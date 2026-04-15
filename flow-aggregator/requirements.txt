@@ -1,0 +1,4 @@
+confluent-kafka==2.3.0
+psycopg2-binary==2.9.9
+pydantic==2.6.4
+orjson==3.9.15

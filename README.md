@@ -57,7 +57,7 @@ PCAP Store ───────────────────────
 | Modul | Sprache | Status | Beschreibung |
 |---|---|---|---|
 | `sniffer` | Rust | ✅ fertig | AF_PACKET Capture, Header-Parsing, Kafka-Publishing |
-| `flow-aggregator` | Python | 🔜 geplant | Pakete → Flows, statistische Features |
+| `flow-aggregator` | Python | ✅ fertig | Pakete → Flows, statistische Features (Welford, IAT-Entropie) |
 | `signature-engine` | Python | 🔜 geplant | Regelbasierte Erkennung (Snort-ähnlich) |
 | `ml-engine` | Python | 🔜 geplant | Anomalie-Erkennung (Isolation Forest / Autoencoder) |
 | `alert-manager` | Python | 🔜 geplant | Deduplication, Korrelation, Severity-Scoring |
@@ -273,6 +273,47 @@ PostgreSQL `LISTEN/NOTIFY` auf Channel `config_changed`: Services reagieren auf 
 - **Known Networks** – CSV-Import, Netzwerk-Farbkodierung
 - **Rule Engine Tests** – Test-Szenarien direkt aus dem Dashboard auslösen (EICAR-Äquivalent)
 - **Settings** – Interface-Konfiguration, Known Networks verwalten
+
+---
+
+## Flow Aggregator – Details
+
+### Pipeline
+
+```
+raw-packets (Kafka)
+    │  poll(100ms)
+    ▼
+PacketEvent (Pydantic)
+    │  add_packet()
+    ▼
+FlowState (in-memory dict, key = proto+src+dst+ports)
+    │  flush_expired() alle 5s  │  TCP RST/FIN-Closed → sofort
+    ▼
+FlowRecord
+    ├──► Kafka "flows" (confluent-kafka Producer, LZ4)
+    └──► TimescaleDB (psycopg2 execute_values, Batch 100)
+```
+
+### Statistische Features pro Flow
+
+| Feature | Berechnung |
+|---|---|
+| `pkt_size` (mean/std/min/max) | Welford Online-Algorithmus |
+| `iat` (mean/std/min/max) | Welford auf Inter-Arrival-Times |
+| `entropy_iat` | Shannon-Entropie auf 7-Bucket-Log-Histogramm |
+| `pps` / `bps` | pkt_count bzw. byte_count / duration_s |
+| `tcp_flags` | Anteil jedes Flags (0.0–1.0) |
+| `tcp_flags_abs` | Absolute Zählwerte |
+| `connection_state` | NEW→SYN_ONLY→ESTABLISHED→FIN_WAIT→CLOSED/RESET |
+| `half_open` | SYN gesehen, kein einziges ACK |
+
+### Flow-Timeouts
+
+- **Inaktivitäts-Timeout** (`FLOW_TIMEOUT_S`, default 30s): Flow endet wenn kein Paket mehr kommt
+- **Max-Duration** (`FLOW_MAX_DURATION_S`, default 300s): Sehr lange Flows werden periodisch geflushst
+- **TCP RST**: Sofortiger Flush
+- **TCP FIN+ACK beidseitig**: Sofortiger Flush
 
 ---
 
