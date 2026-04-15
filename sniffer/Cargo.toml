@@ -1,0 +1,44 @@
+[package]
+name = "sniffer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sniffer"
+path = "src/main.rs"
+
+[dependencies]
+# Error handling
+anyhow = "1"
+
+# Packet parsing
+pnet = "0.35"
+
+# Packet capture (wraps libpcap, uses TPACKET_V3 ring buffer on Linux)
+pcap = "2.1"
+
+# Kafka producer
+rdkafka = { version = "0.36", features = ["cmake-build"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Base64 encoding für raw_header_b64
+base64 = "0.22"
+
+# Lock-free channel zwischen Capture- und Publisher-Thread
+crossbeam-channel = "0.5"
+
+# Signal handling (SIGTERM / SIGINT)
+ctrlc = { version = "3", features = ["termination"] }
+
+# Logging / Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

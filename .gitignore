@@ -26,7 +26,7 @@ coverage.xml
 
 # ── Rust ──────────────────────────────────────────────────────────────────────
 target/
-Cargo.lock
+# Cargo.lock wird für Binary-Crates committet (sniffer)
 
 # ── Node / Frontend ───────────────────────────────────────────────────────────
 node_modules/
