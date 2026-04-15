@@ -1,0 +1,404 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# IDS – Docker Compose
+#
+# Starten:
+#   Produktion:   docker compose --profile prod up -d
+#   Test/Dev:     docker compose --profile test up -d
+#
+# Voraussetzung: .env aus .env.example erzeugen und anpassen
+# ══════════════════════════════════════════════════════════════════════════════
+
+networks:
+  ids-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+
+volumes:
+  kafka-data:
+  timescaledb-data:
+  redis-data:
+  minio-data:
+  ml-models:
+  signature-rules:
+
+services:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # INFRASTRUCTURE
+  # ────────────────────────────────────────────────────────────────────────────
+
+  kafka:
+    image: bitnami/kafka:3.7
+    container_name: ids-kafka
+    restart: unless-stopped
+    networks: [ids-net]
+    volumes:
+      - kafka-data:/bitnami/kafka
+    environment:
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      # PLAINTEXT: intern (container-zu-container)
+      # EXTERNAL:  vom Host erreichbar (für Debugging)
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_CFG_LOG_RETENTION_HOURS: "168"
+      KAFKA_CFG_MESSAGE_MAX_BYTES: "10485760"       # 10 MB (für PCAP-Header-Batches)
+      KAFKA_CFG_REPLICA_FETCH_MAX_BYTES: "10485760"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "127.0.0.1:9094:9094"                       # Kafka External – nur localhost
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  kafka-init:
+    image: bitnami/kafka:3.7
+    container_name: ids-kafka-init
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./infra/kafka/init-topics.sh:/init-topics.sh:ro
+    entrypoint: ["/bin/bash", "/init-topics.sh"]
+    restart: "no"
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: ids-kafka-ui
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ids-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "${MANAGEMENT_IP:-0.0.0.0}:8080:8080"
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: ids-timescaledb
+    restart: unless-stopped
+    networks: [ids-net]
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+      - ./infra/timescaledb/migrations:/docker-entrypoint-initdb.d:ro
+    environment:
+      POSTGRES_DB: ids
+      POSTGRES_USER: ids
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ids-change-me}
+    ports:
+      - "127.0.0.1:5432:5432"                       # Nur localhost
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ids -d ids"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ids-redis
+    restart: unless-stopped
+    networks: [ids-net]
+    volumes:
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "127.0.0.1:6379:6379"                       # Nur localhost
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: ids-minio
+    restart: unless-stopped
+    networks: [ids-net]
+    volumes:
+      - minio-data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ids-access}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+    command: server /data --console-address ":9001"
+    ports:
+      - "127.0.0.1:9001:9001"                       # MinIO Console – nur localhost
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: ids-minio-init
+    networks: [ids-net]
+    depends_on:
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./infra/minio/init-buckets.sh:/init-buckets.sh:ro
+    entrypoint: ["/bin/sh", "/init-buckets.sh"]
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+    restart: "no"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # APPLICATION SERVICES
+  # ────────────────────────────────────────────────────────────────────────────
+
+  flow-aggregator:
+    build: ./flow-aggregator
+    container_name: ids-flow-aggregator
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      FLOW_TIMEOUT_S: ${FLOW_TIMEOUT_S:-30}
+      FLOW_MAX_DURATION_S: ${FLOW_MAX_DURATION_S:-300}
+      TEST_MODE: ${TEST_MODE:-false}
+
+  signature-engine:
+    build: ./signature-engine
+    container_name: ids-signature-engine
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - signature-rules:/rules/custom
+      - ./signature-engine/rules:/rules/builtin:ro
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      RULES_DIR: /rules
+      TEST_MODE: ${TEST_MODE:-false}
+
+  ml-engine:
+    build: ./ml-engine
+    container_name: ids-ml-engine
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    volumes:
+      - ml-models:/models
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      MODELS_DIR: /models
+      TEST_MODE: ${TEST_MODE:-false}
+
+  alert-manager:
+    build: ./alert-manager
+    container_name: ids-alert-manager
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      DEDUP_WINDOW_S: ${DEDUP_WINDOW_S:-300}
+      TEST_MODE: ${TEST_MODE:-false}
+
+  enrichment-service:
+    build: ./enrichment-service
+    container_name: ids-enrichment-service
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    cap_add: [NET_RAW]                              # ICMP Ping ohne root
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      # Hinweis: Pings gehen über die Bridge-IP des Containers.
+      # Für striktes Interface-Binding (Prod): network_mode: host setzen
+      # und KAFKA_BROKERS auf localhost:9094 / REDIS_URL auf localhost:6379 ändern.
+      MANAGEMENT_IFACE: ${MANAGEMENT_IFACE:-eth0}
+      PING_TIMEOUT_MS: ${PING_TIMEOUT_MS:-1000}
+      DNS_TIMEOUT_MS: ${DNS_TIMEOUT_MS:-2000}
+      CACHE_TTL_S: ${CACHE_TTL_S:-3600}
+      TEST_MODE: ${TEST_MODE:-false}
+
+  pcap-store:
+    build: ./pcap-store
+    container_name: ids-pcap-store
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      PCAP_BUCKET: ids-pcaps
+      PCAP_WINDOW_S: ${PCAP_WINDOW_S:-60}          # ±Sekunden um Alert-Timestamp
+
+  api:
+    build: ./api
+    container_name: ids-api
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      PCAP_BUCKET: ids-pcaps
+      KAFKA_BROKERS: kafka:9092
+      TEST_MODE: ${TEST_MODE:-false}
+      SECRET_KEY: ${API_SECRET_KEY:-change-me-in-production}
+    ports:
+      - "${MANAGEMENT_IP:-0.0.0.0}:8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: ids-frontend
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      - api
+    environment:
+      VITE_API_URL: http://${MANAGEMENT_IP:-localhost}:8000
+      VITE_WS_URL: ws://${MANAGEMENT_IP:-localhost}:8000
+      VITE_TEST_MODE: ${TEST_MODE:-false}
+    ports:
+      - "${MANAGEMENT_IP:-0.0.0.0}:3000:3000"
+
+  training-loop:
+    build: ./training-loop
+    container_name: ids-training-loop
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    volumes:
+      - ml-models:/models
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      MODELS_DIR: /models
+      RETRAIN_INTERVAL_S: ${RETRAIN_INTERVAL_S:-86400}
+      TEST_MODE: ${TEST_MODE:-false}
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # SNIFFER – PRODUKTION  (docker compose --profile prod up)
+  #
+  # Benötigt: MIRROR_IFACE gesetzt in .env
+  # network_mode: host → direkter Zugriff auf physische Interfaces via AF_PACKET
+  # ────────────────────────────────────────────────────────────────────────────
+
+  sniffer:
+    build: ./sniffer
+    container_name: ids-sniffer
+    restart: unless-stopped
+    network_mode: host
+    profiles: [prod]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      MIRROR_IFACE: ${MIRROR_IFACE:?MIRROR_IFACE muss in .env gesetzt sein}
+      KAFKA_BROKERS: localhost:9094                  # External Listener (network_mode: host)
+      CAPTURE_SNAPLEN: ${CAPTURE_SNAPLEN:-128}
+      CAPTURE_RING_BUFFER_MB: ${CAPTURE_RING_BUFFER_MB:-64}
+      TEST_MODE: "false"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # SNIFFER – TEST  (docker compose --profile test up)
+  #
+  # Lauscht auf dem Docker-Bridge-Interface (eth0 im Container).
+  # Mit CAP_NET_ADMIN + promiscuous mode sieht er den gesamten Bridge-Traffic.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  sniffer-test:
+    build: ./sniffer
+    container_name: ids-sniffer-test
+    restart: unless-stopped
+    networks: [ids-net]
+    profiles: [test]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      MIRROR_IFACE: ${TEST_IFACE:-eth0}
+      KAFKA_BROKERS: kafka:9092
+      CAPTURE_SNAPLEN: ${CAPTURE_SNAPLEN:-128}
+      CAPTURE_RING_BUFFER_MB: "16"
+      TEST_MODE: "true"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # TRAFFIC GENERATOR – TEST  (docker compose --profile test up)
+  #
+  # Erzeugt synthetischen Testverkehr (Scapy).
+  # Feste IP 172.28.0.100 als Angriffsziel für Szenarien.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  traffic-generator:
+    build: ./traffic-generator
+    container_name: ids-traffic-generator
+    restart: unless-stopped
+    networks:
+      ids-net:
+        ipv4_address: 172.28.0.100
+    profiles: [test]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    cap_add: [NET_RAW, NET_ADMIN]
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      TARGET_IP: 172.28.0.100
+      TEST_MODE: "true"
