@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import io
+import time
 from typing import Annotated
 
 import asyncpg
+import orjson
+from confluent_kafka import Producer
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from minio import Minio
@@ -12,6 +15,14 @@ from database import get_pool
 from models import AlertListResponse, AlertResponse, FeedbackRequest
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
+
+# Wird von main.py nach dem Start gesetzt
+_feedback_producer: Producer | None = None
+
+
+def set_feedback_producer(producer: Producer) -> None:
+    global _feedback_producer
+    _feedback_producer = producer
 
 
 def _row_to_alert(row: asyncpg.Record) -> AlertResponse:
@@ -120,7 +131,27 @@ async def set_feedback(
         )
     if not row:
         raise HTTPException(status_code=404, detail="Alert not found")
-    return _row_to_alert(row)
+
+    alert = _row_to_alert(row)
+
+    # Feedback-Event auf Kafka publizieren (für training-loop)
+    if _feedback_producer is not None:
+        try:
+            event = {
+                "alert_id":  alert_id,
+                "feedback":  body.feedback,
+                "note":      body.note,
+                "rule_id":   alert.rule_id,
+                "source":    alert.source,
+                "score":     alert.score,
+                "ts":        time.time(),
+            }
+            _feedback_producer.produce("feedback", value=orjson.dumps(event))
+            _feedback_producer.poll(0)
+        except Exception:
+            pass  # Kafka-Fehler darf UI nicht blockieren
+
+    return alert
 
 
 def _pcap_proxy(minio: Minio, bucket: str, key: str) -> StreamingResponse:

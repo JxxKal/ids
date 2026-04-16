@@ -39,7 +39,7 @@ from routers import flows as flows_router
 from routers import networks as networks_router
 from routers import system as system_router
 from routers import tests as tests_router
-from routers.alerts import make_pcap_endpoint
+from routers.alerts import make_pcap_endpoint, set_feedback_producer
 from routers.tests import make_run_endpoint
 from ws.manager import AlertStreamer, ConnectionManager
 
@@ -96,6 +96,7 @@ app.include_router(tests_router.router)
 # Endpunkte die Objekte (MinIO, Kafka-Producer) brauchen
 make_pcap_endpoint(minio_client, cfg.pcap_bucket)
 make_run_endpoint(kafka_producer)
+set_feedback_producer(kafka_producer)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────

@@ -65,8 +65,8 @@ PCAP Store ───────────────────────
 | `pcap-store` | Python | ✅ fertig | Sliding-Window-Paketpuffer, PCAP-Datei-Writer, MinIO-Upload, DB-Update |
 | `api` | Python FastAPI | ✅ fertig | REST + WebSocket, Alerts/Flows/Networks/Config/Tests, MinIO-Proxy, Threat-Level |
 | `frontend` | React + Vite + TS | ✅ fertig | Echtzeit Alert-Feed (WebSocket), Threat-Level, Enrichment, PCAP-Download, Feedback, Netzwerke, Tests |
-| `training-loop` | Python | 🔜 geplant | Feedback → ML-Modell-Update |
-| `traffic-generator` | Python/Scapy | 🔜 geplant | Synthetischer Testverkehr (nur Test-Mode) |
+| `training-loop` | Python | ✅ fertig | Feedback-Collector (Kafka), semi-supervised Retrain, atomares Modell-Update |
+| `traffic-generator` | Python/Scapy | ✅ fertig | 5 Test-Szenarien, Alert-Polling, TestRun-Update in DB |
 
 ---
 
@@ -259,6 +259,84 @@ Dashboard und API sind nur über `MANAGEMENT_IP` erreichbar.
 | `test_runs` | Hypertable | Ergebnis-Protokoll der Dashboard-Tests |
 
 PostgreSQL `LISTEN/NOTIFY` auf Channel `config_changed`: Services reagieren auf Interface-Änderungen ohne Polling.
+
+---
+
+## Training Loop – Details
+
+### Lifecycle
+
+```
+feedback (Kafka)
+    │  { alert_id, feedback=tp/fp, rule_id, score }
+    │
+    ▼  [Background-Thread]
+alert → flow JOIN in DB → features extrahieren
+    │
+    └──► training_samples (label=attack/normal)
+
+[Haupt-Thread, alle RETRAIN_INTERVAL_S]
+    │
+    ├── count_new_samples() ≥ MIN_NEW_SAMPLES?
+    │
+    ▼
+load_flows_for_bootstrap() + load_samples()
+    │
+    ▼
+IsolationForest retrain (semi-supervised)
+  normal Flows → Baseline
+  attack-labeled Samples → contamination anpassen
+    │
+    └──► /models/scaler.joblib + iforest.joblib (atomar via tmp→rename)
+         /models/meta.json
+```
+
+### Label-Mapping
+
+| Feedback | Label | Bedeutung |
+|---|---|---|
+| `tp` | `attack` | Echter Angriff → als Outlier trainieren |
+| `fp` | `normal` | Kein Angriff → als Inlier trainieren |
+
+### Umgebungsvariablen
+
+| Variable | Standard | Beschreibung |
+|---|---|---|
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka |
+| `POSTGRES_DSN` | – | TimescaleDB |
+| `MODELS_DIR` | `/models` | Geteiltes Volume mit ml-engine |
+| `RETRAIN_INTERVAL_S` | `86400` | Mindestabstand zwischen Retrains (24h) |
+| `MIN_NEW_SAMPLES` | `50` | Mindest-Neulabels für Retrain |
+| `MAX_TRAIN_SAMPLES` | `100000` | Max. Trainings-Samples |
+| `CONTAMINATION` | `0.01` | IsolationForest-Basiswert |
+
+---
+
+## Traffic Generator – Details
+
+### Test-Szenarien
+
+| Szenario | Methode | Ausgelöste Regel |
+|---|---|---|
+| `TEST_001` | TCP SYN+FIN+URG+PSH an Port 65535 | TEST_001 |
+| `SCAN_001` | 100 TCP SYN an zufällige Ports in ~3s | SCAN_001 |
+| `DOS_SYN_001` | 600 TCP SYN an Port 80 in ~6s | DOS_SYN_001 |
+| `RECON_003` | ICMP Echo an 25 IPs | RECON_003 |
+| `DNS_DGA_001` | 15 DNS-Queries mit zufälligen Hochentropie-Domains | DNS_DGA_001 |
+
+### Flow
+
+```
+test-commands (Kafka)
+    │  { run_id, scenario_id, ts }
+    ▼
+Scapy-Szenario ausführen
+    │
+    └── DB pollen: alerts WHERE rule_id=expected AND ts > start_ts (max 30s)
+              │
+              ├── Alert gefunden → test_runs SET triggered=true, latency_ms, alert_id
+              └── Timeout       → test_runs SET triggered=false
+```
 
 ---
 
