@@ -87,6 +87,12 @@ kafka_producer = Producer({
 })
 
 # ── Routers einbinden ─────────────────────────────────────────────────────────
+# WICHTIG: make_*_endpoint vor include_router aufrufen – FastAPI kopiert die
+# Routes beim include_router-Aufruf; später hinzugefügte Routen werden ignoriert.
+
+set_feedback_producer(kafka_producer)
+make_pcap_endpoint(minio_client, cfg.pcap_bucket)
+make_run_endpoint(kafka_producer)
 
 app.include_router(alerts_router.router)
 app.include_router(flows_router.router)
@@ -94,11 +100,6 @@ app.include_router(hosts_router.router)
 app.include_router(networks_router.router)
 app.include_router(system_router.router)
 app.include_router(tests_router.router)
-
-# Endpunkte die Objekte (MinIO, Kafka-Producer) brauchen
-make_pcap_endpoint(minio_client, cfg.pcap_bucket)
-make_run_endpoint(kafka_producer)
-set_feedback_producer(kafka_producer)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
