@@ -59,7 +59,7 @@ PCAP Store ───────────────────────
 | `sniffer` | Rust | ✅ fertig | AF_PACKET Capture, Header-Parsing, Kafka-Publishing |
 | `flow-aggregator` | Python | ✅ fertig | Pakete → Flows, statistische Features (Welford, IAT-Entropie) |
 | `signature-engine` | Python | ✅ fertig | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
-| `ml-engine` | Python | 🔜 geplant | Anomalie-Erkennung (Isolation Forest / Autoencoder) |
+| `ml-engine` | Python | ✅ fertig | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update |
 | `alert-manager` | Python | 🔜 geplant | Deduplication, Korrelation, Severity-Scoring |
 | `enrichment-service` | Python | 🔜 geplant | Reverse-DNS, Ping, GeoIP/ASN-Lookup |
 | `pcap-store` | Python | 🔜 geplant | Header-PCAP Archivierung in MinIO |
@@ -314,6 +314,71 @@ FlowRecord
 - **Max-Duration** (`FLOW_MAX_DURATION_S`, default 300s): Sehr lange Flows werden periodisch geflushst
 - **TCP RST**: Sofortiger Flush
 - **TCP FIN+ACK beidseitig**: Sofortiger Flush
+
+---
+
+## ML Engine – Details
+
+### Pipeline
+
+```
+flows (Kafka)
+    │  poll(1s)
+    ▼
+Feature-Extraktion (14 Dimensionen)
+    │
+    ├──► Buffer → Scaler partial_fit (alle 200 Flows)
+    │
+    └──► StandardScaler → IsolationForest.decision_function()
+              │  score [0.0–1.0]
+              │  score ≥ 0.65 → Alert
+              ▼
+         alerts (Kafka)
+```
+
+### Lifecycle
+
+1. **Gespeichertes Modell laden** (`/models/iforest.joblib`, `scaler.joblib`)
+2. **Bootstrap** bei fehlendem Modell: bis zu 100k Flows aus TimescaleDB laden und IsolationForest trainieren
+3. **Haupt-Loop**: Flows scoren, bei Score ≥ Schwellwert Alert publizieren
+4. **Scaler partial_fit**: alle 200 Flows inkrementell angepasst
+5. **Persistenz**: Modell alle 1000 Flows gespeichert (+ bei Shutdown)
+
+### Features (14 Dimensionen)
+
+| Feature | Beschreibung |
+|---|---|
+| `duration_s` | Flow-Dauer in Sekunden |
+| `pkt_count` | Anzahl Pakete |
+| `byte_count` | Gesamtbytes |
+| `pps` / `bps` | Paket-/Byterate |
+| `pkt_size_mean/std` | Paketgröße (Welford) |
+| `iat_mean/std` | Inter-Arrival-Time (Welford) |
+| `entropy_iat` | Shannon-Entropie IAT |
+| `syn/rst/fin_ratio` | TCP-Flag-Anteile |
+| `dst_port_norm` | Zielport normiert (0–1) |
+
+### Score → Severity
+
+| Score | Severity |
+|---|---|
+| ≥ 0.90 | critical |
+| ≥ 0.80 | high |
+| ≥ 0.70 | medium |
+| ≥ 0.65 | low |
+
+### Umgebungsvariablen
+
+| Variable | Standard | Beschreibung |
+|---|---|---|
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka Bootstrap-Server |
+| `POSTGRES_DSN` | – | TimescaleDB für Bootstrap |
+| `MODELS_DIR` | `/models` | Persistenz-Verzeichnis |
+| `BOOTSTRAP_MIN_SAMPLES` | `500` | Mindest-Flows für initiales Training |
+| `PARTIAL_FIT_INTERVAL` | `200` | Flows zwischen Scaler-Updates |
+| `SAVE_INTERVAL` | `1000` | Flows zwischen Modell-Saves |
+| `CONTAMINATION` | `0.01` | Geschätzter Outlier-Anteil (IsolationForest) |
+| `TEST_MODE` | `false` | Beendet sich nach leerem Topic |
 
 ---
 
