@@ -8,14 +8,13 @@
 FROM rust:1.85-slim AS builder
 
 RUN apt-get update && apt-get install -y \
-    # pcap crate benötigt libpcap zur Kompilierung
+    # pcap crate
     libpcap-dev \
     pkg-config \
-    # rdkafka cmake-build: librdkafka 2.x aus Quellen kompilieren
-    # cmake-Flags: WITH_ZLIB=1, WITH_SSL=0, WITH_SASL=0 → nur zlib nötig
-    cmake \
-    build-essential \
-    zlib1g-dev \
+    # rdkafka dynamic-linking: gegen System-librdkafka 1.9.2 linken (kein cmake)
+    # Bookworm hat librdkafka-dev 1.9.2 = exakt was rdkafka-sys 4.6 verlangt
+    librdkafka-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -41,8 +40,8 @@ RUN touch src/main.rs && cargo build --release
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
-    # libpcap wird dynamisch gelinkt; librdkafka + SSL sind statisch (cmake-build)
     libpcap0.8 \
+    librdkafka1 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
