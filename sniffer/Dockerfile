@@ -12,9 +12,10 @@ RUN apt-get update && apt-get install -y \
     libpcap-dev \
     pkg-config \
     # rdkafka cmake-build: librdkafka 2.x aus Quellen kompilieren
+    # cmake-Flags: WITH_ZLIB=1, WITH_SSL=0, WITH_SASL=0 → nur zlib nötig
     cmake \
     build-essential \
-    libssl-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
