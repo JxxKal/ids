@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import time
+from datetime import datetime, timezone
 from typing import Annotated
 
 import asyncpg
@@ -53,10 +54,12 @@ def _row_to_alert(row: asyncpg.Record) -> AlertResponse:
 
 @router.get("", response_model=AlertListResponse)
 async def list_alerts(
-    severity: str | None = None,
-    source:   str | None = None,
-    rule_id:  str | None = None,
-    src_ip:   str | None = None,
+    severity: str | None   = None,
+    source:   str | None   = None,
+    rule_id:  str | None   = None,
+    src_ip:   str | None   = None,
+    ts_from:  float | None = None,
+    ts_to:    float | None = None,
     is_test:  bool = False,
     limit:    Annotated[int, Query(ge=1, le=500)] = 50,
     offset:   Annotated[int, Query(ge=0)]         = 0,
@@ -78,6 +81,12 @@ async def list_alerts(
     if src_ip:
         filters.append(f"src_ip = ${idx}::inet")
         params.append(src_ip); idx += 1
+    if ts_from is not None:
+        filters.append(f"ts >= ${idx}")
+        params.append(datetime.fromtimestamp(ts_from, tz=timezone.utc)); idx += 1
+    if ts_to is not None:
+        filters.append(f"ts <= ${idx}")
+        params.append(datetime.fromtimestamp(ts_to, tz=timezone.utc)); idx += 1
 
     where = " AND ".join(filters)
 

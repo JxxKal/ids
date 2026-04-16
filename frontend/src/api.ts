@@ -21,6 +21,8 @@ export interface AlertFilters {
   source?: string;
   rule_id?: string;
   src_ip?: string;
+  ts_from?: number;   // Unix-Timestamp (Sekunden)
+  ts_to?: number;
   is_test?: boolean;
   limit?: number;
   offset?: number;
@@ -31,10 +33,12 @@ export async function fetchAlerts(filters: AlertFilters = {}): Promise<{
   total: number;
 }> {
   const params = new URLSearchParams();
-  if (filters.severity) params.set('severity', filters.severity);
-  if (filters.source)   params.set('source',   filters.source);
-  if (filters.rule_id)  params.set('rule_id',  filters.rule_id);
-  if (filters.src_ip)   params.set('src_ip',   filters.src_ip);
+  if (filters.severity)              params.set('severity', filters.severity);
+  if (filters.source)                params.set('source',   filters.source);
+  if (filters.rule_id)               params.set('rule_id',  filters.rule_id);
+  if (filters.src_ip)                params.set('src_ip',   filters.src_ip);
+  if (filters.ts_from !== undefined) params.set('ts_from',  String(filters.ts_from));
+  if (filters.ts_to   !== undefined) params.set('ts_to',    String(filters.ts_to));
   params.set('is_test', String(filters.is_test ?? false));
   params.set('limit',   String(filters.limit  ?? 100));
   params.set('offset',  String(filters.offset ?? 0));
