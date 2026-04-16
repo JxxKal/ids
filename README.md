@@ -61,7 +61,7 @@ PCAP Store ───────────────────────
 | `signature-engine` | Python | ✅ fertig | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
 | `ml-engine` | Python | ✅ fertig | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update |
 | `alert-manager` | Python | ✅ fertig | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung an alerts-enriched |
-| `enrichment-service` | Python | 🔜 geplant | Reverse-DNS, Ping, GeoIP/ASN-Lookup |
+| `enrichment-service` | Python | ✅ fertig | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache |
 | `pcap-store` | Python | 🔜 geplant | Header-PCAP Archivierung in MinIO |
 | `api` | Python FastAPI | 🔜 geplant | REST + WebSocket für Dashboard |
 | `frontend` | React | 🔜 geplant | Echtzeit-Dashboard, Threat-Level, Tests |
@@ -314,6 +314,61 @@ FlowRecord
 - **Max-Duration** (`FLOW_MAX_DURATION_S`, default 300s): Sehr lange Flows werden periodisch geflushst
 - **TCP RST**: Sofortiger Flush
 - **TCP FIN+ACK beidseitig**: Sofortiger Flush
+
+---
+
+## Enrichment Service – Details
+
+### Pipeline
+
+```
+alerts-enriched (Kafka)
+    │  bereits angereichert? → überspringen
+    ▼
+src_ip + dst_ip
+    │
+    ├── Redis-Cache hit? → direkt verwenden
+    │
+    └── Cache miss:
+        ├── Reverse-DNS   (socket.gethostbyaddr)
+        ├── ICMP Ping     (icmplib, CAP_NET_RAW)
+        ├── GeoIP/ASN     (MaxMind GeoLite2, optional)
+        └── Known Network (DB-Funktion get_network_for_ip)
+              │
+              ├──► Redis-Cache (TTL 3600s)
+              └──► host_info-Tabelle (upsert)
+                        │
+                        └──► alerts.enrichment UPDATE
+```
+
+### GeoIP-Datenbanken (optional)
+
+Ohne MaxMind-DBs läuft der Service mit reduziertem Funktionsumfang (kein Geo/ASN). Download mit kostenlosem Account:
+
+```
+https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
+```
+
+Dateien per Volume mounten:
+```yaml
+volumes:
+  - ./geoip/GeoLite2-City.mmdb:/geoip/GeoLite2-City.mmdb:ro
+  - ./geoip/GeoLite2-ASN.mmdb:/geoip/GeoLite2-ASN.mmdb:ro
+```
+
+### Umgebungsvariablen
+
+| Variable | Standard | Beschreibung |
+|---|---|---|
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka Bootstrap-Server |
+| `POSTGRES_DSN` | – | TimescaleDB Verbindung |
+| `REDIS_URL` | `redis://localhost:6379` | Redis für IP-Enrichment-Cache |
+| `PING_TIMEOUT_MS` | `1000` | ICMP Ping Timeout |
+| `DNS_TIMEOUT_MS` | `2000` | Reverse-DNS Timeout |
+| `CACHE_TTL_S` | `3600` | Redis-Cache Ablaufzeit |
+| `GEOIP_CITY_DB` | `/geoip/GeoLite2-City.mmdb` | MaxMind City-Datenbank |
+| `GEOIP_ASN_DB` | `/geoip/GeoLite2-ASN.mmdb` | MaxMind ASN-Datenbank |
+| `TEST_MODE` | `false` | Beendet sich nach leerem Topic |
 
 ---
 
