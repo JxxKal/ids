@@ -5,7 +5,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
 set -e
 
-KAFKA_BIN=/opt/bitnami/kafka/bin
+KAFKA_BIN=/opt/kafka/bin
 BOOTSTRAP=kafka:9092
 
 echo "[kafka-init] Warte auf Kafka..."
