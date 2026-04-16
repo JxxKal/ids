@@ -413,8 +413,9 @@ services:
   # ────────────────────────────────────────────────────────────────────────────
   # SNORT – PRODUKTION  (docker compose --profile prod --profile snort up)
   #
-  # Snort 3 auf dem Mirror-Interface → schreibt alert_json → snort-bridge
+  # Suricata auf dem Mirror-Interface → schreibt EVE JSON → snort-bridge
   # network_mode: host → direkter AF_PACKET-Zugriff wie beim Sniffer
+  # (Hinweis: Service heißt weiterhin 'snort' für Kompatibilität mit Profilen)
   # ────────────────────────────────────────────────────────────────────────────
 
   snort:
@@ -425,15 +426,15 @@ services:
     profiles: [snort]
     cap_add: [NET_RAW, NET_ADMIN]
     volumes:
-      - snort-alerts:/var/log/snort
-      - snort-rules:/etc/snort/rules
+      - snort-alerts:/var/log/suricata
+      - snort-rules:/etc/suricata/rules
     environment:
       SNORT_IFACE: ${MIRROR_IFACE:-eth1}
-      SNORT_RULESET: ${SNORT_RULESET:-community}
+      SNORT_RULESET: ${SNORT_RULESET:-emerging-threats}
       SNORT_UPDATE_RULES: ${SNORT_UPDATE_RULES:-false}
 
   # ────────────────────────────────────────────────────────────────────────────
-  # SNORT – TEST  (docker compose --profile test --profile snort-test up)
+  # SURICATA – TEST  (docker compose --profile test --profile snort-test up)
   #
   # Lauscht auf dem Docker-Bridge-Interface; teilt ids-net mit allen Services.
   # ────────────────────────────────────────────────────────────────────────────
@@ -446,18 +447,18 @@ services:
     profiles: [snort-test]
     cap_add: [NET_RAW, NET_ADMIN]
     volumes:
-      - snort-alerts:/var/log/snort
-      - snort-rules:/etc/snort/rules
+      - snort-alerts:/var/log/suricata
+      - snort-rules:/etc/suricata/rules
     environment:
       SNORT_IFACE: ${TEST_IFACE:-eth0}
-      SNORT_RULESET: ${SNORT_RULESET:-community}
+      SNORT_RULESET: ${SNORT_RULESET:-emerging-threats}
       SNORT_UPDATE_RULES: ${SNORT_UPDATE_RULES:-false}
 
   # ────────────────────────────────────────────────────────────────────────────
-  # SNORT-BRIDGE  (startet mit snort ODER snort-test Profil)
+  # SURICATA-BRIDGE  (startet mit snort ODER snort-test Profil)
   #
-  # Liest alert_json.txt aus dem Shared-Volume und publiziert nach alerts-raw.
-  # Alert-Manager, Enrichment und Frontend verarbeiten Snort-Alerts transparent.
+  # Liest eve.json aus dem Shared-Volume und publiziert nach alerts-raw.
+  # Alert-Manager, Enrichment und Frontend verarbeiten Alerts transparent.
   # ────────────────────────────────────────────────────────────────────────────
 
   snort-bridge:
@@ -470,8 +471,8 @@ services:
       kafka:
         condition: service_healthy
     volumes:
-      - snort-alerts:/var/log/snort:ro
+      - snort-alerts:/var/log/suricata:ro
     environment:
       KAFKA_BROKERS: kafka:9092
-      SNORT_ALERT_FILE: /var/log/snort/alert_json.txt
+      SNORT_ALERT_FILE: /var/log/suricata/eve.json
       TEST_MODE: ${TEST_MODE:-false}
