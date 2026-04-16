@@ -11,8 +11,9 @@ RUN apt-get update && apt-get install -y \
     # pcap crate benötigt libpcap zur Kompilierung
     libpcap-dev \
     pkg-config \
-    # rdkafka dynamic-linking: gegen System-librdkafka linken (schnell + stabil)
-    librdkafka-dev \
+    # rdkafka cmake-build: librdkafka 2.x aus Quellen kompilieren
+    cmake \
+    build-essential \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -39,10 +40,8 @@ RUN touch src/main.rs && cargo build --release
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
-    # Shared Libraries zur Laufzeit
+    # libpcap wird dynamisch gelinkt; librdkafka + SSL sind statisch (cmake-build)
     libpcap0.8 \
-    librdkafka1 \
-    libssl3 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 

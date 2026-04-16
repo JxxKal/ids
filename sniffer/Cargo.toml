@@ -18,7 +18,7 @@ pnet = "0.35"
 pcap = "2.1"
 
 # Kafka producer
-rdkafka = { version = "0.36", features = ["dynamic-linking"] }
+rdkafka = { version = "0.36", features = ["cmake-build"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
