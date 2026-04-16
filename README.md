@@ -63,7 +63,7 @@ PCAP Store ───────────────────────
 | `alert-manager` | Python | ✅ fertig | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung an alerts-enriched |
 | `enrichment-service` | Python | ✅ fertig | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache |
 | `pcap-store` | Python | ✅ fertig | Sliding-Window-Paketpuffer, PCAP-Datei-Writer, MinIO-Upload, DB-Update |
-| `api` | Python FastAPI | 🔜 geplant | REST + WebSocket für Dashboard |
+| `api` | Python FastAPI | ✅ fertig | REST + WebSocket, Alerts/Flows/Networks/Config/Tests, MinIO-Proxy, Threat-Level |
 | `frontend` | React | 🔜 geplant | Echtzeit-Dashboard, Threat-Level, Tests |
 | `training-loop` | Python | 🔜 geplant | Feedback → ML-Modell-Update |
 | `traffic-generator` | Python/Scapy | 🔜 geplant | Synthetischer Testverkehr (nur Test-Mode) |
@@ -314,6 +314,67 @@ FlowRecord
 - **Max-Duration** (`FLOW_MAX_DURATION_S`, default 300s): Sehr lange Flows werden periodisch geflushst
 - **TCP RST**: Sofortiger Flush
 - **TCP FIN+ACK beidseitig**: Sofortiger Flush
+
+---
+
+## API – Details
+
+### Endpunkte
+
+| Method | Path | Beschreibung |
+|---|---|---|
+| GET | `/api/alerts` | Alert-Liste (Filter: severity, source, rule_id, src_ip, is_test) |
+| GET | `/api/alerts/{id}` | Einzelner Alert |
+| PATCH | `/api/alerts/{id}/feedback` | Feedback setzen (`fp` / `tp`) |
+| GET | `/api/alerts/{id}/pcap` | PCAP-Download (MinIO-Proxy, Wireshark-kompatibel) |
+| GET | `/api/flows` | Flow-Liste (Filter: src_ip, dst_ip, proto, dst_port) |
+| GET | `/api/stats/threat-level` | Threat-Level 0–100 (letzte 15 min, gewichtet nach Severity) |
+| GET | `/api/networks` | Bekannte Netzwerke |
+| POST | `/api/networks` | Netzwerk anlegen (CIDR, Name, Farbe) |
+| DELETE | `/api/networks/{id}` | Netzwerk löschen |
+| GET | `/api/config` | Alle System-Config-Keys |
+| PATCH | `/api/config/{key}` | Config-Key aktualisieren |
+| POST | `/api/tests/run` | Test-Szenario auslösen → `test-commands` Kafka-Topic |
+| GET | `/api/tests/runs` | Test-Run-Protokoll |
+| WS | `/ws/alerts` | Echtzeit-Alert-Stream (initial: letzte 50 Alerts) |
+| GET | `/health` | Health-Check |
+| GET | `/api/docs` | Swagger UI |
+
+### WebSocket-Protokoll
+
+```jsonc
+// Initial-Nachricht beim Verbinden:
+{ "type": "initial", "data": [/* letzte 50 Alert-Objekte */] }
+
+// Neue Alerts in Echtzeit:
+{ "type": "alert", "data": { /* Alert-Objekt */ } }
+```
+
+### Threat-Level
+
+Score basiert auf Alerts der letzten 15 Minuten (Testverkehr ausgeschlossen):
+
+| Severity | Gewicht | Level | Farbe |
+|---|---|---|---|
+| critical | 10 | ≥ 75 | rot |
+| high | 5 | ≥ 50 | orange |
+| medium | 2 | ≥ 25 | gelb |
+| low | 1 | < 25 | grün |
+
+Score wird auf 0–100 normiert (Cap bei 200 Rohpunkten).
+
+### Umgebungsvariablen
+
+| Variable | Standard | Beschreibung |
+|---|---|---|
+| `POSTGRES_DSN` | – | TimescaleDB Verbindung |
+| `REDIS_URL` | `redis://localhost:6379` | Redis |
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka (für test-commands + WS-Consumer) |
+| `MINIO_ENDPOINT` | `localhost:9000` | MinIO |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | – | MinIO-Zugangsdaten |
+| `PCAP_BUCKET` | `ids-pcaps` | MinIO-Bucket für PCAPs |
+| `SECRET_KEY` | – | Signing-Key (für spätere Auth-Erweiterung) |
+| `TEST_MODE` | `false` | Aktiviert Testverkehr-Flags |
 
 ---
 
