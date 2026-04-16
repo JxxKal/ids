@@ -39,7 +39,7 @@ logging.basicConfig(
 log = logging.getLogger("ml-engine")
 
 FLOWS_TOPIC  = "flows"
-ALERTS_TOPIC = "alerts"
+ALERTS_TOPIC = "alerts-raw"
 POLL_TIMEOUT = 1.0
 GROUP_ID     = "ml-engine"
 

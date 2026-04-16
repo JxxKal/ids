@@ -60,7 +60,7 @@ PCAP Store ───────────────────────
 | `flow-aggregator` | Python | ✅ fertig | Pakete → Flows, statistische Features (Welford, IAT-Entropie) |
 | `signature-engine` | Python | ✅ fertig | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
 | `ml-engine` | Python | ✅ fertig | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update |
-| `alert-manager` | Python | 🔜 geplant | Deduplication, Korrelation, Severity-Scoring |
+| `alert-manager` | Python | ✅ fertig | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung an alerts-enriched |
 | `enrichment-service` | Python | 🔜 geplant | Reverse-DNS, Ping, GeoIP/ASN-Lookup |
 | `pcap-store` | Python | 🔜 geplant | Header-PCAP Archivierung in MinIO |
 | `api` | Python FastAPI | 🔜 geplant | REST + WebSocket für Dashboard |
@@ -314,6 +314,52 @@ FlowRecord
 - **Max-Duration** (`FLOW_MAX_DURATION_S`, default 300s): Sehr lange Flows werden periodisch geflushst
 - **TCP RST**: Sofortiger Flush
 - **TCP FIN+ACK beidseitig**: Sofortiger Flush
+
+---
+
+## Alert Manager – Details
+
+### Pipeline
+
+```
+alerts-raw (Kafka)
+    │  signature-engine + ml-engine
+    ▼
+Deduplication (rule_id + src_ip + dst_ip + dst_port, Sliding Window)
+    │  Duplikat? → verwerfen
+    ▼
+Score-Normierung
+    │  severity → 0.0–1.0  (Signature)
+    │  score direkt        (ML)
+    ▼
+alert_id (UUID v4) vergeben
+    │
+    ├──► Kafka "alerts-enriched"  (key=src_ip, LZ4)
+    └──► TimescaleDB alerts-Tabelle (Batch 50)
+```
+
+### Deduplication
+
+Schlüssel: `(rule_id, src_ip, dst_ip, dst_port)` – innerhalb von `DEDUP_WINDOW_S` (Standard 300s) wird pro Schlüssel nur ein Alert weitergeleitet. In-memory OrderedDict, max. 50.000 Einträge.
+
+### Score-Mapping
+
+| Severity | Score |
+|---|---|
+| critical | 1.0 |
+| high | 0.8 |
+| medium | 0.5 |
+| low | 0.2 |
+| ML-Score | direkt (0.0–1.0) |
+
+### Umgebungsvariablen
+
+| Variable | Standard | Beschreibung |
+|---|---|---|
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka Bootstrap-Server |
+| `POSTGRES_DSN` | – | TimescaleDB Verbindung |
+| `DEDUP_WINDOW_S` | `300` | Deduplication-Zeitfenster in Sekunden |
+| `TEST_MODE` | `false` | Beendet sich nach leerem Topic |
 
 ---
 
