@@ -1,17 +1,13 @@
-FROM ubuntu:22.04
+FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Enable universe repo, install Snort 3 + curl for rule downloads
+# snort3 ist in Debian Bookworm (main) direkt verfügbar – kein PPA nötig
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates \
+        snort3 \
         curl \
-        software-properties-common && \
-    add-apt-repository universe && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        snort3 && \
+        ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /var/log/snort /etc/snort/rules
