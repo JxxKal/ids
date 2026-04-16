@@ -303,7 +303,7 @@ services:
       TEST_MODE: ${TEST_MODE:-false}
       SECRET_KEY: ${API_SECRET_KEY:-change-me-in-production}
     ports:
-      - "${MANAGEMENT_IP:-0.0.0.0}:8000:8000"
+      - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
 
   frontend:
     build: ./frontend
@@ -313,8 +313,8 @@ services:
     depends_on:
       - api
     environment:
-      VITE_API_URL: http://${MANAGEMENT_IP:-localhost}:8000
-      VITE_WS_URL: ws://${MANAGEMENT_IP:-localhost}:8000
+      VITE_API_URL: http://${MANAGEMENT_IP:-localhost}:${API_PORT:-8001}
+      VITE_WS_URL: ws://${MANAGEMENT_IP:-localhost}:${API_PORT:-8001}
       VITE_TEST_MODE: ${TEST_MODE:-false}
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:3000:3000"
