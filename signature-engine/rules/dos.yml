@@ -1,0 +1,39 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Denial-of-Service Erkennung
+# Stateful: nutzt ctx.syn_count() und ctx.flow_rate()
+# ══════════════════════════════════════════════════════════════════════════════
+
+- id: DOS_SYN_001
+  name: "SYN Flood"
+  description: ">500 SYN-Pakete in 10s von einer Quelle (TCP SYN Flood)"
+  severity: critical
+  tags: [dos, flood]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and ctx.syn_count(flow.get('src_ip', ''), 10) > 500
+
+- id: DOS_CONN_001
+  name: "Verbindungsflut"
+  description: ">200 Flows in 30s von einer Quelle (Connection Flood)"
+  severity: high
+  tags: [dos, flood]
+  condition: |
+    ctx.flow_rate(flow.get('src_ip', ''), 30) > 200
+
+- id: DOS_UDP_001
+  name: "UDP Flood"
+  description: "Sehr hohe UDP-Paketrate (>10 000 pps) von einer Quelle"
+  severity: critical
+  tags: [dos, flood]
+  condition: |
+    flow.get('proto') == 'UDP'
+    and flow.get('pps', 0) > 10000
+
+- id: DOS_ICMP_001
+  name: "ICMP Flood"
+  description: "Hohe ICMP-Rate (>1 000 pps) von einer Quelle"
+  severity: high
+  tags: [dos, flood]
+  condition: |
+    flow.get('proto') == 'ICMP'
+    and flow.get('pps', 0) > 1000

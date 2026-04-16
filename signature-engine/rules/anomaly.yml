@@ -1,0 +1,54 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Protokoll- und Verhaltensanomalien
+# ══════════════════════════════════════════════════════════════════════════════
+
+- id: ANOMALY_LONGFLOW_001
+  name: "Ungewöhnlich langer Flow"
+  description: "Flow läuft länger als 4 Stunden – mögliche C2-Verbindung oder Exfiltration"
+  severity: medium
+  tags: [anomaly, c2, exfiltration]
+  condition: |
+    flow.get('duration_s', 0) > 14400
+    and flow.get('connection_state') == 'ESTABLISHED'
+
+- id: ANOMALY_HIGHBYTES_001
+  name: "Sehr hoher Datentransfer"
+  description: "TCP-Flow mit >500 MB – mögliche Daten-Exfiltration"
+  severity: medium
+  tags: [anomaly, exfiltration]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and flow.get('byte_count', 0) > 500_000_000
+    and flow.get('connection_state') == 'ESTABLISHED'
+
+- id: ANOMALY_LOWENTROPY_001
+  name: "Gleichmäßiger Datenfluss (Beaconing-Verdacht)"
+  description: "TCP-Flow mit sehr niedriger IAT-Entropie und vielen Paketen – mögliches C2-Beaconing"
+  severity: high
+  tags: [anomaly, c2, beaconing]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and flow.get('pkt_count', 0) > 50
+    and flow.get('entropy_iat', 999) < 0.3
+    and flow.get('connection_state') == 'ESTABLISHED'
+    and flow.get('duration_s', 0) > 60
+
+- id: ANOMALY_FRAGMENT_001
+  name: "Fragmentierter Verkehr"
+  description: "Hoher Anteil fragmentierter IP-Pakete – mögliche Evasion-Technik"
+  severity: low
+  tags: [anomaly, evasion]
+  condition: |
+    flow.get('ip_version') == 4
+    and flow.get('pkt_count', 0) > 20
+    and flow.get('pps', 0) > 50
+
+- id: ANOMALY_HIGHPPS_001
+  name: "Ungewöhnlich hohe Paketrate"
+  description: "Flow mit >5 000 pps bei kleinen Paketen – möglicher Traffic-Generator"
+  severity: medium
+  tags: [anomaly, dos]
+  condition: |
+    flow.get('pps', 0) > 5000
+    and flow.get('pkt_size', {}).get('mean', 9999) < 100
+    and flow.get('proto') == 'TCP'

@@ -58,7 +58,7 @@ PCAP Store ───────────────────────
 |---|---|---|---|
 | `sniffer` | Rust | ✅ fertig | AF_PACKET Capture, Header-Parsing, Kafka-Publishing |
 | `flow-aggregator` | Python | ✅ fertig | Pakete → Flows, statistische Features (Welford, IAT-Entropie) |
-| `signature-engine` | Python | 🔜 geplant | Regelbasierte Erkennung (Snort-ähnlich) |
+| `signature-engine` | Python | ✅ fertig | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
 | `ml-engine` | Python | 🔜 geplant | Anomalie-Erkennung (Isolation Forest / Autoencoder) |
 | `alert-manager` | Python | 🔜 geplant | Deduplication, Korrelation, Severity-Scoring |
 | `enrichment-service` | Python | 🔜 geplant | Reverse-DNS, Ping, GeoIP/ASN-Lookup |
@@ -314,6 +314,71 @@ FlowRecord
 - **Max-Duration** (`FLOW_MAX_DURATION_S`, default 300s): Sehr lange Flows werden periodisch geflushst
 - **TCP RST**: Sofortiger Flush
 - **TCP FIN+ACK beidseitig**: Sofortiger Flush
+
+---
+
+## Signature Engine – Details
+
+### Pipeline
+
+```
+flows (Kafka)
+    │  poll(1s)
+    ▼
+flow dict
+    │  ctx.record(flow)   ← Sliding-Window aktualisieren
+    ▼
+Regel-Evaluation (alle aktiven Regeln)
+    │  eval(condition, {flow, ctx})
+    ▼
+Alerts → Kafka "alerts" (LZ4)
+```
+
+### Regelformat (YAML)
+
+```yaml
+- id: SCAN_001
+  name: "TCP SYN Port Scan"
+  description: "SYN-Pakete an >50 Ports in 60s"
+  severity: high          # critical | high | medium | low
+  tags: [scan, recon]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and flow.get('tcp_flags_abs', {}).get('SYN', 0) > 0
+    and ctx.unique_dst_ports(flow.get('src_ip', ''), 60) > 50
+```
+
+### Verfügbare Kontextfunktionen
+
+| Funktion | Beschreibung |
+|---|---|
+| `ctx.unique_dst_ports(src_ip, window_s)` | Eindeutige Ziel-Ports in den letzten N Sekunden |
+| `ctx.unique_dst_ips(src_ip, window_s)` | Eindeutige Ziel-IPs in den letzten N Sekunden |
+| `ctx.flow_rate(src_ip, window_s)` | Anzahl Flows in den letzten N Sekunden |
+| `ctx.syn_count(src_ip, window_s)` | Summe SYN-Pakete in den letzten N Sekunden |
+
+### Regelsets
+
+| Datei | Regeln | Beschreibung |
+|---|---|---|
+| `scan.yml` | SCAN_001–006 | Port-Scans, Host-Sweep, Stealth-Scans |
+| `dos.yml` | DOS_SYN/CONN/UDP/ICMP_001 | SYN Flood, Connection Flood, UDP/ICMP Flood |
+| `recon.yml` | RECON_001–003 | Half-Open, Port-Sweep, RST-Scan |
+| `dns.yml` | DNS_TUNNEL/DGA/AMP/NONSTANDARD_001 | DNS Tunneling, DGA, Amplification |
+| `anomaly.yml` | ANOMALY_*_001 | Lange Flows, Exfiltration, Beaconing, Fragmentierung |
+| `test.yml` | TEST_001 | Eingebaute Test-Signatur (immer aktiv) |
+
+### Hot-Reload
+
+Regelfiles werden alle 30s auf Änderungen geprüft (`reload_interval_s`). Geänderte oder neue `.yml`-Dateien werden automatisch neu geladen ohne Neustart.
+
+### Umgebungsvariablen
+
+| Variable | Standard | Beschreibung |
+|---|---|---|
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka Bootstrap-Server |
+| `RULES_DIR` | `/rules` | Verzeichnis mit YAML-Regelfiles |
+| `TEST_MODE` | `false` | `true` = Beendet sich nach leerem Topic |
 
 ---
 

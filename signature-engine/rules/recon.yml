@@ -1,0 +1,34 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Reconnaissance / Aufklärungsverkehr
+# ══════════════════════════════════════════════════════════════════════════════
+
+- id: RECON_001
+  name: "Viele Half-Open Verbindungen"
+  description: ">30 TCP-Verbindungen ohne vollständigen Handshake (Half-Open) in 60s"
+  severity: medium
+  tags: [recon, scan]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and flow.get('half_open', False)
+    and ctx.flow_rate(flow.get('src_ip', ''), 60) > 30
+
+- id: RECON_002
+  name: "Systematischer Port-Sweep bekannter Dienste"
+  description: "Verbindungsversuche auf privilegierte Ports (<1024) an >10 IPs in 30s"
+  severity: medium
+  tags: [recon]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and (flow.get('dst_port') or 9999) < 1024
+    and flow.get('connection_state') in ('SYN_ONLY', 'RESET')
+    and ctx.unique_dst_ips(flow.get('src_ip', ''), 30) > 10
+
+- id: RECON_003
+  name: "Viele RST-Verbindungen"
+  description: ">50 TCP-Verbindungen mit RST-Abschluss in 60s – möglicher Scanner"
+  severity: low
+  tags: [recon, scan]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and flow.get('connection_state') == 'RESET'
+    and ctx.flow_rate(flow.get('src_ip', ''), 60) > 50

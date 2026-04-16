@@ -1,0 +1,44 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# DNS-Anomalien (Tunneling, DGA, Amplification)
+# ══════════════════════════════════════════════════════════════════════════════
+
+- id: DNS_TUNNEL_001
+  name: "DNS Tunneling (Volumenbasis)"
+  description: "DNS-Flow mit >50 KB – mögliches DNS-Tunneling"
+  severity: high
+  tags: [dns, tunnel, exfiltration]
+  condition: |
+    flow.get('dst_port') == 53
+    and flow.get('byte_count', 0) > 50_000
+
+- id: DNS_DGA_001
+  name: "DNS High-Entropy (DGA-Verdacht)"
+  description: "Hohe IAT-Entropie in DNS-Flow mit vielen Paketen – mögliche DGA-Kommunikation"
+  severity: high
+  tags: [dns, dga, c2]
+  condition: |
+    flow.get('proto') == 'UDP'
+    and flow.get('dst_port') == 53
+    and flow.get('entropy_iat', 0) > 2.5
+    and flow.get('pkt_count', 0) > 10
+
+- id: DNS_AMP_001
+  name: "DNS Amplification (möglicher Angreifer)"
+  description: "Viele kleine DNS-UDP-Anfragen – mögliche Reflection-Amplification-Quelle"
+  severity: medium
+  tags: [dns, amplification, dos]
+  condition: |
+    flow.get('proto') == 'UDP'
+    and flow.get('dst_port') == 53
+    and flow.get('pps', 0) > 100
+    and flow.get('pkt_size', {}).get('mean', 9999) < 100
+
+- id: DNS_NONSTANDARD_001
+  name: "DNS über TCP mit großen Paketen"
+  description: "DNS über TCP mit Paketgröße >512 Bytes – ungewöhnlich"
+  severity: low
+  tags: [dns, anomaly]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and flow.get('dst_port') == 53
+    and flow.get('pkt_size', {}).get('mean', 0) > 512

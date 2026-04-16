@@ -1,0 +1,65 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Port- und Host-Scan Erkennung
+# Stateful: nutzt ctx.unique_dst_ports() und ctx.unique_dst_ips()
+# ══════════════════════════════════════════════════════════════════════════════
+
+- id: SCAN_001
+  name: "TCP SYN Port Scan"
+  description: "Einzelne Quelle sendet SYN-Pakete an >50 verschiedene Ports in 60s"
+  severity: high
+  tags: [scan, recon]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and flow.get('tcp_flags_abs', {}).get('SYN', 0) > 0
+    and ctx.unique_dst_ports(flow.get('src_ip', ''), 60) > 50
+
+- id: SCAN_002
+  name: "UDP Port Scan"
+  description: "UDP-Flows an >50 verschiedene Ports in 60s"
+  severity: medium
+  tags: [scan, recon]
+  condition: |
+    flow.get('proto') == 'UDP'
+    and ctx.unique_dst_ports(flow.get('src_ip', ''), 60) > 50
+
+- id: SCAN_003
+  name: "ICMP Host Sweep (Ping Sweep)"
+  description: "ICMP-Pakete an >20 verschiedene IPs in 30s"
+  severity: medium
+  tags: [scan, recon]
+  condition: |
+    flow.get('proto') == 'ICMP'
+    and ctx.unique_dst_ips(flow.get('src_ip', ''), 30) > 20
+
+- id: SCAN_004
+  name: "Breite Netzwerk-Erkundung"
+  description: "Verbindungen zu >30 verschiedenen IPs in 60s (beliebiges Protokoll)"
+  severity: high
+  tags: [scan, recon]
+  condition: |
+    ctx.unique_dst_ips(flow.get('src_ip', ''), 60) > 30
+
+- id: SCAN_005
+  name: "TCP Xmas Scan"
+  description: "Pakete mit FIN+URG+PSH gesetzt – klassischer Stealth-Scan"
+  severity: medium
+  tags: [scan, recon, stealth]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and flow.get('tcp_flags_abs', {}).get('FIN', 0) > 0
+    and flow.get('tcp_flags_abs', {}).get('URG', 0) > 0
+    and flow.get('tcp_flags_abs', {}).get('PSH', 0) > 0
+    and flow.get('tcp_flags_abs', {}).get('SYN', 0) == 0
+
+- id: SCAN_006
+  name: "TCP NULL Scan"
+  description: "Pakete ohne gesetzte Flags – möglicher Stealth-Scan"
+  severity: medium
+  tags: [scan, recon, stealth]
+  condition: |
+    flow.get('proto') == 'TCP'
+    and all(
+      flow.get('tcp_flags_abs', {}).get(f, 0) == 0
+      for f in ['SYN', 'ACK', 'FIN', 'RST', 'PSH', 'URG']
+    )
+    and flow.get('pkt_count', 0) > 0

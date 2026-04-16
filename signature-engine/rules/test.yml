@@ -1,0 +1,19 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Eingebaute Test-Signatur (EICAR-Äquivalent)
+# Wird IMMER geladen und kann nicht deaktiviert werden.
+# Erkennungsmerkmal: TCP-Paket mit SYN+FIN+URG+PSH an Port 65535
+# Dieses Muster tritt im echten Traffic praktisch nie auf.
+# ══════════════════════════════════════════════════════════════════════════════
+
+- id: TEST_001
+  name: "IDS Test Signature"
+  description: "Harmloser Testverkehr zur Funktionsprüfung (EICAR-Äquivalent für Netzwerk-IDS)"
+  severity: low
+  tags: [test, builtin]
+  condition: |
+    flow.get('dst_port') == 65535
+    and flow.get('proto') == 'TCP'
+    and flow.get('tcp_flags_abs', {}).get('SYN', 0) > 0
+    and flow.get('tcp_flags_abs', {}).get('FIN', 0) > 0
+    and flow.get('tcp_flags_abs', {}).get('URG', 0) > 0
+    and flow.get('tcp_flags_abs', {}).get('PSH', 0) > 0
