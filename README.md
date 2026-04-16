@@ -64,7 +64,7 @@ PCAP Store ───────────────────────
 | `enrichment-service` | Python | ✅ fertig | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache |
 | `pcap-store` | Python | ✅ fertig | Sliding-Window-Paketpuffer, PCAP-Datei-Writer, MinIO-Upload, DB-Update |
 | `api` | Python FastAPI | ✅ fertig | REST + WebSocket, Alerts/Flows/Networks/Config/Tests, MinIO-Proxy, Threat-Level |
-| `frontend` | React | 🔜 geplant | Echtzeit-Dashboard, Threat-Level, Tests |
+| `frontend` | React + Vite + TS | ✅ fertig | Echtzeit Alert-Feed (WebSocket), Threat-Level, Enrichment, PCAP-Download, Feedback, Netzwerke, Tests |
 | `training-loop` | Python | 🔜 geplant | Feedback → ML-Modell-Update |
 | `traffic-generator` | Python/Scapy | 🔜 geplant | Synthetischer Testverkehr (nur Test-Mode) |
 

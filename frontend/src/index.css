@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-200 font-mono text-sm antialiased;
+  }
+  ::-webkit-scrollbar { @apply w-1.5; }
+  ::-webkit-scrollbar-track { @apply bg-slate-900; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-600 rounded; }
+}
+
+@layer components {
+  .badge-critical { @apply bg-red-900/60 text-red-300 border border-red-700/50; }
+  .badge-high     { @apply bg-orange-900/60 text-orange-300 border border-orange-700/50; }
+  .badge-medium   { @apply bg-yellow-900/60 text-yellow-300 border border-yellow-700/50; }
+  .badge-low      { @apply bg-slate-700/60 text-slate-300 border border-slate-600/50; }
+
+  .btn { @apply px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer; }
+  .btn-primary  { @apply btn bg-blue-600 hover:bg-blue-500 text-white; }
+  .btn-ghost    { @apply btn bg-transparent hover:bg-slate-700 text-slate-300; }
+  .btn-danger   { @apply btn bg-red-900/50 hover:bg-red-800 text-red-300; }
+  .btn-success  { @apply btn bg-green-900/50 hover:bg-green-800 text-green-300; }
+
+  .card { @apply bg-slate-900 border border-slate-800 rounded-lg; }
+  .input { @apply bg-slate-800 border border-slate-700 rounded px-2 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500; }
+}
