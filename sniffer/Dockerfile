@@ -11,12 +11,9 @@ RUN apt-get update && apt-get install -y \
     # pcap crate benötigt libpcap zur Kompilierung
     libpcap-dev \
     pkg-config \
-    # rdkafka cmake-build Feature: librdkafka aus Quellen kompilieren
-    cmake \
-    # rdkafka benötigt einen C-Compiler
-    clang \
+    # rdkafka dynamic-linking: gegen System-librdkafka linken (schnell + stabil)
+    librdkafka-dev \
     libssl-dev \
-    # pnet benötigt keine extra Abhängigkeiten
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -42,9 +39,10 @@ RUN touch src/main.rs && cargo build --release
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
-    # Shared Library für Packet-Capture zur Laufzeit
+    # Shared Libraries zur Laufzeit
     libpcap0.8 \
-    # CA-Zertifikate für eventuelle TLS-Verbindungen
+    librdkafka1 \
+    libssl3 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
