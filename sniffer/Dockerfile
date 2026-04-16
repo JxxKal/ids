@@ -5,7 +5,7 @@
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM rust:1.78-slim AS builder
+FROM rust:1.85-slim AS builder
 
 RUN apt-get update && apt-get install -y \
     # pcap crate benötigt libpcap zur Kompilierung
