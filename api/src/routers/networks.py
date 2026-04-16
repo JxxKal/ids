@@ -55,7 +55,7 @@ async def create_network(
     )
 
 
-@router.delete("/{network_id}", status_code=204)
+@router.delete("/{network_id}", status_code=204, response_model=None)
 async def delete_network(
     network_id: str,
     pool: asyncpg.Pool = Depends(get_pool),

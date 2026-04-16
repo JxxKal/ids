@@ -157,7 +157,7 @@ async def update_host(
     return _row_to_host(row)
 
 
-@router.delete("/{ip}", status_code=204)
+@router.delete("/{ip}", status_code=204, response_model=None)
 async def delete_host(ip: str, pool: asyncpg.Pool = Depends(get_pool)) -> None:
     async with pool.acquire() as conn:
         result = await conn.execute("DELETE FROM host_info WHERE ip = $1::inet", ip)
