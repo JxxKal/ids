@@ -62,7 +62,7 @@ PCAP Store ───────────────────────
 | `ml-engine` | Python | ✅ fertig | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update |
 | `alert-manager` | Python | ✅ fertig | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung an alerts-enriched |
 | `enrichment-service` | Python | ✅ fertig | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache |
-| `pcap-store` | Python | 🔜 geplant | Header-PCAP Archivierung in MinIO |
+| `pcap-store` | Python | ✅ fertig | Sliding-Window-Paketpuffer, PCAP-Datei-Writer, MinIO-Upload, DB-Update |
 | `api` | Python FastAPI | 🔜 geplant | REST + WebSocket für Dashboard |
 | `frontend` | React | 🔜 geplant | Echtzeit-Dashboard, Threat-Level, Tests |
 | `training-loop` | Python | 🔜 geplant | Feedback → ML-Modell-Update |
@@ -314,6 +314,54 @@ FlowRecord
 - **Max-Duration** (`FLOW_MAX_DURATION_S`, default 300s): Sehr lange Flows werden periodisch geflushst
 - **TCP RST**: Sofortiger Flush
 - **TCP FIN+ACK beidseitig**: Sofortiger Flush
+
+---
+
+## PCAP Store – Details
+
+### Pipeline
+
+```
+pcap-headers (Kafka)           alerts-enriched (Kafka)
+     │  PacketEvent (JSON)           │  AlertEvent (JSON)
+     │  raw_header_b64               │
+     ▼                               ▼
+PacketBuffer                   PendingAlert anlegen
+(sliding window ±window_s*2)   (ready_at = jetzt + window_s)
+     │                               │
+     └──────────────┬────────────────┘
+                    │  wenn Buffer-Timestamp > ready_at:
+                    ▼
+            Pakete extrahieren
+            [alert_ts - window_s, alert_ts + window_s]
+                    │
+                    ▼
+            PCAP-Datei bauen (libpcap-Format, kein Payload)
+                    │
+                    ├──► MinIO  ids-pcaps/alerts/{alert_id}.pcap
+                    └──► DB     alerts SET pcap_available=true, pcap_key=...
+```
+
+### PCAP-Format
+
+Natives libpcap-Format (`LINKTYPE_ETHERNET`, little-endian). Enthält nur Header-Bytes (snaplen 128), **keinen Payload**. Öffenbar mit Wireshark, tcpdump, tshark.
+
+### Pending-Alert-Mechanismus
+
+Alerts werden mit `ready_at = jetzt + window_s` gepuffert. Erst wenn der Paketpuffer Pakete bis mindestens `alert_ts + window_s` enthält, wird das PCAP erstellt. Dadurch landen auch Pakete **nach** dem Alert-Timestamp im PCAP.
+
+### Umgebungsvariablen
+
+| Variable | Standard | Beschreibung |
+|---|---|---|
+| `KAFKA_BROKERS` | `localhost:9092` | Kafka Bootstrap-Server |
+| `POSTGRES_DSN` | – | TimescaleDB Verbindung |
+| `MINIO_ENDPOINT` | `localhost:9000` | MinIO Endpoint |
+| `MINIO_ACCESS_KEY` | `ids-access` | MinIO Zugangsdaten |
+| `MINIO_SECRET_KEY` | – | MinIO Secret |
+| `PCAP_BUCKET` | `ids-pcaps` | MinIO Bucket |
+| `PCAP_WINDOW_S` | `60` | ±Sekunden um Alert-Timestamp |
+| `TEST_MODE` | `false` | Beendet sich nach leerem Topic |
 
 ---
 
