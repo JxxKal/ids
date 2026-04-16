@@ -22,6 +22,8 @@ volumes:
   minio-data:
   ml-models:
   signature-rules:
+  snort-rules:    # Persistenter Regel-Cache (Community + ET Open)
+  snort-alerts:   # Shared Volume: Snort → snort-bridge
 
 services:
 
@@ -30,7 +32,8 @@ services:
   # ────────────────────────────────────────────────────────────────────────────
 
   kafka:
-    image: bitnami/kafka:3.7
+    #image: bitnami/kafka:3.7 
+    image: apache/kafka:latest
     container_name: ids-kafka
     restart: unless-stopped
     networks: [ids-net]
@@ -61,7 +64,8 @@ services:
       start_period: 30s
 
   kafka-init:
-    image: bitnami/kafka:3.7
+    #image: bitnami/kafka:3.7
+    image: apache/kafka:latest
     container_name: ids-kafka-init
     networks: [ids-net]
     depends_on:
@@ -402,3 +406,69 @@ services:
       KAFKA_BROKERS: kafka:9092
       TARGET_IP: 172.28.0.100
       TEST_MODE: "true"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # SNORT – PRODUKTION  (docker compose --profile prod --profile snort up)
+  #
+  # Snort 3 auf dem Mirror-Interface → schreibt alert_json → snort-bridge
+  # network_mode: host → direkter AF_PACKET-Zugriff wie beim Sniffer
+  # ────────────────────────────────────────────────────────────────────────────
+
+  snort:
+    build: ./snort
+    container_name: ids-snort
+    restart: unless-stopped
+    network_mode: host
+    profiles: [snort]
+    cap_add: [NET_RAW, NET_ADMIN]
+    volumes:
+      - snort-alerts:/var/log/snort
+      - snort-rules:/etc/snort/rules
+    environment:
+      SNORT_IFACE: ${MIRROR_IFACE:-eth1}
+      SNORT_RULESET: ${SNORT_RULESET:-community}
+      SNORT_UPDATE_RULES: ${SNORT_UPDATE_RULES:-false}
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # SNORT – TEST  (docker compose --profile test --profile snort-test up)
+  #
+  # Lauscht auf dem Docker-Bridge-Interface; teilt ids-net mit allen Services.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  snort-test:
+    build: ./snort
+    container_name: ids-snort-test
+    restart: unless-stopped
+    networks: [ids-net]
+    profiles: [snort-test]
+    cap_add: [NET_RAW, NET_ADMIN]
+    volumes:
+      - snort-alerts:/var/log/snort
+      - snort-rules:/etc/snort/rules
+    environment:
+      SNORT_IFACE: ${TEST_IFACE:-eth0}
+      SNORT_RULESET: ${SNORT_RULESET:-community}
+      SNORT_UPDATE_RULES: ${SNORT_UPDATE_RULES:-false}
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # SNORT-BRIDGE  (startet mit snort ODER snort-test Profil)
+  #
+  # Liest alert_json.txt aus dem Shared-Volume und publiziert nach alerts-raw.
+  # Alert-Manager, Enrichment und Frontend verarbeiten Snort-Alerts transparent.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  snort-bridge:
+    build: ./snort-bridge
+    container_name: ids-snort-bridge
+    restart: unless-stopped
+    networks: [ids-net]
+    profiles: [snort, snort-test]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - snort-alerts:/var/log/snort:ro
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      SNORT_ALERT_FILE: /var/log/snort/alert_json.txt
+      TEST_MODE: ${TEST_MODE:-false}

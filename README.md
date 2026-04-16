@@ -48,6 +48,8 @@ Mirror Port
 
 Enrichment Service (DNS/Ping/GeoIP) ──► alerts-enriched
 PCAP Store ──────────────────────────► MinIO (ids-pcaps)
+
+Snort 3 (optional) ──► snort-bridge ──► alerts-raw
 ```
 
 ---
@@ -67,6 +69,8 @@ PCAP Store ───────────────────────
 | `frontend` | React + Vite + TS | ✅ fertig | Echtzeit Alert-Feed (WebSocket), Threat-Level, Enrichment, PCAP-Download, Feedback, Netzwerke, Hosts, Tests |
 | `training-loop` | Python | ✅ fertig | Feedback-Collector (Kafka), semi-supervised Retrain, atomares Modell-Update |
 | `traffic-generator` | Python/Scapy | ✅ fertig | 5 Test-Szenarien, Alert-Polling, TestRun-Update in DB |
+| `snort` | Snort 3 | ✅ fertig | Paketerfassung auf Mirror-/Test-Interface, Community- + ET-Open-Regelsets, alert_json Output |
+| `snort-bridge` | Python | ✅ fertig | Liest Snort alert_json → normalisiert → Kafka alerts-raw; transparente Integration ohne Pipeline-Umbau |
 
 ---
 
@@ -191,6 +195,47 @@ Router;192.168.1.1
 | `PUT` | `/api/hosts/{ip}` | display_name und/oder trusted-Flag ändern |
 | `DELETE` | `/api/hosts/{ip}` | Host entfernen |
 | `POST` | `/api/hosts/import/csv` | Bulk-Import aus CSV |
+
+---
+
+## Snort Integration (optional)
+
+Snort 3 läuft als parallele Detection-Engine auf demselben Mirror-Port. Alerts fließen über einen Bridge-Service in die bestehende Kafka-Pipeline – Alert-Manager, Enrichment, Deduplication und Dashboard funktionieren ohne Änderungen.
+
+```
+Mirror Port ──► Rust Sniffer   ──► flows        ──► Signature Engine  ─┐
+              │                                  ──► ML Engine          ├──► alerts-raw ──► Alert-Manager ──► ...
+              └──► Snort 3 ──► alert_json.txt ──► snort-bridge ─────────┘
+                   (Container)    (Shared Vol.)    (Python)
+```
+
+### Starten
+
+```bash
+# Produktion + Snort
+docker compose --profile prod --profile snort up -d
+
+# Test/Dev + Snort
+docker compose --profile test --profile snort-test up -d
+```
+
+### Regelsets
+
+| Wert (`SNORT_RULESET`) | Quelle | Signaturen | Hinweis |
+|---|---|---|---|
+| `community` _(Standard)_ | snort.org | ~4.000 | Snort 3 nativ, keine Anmeldung |
+| `emerging-threats` | emergingthreats.net | ~40.000 | ET Open, Snort 2.9 Format (`--warn-all`) |
+| `both` | beide | ~44.000 | Community + ET kombiniert |
+
+Regeln werden beim ersten Start heruntergeladen und im Volume `snort-rules` gecacht. Für Updates:
+
+```bash
+SNORT_UPDATE_RULES=true docker compose --profile snort up -d snort
+```
+
+### Alert-Erkennung im Dashboard
+
+Snort-Alerts erscheinen in der Alert-Liste mit `source=snort` und einer `rule_id` der Form `SNORT:GID:SID:REV` (z.B. `SNORT:1:2001219:20`). Severity und Score werden aus der Snort-Priorität abgeleitet (1=critical, 2=high, 3=medium, 4+=low). Feedback (TP/FP) und Enrichment funktionieren identisch zu eigenen Signaturen.
 
 ---
 
