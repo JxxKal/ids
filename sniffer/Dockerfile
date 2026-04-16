@@ -13,10 +13,13 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     # rdkafka cmake-build: librdkafka 2.x aus Quellen kompilieren
     # cmake-build statisch linken → kein System-librdkafka nötig
+    # libcurl4-openssl-dev: rdkafka_conf.c in librdkafka 2.12 inkludiert
+    # curl/curl.h auch wenn WITH_CURL=0 gesetzt ist (Bug in 2.12.1)
     cmake \
     build-essential \
     libssl-dev \
     zlib1g-dev \
+    libcurl4-openssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -43,6 +46,7 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
     libpcap0.8 \
+    libcurl4 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
