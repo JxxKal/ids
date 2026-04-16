@@ -11,10 +11,12 @@ RUN apt-get update && apt-get install -y \
     # pcap crate
     libpcap-dev \
     pkg-config \
-    # rdkafka dynamic-linking: gegen System-librdkafka 1.9.2 linken (kein cmake)
-    # Bookworm hat librdkafka-dev 1.9.2 = exakt was rdkafka-sys 4.6 verlangt
-    librdkafka-dev \
+    # rdkafka cmake-build: librdkafka 2.x aus Quellen kompilieren
+    # cmake-build statisch linken → kein System-librdkafka nötig
+    cmake \
+    build-essential \
     libssl-dev \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -41,7 +43,6 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
     libpcap0.8 \
-    librdkafka1 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
