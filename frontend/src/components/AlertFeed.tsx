@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Alert } from '../types';
 import { AlertDetail } from './AlertDetail';
 import { SeverityBadge } from './SeverityBadge';
+import { TrustBadge } from './TrustBadge';
 
 interface Props {
   alerts: Alert[];
@@ -68,6 +69,7 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
               <th className="px-3 py-2">Regel</th>
               <th className="px-3 py-2">Quelle</th>
               <th className="px-3 py-2">Ziel</th>
+              <th className="px-3 py-2">Trust</th>
               <th className="px-3 py-2">Score</th>
               <th className="px-3 py-2"></th>
             </tr>
@@ -102,6 +104,18 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                 <td className="px-3 py-2 text-slate-400">
                   {a.enrichment?.dst_hostname ?? a.dst_ip ?? '–'}
                   {a.dst_port ? `:${a.dst_port}` : ''}
+                </td>
+                <td className="px-3 py-2">
+                  {a.enrichment && (
+                    <div className="flex gap-1 flex-wrap">
+                      {a.enrichment.src_trusted === false && (
+                        <TrustBadge trusted={false} />
+                      )}
+                      {a.enrichment.dst_trusted === false && (
+                        <TrustBadge trusted={false} />
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td className="px-3 py-2 tabular-nums text-slate-400">
                   {a.score.toFixed(2)}

@@ -1,4 +1,4 @@
-import type { Alert, KnownNetwork, TestRun, ThreatLevel } from './types';
+import type { Alert, Host, KnownNetwork, TestRun, ThreatLevel } from './types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
@@ -79,6 +79,39 @@ export async function createNetwork(data: {
 
 export async function deleteNetwork(id: string): Promise<void> {
   await req(`/api/networks/${id}`, { method: 'DELETE' });
+}
+
+// ── Hosts ─────────────────────────────────────────────────────────────────────
+
+export async function fetchHosts(params: { trusted?: boolean; search?: string } = {}): Promise<Host[]> {
+  const p = new URLSearchParams();
+  if (params.trusted !== undefined) p.set('trusted', String(params.trusted));
+  if (params.search)                p.set('search',  params.search);
+  return req(`/api/hosts?${p}`);
+}
+
+export async function createHost(data: {
+  ip: string;
+  display_name?: string;
+  trusted?: boolean;
+}): Promise<Host> {
+  return req('/api/hosts', { method: 'POST', body: JSON.stringify({ ...data, trust_source: 'manual', trusted: true }) });
+}
+
+export async function updateHost(ip: string, data: { display_name?: string; trusted?: boolean }): Promise<Host> {
+  return req(`/api/hosts/${encodeURIComponent(ip)}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function deleteHost(ip: string): Promise<void> {
+  await req(`/api/hosts/${encodeURIComponent(ip)}`, { method: 'DELETE' });
+}
+
+export async function importHostsCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${BASE}/api/hosts/import/csv`, { method: 'POST', body: fd });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

@@ -28,6 +28,26 @@ export interface Enrichment {
   dst_asn?: ASN;
   src_geo?: Geo;
   dst_geo?: Geo;
+  // Trust
+  src_trusted?: boolean;
+  dst_trusted?: boolean;
+  src_trust_source?: string;
+  dst_trust_source?: string;
+  src_display_name?: string;
+  dst_display_name?: string;
+}
+
+export interface Host {
+  ip: string;
+  hostname?: string;
+  display_name?: string;
+  trusted: boolean;
+  trust_source?: string;
+  asn?: ASN;
+  geo?: Geo;
+  ping_ms?: number;
+  last_seen?: string;
+  updated_at: string;
 }
 
 export interface Alert {

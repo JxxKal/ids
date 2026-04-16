@@ -69,6 +69,33 @@ class FlowListResponse(BaseModel):
     limit:  int
 
 
+# ── Hosts ─────────────────────────────────────────────────────────────────────
+
+class HostResponse(BaseModel):
+    ip:           str
+    hostname:     str | None = None
+    display_name: str | None = None
+    trusted:      bool = False
+    trust_source: str | None = None   # dns | csv | manual
+    asn:          dict[str, Any] | None = None
+    geo:          dict[str, Any] | None = None
+    ping_ms:      float | None = None
+    last_seen:    datetime | None = None
+    updated_at:   datetime
+
+
+class HostCreate(BaseModel):
+    ip:           str
+    display_name: str | None = None
+    trusted:      bool = True
+    trust_source: str = "manual"
+
+
+class HostUpdate(BaseModel):
+    display_name: str | None = None
+    trusted:      bool | None = None
+
+
 # ── Networks ──────────────────────────────────────────────────────────────────
 
 class NetworkResponse(BaseModel):

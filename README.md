@@ -61,10 +61,10 @@ PCAP Store ───────────────────────
 | `signature-engine` | Python | ✅ fertig | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
 | `ml-engine` | Python | ✅ fertig | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update |
 | `alert-manager` | Python | ✅ fertig | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung an alerts-enriched |
-| `enrichment-service` | Python | ✅ fertig | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache |
+| `enrichment-service` | Python | ✅ fertig | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache, Host-Trust-Prüfung, UNKNOWN_HOST-Alert |
 | `pcap-store` | Python | ✅ fertig | Sliding-Window-Paketpuffer, PCAP-Datei-Writer, MinIO-Upload, DB-Update |
-| `api` | Python FastAPI | ✅ fertig | REST + WebSocket, Alerts/Flows/Networks/Config/Tests, MinIO-Proxy, Threat-Level |
-| `frontend` | React + Vite + TS | ✅ fertig | Echtzeit Alert-Feed (WebSocket), Threat-Level, Enrichment, PCAP-Download, Feedback, Netzwerke, Tests |
+| `api` | Python FastAPI | ✅ fertig | REST + WebSocket, Alerts/Flows/Networks/Config/Tests/Hosts, MinIO-Proxy, Threat-Level, CSV-Import |
+| `frontend` | React + Vite + TS | ✅ fertig | Echtzeit Alert-Feed (WebSocket), Threat-Level, Enrichment, PCAP-Download, Feedback, Netzwerke, Hosts, Tests |
 | `training-loop` | Python | ✅ fertig | Feedback-Collector (Kafka), semi-supervised Retrain, atomares Modell-Update |
 | `traffic-generator` | Python/Scapy | ✅ fertig | 5 Test-Szenarien, Alert-Polling, TestRun-Update in DB |
 
@@ -148,6 +148,49 @@ Dashboard und API sind nur über `MANAGEMENT_IP` erreichbar.
 | `DEDUP_WINDOW_S` | `300` | Alert-Deduplication Zeitfenster |
 | `PCAP_WINDOW_S` | `60` | ±Sekunden PCAP-Fenster pro Alert |
 | `RETRAIN_INTERVAL_S` | `86400` | ML Retrain-Interval (24h) |
+
+---
+
+## Host-Trust-System
+
+Jeder Host kann als **trusted** (bekannt) markiert werden. Das senkt das Alarm-Rauschen für interne Geräte, die nicht via DNS aufgelöst werden.
+
+### Trust-Quellen
+
+| Quelle | Beschreibung |
+|---|---|
+| `dns` | Hostname automatisch per Reverse-DNS aufgelöst |
+| `csv` | Manueller Import über CSV-Datei |
+| `manual` | Direkt im Dashboard oder via API angelegt |
+
+Trust wird **nie herabgestuft** – ein manuell gesetztes `trusted=true` bleibt erhalten, auch wenn der DNS-Lookup fehlschlägt.
+
+### UNKNOWN_HOST-Alert
+
+Der Enrichment-Service erzeugt automatisch einen Alert (`UNKNOWN_HOST_001`, Severity `low`) wenn ein privater IP-Host auftaucht, der nicht in `host_info` als trusted hinterlegt ist. Deduplication: max. 1 Alert pro IP pro Stunde.
+
+### CSV-Import
+
+Format: `Hostname;IP-Adresse` oder `IP-Adresse;Hostname` – Semikolon oder Komma als Trennzeichen, `#` für Kommentare.
+
+```
+# Netzwerkgeräte
+Router;192.168.1.1
+192.168.1.2;Drucker-EG
+```
+
+**Endpunkt:** `POST /api/hosts/import/csv` (multipart/form-data, Feld `file`)
+
+### Host-API
+
+| Methode | Pfad | Beschreibung |
+|---|---|---|
+| `GET` | `/api/hosts` | Liste (`?trusted=true/false`, `?search=…`) |
+| `GET` | `/api/hosts/{ip}` | Einzelner Host |
+| `POST` | `/api/hosts` | Host anlegen (trust_source=manual, trusted=true) |
+| `PUT` | `/api/hosts/{ip}` | display_name und/oder trusted-Flag ändern |
+| `DELETE` | `/api/hosts/{ip}` | Host entfernen |
+| `POST` | `/api/hosts/import/csv` | Bulk-Import aus CSV |
 
 ---
 

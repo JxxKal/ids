@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { pcapUrl, setFeedback } from '../api';
 import type { Alert } from '../types';
 import { SeverityBadge } from './SeverityBadge';
+import { TrustBadge } from './TrustBadge';
 
 interface Props {
   alert: Alert;
@@ -70,6 +71,22 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           {enr && (
             <>
               <div className="pt-2 pb-1 text-xs text-slate-500 uppercase tracking-wider">Enrichment</div>
+              <div className="flex gap-4 py-1 border-b border-slate-800">
+                <div className="flex flex-col gap-1 flex-1">
+                  <span className="text-xs text-slate-500">Quelle</span>
+                  <div className="flex items-center gap-1.5">
+                    <TrustBadge trusted={enr.src_trusted ?? false} source={enr.src_trust_source} />
+                    {enr.src_display_name && <span className="text-xs text-slate-300">{enr.src_display_name}</span>}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <span className="text-xs text-slate-500">Ziel</span>
+                  <div className="flex items-center gap-1.5">
+                    <TrustBadge trusted={enr.dst_trusted ?? false} source={enr.dst_trust_source} />
+                    {enr.dst_display_name && <span className="text-xs text-slate-300">{enr.dst_display_name}</span>}
+                  </div>
+                </div>
+              </div>
               <Row label="Src Hostname"  value={enr.src_hostname} />
               <Row label="Dst Hostname"  value={enr.dst_hostname} />
               <Row label="Src Network"   value={enr.src_network ? `${enr.src_network.name} (${enr.src_network.cidr})` : undefined} />

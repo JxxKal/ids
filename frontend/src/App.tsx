@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { AlertFeed } from './components/AlertFeed';
+import { HostsPage } from './components/HostsPage';
 import { NetworksPage } from './components/NetworksPage';
 import { TestsPage } from './components/TestsPage';
 import { ThreatGauge } from './components/ThreatGauge';
 import { useWebSocket } from './hooks/useWebSocket';
 import type { Alert } from './types';
 
-type Tab = 'dashboard' | 'networks' | 'tests';
+type Tab = 'dashboard' | 'networks' | 'hosts' | 'tests';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'networks',  label: 'Netzwerke' },
+  { id: 'hosts',     label: 'Hosts' },
   { id: 'tests',     label: 'Tests' },
 ];
 
@@ -91,6 +93,7 @@ export default function App() {
           </div>
         )}
         {tab === 'networks' && <NetworksPage />}
+        {tab === 'hosts'    && <HostsPage />}
         {tab === 'tests'    && <TestsPage />}
       </main>
     </div>

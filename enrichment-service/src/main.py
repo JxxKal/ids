@@ -67,16 +67,22 @@ def _enrich_ip(
     cache: EnrichmentCache,
     db: EnrichmentDB,
 ) -> dict | None:
-    """Reichert eine einzelne IP an. Gibt Enrichment-Dict oder None zurück."""
+    """
+    Reichert eine einzelne IP an.
+    Gibt Enrichment-Dict inkl. trusted/trust_source/display_name zurück.
+    """
     if not ip:
         return None
 
-    # Cache prüfen
+    # Cache prüfen (enthält auch Trust-Felder wenn bereits gecacht)
     cached = cache.get(ip)
     if cached is not None:
         return cached
 
     private = is_private_ip(ip)
+
+    # Trust-Status VOR der DNS-Auflösung lesen (manuell/csv hat Vorrang)
+    trust = db.get_host_trust(ip)
 
     hostname = resolve_hostname(ip, cfg.dns_timeout_s)
     ping_ms  = ping_host(ip, cfg.ping_timeout_ms)
@@ -85,11 +91,15 @@ def _enrich_ip(
     network  = db.get_network_for_ip(ip)
 
     info: dict = {
-        "hostname": hostname,
-        "ping_ms":  ping_ms,
-        "geo":      geo,
-        "asn":      asn,
-        "network":  network,
+        "hostname":     hostname,
+        "ping_ms":      ping_ms,
+        "geo":          geo,
+        "asn":          asn,
+        "network":      network,
+        # Trust-Felder – entweder aus DB (manual/csv) oder aus DNS-Ergebnis
+        "trusted":      trust["trusted"] or bool(hostname),
+        "trust_source": trust["trust_source"] or ("dns" if hostname else None),
+        "display_name": trust["display_name"],
     }
 
     # Im Cache + host_info speichern
@@ -97,6 +107,28 @@ def _enrich_ip(
     db.upsert_host_info(ip, info)
 
     return info
+
+
+def _check_unknown_host(
+    ip: str | None,
+    info: dict | None,
+    direction: str,
+    db: EnrichmentDB,
+) -> None:
+    """
+    Erzeugt einen UNKNOWN_HOST_001-Alert wenn:
+    - IP ist eine private/interne Adresse
+    - Host ist nicht als trusted bekannt
+    - In den letzten UNKNOWN_HOST_DEDUP_S war noch kein solcher Alert
+    """
+    if not ip or not info:
+        return
+    if info.get("trusted"):
+        return
+    if not is_private_ip(ip):
+        return
+    if db.should_alert_unknown_host(ip):
+        db.insert_unknown_host_alert(ip, direction)
 
 
 def run(cfg: Config) -> None:
@@ -160,20 +192,34 @@ def run(cfg: Config) -> None:
             dst_info = _enrich_ip(dst_ip, cfg, cache, db)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
 
+            def _f(info: dict | None, key: str):
+                return info.get(key) if info else None
+
             enrichment = {
-                "src_hostname": src_info.get("hostname") if src_info else None,
-                "dst_hostname": dst_info.get("hostname") if dst_info else None,
-                "src_network":  src_info.get("network")  if src_info else None,
-                "dst_network":  dst_info.get("network")  if dst_info else None,
-                "src_ping_ms":  src_info.get("ping_ms")  if src_info else None,
-                "dst_ping_ms":  dst_info.get("ping_ms")  if dst_info else None,
-                "src_asn":      src_info.get("asn")      if src_info else None,
-                "dst_asn":      dst_info.get("asn")      if dst_info else None,
-                "src_geo":      src_info.get("geo")      if src_info else None,
-                "dst_geo":      dst_info.get("geo")      if dst_info else None,
+                "src_hostname":     _f(src_info, "hostname"),
+                "dst_hostname":     _f(dst_info, "hostname"),
+                "src_network":      _f(src_info, "network"),
+                "dst_network":      _f(dst_info, "network"),
+                "src_ping_ms":      _f(src_info, "ping_ms"),
+                "dst_ping_ms":      _f(dst_info, "ping_ms"),
+                "src_asn":          _f(src_info, "asn"),
+                "dst_asn":          _f(dst_info, "asn"),
+                "src_geo":          _f(src_info, "geo"),
+                "dst_geo":          _f(dst_info, "geo"),
+                # Trust-Felder
+                "src_trusted":      _f(src_info, "trusted"),
+                "dst_trusted":      _f(dst_info, "trusted"),
+                "src_trust_source": _f(src_info, "trust_source"),
+                "dst_trust_source": _f(dst_info, "trust_source"),
+                "src_display_name": _f(src_info, "display_name"),
+                "dst_display_name": _f(dst_info, "display_name"),
             }
 
             db.update_alert_enrichment(alert_id, enrichment)
+
+            # Unknown-Host-Alert für unbekannte interne IPs
+            _check_unknown_host(src_ip, src_info, "src", db)
+            _check_unknown_host(dst_ip, dst_info, "dst", db)
 
             total += 1
             log.debug(
