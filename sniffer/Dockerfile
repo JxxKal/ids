@@ -25,7 +25,9 @@ WORKDIR /build
 # Erst Cargo.toml + Cargo.lock kopieren und mit Dummy-main builden.
 # Docker-Layer-Cache: dieser teure Schritt wird nur bei Dependency-Änderungen
 # wiederholt, nicht bei Source-Code-Änderungen.
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
+# Cargo.lock optional: vorhanden → reproduzierbarer Build; fehlt → cargo löst auf
+COPY Cargo.loc[k] ./
 RUN mkdir -p src \
     && echo 'fn main() { println!("placeholder"); }' > src/main.rs \
     && cargo build --release \
