@@ -257,7 +257,7 @@ fn parse_transport(
 
 // ── TCP Flags ─────────────────────────────────────────────────────────────────
 
-fn parse_tcp_flags(flags: u16) -> Vec<String> {
+fn parse_tcp_flags(flags: u8) -> Vec<String> {
     let mut result = Vec::with_capacity(4);
     // Reihenfolge: wichtigste zuerst
     if flags & TcpFlags::SYN != 0 { result.push("SYN".into()); }
