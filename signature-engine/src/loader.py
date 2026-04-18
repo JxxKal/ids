@@ -54,7 +54,9 @@ def _compile_rule(raw: dict, source_file: str) -> Rule | None:
             log.error("Rule %s in %s has empty condition – skipped", rule_id, source_file)
             return None
 
-        code = compile(condition_src, f"<rule:{rule_id}>", "eval")
+        # Mehrzeilige YAML-Conditions (block scalar |) in Klammern einwickeln,
+        # damit Python-eval Zeilenumbrüche bei and/or-Ketten akzeptiert.
+        code = compile(f"(\n{condition_src}\n)", f"<rule:{rule_id}>", "eval")
 
         return Rule(
             id=rule_id,
