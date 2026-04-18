@@ -74,13 +74,14 @@ create_topic() {
 #                   Retention 1h
 # ──────────────────────────────────────────────────────────────────────────────
 
-create_topic "raw-packets"      4   600000    "--config max.message.bytes=1048576"
-create_topic "flows"            4   3600000
-create_topic "pcap-headers"     4   1800000   "--config max.message.bytes=10485760"
-create_topic "alerts-raw"       2   86400000
-create_topic "alerts-enriched"  2   604800000
-create_topic "feedback"         1   2592000000
-create_topic "test-commands"    1   3600000
+create_topic "raw-packets"          4   600000    "--config max.message.bytes=1048576"
+create_topic "flows"                4   3600000
+create_topic "pcap-headers"         4   1800000   "--config max.message.bytes=10485760"
+create_topic "alerts-raw"           2   86400000
+create_topic "alerts-enriched"      2   604800000
+create_topic "alerts-enriched-push" 1   3600000
+create_topic "feedback"             1   2592000000
+create_topic "test-commands"        1   3600000
 
 echo ""
 echo "[kafka-init] Alle Topics angelegt:"
