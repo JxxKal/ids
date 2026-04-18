@@ -247,10 +247,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      timescaledb:
+        condition: service_healthy
     cap_add: [NET_RAW]                              # ICMP Ping ohne root
     environment:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
       # Hinweis: Pings gehen über die Bridge-IP des Containers.
       # Für striktes Interface-Binding (Prod): network_mode: host setzen
       # und KAFKA_BROKERS auf localhost:9094 / REDIS_URL auf localhost:6379 ändern.
