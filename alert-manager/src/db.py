@@ -93,7 +93,7 @@ class AlertWriter:
             """,
             rows,
             template="""(
-                %s, to_timestamp(%s), %s, %s, %s,
+                %s, %s::timestamptz, %s, %s, %s,
                 %s, %s,
                 %s, %s, %s, %s,
                 %s, %s
