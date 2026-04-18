@@ -66,17 +66,18 @@ const ROW_SEVERITY: Record<string, string> = {
 // ── Gruppierung ────────────────────────────────────────────────────────────────
 
 interface AlertGroup {
-  key:         string;
-  severity:    Alert['severity'];
-  rule_id?:    string;
-  src_ip?:     string;
-  dst_ip?:     string;
-  proto?:      string;
+  key:          string;
+  severity:     Alert['severity'];
+  rule_id?:     string;
+  src_ip?:      string;
+  dst_ip?:      string;
+  proto?:       string;
   description?: string;
-  count:       number;
-  first_ts:    string;
-  last_ts:     string;
-  latest:      Alert;
+  count:        number;
+  first_ts:     string;
+  last_ts:      string;
+  latest:       Alert;
+  enrichment?:  Enrichment;
 }
 
 /** Wandelt ts (ISO-String oder Unix-Float) in Millisekunden um. */
@@ -99,12 +100,14 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
       g.count++;
       if (tsMs(a.ts) > tsMs(g.last_ts)) { g.last_ts = a.ts; g.latest = a; g.description = a.description; }
       if (tsMs(a.ts) < tsMs(g.first_ts)) g.first_ts = a.ts;
+      if (!g.enrichment && a.enrichment) g.enrichment = a.enrichment;
     } else {
       map.set(k, {
         key: k, severity: a.severity,
         rule_id: a.rule_id, src_ip: a.src_ip, dst_ip: a.dst_ip,
         proto: a.proto, description: a.description,
         count: 1, first_ts: a.ts, last_ts: a.ts, latest: a,
+        enrichment: a.enrichment ?? undefined,
       });
     }
   }
@@ -224,10 +227,10 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                     {g.description ?? '–'}
                   </td>
                   <td className="px-3 py-2">
-                    <IpCell ip={g.src_ip} enrichment={g.latest.enrichment} dir="src" />
+                    <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
                   </td>
                   <td className="px-3 py-2">
-                    <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.latest.enrichment} dir="dst" />
+                    <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" />
                   </td>
                   <td className="px-3 py-2 text-right">
                     {g.count > 1
