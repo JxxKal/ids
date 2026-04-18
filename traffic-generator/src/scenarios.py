@@ -1,100 +1,124 @@
 """
-Test-Szenarien: Synthetischer Netzwerkverkehr mit Scapy.
+Synthetische Flow-Szenarien für den Traffic Generator.
 
-Jedes Szenario ist eine Funktion die:
-  - Pakete generiert die die entsprechende IDS-Regel auslösen
-  - Scapy send() / sendp() mit inter=... für Rate-Control verwendet
-  - Kein Payload – nur Header (konform mit IDS-Scope)
+Jedes Szenario erzeugt eine Liste von Flow-Dicts die direkt in das
+Kafka-Topic 'flows' injiziert werden – kein Packet-Capture nötig.
 
-Alle Szenarien senden an target_ip von src_ip aus.
+Die Flows haben is_test=True, sodass sie im Alert-Log gesondert markiert
+und gefiltert werden können.
 """
 from __future__ import annotations
 
 import random
-import time
-
-from scapy.layers.dns import DNS, DNSQR
-from scapy.layers.inet import ICMP, IP, TCP, UDP
-from scapy.sendrecv import send
-
-# Scapy-Warnungen unterdrücken
-import logging
-logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
+from typing import Callable
 
 
-def scenario_test_001(src_ip: str, target_ip: str) -> None:
-    """
-    TEST_001: EICAR-Äquivalent
-    TCP-Paket mit SYN+FIN+URG+PSH an Port 65535.
-    """
-    pkt = (
-        IP(src=src_ip, dst=target_ip)
-        / TCP(dport=65535, flags="SFUP")
-    )
-    send(pkt, verbose=False)
+def scenario_test_001(src_ip: str, _target_ip: str) -> list[dict]:
+    """TEST_001: EICAR-Äquivalent – TCP SYN+FIN+URG+PSH an Port 65535."""
+    return [
+        {
+            "proto":    "TCP",
+            "src_ip":   src_ip,
+            "dst_ip":   "10.0.0.1",
+            "dst_port": 65535,
+            "is_test":  True,
+            "stats": {
+                "tcp_flags_abs": {"SYN": 1, "FIN": 1, "URG": 1, "PSH": 1,
+                                  "ACK": 0, "RST": 0},
+            },
+        }
+    ]
 
 
-def scenario_scan_001(src_ip: str, target_ip: str) -> None:
+def scenario_scan_001(src_ip: str, _target_ip: str) -> list[dict]:
     """
     SCAN_001: TCP SYN Port Scan
-    100 SYN-Pakete an verschiedene Ports in ~3 Sekunden.
+    55 SYN-Flows an verschiedene Ports → unique_dst_ports > 50 in 60s.
     """
-    ports = random.sample(range(1, 65535), 100)
-    for port in ports:
-        pkt = IP(src=src_ip, dst=target_ip) / TCP(dport=port, flags="S")
-        send(pkt, verbose=False)
-        time.sleep(0.03)
+    ports = random.sample(range(1, 65535), 55)
+    return [
+        {
+            "proto":    "TCP",
+            "src_ip":   src_ip,
+            "dst_ip":   "10.0.0.1",
+            "dst_port": port,
+            "is_test":  True,
+            "stats": {
+                "tcp_flags_abs": {"SYN": 1, "FIN": 0, "ACK": 0,
+                                  "RST": 0, "PSH": 0, "URG": 0},
+                "connection_state": "SYN_ONLY",
+            },
+        }
+        for port in ports
+    ]
 
 
-def scenario_dos_syn_001(src_ip: str, target_ip: str) -> None:
+def scenario_dos_syn_001(src_ip: str, _target_ip: str) -> list[dict]:
     """
     DOS_SYN_001: SYN Flood
-    600 SYN-Pakete an Port 80 in ~6 Sekunden (>500 in 10s Fenster).
+    510 SYN-Flows → syn_count > 500 in 10s.
     """
-    pkt = IP(src=src_ip, dst=target_ip) / TCP(dport=80, flags="S")
-    for _ in range(600):
-        send(pkt, verbose=False)
-        time.sleep(0.01)
+    return [
+        {
+            "proto":    "TCP",
+            "src_ip":   src_ip,
+            "dst_ip":   "10.0.0.1",
+            "dst_port": 80,
+            "is_test":  True,
+            "stats": {
+                "tcp_flags_abs": {"SYN": 1, "FIN": 0, "ACK": 0,
+                                  "RST": 0, "PSH": 0, "URG": 0},
+            },
+        }
+        for _ in range(510)
+    ]
 
 
-def scenario_recon_003(src_ip: str, target_ip: str) -> None:
+def scenario_recon_003(src_ip: str, _target_ip: str) -> list[dict]:
     """
-    RECON_003: ICMP Host Sweep (Ping Sweep)
-    ICMP Echo an 25 verschiedene IPs (simuliert /24-Sweep).
+    RECON_003: Viele RST-Verbindungen
+    55 TCP-RST-Flows → flow_rate > 50 in 60s, connection_state == RESET.
     """
-    base = target_ip.rsplit(".", 1)[0]
-    for i in range(1, 26):
-        dst = f"{base}.{i}"
-        pkt = IP(src=src_ip, dst=dst) / ICMP()
-        send(pkt, verbose=False)
-        time.sleep(0.05)
+    return [
+        {
+            "proto":    "TCP",
+            "src_ip":   src_ip,
+            "dst_ip":   "10.0.0.1",
+            "dst_port": random.randint(1, 65535),
+            "is_test":  True,
+            "stats": {
+                "connection_state": "RESET",
+                "tcp_flags_abs": {"SYN": 0, "FIN": 0, "ACK": 0,
+                                  "RST": 1, "PSH": 0, "URG": 0},
+            },
+        }
+        for _ in range(55)
+    ]
 
 
-def scenario_dns_dga_001(src_ip: str, _target_ip: str) -> None:
+def scenario_dns_dga_001(src_ip: str, _target_ip: str) -> list[dict]:
     """
     DNS_DGA_001: DNS High-Entropy (DGA-Verdacht)
-    15 DNS-Anfragen für zufällige Hochentropie-Domains an Port 53.
+    Einzelner UDP-Flow an Port 53 mit hoher IAT-Entropie und >10 Paketen.
     """
-    import string
-
-    def _random_domain(length: int = 16) -> str:
-        chars = string.ascii_lowercase + string.digits
-        return "".join(random.choices(chars, k=length)) + ".com"
-
-    dns_server = "8.8.8.8"
-    for _ in range(15):
-        domain = _random_domain()
-        pkt = (
-            IP(src=src_ip, dst=dns_server)
-            / UDP(dport=53)
-            / DNS(rd=1, qd=DNSQR(qname=domain))
-        )
-        send(pkt, verbose=False)
-        time.sleep(0.1)
+    return [
+        {
+            "proto":    "UDP",
+            "src_ip":   src_ip,
+            "dst_ip":   "8.8.8.8",
+            "dst_port": 53,
+            "is_test":  True,
+            "stats": {
+                "entropy_iat": 3.2,
+                "pkt_count":   15,
+                "byte_count":  1200,
+            },
+        }
+    ]
 
 
-# Scenario-Registry
-SCENARIOS: dict[str, tuple[str, callable]] = {
+# Scenario-Registry: scenario_id → (expected_rule_id, fn)
+SCENARIOS: dict[str, tuple[str, Callable]] = {
     "TEST_001":    ("TEST_001",    scenario_test_001),
     "SCAN_001":    ("SCAN_001",    scenario_scan_001),
     "DOS_SYN_001": ("DOS_SYN_001", scenario_dos_syn_001),

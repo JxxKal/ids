@@ -11,6 +11,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => '');
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
   }
+  if (res.status === 204 || res.headers.get('content-length') === '0') {
+    return undefined as T;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -129,4 +132,12 @@ export async function runTest(scenarioId: string): Promise<TestRun> {
 
 export async function fetchTestRuns(): Promise<TestRun[]> {
   return req('/api/tests/runs');
+}
+
+export async function deleteTestRun(runId: string): Promise<void> {
+  return req(`/api/tests/runs/${runId}`, { method: 'DELETE' });
+}
+
+export async function deleteAllTestRuns(): Promise<void> {
+  return req('/api/tests/runs', { method: 'DELETE' });
 }

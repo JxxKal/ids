@@ -2,11 +2,15 @@
 Traffic Generator – Einstiegspunkt.
 
 Wartet auf `test-commands`-Kafka-Events (vom API-Service),
-führt das entsprechende Scapy-Szenario aus und pollt anschließend
-die DB auf einen passenden Alert um den TestRun-Eintrag zu aktualisieren.
+injiziert synthetische Flow-Records direkt in das Kafka-Topic 'flows'
+(kein Packet-Capture nötig) und pollt anschließend die DB auf einen
+passenden Alert um den TestRun-Eintrag zu aktualisieren.
 
-Kafka-Event-Format:
+Kafka-Event-Format (Eingang):
   { "run_id": "uuid", "scenario_id": "SCAN_001", "ts": 1234567890.0 }
+
+Flows werden mit is_test=True markiert; die Signature-Engine propagiert
+dieses Flag auf generierte Alerts.
 
 TestRun-Update:
   - status = "completed" / "failed"
@@ -24,7 +28,7 @@ import time
 import orjson
 import psycopg2
 import psycopg2.extras
-from confluent_kafka import Consumer, KafkaError, KafkaException
+from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 
 from config import Config
 from scenarios import SCENARIOS
@@ -50,6 +54,26 @@ def _make_consumer(brokers: str) -> Consumer:
         "auto.offset.reset":  "earliest",
         "enable.auto.commit": True,
     })
+
+
+def _make_producer(brokers: str) -> Producer:
+    return Producer({
+        "bootstrap.servers": brokers,
+        "acks":              "1",
+        "linger.ms":         5,
+    })
+
+
+def _inject_flows(
+    producer: Producer,
+    flows_topic: str,
+    flows: list[dict],
+) -> None:
+    """Publiziert synthetische Flows ins flows-Topic."""
+    for flow in flows:
+        producer.produce(flows_topic, value=orjson.dumps(flow))
+    producer.flush(timeout=10)
+    log.info("Injected %d synthetic flows", len(flows))
 
 
 def _wait_for_alert(
@@ -115,12 +139,17 @@ def _update_run(
 
 
 def run(cfg: Config) -> None:
-    conn = psycopg2.connect(cfg.postgres_dsn)
+    conn     = psycopg2.connect(cfg.postgres_dsn)
     conn.autocommit = False
 
     consumer = _make_consumer(cfg.kafka_brokers)
+    producer = _make_producer(cfg.kafka_brokers)
     consumer.subscribe([COMMANDS_TOPIC])
-    log.info("Traffic generator ready | target=%s src=%s", cfg.target_ip, cfg.src_ip)
+    log.info(
+        "Traffic generator ready | flows_topic=%s src_ip=%s",
+        cfg.flows_topic,
+        cfg.src_ip,
+    )
 
     running = True
 
@@ -137,9 +166,6 @@ def run(cfg: Config) -> None:
             msg = consumer.poll(timeout=POLL_TIMEOUT)
 
             if msg is None:
-                if cfg.test_mode:
-                    log.info("Test mode: no commands pending")
-                    time.sleep(5)
                 continue
 
             if msg.error():
@@ -162,11 +188,12 @@ def run(cfg: Config) -> None:
             expected_rule, scenario_fn = SCENARIOS[scenario_id]
             log.info("Running scenario %s (run_id=%s)", scenario_id, run_id[:8])
 
-            start_ts = time.time()
+            start_ts  = time.time()
             error_msg: str | None = None
 
             try:
-                scenario_fn(cfg.src_ip, cfg.target_ip)
+                flows = scenario_fn(cfg.src_ip, cfg.target_ip)
+                _inject_flows(producer, cfg.flows_topic, flows)
             except Exception as exc:
                 error_msg = str(exc)
                 log.error("Scenario %s failed: %s", scenario_id, exc)
@@ -187,22 +214,25 @@ def run(cfg: Config) -> None:
                 )
                 _update_run(conn, run_id, "completed", True, alert_id, latency_ms)
             else:
-                log.warning("Scenario %s: alert %s not triggered within %ds",
-                            scenario_id, expected_rule, ALERT_WAIT_S)
+                log.warning(
+                    "Scenario %s: alert %s not triggered within %ds",
+                    scenario_id, expected_rule, ALERT_WAIT_S,
+                )
                 _update_run(conn, run_id, "completed", False, None, None)
 
     finally:
         conn.close()
         consumer.close()
+        producer.flush(timeout=5)
         log.info("Traffic generator stopped")
 
 
 def main() -> None:
     cfg = Config.from_env()
     log.info(
-        "Starting traffic-generator | brokers=%s target=%s",
+        "Starting traffic-generator | brokers=%s flows_topic=%s",
         cfg.kafka_brokers,
-        cfg.target_ip,
+        cfg.flows_topic,
     )
     try:
         run(cfg)

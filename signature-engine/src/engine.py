@@ -118,4 +118,5 @@ def _make_alert(rule: Rule, flow: dict, ctx: RuleContext) -> dict:
         "proto":       flow.get("proto"),
         "flow_id":     flow.get("flow_id"),
         "ts":          float(flow.get("end_ts") or time.time()),
+        "is_test":     bool(flow.get("is_test", False)),
     }

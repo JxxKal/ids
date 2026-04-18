@@ -387,28 +387,26 @@ services:
       TEST_MODE: "true"
 
   # ────────────────────────────────────────────────────────────────────────────
-  # TRAFFIC GENERATOR – TEST  (docker compose --profile test up)
+  # TRAFFIC GENERATOR  (startet mit prod UND test Profil)
   #
-  # Erzeugt synthetischen Testverkehr (Scapy).
-  # Feste IP 172.28.0.100 als Angriffsziel für Szenarien.
+  # Injiziert synthetische Flows direkt ins Kafka-Topic 'flows' –
+  # kein Packet-Capture oder Raw-Socket nötig.
   # ────────────────────────────────────────────────────────────────────────────
 
   traffic-generator:
     build: ./traffic-generator
     container_name: ids-traffic-generator
     restart: unless-stopped
-    networks:
-      ids-net:
-        ipv4_address: 172.28.0.100
-    profiles: [test]
+    networks: [ids-net]
+    profiles: [prod, test]
     depends_on:
       kafka:
         condition: service_healthy
-    cap_add: [NET_RAW, NET_ADMIN]
     environment:
       KAFKA_BROKERS: kafka:9092
-      TARGET_IP: 172.28.0.100
-      TEST_MODE: "true"
+      FLOWS_TOPIC: flows
+      SRC_IP: "10.255.255.100"
+      TARGET_IP: "10.255.255.1"
 
   # ────────────────────────────────────────────────────────────────────────────
   # SNORT – PRODUKTION  (docker compose --profile prod --profile snort up)

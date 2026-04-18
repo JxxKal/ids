@@ -103,3 +103,20 @@ async def get_run(run_id: str, pool: asyncpg.Pool = Depends(get_pool)) -> TestRu
     if not row:
         raise HTTPException(status_code=404, detail="Test run not found")
     return _row_to_run(row)
+
+
+@router.delete("/runs/{run_id}", status_code=204, response_model=None)
+async def delete_run(run_id: str, pool: asyncpg.Pool = Depends(get_pool)) -> None:
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM test_runs WHERE id = $1::uuid", run_id
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Test run not found")
+
+
+@router.delete("/runs", status_code=204, response_model=None)
+async def delete_all_runs(pool: asyncpg.Pool = Depends(get_pool)) -> None:
+    """Löscht alle Test-Run-Einträge (z.B. um hängengebliebene 'running'-Einträge zu bereinigen)."""
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM test_runs")

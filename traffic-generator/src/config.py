@@ -6,11 +6,11 @@ from dataclasses import dataclass
 class Config:
     kafka_brokers: str
     postgres_dsn: str
-    # IP-Adresse des Ziels im Test-Netzwerk (feste IP des traffic-generator-Containers)
-    target_ip: str
-    # Eigene IP (Quelle der Test-Pakete)
+    flows_topic: str
+    # Test-Quell-IP für synthetische Flows (sollte nicht im echten Traffic vorkommen)
     src_ip: str
-    test_mode: bool
+    # Ziel-IP für Flows die eine Zieladresse benötigen
+    target_ip: str
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -20,7 +20,7 @@ class Config:
                 "POSTGRES_DSN",
                 "postgresql://ids:ids-change-me@localhost:5432/ids",
             ),
-            target_ip=os.environ.get("TARGET_IP", "172.28.0.100"),
-            src_ip=os.environ.get("SRC_IP", "172.28.0.1"),
-            test_mode=os.environ.get("TEST_MODE", "true").lower() == "true",
+            flows_topic=os.environ.get("FLOWS_TOPIC", "flows"),
+            src_ip=os.environ.get("SRC_IP", "10.255.255.100"),
+            target_ip=os.environ.get("TARGET_IP", "10.255.255.1"),
         )

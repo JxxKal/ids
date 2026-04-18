@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
-import { fetchTestRuns, runTest } from '../api';
+import { deleteAllTestRuns, deleteTestRun, fetchTestRuns, runTest } from '../api';
 import type { TestRun } from '../types';
 
 const SCENARIOS = [
-  { id: 'TEST_001',    label: 'IDS Test Signature',   desc: 'EICAR-Äquivalent: TCP an Port 65535' },
-  { id: 'SCAN_001',   label: 'TCP SYN Port Scan',     desc: '100 SYN-Pakete an verschiedene Ports in 5s' },
-  { id: 'DOS_SYN_001',label: 'SYN Flood',             desc: '500 SYN/s an einen Port' },
-  { id: 'RECON_003',  label: 'ICMP Host Sweep',       desc: 'Ping-Sweep über 50 IPs' },
-  { id: 'DNS_DGA_001',label: 'DNS High-Entropy (DGA)', desc: 'DGA-ähnliche Subdomain-Queries' },
+  { id: 'TEST_001',    label: 'IDS Test Signature',   desc: 'EICAR-Äquivalent: TCP SYN+FIN+URG+PSH an Port 65535' },
+  { id: 'SCAN_001',   label: 'TCP SYN Port Scan',     desc: '55 SYN-Flows an verschiedene Ports' },
+  { id: 'DOS_SYN_001',label: 'SYN Flood',             desc: '510 SYN-Flows → syn_count > 500 in 10s' },
+  { id: 'RECON_003',  label: 'RST-Verbindungsflut',   desc: '55 TCP-RST-Flows → flow_rate > 50 in 60s' },
+  { id: 'DNS_DGA_001',label: 'DNS High-Entropy (DGA)', desc: 'UDP/53 mit hoher IAT-Entropie' },
 ];
 
 function statusColor(status: string) {
@@ -19,9 +19,10 @@ function statusColor(status: string) {
 }
 
 export function TestsPage() {
-  const [runs, setRuns]       = useState<TestRun[]>([]);
-  const [running, setRunning] = useState<string | null>(null);
-  const [error, setError]     = useState('');
+  const [runs, setRuns]             = useState<TestRun[]>([]);
+  const [running, setRunning]       = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError]           = useState('');
 
   const load = () =>
     fetchTestRuns()
@@ -44,6 +45,27 @@ export function TestsPage() {
       setError(err instanceof Error ? err.message : 'Fehler');
     } finally {
       setRunning(null);
+    }
+  };
+
+  const handleDelete = async (runId: string) => {
+    setDeletingId(runId);
+    try {
+      await deleteTestRun(runId);
+      setRuns(prev => prev.filter(r => r.id !== runId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Löschen fehlgeschlagen');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    try {
+      await deleteAllTestRuns();
+      setRuns([]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Löschen fehlgeschlagen');
     }
   };
 
@@ -77,7 +99,18 @@ export function TestsPage() {
       <div className="card overflow-hidden">
         <div className="px-4 py-2 border-b border-slate-800 flex justify-between items-center">
           <h2 className="text-sm font-semibold text-slate-300">Protokoll</h2>
-          <span className="text-xs text-slate-500">Aktualisierung alle 5s</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500">Aktualisierung alle 5s</span>
+            {runs.length > 0 && (
+              <button
+                onClick={handleDeleteAll}
+                className="text-xs text-slate-500 hover:text-red-400 transition-colors"
+                title="Alle Einträge löschen"
+              >
+                Alle löschen
+              </button>
+            )}
+          </div>
         </div>
         <table className="w-full text-xs">
           <thead className="border-b border-slate-800 text-slate-500 text-left">
@@ -88,12 +121,13 @@ export function TestsPage() {
               <th className="px-4 py-2">Erwartet</th>
               <th className="px-4 py-2">Ausgelöst</th>
               <th className="px-4 py-2">Latenz</th>
+              <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {runs.length === 0 && (
               <tr>
-                <td colSpan={6} className="text-center text-slate-600 py-8">Noch keine Tests</td>
+                <td colSpan={7} className="text-center text-slate-600 py-8">Noch keine Tests</td>
               </tr>
             )}
             {runs.map(r => (
@@ -112,6 +146,16 @@ export function TestsPage() {
                 </td>
                 <td className="px-4 py-2 text-slate-400 tabular-nums">
                   {r.latency_ms != null ? `${r.latency_ms} ms` : '–'}
+                </td>
+                <td className="px-4 py-2">
+                  <button
+                    onClick={() => handleDelete(r.id)}
+                    disabled={deletingId === r.id}
+                    className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40"
+                    title="Eintrag löschen"
+                  >
+                    ✕
+                  </button>
                 </td>
               </tr>
             ))}
