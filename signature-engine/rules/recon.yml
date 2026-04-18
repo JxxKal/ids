@@ -6,6 +6,7 @@
   name: "Viele Half-Open Verbindungen"
   description: ">30 TCP-Verbindungen ohne vollständigen Handshake (Half-Open) in 60s"
   severity: medium
+  cooldown_s: 90
   tags: [recon, scan]
   condition: |
     flow.get('proto') == 'TCP'
@@ -16,6 +17,7 @@
   name: "Systematischer Port-Sweep bekannter Dienste"
   description: "Verbindungsversuche auf privilegierte Ports (<1024) an >10 IPs in 30s"
   severity: medium
+  cooldown_s: 90
   tags: [recon]
   condition: |
     flow.get('proto') == 'TCP'
@@ -27,6 +29,7 @@
   name: "Viele RST-Verbindungen"
   description: ">50 TCP-Verbindungen mit RST-Abschluss in 60s – möglicher Scanner"
   severity: low
+  cooldown_s: 90
   tags: [recon, scan]
   condition: |
     flow.get('proto') == 'TCP'

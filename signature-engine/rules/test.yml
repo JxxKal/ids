@@ -9,6 +9,7 @@
   name: "IDS Test Signature"
   description: "Harmloser Testverkehr zur Funktionsprüfung (EICAR-Äquivalent für Netzwerk-IDS)"
   severity: low
+  cooldown_s: 0
   tags: [test, builtin]
   condition: |
     flow.get('dst_port') == 65535

@@ -6,6 +6,7 @@
   name: "Ungewöhnlich langer Flow"
   description: "Flow läuft länger als 4 Stunden – mögliche C2-Verbindung oder Exfiltration"
   severity: medium
+  cooldown_s: 300
   tags: [anomaly, c2, exfiltration]
   condition: |
     flow.get('duration_s', 0) > 14400
@@ -15,6 +16,7 @@
   name: "Sehr hoher Datentransfer"
   description: "TCP-Flow mit >500 MB – mögliche Daten-Exfiltration"
   severity: medium
+  cooldown_s: 300
   tags: [anomaly, exfiltration]
   condition: |
     flow.get('proto') == 'TCP'
@@ -25,6 +27,7 @@
   name: "Gleichmäßiger Datenfluss (Beaconing-Verdacht)"
   description: "TCP-Flow mit sehr niedriger IAT-Entropie und vielen Paketen – mögliches C2-Beaconing"
   severity: high
+  cooldown_s: 300
   tags: [anomaly, c2, beaconing]
   condition: |
     flow.get('proto') == 'TCP'
@@ -37,6 +40,7 @@
   name: "Fragmentierter Verkehr"
   description: "Hoher Anteil fragmentierter IP-Pakete – mögliche Evasion-Technik"
   severity: low
+  cooldown_s: 300
   tags: [anomaly, evasion]
   condition: |
     flow.get('ip_version') == 4
@@ -47,6 +51,7 @@
   name: "Ungewöhnlich hohe Paketrate"
   description: "Flow mit >5 000 pps bei kleinen Paketen – möglicher Traffic-Generator"
   severity: medium
+  cooldown_s: 300
   tags: [anomaly, dos]
   condition: |
     flow.get('pps', 0) > 5000

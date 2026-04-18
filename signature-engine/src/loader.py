@@ -37,7 +37,8 @@ class Rule:
     severity: str
     tags: list[str]
     condition_src: str
-    condition_code: Any  # compiled code object
+    condition_code: Any   # compiled code object
+    cooldown_s: int = 60  # Sekunden zwischen zwei Alerts derselben Regel+Src-IP
 
 
 def _compile_rule(raw: dict, source_file: str) -> Rule | None:
@@ -66,6 +67,7 @@ def _compile_rule(raw: dict, source_file: str) -> Rule | None:
             tags=list(raw.get("tags") or []),
             condition_src=condition_src,
             condition_code=code,
+            cooldown_s=int(raw.get("cooldown_s", 60)),
         )
     except SyntaxError as exc:
         log.error("Rule %s in %s has syntax error: %s – skipped", rule_id, source_file, exc)

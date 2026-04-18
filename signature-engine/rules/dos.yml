@@ -7,6 +7,7 @@
   name: "SYN Flood"
   description: ">500 SYN-Pakete in 10s von einer Quelle (TCP SYN Flood)"
   severity: critical
+  cooldown_s: 30
   tags: [dos, flood]
   condition: |
     flow.get('proto') == 'TCP'
@@ -16,6 +17,7 @@
   name: "Verbindungsflut"
   description: ">200 Flows in 30s von einer Quelle (Connection Flood)"
   severity: high
+  cooldown_s: 30
   tags: [dos, flood]
   condition: |
     ctx.flow_rate(flow.get('src_ip', ''), 30) > 200
@@ -24,6 +26,7 @@
   name: "UDP Flood"
   description: "Sehr hohe UDP-Paketrate (>10 000 pps) von einer Quelle"
   severity: critical
+  cooldown_s: 30
   tags: [dos, flood]
   condition: |
     flow.get('proto') == 'UDP'
@@ -33,6 +36,7 @@
   name: "ICMP Flood"
   description: "Hohe ICMP-Rate (>1 000 pps) von einer Quelle"
   severity: high
+  cooldown_s: 30
   tags: [dos, flood]
   condition: |
     flow.get('proto') == 'ICMP'

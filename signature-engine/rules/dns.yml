@@ -6,6 +6,7 @@
   name: "DNS Tunneling (Volumenbasis)"
   description: "DNS-Flow mit >50 KB – mögliches DNS-Tunneling"
   severity: high
+  cooldown_s: 120
   tags: [dns, tunnel, exfiltration]
   condition: |
     flow.get('dst_port') == 53
@@ -15,6 +16,7 @@
   name: "DNS High-Entropy (DGA-Verdacht)"
   description: "Hohe IAT-Entropie in DNS-Flow mit vielen Paketen – mögliche DGA-Kommunikation"
   severity: high
+  cooldown_s: 120
   tags: [dns, dga, c2]
   condition: |
     flow.get('proto') == 'UDP'
@@ -26,6 +28,7 @@
   name: "DNS Amplification (möglicher Angreifer)"
   description: "Viele kleine DNS-UDP-Anfragen – mögliche Reflection-Amplification-Quelle"
   severity: medium
+  cooldown_s: 120
   tags: [dns, amplification, dos]
   condition: |
     flow.get('proto') == 'UDP'
@@ -37,6 +40,7 @@
   name: "DNS über TCP mit großen Paketen"
   description: "DNS über TCP mit Paketgröße >512 Bytes – ungewöhnlich"
   severity: low
+  cooldown_s: 120
   tags: [dns, anomaly]
   condition: |
     flow.get('proto') == 'TCP'

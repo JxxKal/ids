@@ -7,6 +7,7 @@
   name: "TCP SYN Port Scan"
   description: "Einzelne Quelle sendet SYN-Pakete an >50 verschiedene Ports in 60s"
   severity: high
+  cooldown_s: 120
   tags: [scan, recon]
   condition: |
     flow.get('proto') == 'TCP'
@@ -17,6 +18,7 @@
   name: "UDP Port Scan"
   description: "UDP-Flows an >50 verschiedene Ports in 60s"
   severity: medium
+  cooldown_s: 120
   tags: [scan, recon]
   condition: |
     flow.get('proto') == 'UDP'
@@ -26,6 +28,7 @@
   name: "ICMP Host Sweep (Ping Sweep)"
   description: "ICMP-Pakete an >20 verschiedene IPs in 30s"
   severity: medium
+  cooldown_s: 120
   tags: [scan, recon]
   condition: |
     flow.get('proto') == 'ICMP'
@@ -35,6 +38,7 @@
   name: "Breite Netzwerk-Erkundung"
   description: "Verbindungen zu >30 verschiedenen IPs in 60s (beliebiges Protokoll)"
   severity: high
+  cooldown_s: 120
   tags: [scan, recon]
   condition: |
     ctx.unique_dst_ips(flow.get('src_ip', ''), 60) > 30
@@ -43,6 +47,7 @@
   name: "TCP Xmas Scan"
   description: "Pakete mit FIN+URG+PSH gesetzt – klassischer Stealth-Scan"
   severity: medium
+  cooldown_s: 120
   tags: [scan, recon, stealth]
   condition: |
     flow.get('proto') == 'TCP'
@@ -55,6 +60,7 @@
   name: "TCP NULL Scan"
   description: "Pakete ohne gesetzte Flags – möglicher Stealth-Scan"
   severity: medium
+  cooldown_s: 120
   tags: [scan, recon, stealth]
   condition: |
     flow.get('proto') == 'TCP'
