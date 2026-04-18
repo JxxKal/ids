@@ -60,14 +60,18 @@ async def list_alerts(
     src_ip:   str | None   = None,
     ts_from:  float | None = None,
     ts_to:    float | None = None,
-    is_test:  bool = False,
+    is_test:  bool | None = None,
     limit:    Annotated[int, Query(ge=1, le=500)] = 50,
     offset:   Annotated[int, Query(ge=0)]         = 0,
     pool:     asyncpg.Pool = Depends(get_pool),
 ) -> AlertListResponse:
-    filters = ["is_test = $1"]
-    params:  list = [is_test]
-    idx = 2
+    filters: list[str] = []
+    params:  list = []
+    idx = 1
+
+    if is_test is not None:
+        filters.append(f"is_test = ${idx}")
+        params.append(is_test); idx += 1
 
     if severity:
         filters.append(f"severity = ${idx}")
@@ -88,14 +92,14 @@ async def list_alerts(
         filters.append(f"ts <= ${idx}")
         params.append(datetime.fromtimestamp(ts_to, tz=timezone.utc)); idx += 1
 
-    where = " AND ".join(filters)
+    where = ("WHERE " + " AND ".join(filters)) if filters else ""
 
     async with pool.acquire() as conn:
-        total = await conn.fetchval(f"SELECT COUNT(*) FROM alerts WHERE {where}", *params)
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM alerts {where}", *params)
         rows  = await conn.fetch(
             f"""
             SELECT * FROM alerts
-            WHERE {where}
+            {where}
             ORDER BY ts DESC
             LIMIT ${idx} OFFSET ${idx+1}
             """,

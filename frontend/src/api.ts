@@ -26,7 +26,7 @@ export interface AlertFilters {
   src_ip?: string;
   ts_from?: number;   // Unix-Timestamp (Sekunden)
   ts_to?: number;
-  is_test?: boolean;
+  is_test?: boolean | null;  // null = alle (kein Filter)
   limit?: number;
   offset?: number;
 }
@@ -42,7 +42,8 @@ export async function fetchAlerts(filters: AlertFilters = {}): Promise<{
   if (filters.src_ip)                params.set('src_ip',   filters.src_ip);
   if (filters.ts_from !== undefined) params.set('ts_from',  String(filters.ts_from));
   if (filters.ts_to   !== undefined) params.set('ts_to',    String(filters.ts_to));
-  params.set('is_test', String(filters.is_test ?? false));
+  if (filters.is_test !== null && filters.is_test !== undefined)
+    params.set('is_test', String(filters.is_test));
   params.set('limit',   String(filters.limit  ?? 100));
   params.set('offset',  String(filters.offset ?? 0));
   return req(`/api/alerts?${params}`);

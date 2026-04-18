@@ -30,7 +30,9 @@ const TIME_WINDOWS: { id: TimeWindow; label: string; seconds?: number }[] = [
 
 export default function App() {
   const [tab, setTab]         = useState<Tab>('dashboard');
-  const [showTest, setShowTest] = useState(false);
+  const [showTest, setShowTest] = useState(
+    () => localStorage.getItem('showTest') === 'true'
+  );
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('live');
   const [historicAlerts, setHistoricAlerts] = useState<Alert[]>([]);
   const [isLoading, setIsLoading]   = useState(false);
@@ -51,13 +53,13 @@ export default function App() {
     let cancelled = false;
     setIsLoading(true);
 
-    fetchAlerts({ ts_from: Date.now() / 1000 - win.seconds, limit: 500, is_test: false })
+    fetchAlerts({ ts_from: Date.now() / 1000 - win.seconds, limit: 500, is_test: showTest ? null : false })
       .then(r  => { if (!cancelled) setHistoricAlerts(r.alerts); })
       .catch(e => { console.error('historic fetch:', e); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [timeWindow, refreshKey]);
+  }, [timeWindow, refreshKey, showTest]);
 
   const handleWindowSelect = (w: TimeWindow) => {
     if (w === timeWindow && w !== 'live') {
@@ -157,7 +159,10 @@ export default function App() {
                     type="checkbox"
                     className="accent-blue-500"
                     checked={showTest}
-                    onChange={e => setShowTest(e.target.checked)}
+                    onChange={e => {
+                setShowTest(e.target.checked);
+                localStorage.setItem('showTest', String(e.target.checked));
+              }}
                   />
                   Testverkehr anzeigen
                 </label>
