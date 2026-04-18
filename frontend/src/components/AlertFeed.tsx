@@ -12,6 +12,13 @@ interface Props {
 
 const SEVERITIES = ['', 'critical', 'high', 'medium', 'low'];
 
+const ROW_SEVERITY: Record<string, string> = {
+  critical: 'border-l-2 border-l-red-500   bg-red-950/40',
+  high:     'border-l-2 border-l-red-600   bg-red-950/20',
+  medium:   'border-l-2 border-l-orange-500 bg-orange-950/20',
+  low:      'border-l-2 border-l-green-600  bg-green-950/20',
+};
+
 export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
   const [selected,  setSelected]  = useState<Alert | null>(null);
   const [severityF, setSeverityF] = useState('');
@@ -85,7 +92,7 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
             {filtered.map(a => (
               <tr
                 key={a.alert_id}
-                className="border-b border-slate-800/50 hover:bg-slate-800/40 cursor-pointer"
+                className={`border-b border-slate-800/50 hover:brightness-125 cursor-pointer transition-all ${ROW_SEVERITY[a.severity] ?? ''}`}
                 onClick={() => setSelected(a)}
               >
                 <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
