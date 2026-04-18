@@ -140,7 +140,8 @@ class RuleLoader:
         """Gibt alle .yml-Dateien im rules_dir zurück, plus die eingebaute test.yml."""
         files: list[Path] = []
         if self._rules_dir.is_dir():
-            files = sorted(self._rules_dir.glob("*.yml"))
+            # rglob durchsucht auch Unterverzeichnisse (builtin/, custom/, …)
+            files = sorted(self._rules_dir.rglob("*.yml"))
         else:
             log.warning("Rules dir not found: %s", self._rules_dir)
 
