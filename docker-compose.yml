@@ -402,7 +402,6 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    depends_on:
       timescaledb:
         condition: service_healthy
     environment:
