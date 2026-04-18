@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchAlerts } from './api';
 import { AlertFeed } from './components/AlertFeed';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { HostsPage } from './components/HostsPage';
 import { NetworksPage } from './components/NetworksPage';
 import { TestsPage } from './components/TestsPage';
@@ -171,11 +172,13 @@ export default function App() {
             </div>
 
             <div className="flex-1 min-h-0">
-              <AlertFeed
-                alerts={displayAlerts}
-                onUpdate={handleUpdate}
-                showTest={showTest}
-              />
+              <ErrorBoundary>
+                <AlertFeed
+                  alerts={displayAlerts}
+                  onUpdate={handleUpdate}
+                  showTest={showTest}
+                />
+              </ErrorBoundary>
             </div>
           </div>
         )}

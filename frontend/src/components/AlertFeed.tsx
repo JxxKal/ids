@@ -35,6 +35,16 @@ interface AlertGroup {
   latest:      Alert;
 }
 
+/** Wandelt ts (ISO-String oder Unix-Float) in Millisekunden um. */
+function tsMs(ts: string | number): number {
+  if (typeof ts === 'number') return ts * 1000;
+  return new Date(ts).getTime();
+}
+
+function fmtTime(ts: string | number): string {
+  return new Date(tsMs(ts)).toLocaleTimeString();
+}
+
 function groupAlerts(alerts: Alert[]): AlertGroup[] {
   const map = new Map<string, AlertGroup>();
 
@@ -43,8 +53,8 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
     const g = map.get(k);
     if (g) {
       g.count++;
-      if (a.ts > g.last_ts) { g.last_ts = a.ts; g.latest = a; g.description = a.description; }
-      if (a.ts < g.first_ts)  g.first_ts = a.ts;
+      if (tsMs(a.ts) > tsMs(g.last_ts)) { g.last_ts = a.ts; g.latest = a; g.description = a.description; }
+      if (tsMs(a.ts) < tsMs(g.first_ts)) g.first_ts = a.ts;
     } else {
       map.set(k, {
         key: k, severity: a.severity,
@@ -55,7 +65,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
     }
   }
 
-  return [...map.values()].sort((a, b) => b.last_ts.localeCompare(a.last_ts));
+  return [...map.values()].sort((a, b) => tsMs(b.last_ts) - tsMs(a.last_ts));
 }
 
 // ── Komponente ─────────────────────────────────────────────────────────────────
@@ -152,10 +162,10 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                   onClick={() => setSelected(g.latest)}
                 >
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
-                    {new Date(g.last_ts).toLocaleTimeString()}
+                    {fmtTime(g.last_ts)}
                     {g.count > 1 && (
                       <div className="text-slate-600 text-xs">
-                        ab {new Date(g.first_ts).toLocaleTimeString()}
+                        ab {fmtTime(g.first_ts)}
                       </div>
                     )}
                   </td>
@@ -212,7 +222,7 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                   onClick={() => setSelected(a)}
                 >
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
-                    {new Date(a.ts).toLocaleTimeString()}
+                    {fmtTime(a.ts)}
                   </td>
                   <td className="px-3 py-2"><SeverityBadge severity={a.severity} /></td>
                   <td className="px-3 py-2 font-medium text-slate-200">
@@ -234,7 +244,7 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-2 tabular-nums text-slate-400">{a.score.toFixed(2)}</td>
+                  <td className="px-3 py-2 tabular-nums text-slate-400">{(a.score ?? 0).toFixed(2)}</td>
                   <td className="px-3 py-2 text-slate-600">
                     {a.feedback && (
                       <span className={a.feedback === 'fp' ? 'text-green-500' : 'text-red-400'}>

@@ -24,6 +24,7 @@ import signal
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 
 import orjson
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
@@ -138,6 +139,11 @@ def run(cfg: Config) -> None:
 
             # 2. Score-Normierung
             enrich_score(alert)
+
+            # ts auf ISO-String normieren (Signature-Engine liefert Unix-Float)
+            ts_raw = alert.get("ts") or time.time()
+            if isinstance(ts_raw, (int, float)):
+                alert["ts"] = datetime.fromtimestamp(float(ts_raw), tz=timezone.utc).isoformat()
 
             # 3. Alert-ID vergeben
             alert.setdefault("alert_id", str(uuid.uuid4()))
