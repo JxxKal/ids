@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Alert } from '../types';
 import { AlertDetail } from './AlertDetail';
 import { SeverityBadge } from './SeverityBadge';
-import { TrustBadge } from './TrustBadge';
+
 
 interface Props {
   alerts: Alert[];
