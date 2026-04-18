@@ -91,7 +91,6 @@ class AlertWriter:
                 src_ip, dst_ip, proto, dst_port,
                 description, tags, is_test
             ) VALUES %s
-            ON CONFLICT (alert_id) DO NOTHING
             """,
             rows,
             template="""(
