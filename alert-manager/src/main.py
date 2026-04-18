@@ -131,8 +131,8 @@ def run(cfg: Config) -> None:
 
             total_in += 1
 
-            # 1. Deduplication
-            if dedup.is_duplicate(alert):
+            # 1. Deduplication (Test-Alerts immer durchlassen)
+            if not alert.get("is_test") and dedup.is_duplicate(alert):
                 total_deduped += 1
                 continue
 
@@ -155,8 +155,10 @@ def run(cfg: Config) -> None:
             producer.poll(0)
             total_out += 1
 
-            # 5. DB-Write (gebatcht)
+            # 5. DB-Write (gebatcht; Test-Alerts sofort flushen)
             writer.write(alert)
+            if alert.get("is_test"):
+                writer.flush()
 
             log.info(
                 "[%s] %s | %s → %s:%s | severity=%s score=%.2f",

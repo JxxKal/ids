@@ -154,7 +154,6 @@ async def ws_alerts(ws: WebSocket) -> None:
             rows = await conn.fetch(
                 """
                 SELECT * FROM alerts
-                WHERE is_test = false
                 ORDER BY ts DESC
                 LIMIT 50
                 """
