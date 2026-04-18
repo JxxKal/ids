@@ -103,5 +103,6 @@ export interface TestRun {
 }
 
 export type WsMessage =
-  | { type: 'initial'; data: Alert[] }
-  | { type: 'alert';   data: Alert };
+  | { type: 'initial';       data: Alert[] }
+  | { type: 'alert';         data: Alert }
+  | { type: 'alert_enriched'; data: { alert_id: string; enrichment: Enrichment } };

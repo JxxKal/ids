@@ -133,8 +133,8 @@ async def _broadcast_loop() -> None:
     """Liest aus der Alert-Queue und sendet an alle WebSocket-Clients."""
     while True:
         try:
-            alert = await asyncio.wait_for(alert_queue.get(), timeout=5.0)
-            await ws_manager.broadcast({"type": "alert", "data": alert})
+            msg = await asyncio.wait_for(alert_queue.get(), timeout=5.0)
+            await ws_manager.broadcast(msg)
         except asyncio.TimeoutError:
             continue
         except Exception as exc:

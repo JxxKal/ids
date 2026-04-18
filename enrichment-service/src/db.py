@@ -193,11 +193,10 @@ class EnrichmentDB:
             """
             INSERT INTO alerts
               (alert_id, ts, source, rule_id, severity, score,
-               src_ip, description, tags, is_test)
+               src_ip, description, is_test)
             VALUES
-              (%s::uuid, now(), 'enrichment', 'UNKNOWN_HOST_001', 'low', 0.3,
+              (%s::uuid, now(), 'correlation', 'UNKNOWN_HOST_001', 'low', 0.3,
                %s::inet,
-               %s,
                %s,
                false)
             """,
@@ -205,7 +204,6 @@ class EnrichmentDB:
                 alert_id,
                 ip,
                 f"Unbekannter interner Host ({direction}_ip: {ip}) – nicht in host_info als trusted",
-                '{"unknown-host","internal"}',
             ),
         )
         log.info("UNKNOWN_HOST_001 alert created for %s (%s)", ip, direction)

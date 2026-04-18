@@ -26,7 +26,7 @@ import sys
 import time
 
 import orjson
-from confluent_kafka import Consumer, KafkaError, KafkaException
+from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 
 from cache import EnrichmentCache
 from config import Config
@@ -47,9 +47,18 @@ logging.basicConfig(
 )
 log = logging.getLogger("enrichment-service")
 
-INPUT_TOPIC  = "alerts-enriched"
-POLL_TIMEOUT = 1.0
-GROUP_ID     = "enrichment-service"
+INPUT_TOPIC   = "alerts-enriched"
+PUSH_TOPIC    = "alerts-enriched-push"
+POLL_TIMEOUT  = 1.0
+GROUP_ID      = "enrichment-service"
+
+
+def _make_producer(brokers: str) -> Producer:
+    return Producer({
+        "bootstrap.servers": brokers,
+        "acks": "1",
+        "linger.ms": 5,
+    })
 
 
 def _make_consumer(brokers: str) -> Consumer:
@@ -134,8 +143,9 @@ def _check_unknown_host(
 def run(cfg: Config) -> None:
     init_geoip(cfg.geoip_city_db, cfg.geoip_asn_db)
 
-    cache = EnrichmentCache(cfg.redis_url, cfg.cache_ttl_s)
-    db    = EnrichmentDB(cfg.postgres_dsn)
+    cache    = EnrichmentCache(cfg.redis_url, cfg.cache_ttl_s)
+    db       = EnrichmentDB(cfg.postgres_dsn)
+    producer = _make_producer(cfg.kafka_brokers)
 
     consumer = _make_consumer(cfg.kafka_brokers)
     consumer.subscribe([INPUT_TOPIC])
@@ -217,6 +227,17 @@ def run(cfg: Config) -> None:
 
             db.update_alert_enrichment(alert_id, enrichment)
 
+            # Enrichment-Update an API-WebSocket pushen
+            try:
+                push_msg = orjson.dumps({
+                    "type": "alert_enriched",
+                    "data": {"alert_id": alert_id, "enrichment": enrichment},
+                })
+                producer.produce(PUSH_TOPIC, value=push_msg)
+                producer.poll(0)
+            except Exception as push_exc:
+                log.debug("Push to %s failed: %s", PUSH_TOPIC, push_exc)
+
             # Unknown-Host-Alert für unbekannte interne IPs
             _check_unknown_host(src_ip, src_info, "src", db)
             _check_unknown_host(dst_ip, dst_info, "dst", db)
@@ -236,6 +257,7 @@ def run(cfg: Config) -> None:
     finally:
         log.info("Shutting down – enriched %d alerts", total)
         db.close()
+        producer.flush(timeout=5)
         consumer.close()
 
 

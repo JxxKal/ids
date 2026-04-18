@@ -19,6 +19,7 @@ from fastapi import WebSocket
 log = logging.getLogger(__name__)
 
 ALERTS_TOPIC = "alerts-enriched"
+PUSH_TOPIC   = "alerts-enriched-push"
 GROUP_ID     = "api-ws"
 
 
@@ -78,8 +79,8 @@ class AlertStreamer:
             "auto.offset.reset":  "latest",   # nur neue Alerts ab jetzt
             "enable.auto.commit": True,
         })
-        consumer.subscribe([ALERTS_TOPIC])
-        log.info("WS Kafka consumer started")
+        consumer.subscribe([ALERTS_TOPIC, PUSH_TOPIC])
+        log.info("WS Kafka consumer started (topics: %s, %s)", ALERTS_TOPIC, PUSH_TOPIC)
 
         try:
             while not self._stop_event.is_set():
@@ -91,9 +92,14 @@ class AlertStreamer:
                         log.error("WS Kafka error: %s", msg.error())
                     continue
                 try:
-                    alert = orjson.loads(msg.value())
+                    payload = orjson.loads(msg.value())
+                    # alerts-enriched-push already has {type, data} structure
+                    if payload.get("type") == "alert_enriched":
+                        outmsg = payload
+                    else:
+                        outmsg = {"type": "alert", "data": payload}
                     asyncio.run_coroutine_threadsafe(
-                        self._queue.put(alert),
+                        self._queue.put(outmsg),
                         self._loop,
                     )
                 except Exception as exc:

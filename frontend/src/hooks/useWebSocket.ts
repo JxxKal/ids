@@ -31,6 +31,11 @@ export function useWebSocket() {
             const next = [msg.data, ...prev];
             return next.length > MAX_ALERTS ? next.slice(0, MAX_ALERTS) : next;
           });
+        } else if (msg.type === 'alert_enriched') {
+          const { alert_id, enrichment } = msg.data;
+          setAlerts(prev => prev.map(a =>
+            a.alert_id === alert_id ? { ...a, enrichment } : a,
+          ));
         }
       } catch {
         // ignore parse errors
