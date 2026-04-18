@@ -41,7 +41,7 @@ def _row_to_alert(row: asyncpg.Record) -> AlertResponse:
         dst_port=row["dst_port"],
         proto=row["proto"],
         description=row["description"],
-        tags=list(row["tags"] or []),
+        tags=[],
         enrichment=dict(row["enrichment"]) if row["enrichment"] else None,
         pcap_available=row["pcap_available"],
         pcap_key=row["pcap_key"],
