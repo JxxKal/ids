@@ -127,9 +127,9 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
               ? 'bg-slate-700 text-slate-100 border-slate-600'
               : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
           }`}
-          title={grouped ? 'Gruppierung aufheben' : 'Nach Regel + Quelle gruppieren'}
+          title="Alerts mit gleicher Regel-ID und Quell-IP zu einer Zeile zusammenfassen und Treffer-Anzahl anzeigen"
         >
-          Gruppiert
+          {grouped ? 'Zusammengefasst' : 'Einzeln'}
         </button>
 
         <span className="text-xs text-slate-500 shrink-0">{rowCount} {grouped && groups!.some(g => g.count > 1) ? 'Gruppen' : 'Alerts'}</span>
@@ -204,9 +204,9 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                 <th className="px-3 py-2">Zeit</th>
                 <th className="px-3 py-2">Severity</th>
                 <th className="px-3 py-2">Regel</th>
+                <th className="px-3 py-2">Beschreibung</th>
                 <th className="px-3 py-2">Quelle</th>
                 <th className="px-3 py-2">Ziel</th>
-                <th className="px-3 py-2">Trust</th>
                 <th className="px-3 py-2">Score</th>
                 <th className="px-3 py-2"></th>
               </tr>
@@ -225,9 +225,12 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                     {fmtTime(a.ts)}
                   </td>
                   <td className="px-3 py-2"><SeverityBadge severity={a.severity} /></td>
-                  <td className="px-3 py-2 font-medium text-slate-200">
+                  <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
                     {a.rule_id}
                     {a.is_test && <span className="ml-1 text-blue-400 text-xs">[TEST]</span>}
+                  </td>
+                  <td className="px-3 py-2 text-slate-400 max-w-xs truncate">
+                    {a.description ?? '–'}
                   </td>
                   <td className="px-3 py-2 text-slate-400">
                     {a.enrichment?.src_hostname ?? a.src_ip ?? '–'}
@@ -235,14 +238,6 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                   <td className="px-3 py-2 text-slate-400">
                     {a.enrichment?.dst_hostname ?? a.dst_ip ?? '–'}
                     {a.dst_port ? `:${a.dst_port}` : ''}
-                  </td>
-                  <td className="px-3 py-2">
-                    {a.enrichment && (
-                      <div className="flex gap-1 flex-wrap">
-                        {a.enrichment.src_trusted === false && <TrustBadge trusted={false} />}
-                        {a.enrichment.dst_trusted === false && <TrustBadge trusted={false} />}
-                      </div>
-                    )}
                   </td>
                   <td className="px-3 py-2 tabular-nums text-slate-400">{(a.score ?? 0).toFixed(2)}</td>
                   <td className="px-3 py-2 text-slate-600">

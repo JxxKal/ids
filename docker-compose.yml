@@ -402,8 +402,12 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    depends_on:
+      timescaledb:
+        condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
       FLOWS_TOPIC: flows
       SRC_IP: "10.255.255.100"
       TARGET_IP: "10.255.255.1"
