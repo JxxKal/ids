@@ -15,7 +15,7 @@ import psycopg2.extras
 
 log = logging.getLogger(__name__)
 
-BATCH_SIZE = 50
+BATCH_SIZE = 1   # sofortiger Flush: Alerts sofort in DB, sichtbar nach Reload
 
 
 class AlertWriter:

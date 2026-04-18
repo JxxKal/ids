@@ -161,10 +161,8 @@ def run(cfg: Config) -> None:
             producer.poll(0)
             total_out += 1
 
-            # 5. DB-Write (gebatcht; Test-Alerts sofort flushen)
+            # 5. DB-Write
             writer.write(alert)
-            if alert.get("is_test"):
-                writer.flush()
 
             log.info(
                 "[%s] %s | %s → %s:%s | severity=%s score=%.2f",
