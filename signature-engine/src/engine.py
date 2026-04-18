@@ -88,11 +88,18 @@ class SignatureEngine:
         """
         Registriert den Flow im Kontext, dann wertet jede Regel aus.
         Gibt eine Liste von Alert-Dicts zurück (kann leer sein).
+
+        Hinweis: stats-Felder (tcp_flags_abs, pps, duration_s, …) werden vor
+        der Auswertung in die oberste Ebene des Flow-Dicts gemergt, damit
+        Regelausdrücke direkt mit flow.get('tcp_flags_abs', …) arbeiten können.
         """
-        self._ctx.record(flow)
+        # stats-Dict flach in den Flow mergen (top-level-Felder bleiben erhalten)
+        flat = {**flow, **flow.get("stats", {})}
+
+        self._ctx.record(flat)
 
         alerts: list[dict] = []
-        local_vars = {"flow": flow, "ctx": self._ctx}
+        local_vars = {"flow": flat, "ctx": self._ctx}
         eval_globals = _EVAL_GLOBALS
 
         for rule in self._loader.rules:
