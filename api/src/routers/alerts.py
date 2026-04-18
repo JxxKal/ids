@@ -42,7 +42,10 @@ def _row_to_alert(row: asyncpg.Record) -> AlertResponse:
         proto=row["proto"],
         description=row["description"],
         tags=[],
-        enrichment=dict(row["enrichment"]) if row["enrichment"] else None,
+        enrichment=(
+            row["enrichment"] if isinstance(row["enrichment"], dict)
+            else orjson.loads(row["enrichment"])
+        ) if row["enrichment"] else None,
         pcap_available=row["pcap_available"],
         pcap_key=row["pcap_key"],
         feedback=row["feedback"],
