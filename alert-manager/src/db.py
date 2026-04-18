@@ -78,7 +78,6 @@ class AlertWriter:
                 a.get("proto"),
                 a.get("dst_port"),
                 a.get("description", ""),
-                a.get("tags") or [],
                 a.get("is_test", False),
             ))
 
@@ -89,7 +88,7 @@ class AlertWriter:
                 alert_id, ts, flow_id, source, rule_id,
                 severity, score,
                 src_ip, dst_ip, proto, dst_port,
-                description, tags, is_test
+                description, is_test
             ) VALUES %s
             """,
             rows,
@@ -97,7 +96,7 @@ class AlertWriter:
                 %s, to_timestamp(%s), %s, %s, %s,
                 %s, %s,
                 %s, %s, %s, %s,
-                %s, %s, %s
+                %s, %s
             )""",
         )
 
