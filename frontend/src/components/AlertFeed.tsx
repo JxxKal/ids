@@ -1,7 +1,51 @@
 import { useState } from 'react';
-import type { Alert } from '../types';
+import type { Alert, Enrichment } from '../types';
 import { AlertDetail } from './AlertDetail';
 import { SeverityBadge } from './SeverityBadge';
+
+// ── IP-Zelle mit Hostname + Trust-Badge ────────────────────────────────────────
+
+const TRUST_SOURCE_LABEL: Record<string, string> = {
+  manual: 'manuell',
+  csv:    'Import',
+  dns:    'DNS',
+};
+
+function IpCell({
+  ip, port, enrichment, dir,
+}: {
+  ip?: string;
+  port?: number;
+  enrichment?: Enrichment;
+  dir: 'src' | 'dst';
+}) {
+  const hostname    = dir === 'src' ? enrichment?.src_hostname    : enrichment?.dst_hostname;
+  const displayName = dir === 'src' ? enrichment?.src_display_name: enrichment?.dst_display_name;
+  const trusted     = dir === 'src' ? enrichment?.src_trusted      : enrichment?.dst_trusted;
+  const trustSrc    = dir === 'src' ? enrichment?.src_trust_source : enrichment?.dst_trust_source;
+
+  const primary  = displayName ?? hostname ?? ip ?? '–';
+  const showIp   = !!ip && primary !== ip;
+  const portStr  = port ? `:${port}` : '';
+  const srcLabel = trustSrc ? TRUST_SOURCE_LABEL[trustSrc] ?? trustSrc : null;
+
+  return (
+    <div className="leading-tight">
+      <span className="text-slate-300">{primary}{!showIp ? portStr : ''}</span>
+      {showIp && (
+        <div className="text-slate-600 text-[10px]">{ip}{portStr}</div>
+      )}
+      {trusted && (
+        <span
+          className="inline-flex items-center gap-0.5 text-[10px] text-green-400 bg-green-950/50 border border-green-800/40 rounded px-1 mt-0.5"
+          title={srcLabel ? `Validiert via ${srcLabel}` : 'Validiert'}
+        >
+          ✓{srcLabel && <span className="text-green-600">{srcLabel}</span>}
+        </span>
+      )}
+    </div>
+  );
+}
 
 
 interface Props {
@@ -179,12 +223,11 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                   <td className="px-3 py-2 text-slate-400 max-w-xs truncate">
                     {g.description ?? '–'}
                   </td>
-                  <td className="px-3 py-2 text-slate-400">
-                    {g.latest.enrichment?.src_hostname ?? g.src_ip ?? '–'}
+                  <td className="px-3 py-2">
+                    <IpCell ip={g.src_ip} enrichment={g.latest.enrichment} dir="src" />
                   </td>
-                  <td className="px-3 py-2 text-slate-400">
-                    {g.latest.enrichment?.dst_hostname ?? g.dst_ip ?? '–'}
-                    {g.latest.dst_port ? `:${g.latest.dst_port}` : ''}
+                  <td className="px-3 py-2">
+                    <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.latest.enrichment} dir="dst" />
                   </td>
                   <td className="px-3 py-2 text-right">
                     {g.count > 1
@@ -232,12 +275,11 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                   <td className="px-3 py-2 text-slate-400 max-w-xs truncate">
                     {a.description ?? '–'}
                   </td>
-                  <td className="px-3 py-2 text-slate-400">
-                    {a.enrichment?.src_hostname ?? a.src_ip ?? '–'}
+                  <td className="px-3 py-2">
+                    <IpCell ip={a.src_ip} enrichment={a.enrichment} dir="src" />
                   </td>
-                  <td className="px-3 py-2 text-slate-400">
-                    {a.enrichment?.dst_hostname ?? a.dst_ip ?? '–'}
-                    {a.dst_port ? `:${a.dst_port}` : ''}
+                  <td className="px-3 py-2">
+                    <IpCell ip={a.dst_ip} port={a.dst_port} enrichment={a.enrichment} dir="dst" />
                   </td>
                   <td className="px-3 py-2 tabular-nums text-slate-400">{(a.score ?? 0).toFixed(2)}</td>
                   <td className="px-3 py-2 text-slate-600">
