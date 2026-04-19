@@ -262,6 +262,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           <option value="signature">Signatur</option>
           <option value="ml">ML / KI</option>
           <option value="suricata">Suricata</option>
+          <option value="external">Extern (IRMA)</option>
         </select>
         <select className="input w-28" value={feedbackF} onChange={e => setFeedbackF(e.target.value)}
           title="Feedback-Status filtern">
@@ -341,6 +342,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
                     {g.rule_id ?? '–'}
                     {g.latest.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
+                    {g.latest.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
                   </td>
                   <td className="px-3 py-2 text-slate-400 max-w-sm">
                     <span className="line-clamp-2" title={g.description ?? undefined}>
@@ -405,6 +407,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
                     {a.rule_id}
                     {a.is_test && <span className="ml-1 text-blue-400 text-xs">[TEST]</span>}
+                    {a.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
                   </td>
                   <td className="px-3 py-2 text-slate-400 max-w-sm">
                     <span className="line-clamp-2" title={a.description ?? undefined}>

@@ -24,6 +24,7 @@ volumes:
   signature-rules:
   snort-rules:    # Persistenter Regel-Cache (Community + ET Open)
   snort-alerts:   # Shared Volume: Snort → snort-bridge
+  irma-data:      # Persistiert letzte bekannte IRMA-Alarm-ID
 
 services:
 
@@ -349,6 +350,31 @@ services:
       MODELS_DIR: /models
       RETRAIN_INTERVAL_S: ${RETRAIN_INTERVAL_S:-86400}
       TEST_MODE: ${TEST_MODE:-false}
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # IRMA BRIDGE  (immer aktiv wenn IRMA_USER + IRMA_PASS gesetzt)
+  #
+  # Pollt die IRMA REST-API und importiert neue Alarme als source='external'.
+  # Setzt IRMA_USER und IRMA_PASS in der .env-Datei.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  irma-bridge:
+    build: ./irma-bridge
+    container_name: ids-irma-bridge
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - irma-data:/data
+    environment:
+      KAFKA_BROKERS:       kafka:9092
+      IRMA_BASE_URL:       ${IRMA_BASE_URL:-https://10.133.168.115/rest}
+      IRMA_USER:           ${IRMA_USER:-}
+      IRMA_PASS:           ${IRMA_PASS:-}
+      IRMA_POLL_INTERVAL:  ${IRMA_POLL_INTERVAL:-30}
+      IRMA_SSL_VERIFY:     ${IRMA_SSL_VERIFY:-false}
 
   # ────────────────────────────────────────────────────────────────────────────
   # SNIFFER – PRODUKTION  (docker compose --profile prod up)
