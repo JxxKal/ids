@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   addRuleSource, createUser, deleteRuleSource, deleteUser,
-  fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
+  fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
   fetchSamlConfig, fetchUsers, patchRuleSource,
   saveSamlConfig, triggerRuleUpdate, updateUser,
 } from '../api';
-import type { Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
+import type { MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -379,6 +379,188 @@ function SamlSettings() {
   );
 }
 
+// ── MLStatusSection ───────────────────────────────────────────────────────────
+
+function fmtDuration(secs: number): string {
+  if (secs < 60)    return `${secs} Sek.`;
+  if (secs < 3600)  return `${Math.round(secs / 60)} Min.`;
+  if (secs < 86400) return `${Math.round(secs / 3600)} Std.`;
+  return `${Math.round(secs / 86400)} Tage`;
+}
+
+function fmtTs(ts: number): string {
+  return new Date(ts * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function PhaseIndicator({ phase }: { phase: MLStatus['phase'] }) {
+  const cfg = {
+    passthrough: { dot: 'bg-slate-500',  text: 'text-slate-400',  label: 'Datensammlung' },
+    learning:    { dot: 'bg-yellow-500 animate-pulse', text: 'text-yellow-400', label: 'Lernphase' },
+    active:      { dot: 'bg-green-500',  text: 'text-green-400',  label: 'Aktiv' },
+  }[phase];
+  return (
+    <span className={`flex items-center gap-1.5 font-medium ${cfg.text}`}>
+      <span className={`w-2 h-2 rounded-full ${cfg.dot}`} />
+      {cfg.label}
+    </span>
+  );
+}
+
+function MLStatusSection() {
+  const [status,  setStatus]  = useState<MLStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState('');
+
+  useEffect(() => {
+    fetchMLStatus()
+      .then(setStatus)
+      .catch(() => setError('ML-Status konnte nicht geladen werden'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (error)   return <p className="text-red-400 text-sm">{error}</p>;
+  if (!status) return null;
+
+  const { phase, phase_label, model, bootstrap, stats_24h, top_anomaly_features } = status;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">KI/ML-Engine</h2>
+        <PhaseIndicator phase={phase} />
+      </div>
+
+      {/* ── Phase-Banner ─────────────────────────────────────────────── */}
+      <div className={`rounded-lg border px-4 py-3 text-xs ${
+        phase === 'active'
+          ? 'bg-green-950/30 border-green-800/40 text-green-300'
+          : phase === 'learning'
+          ? 'bg-yellow-950/30 border-yellow-800/40 text-yellow-300'
+          : 'bg-slate-800/40 border-slate-700/40 text-slate-400'
+      }`}>
+        <p className="font-medium mb-1">{phase_label}</p>
+        {phase === 'passthrough' && (
+          <p>Das Modell wartet auf ausreichend Netzwerkdaten. Noch kein ML-Filtering aktiv – alle Flows werden durchgelassen.</p>
+        )}
+        {phase === 'learning' && (
+          <p>Das Modell wurde initial trainiert und verfeinert sich kontinuierlich. ML-Filtering ist bereits aktiv, aber noch nicht vollständig kalibriert.</p>
+        )}
+        {phase === 'active' && (
+          <p>Das Modell ist vollständig trainiert. Anomaler Verkehr wird automatisch erkannt und als ML-Alert markiert.</p>
+        )}
+      </div>
+
+      {/* ── Lernfortschritt (nur wenn noch kein Modell) ──────────────── */}
+      {phase === 'passthrough' && (
+        <div>
+          <div className="flex justify-between text-xs text-slate-400 mb-1.5">
+            <span>Datensammlung</span>
+            <span>{bootstrap.current_flows.toLocaleString()} / {bootstrap.required.toLocaleString()} Flows</span>
+          </div>
+          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-600 rounded-full transition-all"
+              style={{ width: `${bootstrap.progress_pct}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px] text-slate-600 mt-1">
+            <span>{bootstrap.progress_pct}% abgeschlossen</span>
+            {bootstrap.estimated_remaining_s != null && (
+              <span>ca. {fmtDuration(bootstrap.estimated_remaining_s)} verbleibend</span>
+            )}
+            {bootstrap.estimated_remaining_s == null && (
+              <span>Schätzung nicht verfügbar (kein Netzwerkverkehr)</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Modell-Details ───────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+        {[
+          { label: 'Trainings-Samples',  value: model.n_samples.toLocaleString() },
+          { label: 'Davon Angriffe',     value: model.n_attack > 0 ? model.n_attack.toLocaleString() : '—' },
+          { label: 'Contamination',      value: `${(model.contamination * 100).toFixed(1)} %` },
+          { label: 'Letztes Training',   value: model.trained_at ? fmtTs(model.trained_at) : '—' },
+        ].map(({ label, value }) => (
+          <div key={label} className="bg-slate-800/40 rounded-lg px-3 py-2 border border-slate-700/40">
+            <div className="text-slate-500 mb-0.5">{label}</div>
+            <div className="text-slate-200 font-medium">{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── 24h-Statistik (nur im aktiven Modus) ─────────────────────── */}
+      {phase === 'active' && (
+        <div>
+          <p className="text-xs font-medium text-slate-400 mb-2">Letzte 24 Stunden</p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+            {[
+              { label: 'Analysierte Flows',  value: stats_24h.flows_total.toLocaleString() },
+              { label: 'ML-Alerts',          value: stats_24h.ml_alerts.toLocaleString() },
+              {
+                label: 'Filter-Rate',
+                value: stats_24h.flows_total > 0
+                  ? `${stats_24h.filter_rate_pct.toFixed(3)} %`
+                  : '—',
+              },
+              { label: 'Score-Schwellwert',  value: stats_24h.alert_threshold.toFixed(2) },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-slate-800/40 rounded-lg px-3 py-2 border border-slate-700/40">
+                <div className="text-slate-500 mb-0.5">{label}</div>
+                <div className="text-slate-200 font-medium">{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Feature-Abweichungen ─────────────────────────────────────── */}
+      {top_anomaly_features.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-slate-400 mb-2">
+            Warum werden Flows als anomal erkannt? <span className="font-normal text-slate-600">(Merkmal-Abweichungen in ML-Alerts vs. normaler Verkehr)</span>
+          </p>
+          <div className="space-y-2">
+            {top_anomaly_features.map(f => {
+              const isHigh = f.deviation_pct > 0;
+              const absDev = Math.abs(f.deviation_pct);
+              const barW   = Math.min(100, absDev / 5);  // 500% = volle Breite
+              return (
+                <div key={f.name} className="text-xs">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-slate-300">{f.label}</span>
+                    <span className={`font-mono ${isHigh ? 'text-orange-400' : 'text-blue-400'}`}>
+                      {isHigh ? '↑' : '↓'} {absDev.toFixed(0)} %
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full ${isHigh ? 'bg-orange-600' : 'bg-blue-600'}`}
+                      style={{ width: `${barW}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-600 mt-0.5">
+                    <span>Normal: {f.avg_normal.toFixed(3)} {f.unit}</span>
+                    <span>In ML-Alerts: {f.avg_in_alerts.toFixed(3)} {f.unit}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {phase === 'active' && stats_24h.ml_alerts === 0 && (
+        <p className="text-xs text-slate-600 italic">
+          In den letzten 24 Stunden keine ML-Alerts – kein anomaler Verkehr erkannt oder ML-Filter zu lax konfiguriert.
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── RulesEngine ───────────────────────────────────────────────────────────────
 
 const OT_TAGS = ['OT', 'ICS', 'SCADA', 'Modbus', 'DNP3', 'EtherNet/IP', 'BACnet', 'Rockwell', 'Gebäudeautomation', 'Angriffserkennung'];
@@ -659,6 +841,9 @@ export function SettingsPage() {
       <div className="max-w-4xl mx-auto py-6 px-4 space-y-8">
         <section className="card p-5">
           <UserManagement />
+        </section>
+        <section className="card p-5">
+          <MLStatusSection />
         </section>
         <section className="card p-5">
           <RulesEngine />

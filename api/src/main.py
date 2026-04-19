@@ -40,6 +40,7 @@ from routers import auth as auth_router
 from routers import flows as flows_router
 from routers import hosts as hosts_router
 from routers import networks as networks_router
+from routers import ml as ml_router
 from routers import rules as rules_router
 from routers import system as system_router
 from routers import tests as tests_router
@@ -108,6 +109,7 @@ app.include_router(alerts_router.router,   dependencies=_auth)
 app.include_router(flows_router.router,    dependencies=_auth)
 app.include_router(hosts_router.router,    dependencies=_auth)
 app.include_router(networks_router.router, dependencies=_auth)
+app.include_router(ml_router.router,       dependencies=_auth)
 app.include_router(rules_router.router,    dependencies=_auth)
 app.include_router(system_router.router,   dependencies=_auth)
 app.include_router(tests_router.router,    dependencies=_auth)

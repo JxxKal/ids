@@ -306,8 +306,11 @@ services:
       TEST_MODE: ${TEST_MODE:-false}
       SECRET_KEY: ${API_SECRET_KEY:-change-me-in-production}
       RULES_DIR: /rules
+      MODELS_DIR: /models
+      ML_BOOTSTRAP_MIN: ${ML_BOOTSTRAP_MIN:-500}
     volumes:
       - snort-rules:/rules
+      - ml-models:/models:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
 

@@ -125,6 +125,46 @@ export interface SamlConfig {
   default_role:         'admin' | 'viewer';
 }
 
+export interface MLModelInfo {
+  trained:       boolean;
+  n_samples:     number;
+  trained_at:    number | null;
+  contamination: number;
+  n_attack:      number;
+}
+
+export interface MLBootstrapInfo {
+  required:              number;
+  current_flows:         number;
+  progress_pct:          number;
+  estimated_remaining_s: number | null;
+}
+
+export interface MLStats24h {
+  flows_total:      number;
+  ml_alerts:        number;
+  filter_rate_pct:  number;
+  alert_threshold:  number;
+}
+
+export interface MLFeatureDeviation {
+  name:          string;
+  label:         string;
+  unit:          string;
+  avg_in_alerts: number;
+  avg_normal:    number;
+  deviation_pct: number;
+}
+
+export interface MLStatus {
+  phase:                 'passthrough' | 'learning' | 'active';
+  phase_label:           string;
+  model:                 MLModelInfo;
+  bootstrap:             MLBootstrapInfo;
+  stats_24h:             MLStats24h;
+  top_anomaly_features:  MLFeatureDeviation[];
+}
+
 export interface RuleSource {
   id:      string;
   name:    string;
