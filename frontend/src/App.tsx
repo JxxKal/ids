@@ -8,15 +8,18 @@ import { TestsPage } from './components/TestsPage';
 import { ThreatGauge } from './components/ThreatGauge';
 import { useWebSocket } from './hooks/useWebSocket';
 import type { Alert } from './types';
+import { type ReactNode } from 'react';
+import { LayoutDashboard, Network, Server, FlaskConical, Settings } from 'lucide-react';
 
-type Tab        = 'dashboard' | 'networks' | 'hosts' | 'tests';
+type Tab        = 'dashboard' | 'networks' | 'hosts' | 'tests' | 'settings';
 type TimeWindow = 'live' | '1m' | '15m' | '1h' | '4h' | '1d';
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'networks',  label: 'Netzwerke' },
-  { id: 'hosts',     label: 'Hosts' },
-  { id: 'tests',     label: 'Tests' },
+const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={14} /> },
+  { id: 'networks',  label: 'Netzwerke', icon: <Network       size={14} /> },
+  { id: 'hosts',     label: 'Hosts',     icon: <Server        size={14} /> },
+  { id: 'tests',     label: 'Tests',     icon: <FlaskConical  size={14} /> },
+  { id: 'settings',  label: 'Settings',  icon: <Settings      size={14} /> },
 ];
 
 const TIME_WINDOWS: { id: TimeWindow; label: string; seconds?: number }[] = [
@@ -97,12 +100,13 @@ export default function App() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
                 tab === t.id
                   ? 'bg-slate-700 text-slate-100'
                   : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
               }`}
             >
+              {t.icon}
               {t.label}
             </button>
           ))}
@@ -217,9 +221,14 @@ export default function App() {
             </div>
           </div>
         )}
-        {tab === 'networks' && <NetworksPage />}
-        {tab === 'hosts'    && <HostsPage />}
-        {tab === 'tests'    && <TestsPage />}
+        {tab === 'networks'  && <NetworksPage />}
+        {tab === 'hosts'     && <HostsPage />}
+        {tab === 'tests'     && <TestsPage />}
+        {tab === 'settings'  && (
+          <div className="flex items-center justify-center h-full text-slate-600 text-sm">
+            Settings — coming soon
+          </div>
+        )}
       </main>
     </div>
   );
