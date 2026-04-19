@@ -460,15 +460,10 @@ const PARAM_DOCS = [
   },
 ];
 
-function MLStatusSection() {
+function MLStatusDisplay() {
   const [status,  setStatus]  = useState<MLStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
-  const [cfg,     setCfg]     = useState<MLConfig | null>(null);
-  const [cfgDraft, setCfgDraft] = useState<MLConfig | null>(null);
-  const [saving,   setSaving]  = useState(false);
-  const [saveMsg,  setSaveMsg] = useState('');
-  const [retraining, setRetraining] = useState(false);
 
   useEffect(() => {
     fetchMLStatus()
@@ -476,40 +471,6 @@ function MLStatusSection() {
       .catch(() => setError('ML-Status konnte nicht geladen werden'))
       .finally(() => setLoading(false));
   }, []);
-
-  useEffect(() => {
-    fetchMLConfig()
-      .then(c => { setCfg(c); setCfgDraft(c); })
-      .catch(() => {/* Backend liefert Defaults */});
-  }, []);
-
-  async function handleSaveConfig() {
-    if (!cfgDraft) return;
-    setSaving(true); setSaveMsg('');
-    try {
-      const updated = await saveMLConfig(cfgDraft);
-      setCfg(updated); setCfgDraft(updated);
-      setSaveMsg('ok');
-      setTimeout(() => setSaveMsg(''), 3000);
-    } catch (err: unknown) {
-      setSaveMsg('err:' + (err instanceof Error ? err.message : 'Fehler beim Speichern'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleRetrain() {
-    setRetraining(true); setSaveMsg('');
-    try {
-      await triggerMLRetrain();
-      setSaveMsg('retrain');
-      setTimeout(() => setSaveMsg(''), 5000);
-    } catch (err: unknown) {
-      setSaveMsg('err:' + (err instanceof Error ? err.message : 'Fehler'));
-    } finally {
-      setRetraining(false);
-    }
-  }
 
   if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
   if (error)   return <p className="text-red-400 text-sm">{error}</p>;
@@ -650,89 +611,116 @@ function MLStatusSection() {
           In den letzten 24 Stunden keine ML-Alerts – kein anomaler Verkehr erkannt oder ML-Filter zu lax konfiguriert.
         </p>
       )}
+    </div>
+  );
+}
 
-      {/* ── ML-Konfiguration ─────────────────────────────────────────── */}
-      {cfgDraft && (
-        <div className="border-t border-slate-800 pt-5 space-y-5">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-200">Filter-Konfiguration</h3>
-            <div className="flex items-center gap-2">
-              {saveMsg === 'ok'     && <span className="text-xs text-green-400">Gespeichert ✓</span>}
-              {saveMsg === 'retrain'&& <span className="text-xs text-blue-400">Retrain ausgelöst ✓</span>}
-              {saveMsg.startsWith('err:') && <span className="text-xs text-red-400">{saveMsg.slice(4)}</span>}
-              <button
-                className="btn-ghost text-xs"
-                disabled={retraining}
-                onClick={handleRetrain}
-              >
-                {retraining ? 'Wird ausgelöst…' : '↺ Retrain jetzt starten'}
-              </button>
-              <button
-                className="btn-primary text-xs"
-                disabled={saving || !cfg || JSON.stringify(cfgDraft) === JSON.stringify(cfg)}
-                onClick={handleSaveConfig}
-              >
-                {saving ? 'Speichern…' : 'Speichern'}
-              </button>
-            </div>
-          </div>
+function MLFilterConfig() {
+  const [cfg,      setCfg]      = useState<MLConfig | null>(null);
+  const [cfgDraft, setCfgDraft] = useState<MLConfig | null>(null);
+  const [saving,   setSaving]   = useState(false);
+  const [saveMsg,  setSaveMsg]  = useState('');
+  const [retraining, setRetraining] = useState(false);
 
-          {PARAM_DOCS.map(p => {
-            const val = cfgDraft[p.key] as number;
-            return (
-              <div key={p.key} className="space-y-2">
-                <div className="flex items-baseline justify-between">
-                  <label className="text-xs font-medium text-slate-300">{p.label}</label>
-                  <span className="text-xs font-mono text-cyan-400">{p.fmt(val)}</span>
-                </div>
+  useEffect(() => {
+    fetchMLConfig()
+      .then(c => { setCfg(c); setCfgDraft(c); })
+      .catch(() => {});
+  }, []);
 
-                {/* Slider + Zahlenfeld */}
-                <div className="flex items-center gap-3">
-                  <input
-                    type="range"
-                    min={p.min} max={p.max} step={p.step}
-                    value={val}
-                    onChange={e => setCfgDraft(d => d ? { ...d, [p.key]: parseFloat(e.target.value) } : d)}
-                    className="flex-1 accent-cyan-500 cursor-pointer h-1.5"
-                  />
-                  <input
-                    type="number"
-                    min={p.min} max={p.max} step={p.step}
-                    value={val}
-                    onChange={e => {
-                      const n = parseFloat(e.target.value);
-                      if (!isNaN(n) && n >= p.min && n <= p.max)
-                        setCfgDraft(d => d ? { ...d, [p.key]: n } : d);
-                    }}
-                    className="input text-xs w-24 font-mono"
-                  />
-                </div>
+  async function handleSaveConfig() {
+    if (!cfgDraft) return;
+    setSaving(true); setSaveMsg('');
+    try {
+      const updated = await saveMLConfig(cfgDraft);
+      setCfg(updated); setCfgDraft(updated);
+      setSaveMsg('ok');
+      setTimeout(() => setSaveMsg(''), 3000);
+    } catch (err: unknown) {
+      setSaveMsg('err:' + (err instanceof Error ? err.message : 'Fehler'));
+    } finally {
+      setSaving(false);
+    }
+  }
 
-                {/* Preset-Buttons */}
-                <div className="flex flex-wrap gap-1.5">
-                  {p.presets.map(pr => (
-                    <button
-                      key={pr.label}
-                      onClick={() => setCfgDraft(d => d ? { ...d, [p.key]: pr.value } : d)}
-                      title={pr.desc}
-                      className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
-                        Math.abs(val - pr.value) < p.step * 0.5
-                          ? 'bg-cyan-900/50 border-cyan-600/60 text-cyan-300'
-                          : 'bg-slate-800/50 border-slate-700/40 text-slate-400 hover:border-slate-500/60 hover:text-slate-300'
-                      }`}
-                    >
-                      {pr.label}
-                    </button>
-                  ))}
-                </div>
+  async function handleRetrain() {
+    setRetraining(true); setSaveMsg('');
+    try {
+      await triggerMLRetrain();
+      setSaveMsg('retrain');
+      setTimeout(() => setSaveMsg(''), 5000);
+    } catch (err: unknown) {
+      setSaveMsg('err:' + (err instanceof Error ? err.message : 'Fehler'));
+    } finally {
+      setRetraining(false);
+    }
+  }
 
-                {/* Hinweistext */}
-                <p className="text-[11px] text-slate-600 leading-relaxed">{p.hint}</p>
-              </div>
-            );
-          })}
+  if (!cfgDraft) return <p className="text-slate-500 text-sm">Lade…</p>;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">Filter-Konfiguration</h2>
+        <div className="flex items-center gap-2">
+          {saveMsg === 'ok'          && <span className="text-xs text-green-400">Gespeichert ✓</span>}
+          {saveMsg === 'retrain'     && <span className="text-xs text-blue-400">Retrain ausgelöst ✓</span>}
+          {saveMsg.startsWith('err:')&& <span className="text-xs text-red-400">{saveMsg.slice(4)}</span>}
+          <button className="btn-ghost text-xs" disabled={retraining} onClick={handleRetrain}>
+            {retraining ? 'Wird ausgelöst…' : '↺ Retrain jetzt starten'}
+          </button>
+          <button
+            className="btn-primary text-xs"
+            disabled={saving || !cfg || JSON.stringify(cfgDraft) === JSON.stringify(cfg)}
+            onClick={handleSaveConfig}
+          >
+            {saving ? 'Speichern…' : 'Speichern'}
+          </button>
         </div>
-      )}
+      </div>
+
+      {PARAM_DOCS.map(p => {
+        const val = cfgDraft[p.key] as number;
+        return (
+          <div key={p.key} className="space-y-2">
+            <div className="flex items-baseline justify-between">
+              <label className="text-xs font-medium text-slate-300">{p.label}</label>
+              <span className="text-xs font-mono text-cyan-400">{p.fmt(val)}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                type="range" min={p.min} max={p.max} step={p.step} value={val}
+                onChange={e => setCfgDraft(d => d ? { ...d, [p.key]: parseFloat(e.target.value) } : d)}
+                className="flex-1 accent-cyan-500 cursor-pointer h-1.5"
+              />
+              <input
+                type="number" min={p.min} max={p.max} step={p.step} value={val}
+                onChange={e => {
+                  const n = parseFloat(e.target.value);
+                  if (!isNaN(n) && n >= p.min && n <= p.max)
+                    setCfgDraft(d => d ? { ...d, [p.key]: n } : d);
+                }}
+                className="input text-xs w-24 font-mono"
+              />
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {p.presets.map(pr => (
+                <button
+                  key={pr.label}
+                  onClick={() => setCfgDraft(d => d ? { ...d, [p.key]: pr.value } : d)}
+                  title={pr.desc}
+                  className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                    Math.abs(val - pr.value) < p.step * 0.5
+                      ? 'bg-cyan-900/50 border-cyan-600/60 text-cyan-300'
+                      : 'bg-slate-800/50 border-slate-700/40 text-slate-400 hover:border-slate-500/60 hover:text-slate-300'
+                  }`}
+                >{pr.label}</button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">{p.hint}</p>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -755,21 +743,15 @@ function TagBadges({ tags }: { tags: string[] }) {
   );
 }
 
-function RulesEngine() {
+function RuleSources() {
   const [sources,   setSources]   = useState<RuleSource[]>([]);
   const [status,    setStatus]    = useState<UpdateStatus | null>(null);
-  const [rules,     setRules]     = useState<Rule[]>([]);
-  const [total,     setTotal]     = useState(0);
-  const [search,    setSearch]    = useState('');
-  const [offset,    setOffset]    = useState(0);
-  const [loadingR,  setLoadingR]  = useState(false);
   const [updating,  setUpdating]  = useState(false);
   const [showAdd,   setShowAdd]   = useState(false);
   const [newName,   setNewName]   = useState('');
   const [newUrl,    setNewUrl]    = useState('');
   const [newErr,    setNewErr]    = useState('');
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const LIMIT = 100;
 
   // Quellen + Update-Status initial laden
   useEffect(() => {
@@ -787,15 +769,6 @@ function RulesEngine() {
     return () => { if (pollRef.current) clearTimeout(pollRef.current); };
   }, [status]);
 
-  // Regelliste laden
-  useEffect(() => {
-    setLoadingR(true);
-    fetchRules({ search, limit: LIMIT, offset })
-      .then(r => { setRules(r.rules); setTotal(r.total); })
-      .catch(() => {})
-      .finally(() => setLoadingR(false));
-  }, [search, offset]);
-
   async function handleToggleSource(src: RuleSource) {
     const updated = await patchRuleSource(src.id, { enabled: !src.enabled }).catch(() => null);
     if (updated) setSources(prev => prev.map(s => s.id === src.id ? updated : s));
@@ -808,8 +781,7 @@ function RulesEngine() {
   }
 
   async function handleAddSource(e: React.FormEvent) {
-    e.preventDefault();
-    setNewErr('');
+    e.preventDefault(); setNewErr('');
     try {
       const src = await addRuleSource({ name: newName, url: newUrl, enabled: true });
       setSources(prev => [...prev, src]);
@@ -821,213 +793,253 @@ function RulesEngine() {
 
   async function handleTriggerUpdate() {
     setUpdating(true);
-    try {
-      const s = await triggerRuleUpdate();
-      setStatus(s);
-    } catch { /* ignore */ } finally {
-      setUpdating(false);
-    }
+    try { const s = await triggerRuleUpdate(); setStatus(s); }
+    catch { /* ignore */ } finally { setUpdating(false); }
   }
 
   const fmtTs = (ts: number | null) => ts
     ? new Date(ts * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
     : '—';
 
-  const pages = Math.ceil(total / LIMIT);
-  const page  = Math.floor(offset / LIMIT);
-
   return (
-    <div className="space-y-6">
-
-      {/* ── Quellen ─────────────────────────────────────────────────────── */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-200">Rule-Quellen</h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleTriggerUpdate}
-              disabled={updating || !!status?.requested}
-              className="btn-primary text-xs"
-            >
-              {status?.requested ? '⏳ Update läuft…' : updating ? '…' : '↻ Update starten'}
-            </button>
-            <button className="btn-ghost text-xs" onClick={() => { setShowAdd(v => !v); setNewErr(''); }}>
-              {showAdd ? 'Abbrechen' : '+ Quelle'}
-            </button>
-          </div>
-        </div>
-
-        {/* Status-Zeile */}
-        {status && (
-          <p className="text-xs text-slate-500 mb-3">
-            {status.requested
-              ? `Update angefordert um ${fmtTs(status.requested_at)} – Suricata lädt gerade neu…`
-              : status.last_updated
-                ? `Letzte Aktualisierung: ${fmtTs(status.last_updated)}`
-                : 'Noch kein Update durchgeführt'}
-          </p>
-        )}
-
-        {/* Neue Quelle */}
-        {showAdd && (
-          <form onSubmit={handleAddSource} className="card p-3 mb-3 flex flex-wrap gap-2 items-end text-xs">
-            <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
-              <label className="text-slate-400">Name</label>
-              <input className="input" required value={newName} onChange={e => setNewName(e.target.value)} placeholder="Meine Custom Rules" />
-            </div>
-            <div className="flex flex-col gap-1 flex-[2] min-w-[260px]">
-              <label className="text-slate-400">URL (.rules oder .tar.gz)</label>
-              <input className="input" required type="url" value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://example.com/my.rules" />
-            </div>
-            {newErr && <p className="w-full text-red-400">{newErr}</p>}
-            <button type="submit" className="btn-primary text-xs">Hinzufügen</button>
-          </form>
-        )}
-
-        {/* Quellen-Liste */}
-        <div className="space-y-1.5">
-          {sources.map(src => (
-            <div key={src.id} className={`flex items-center gap-3 px-3 py-2.5 rounded border text-xs transition-colors ${
-              src.enabled ? 'bg-slate-800/50 border-slate-700/60' : 'bg-slate-900/30 border-slate-800/40 opacity-60'
-            }`}>
-              {/* Toggle */}
-              <button
-                onClick={() => handleToggleSource(src)}
-                className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${src.enabled ? 'bg-green-600' : 'bg-slate-700'}`}
-                title={src.enabled ? 'Aktiviert – klicken zum Deaktivieren' : 'Deaktiviert'}
-              >
-                <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${src.enabled ? 'left-4' : 'left-0.5'}`} />
-              </button>
-
-              {/* Name + Tags */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`font-medium ${src.enabled ? 'text-slate-200' : 'text-slate-500'}`}>{src.name}</span>
-                  {src.builtin && (
-                    <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/50 text-slate-500 border border-slate-600/30">Built-in</span>
-                  )}
-                  <TagBadges tags={src.tags} />
-                </div>
-                <div className="text-slate-600 truncate mt-0.5 font-mono text-[10px]">{src.url}</div>
-              </div>
-
-              {/* Löschen (nur Custom) */}
-              {!src.builtin && (
-                <button
-                  onClick={() => handleDeleteSource(src)}
-                  className="text-red-500 hover:text-red-400 px-1.5 py-1 rounded hover:bg-red-950/30 transition-colors flex-shrink-0"
-                  title="Quelle entfernen"
-                >✕</button>
-              )}
-            </div>
-          ))}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">Rule-Quellen</h2>
+        <div className="flex items-center gap-2">
+          <button onClick={handleTriggerUpdate} disabled={updating || !!status?.requested} className="btn-primary text-xs">
+            {status?.requested ? '⏳ Update läuft…' : updating ? '…' : '↻ Update starten'}
+          </button>
+          <button className="btn-ghost text-xs" onClick={() => { setShowAdd(v => !v); setNewErr(''); }}>
+            {showAdd ? 'Abbrechen' : '+ Quelle'}
+          </button>
         </div>
       </div>
 
-      {/* ── Aktive Regeln ───────────────────────────────────────────────── */}
-      <div>
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2 className="text-sm font-semibold text-slate-200">
-            Aktive Regeln
-            {total > 0 && <span className="ml-2 text-slate-500 font-normal">{total.toLocaleString()}</span>}
-          </h2>
-          <input
-            className="input text-xs w-56"
-            placeholder="Suche nach msg, sid, classtype, Datei…"
-            value={search}
-            onChange={e => { setSearch(e.target.value); setOffset(0); }}
-          />
-        </div>
+      {status && (
+        <p className="text-xs text-slate-500">
+          {status.requested
+            ? `Update angefordert um ${fmtTs(status.requested_at)} – Suricata lädt gerade neu…`
+            : status.last_updated
+              ? `Letzte Aktualisierung: ${fmtTs(status.last_updated)}`
+              : 'Noch kein Update durchgeführt'}
+        </p>
+      )}
 
-        {loadingR ? (
-          <p className="text-slate-500 text-xs">Lade…</p>
-        ) : rules.length === 0 ? (
-          <p className="text-slate-600 text-xs">
-            {total === 0
-              ? 'Keine Regeln geladen – bitte ein Update starten.'
-              : 'Keine Treffer.'}
-          </p>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="border-b border-slate-800">
-                  <tr className="text-left text-slate-500">
-                    <th className="pb-2 pr-3 w-20">SID</th>
-                    <th className="pb-2 pr-3">Beschreibung (msg)</th>
-                    <th className="pb-2 pr-3 w-28">Classtype</th>
-                    <th className="pb-2 pr-3 w-16">Aktion</th>
-                    <th className="pb-2 pr-3 w-16">Status</th>
-                    <th className="pb-2 w-40">Datei</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rules.map((r, i) => (
-                    <tr key={`${r.sid}-${i}`} className={`border-b border-slate-800/40 hover:bg-slate-800/20 ${!r.enabled ? 'opacity-40' : ''}`}>
-                      <td className="py-1.5 pr-3 font-mono text-slate-400">{r.sid ?? '—'}</td>
-                      <td className="py-1.5 pr-3 text-slate-300 max-w-xs truncate" title={r.msg}>{r.msg}</td>
-                      <td className="py-1.5 pr-3 text-slate-500 truncate">{r.classtype ?? '—'}</td>
-                      <td className="py-1.5 pr-3">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
-                          r.action === 'drop' ? 'bg-red-900/40 text-red-300' :
-                          r.action === 'pass' ? 'bg-green-900/40 text-green-300' :
-                          'bg-slate-700/50 text-slate-400'
-                        }`}>{r.action}</span>
-                      </td>
-                      <td className="py-1.5 pr-3">
-                        <span className={`text-[10px] ${r.enabled ? 'text-green-500' : 'text-slate-600'}`}>
-                          {r.enabled ? '● aktiv' : '○ aus'}
-                        </span>
-                      </td>
-                      <td className="py-1.5 font-mono text-slate-600 text-[10px] truncate">{r.file}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+      {showAdd && (
+        <form onSubmit={handleAddSource} className="card p-3 flex flex-wrap gap-2 items-end text-xs">
+          <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
+            <label className="text-slate-400">Name</label>
+            <input className="input" required value={newName} onChange={e => setNewName(e.target.value)} placeholder="Meine Custom Rules" />
+          </div>
+          <div className="flex flex-col gap-1 flex-[2] min-w-[260px]">
+            <label className="text-slate-400">URL (.rules oder .tar.gz)</label>
+            <input className="input" required type="url" value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://example.com/my.rules" />
+          </div>
+          {newErr && <p className="w-full text-red-400">{newErr}</p>}
+          <button type="submit" className="btn-primary text-xs">Hinzufügen</button>
+        </form>
+      )}
 
-            {/* Pagination */}
-            {pages > 1 && (
-              <div className="flex items-center gap-2 mt-3 text-xs text-slate-500">
-                <button
-                  className="btn-ghost text-xs disabled:opacity-30"
-                  disabled={page === 0}
-                  onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-                >← Zurück</button>
-                <span>{page + 1} / {pages}</span>
-                <button
-                  className="btn-ghost text-xs disabled:opacity-30"
-                  disabled={page >= pages - 1}
-                  onClick={() => setOffset(offset + LIMIT)}
-                >Weiter →</button>
+      <div className="space-y-1.5">
+        {sources.map(src => (
+          <div key={src.id} className={`flex items-center gap-3 px-3 py-2.5 rounded border text-xs transition-colors ${
+            src.enabled ? 'bg-slate-800/50 border-slate-700/60' : 'bg-slate-900/30 border-slate-800/40 opacity-60'
+          }`}>
+            <button
+              onClick={() => handleToggleSource(src)}
+              className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${src.enabled ? 'bg-green-600' : 'bg-slate-700'}`}
+              title={src.enabled ? 'Aktiviert' : 'Deaktiviert'}
+            >
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${src.enabled ? 'left-4' : 'left-0.5'}`} />
+            </button>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`font-medium ${src.enabled ? 'text-slate-200' : 'text-slate-500'}`}>{src.name}</span>
+                {src.builtin && <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/50 text-slate-500 border border-slate-600/30">Built-in</span>}
+                <TagBadges tags={src.tags} />
               </div>
+              <div className="text-slate-600 truncate mt-0.5 font-mono text-[10px]">{src.url}</div>
+            </div>
+            {!src.builtin && (
+              <button onClick={() => handleDeleteSource(src)}
+                className="text-red-500 hover:text-red-400 px-1.5 py-1 rounded hover:bg-red-950/30 transition-colors flex-shrink-0"
+                title="Quelle entfernen">✕</button>
             )}
-          </>
-        )}
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-// ── SettingsPage ──────────────────────────────────────────────────────────────
+function RulesList() {
+  const [rules,    setRules]    = useState<Rule[]>([]);
+  const [total,    setTotal]    = useState(0);
+  const [search,   setSearch]   = useState('');
+  const [offset,   setOffset]   = useState(0);
+  const [loading,  setLoading]  = useState(false);
+  const LIMIT = 100;
+
+  useEffect(() => {
+    setLoading(true);
+    fetchRules({ search, limit: LIMIT, offset })
+      .then(r => { setRules(r.rules); setTotal(r.total); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [search, offset]);
+
+  const pages = Math.ceil(total / LIMIT);
+  const page  = Math.floor(offset / LIMIT);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-sm font-semibold text-slate-200">
+          Aktive Regeln
+          {total > 0 && <span className="ml-2 text-slate-500 font-normal">{total.toLocaleString()}</span>}
+        </h2>
+        <input
+          className="input text-xs w-56"
+          placeholder="Suche nach msg, sid, classtype…"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setOffset(0); }}
+        />
+      </div>
+
+      {loading ? (
+        <p className="text-slate-500 text-xs">Lade…</p>
+      ) : rules.length === 0 ? (
+        <p className="text-slate-600 text-xs">
+          {total === 0 ? 'Keine Regeln geladen – bitte ein Update starten.' : 'Keine Treffer.'}
+        </p>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="border-b border-slate-800">
+                <tr className="text-left text-slate-500">
+                  <th className="pb-2 pr-3 w-20">SID</th>
+                  <th className="pb-2 pr-3">Beschreibung (msg)</th>
+                  <th className="pb-2 pr-3 w-28">Classtype</th>
+                  <th className="pb-2 pr-3 w-16">Aktion</th>
+                  <th className="pb-2 pr-3 w-16">Status</th>
+                  <th className="pb-2 w-40">Datei</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r, i) => (
+                  <tr key={`${r.sid}-${i}`} className={`border-b border-slate-800/40 hover:bg-slate-800/20 ${!r.enabled ? 'opacity-40' : ''}`}>
+                    <td className="py-1.5 pr-3 font-mono text-slate-400">{r.sid ?? '—'}</td>
+                    <td className="py-1.5 pr-3 text-slate-300 max-w-xs truncate" title={r.msg}>{r.msg}</td>
+                    <td className="py-1.5 pr-3 text-slate-500 truncate">{r.classtype ?? '—'}</td>
+                    <td className="py-1.5 pr-3">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                        r.action === 'drop' ? 'bg-red-900/40 text-red-300' :
+                        r.action === 'pass' ? 'bg-green-900/40 text-green-300' :
+                        'bg-slate-700/50 text-slate-400'
+                      }`}>{r.action}</span>
+                    </td>
+                    <td className="py-1.5 pr-3">
+                      <span className={`text-[10px] ${r.enabled ? 'text-green-500' : 'text-slate-600'}`}>
+                        {r.enabled ? '● aktiv' : '○ aus'}
+                      </span>
+                    </td>
+                    <td className="py-1.5 font-mono text-slate-600 text-[10px] truncate">{r.file}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {pages > 1 && (
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <button className="btn-ghost text-xs disabled:opacity-30" disabled={page === 0}
+                onClick={() => setOffset(Math.max(0, offset - LIMIT))}>← Zurück</button>
+              <span>{page + 1} / {pages}</span>
+              <button className="btn-ghost text-xs disabled:opacity-30" disabled={page >= pages - 1}
+                onClick={() => setOffset(offset + LIMIT)}>Weiter →</button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Settings Navigation ───────────────────────────────────────────────────────
+
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list';
+
+interface NavItem { id: SectionId; label: string }
+interface NavGroup { label: string; items: NavItem[] }
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Benutzer & Zugang',
+    items: [
+      { id: 'users', label: 'Benutzerverwaltung' },
+      { id: 'saml',  label: 'SAML / SSO' },
+    ],
+  },
+  {
+    label: 'KI/ML-Engine',
+    items: [
+      { id: 'ml-status', label: 'Status & Lernphase' },
+      { id: 'ml-config', label: 'Filter-Konfiguration' },
+    ],
+  },
+  {
+    label: 'Regelwerk',
+    items: [
+      { id: 'rules-sources', label: 'Rule-Quellen' },
+      { id: 'rules-list',    label: 'Aktive Regeln' },
+    ],
+  },
+];
 
 export function SettingsPage() {
+  const [active, setActive] = useState<SectionId>('users');
+
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-4xl mx-auto py-6 px-4 space-y-8">
-        <section className="card p-5">
-          <UserManagement />
-        </section>
-        <section className="card p-5">
-          <MLStatusSection />
-        </section>
-        <section className="card p-5">
-          <RulesEngine />
-        </section>
-        <section className="card p-5">
-          <SamlSettings />
-        </section>
+    <div className="flex h-full overflow-hidden">
+
+      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      <nav className="w-44 border-r border-slate-800 overflow-y-auto flex-shrink-0 py-3">
+        {NAV_GROUPS.map(group => (
+          <div key={group.label} className="mb-4">
+            <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600 select-none">
+              {group.label}
+            </div>
+            {group.items.map(item => (
+              <button
+                key={item.id}
+                onClick={() => setActive(item.id)}
+                className={`w-full text-left px-3 py-1.5 text-xs transition-colors border-r-2 ${
+                  active === item.id
+                    ? 'text-cyan-300 bg-cyan-950/40 border-cyan-500'
+                    : 'text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        ))}
+      </nav>
+
+      {/* ── Content ──────────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-3xl mx-auto py-6 px-6">
+          <div className="card p-5">
+            {active === 'users'         && <UserManagement />}
+            {active === 'saml'          && <SamlSettings />}
+            {active === 'ml-status'     && <MLStatusDisplay />}
+            {active === 'ml-config'     && <MLFilterConfig />}
+            {active === 'rules-sources' && <RuleSources />}
+            {active === 'rules-list'    && <RulesList />}
+          </div>
+        </div>
       </div>
+
     </div>
   );
 }
