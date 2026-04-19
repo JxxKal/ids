@@ -30,6 +30,7 @@ import orjson
 from confluent_kafka import Producer
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from minio import Minio
 
 from config import Config
@@ -59,12 +60,45 @@ log = logging.getLogger("api")
 cfg = Config.from_env()
 
 app = FastAPI(
-    title="IDS API",
+    title="Cyjan IDS API",
     version="1.0.0",
+    description=(
+        "REST API + WebSocket für das Cyjan Passive Network IDS.\n\n"
+        "**Authentifizierung:** Zuerst `POST /api/auth/login` aufrufen, "
+        "den `access_token` kopieren und oben rechts auf **Authorize** klicken "
+        "(`Bearer <token>` wird automatisch gesetzt)."
+    ),
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
 )
+
+
+def _custom_openapi() -> dict:
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {})
+    schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "JWT-Token aus POST /api/auth/login → access_token",
+        }
+    }
+    # Alle Endpunkte standardmäßig mit BearerAuth absichern
+    schema["security"] = [{"BearerAuth": []}]
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi  # type: ignore[method-assign]
 
 app.add_middleware(
     CORSMiddleware,
