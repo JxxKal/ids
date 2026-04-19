@@ -107,7 +107,7 @@ export interface User {
   username:     string;
   email?:       string;
   display_name?: string;
-  role:         'admin' | 'viewer';
+  role:         'admin' | 'viewer' | 'api';
   source:       'local' | 'saml';
   active:       boolean;
   created_at:   string;
