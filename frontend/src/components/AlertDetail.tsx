@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { pcapUrl, setFeedback } from '../api';
 import type { Alert } from '../types';
+import { ConnectionGraph } from './ConnectionGraph';
 import { SeverityBadge } from './SeverityBadge';
 import { TrustBadge } from './TrustBadge';
 
@@ -21,8 +22,9 @@ function Row({ label, value }: { label: string; value?: string | number | null }
 }
 
 export function AlertDetail({ alert, onClose, onUpdate }: Props) {
-  const [note, setNote]     = useState('');
+  const [note, setNote]       = useState('');
   const [loading, setLoading] = useState(false);
+  const [showGraph, setShowGraph] = useState(false);
 
   const giveFeedback = async (fb: 'fp' | 'tp') => {
     setLoading(true);
@@ -139,6 +141,25 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
 
         {/* Actions */}
         <div className="flex items-center gap-2 px-4 py-3 border-t border-slate-800 mt-3">
+          {showGraph && (
+            <ConnectionGraph alert={alert} onClose={() => setShowGraph(false)} />
+          )}
+          {alert.src_ip && alert.dst_ip && (
+            <button
+              onClick={() => setShowGraph(true)}
+              className="btn-primary flex items-center gap-1.5"
+              title="Alle Verbindungen zwischen Quelle und Ziel im ±5-min-Fenster"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <circle cx="3" cy="8" r="2" />
+                <circle cx="13" cy="8" r="2" />
+                <line x1="5" y1="8" x2="11" y2="8" />
+                <line x1="9" y1="6" x2="11" y2="8" />
+                <line x1="9" y1="10" x2="11" y2="8" />
+              </svg>
+              Verbindungsgraph
+            </button>
+          )}
           {alert.pcap_available && (
             <a href={pcapUrl(alert.alert_id)} download className="btn-primary">
               PCAP herunterladen
