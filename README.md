@@ -1,4 +1,4 @@
-# IDS – Intrusion Detection System
+# CYJAN Intrusion Detection System -The OT-Sentrymode-
 
 Passives Netzwerk-IDS das an einem Mirror-Port eines Switches Traffic mitschneidet, anhand von Signaturen und ML Alarme erzeugt und ein Webdashboard mit Self-Learning-Feedback-Loop bietet.
 
