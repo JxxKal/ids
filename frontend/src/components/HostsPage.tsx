@@ -3,7 +3,7 @@ import {
   createHost,
   deleteHost,
   fetchHosts,
-  hostsExampleCsvUrl,
+  downloadHostsExampleCsv,
   importHostsCsv,
   updateHost,
 } from '../api';
@@ -93,14 +93,13 @@ export function HostsPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-300">Host hinzufügen</h2>
           <div className="flex items-center gap-2">
-            <a
-              href={hostsExampleCsvUrl()}
-              download="hosts_example.csv"
+            <button
+              onClick={() => downloadHostsExampleCsv().catch(() => {})}
               className="btn-ghost text-xs text-slate-500 hover:text-slate-300"
               title="Beispiel-CSV herunterladen"
             >
               Beispiel-CSV
-            </a>
+            </button>
             <label className="btn-ghost cursor-pointer text-xs">
               CSV importieren
               <input
