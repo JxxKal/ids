@@ -156,6 +156,13 @@ export interface MLFeatureDeviation {
   deviation_pct: number;
 }
 
+export interface MLConfig {
+  alert_threshold:       number;
+  contamination:         number;
+  bootstrap_min_samples: number;
+  partial_fit_interval:  number;
+}
+
 export interface MLStatus {
   phase:                 'passthrough' | 'learning' | 'active';
   phase_label:           string;

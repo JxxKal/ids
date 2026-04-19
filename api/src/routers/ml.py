@@ -1,4 +1,4 @@
-"""ML/KI-Engine Status: Lernphase, Filter-Rate, Feature-Analyse."""
+"""ML/KI-Engine Status, Konfiguration und Retrain-Trigger."""
 from __future__ import annotations
 
 import json
@@ -18,6 +18,16 @@ router = APIRouter(prefix="/api/ml", tags=["ml"])
 MODELS_DIR        = Path(os.getenv("MODELS_DIR", "/models"))
 BOOTSTRAP_MIN     = int(os.getenv("ML_BOOTSTRAP_MIN", "500"))
 ALERT_THRESHOLD   = 0.65
+ML_CONFIG_FILE    = MODELS_DIR / "ml_config.json"
+RETRAIN_TRIGGER   = MODELS_DIR / "retrain.trigger"
+
+# Defaults
+DEFAULT_CONFIG: dict = {
+    "alert_threshold":      0.65,
+    "contamination":        0.01,
+    "bootstrap_min_samples": 500,
+    "partial_fit_interval": 200,
+}
 
 # Menschenlesbare Feature-Labels
 FEATURE_LABELS: dict[str, dict[str, str]] = {
@@ -67,6 +77,22 @@ class FeatureDeviation(BaseModel):
     avg_normal:    float
     deviation_pct: float   # (avg_in_alerts - avg_normal) / max(avg_normal, 0.001) * 100
 
+class MLConfig(BaseModel):
+    alert_threshold:       float   # 0.50 – 0.95
+    contamination:         float   # 0.001 – 0.50
+    bootstrap_min_samples: int     # 100 – 50000
+    partial_fit_interval:  int     # 50 – 5000
+
+class MLConfigPatch(BaseModel):
+    alert_threshold:       float | None = None
+    contamination:         float | None = None
+    bootstrap_min_samples: int   | None = None
+    partial_fit_interval:  int   | None = None
+
+class RetrainStatus(BaseModel):
+    triggered:    bool
+    triggered_at: float | None
+
 class MLStatus(BaseModel):
     phase:                  str   # "passthrough" | "learning" | "active"
     phase_label:            str
@@ -77,6 +103,18 @@ class MLStatus(BaseModel):
 
 
 # ── Hilfsfunktionen ────────────────────────────────────────────────────────────
+
+def _read_ml_config() -> dict:
+    if ML_CONFIG_FILE.exists():
+        try:
+            return {**DEFAULT_CONFIG, **json.loads(ML_CONFIG_FILE.read_text())}
+        except Exception:
+            pass
+    return dict(DEFAULT_CONFIG)
+
+def _write_ml_config(cfg: dict) -> None:
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    ML_CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
 
 def _read_meta() -> dict:
     meta_file = MODELS_DIR / "meta.json"
@@ -196,12 +234,13 @@ async def ml_status(pool: asyncpg.Pool = Depends(get_pool)) -> MLStatus:
     )
 
     # ── 24h-Stats ───────────────────────────────────────────────────────────
+    current_threshold = _read_ml_config().get("alert_threshold", ALERT_THRESHOLD)
     filter_rate = round(ml_alerts_24h / max(flows_24h, 1) * 100, 3)
     stats_24h   = Stats24h(
         flows_total     = flows_24h,
         ml_alerts       = ml_alerts_24h,
         filter_rate_pct = filter_rate,
-        alert_threshold = ALERT_THRESHOLD,
+        alert_threshold = current_threshold,
     )
 
     # ── Feature-Abweichungen ────────────────────────────────────────────────
@@ -242,3 +281,45 @@ async def ml_status(pool: asyncpg.Pool = Depends(get_pool)) -> MLStatus:
         stats_24h           = stats_24h,
         top_anomaly_features = feature_deviations,
     )
+
+
+# ── Konfigurations-Endpunkte ───────────────────────────────────────────────────
+
+@router.get("/config", response_model=MLConfig)
+async def get_ml_config() -> MLConfig:
+    return MLConfig(**_read_ml_config())
+
+
+@router.patch("/config", response_model=MLConfig)
+async def update_ml_config(body: MLConfigPatch) -> MLConfig:
+    cfg = _read_ml_config()
+    needs_retrain = False
+
+    if body.alert_threshold is not None:
+        cfg["alert_threshold"] = round(max(0.5, min(0.95, body.alert_threshold)), 3)
+    if body.contamination is not None:
+        new_c = round(max(0.001, min(0.5, body.contamination)), 4)
+        if abs(new_c - cfg["contamination"]) > 0.0001:
+            needs_retrain = True
+        cfg["contamination"] = new_c
+    if body.bootstrap_min_samples is not None:
+        cfg["bootstrap_min_samples"] = max(100, min(50_000, body.bootstrap_min_samples))
+    if body.partial_fit_interval is not None:
+        cfg["partial_fit_interval"] = max(50, min(5_000, body.partial_fit_interval))
+
+    _write_ml_config(cfg)
+
+    # Contamination-Änderung → Retrain anstoßen
+    if needs_retrain:
+        RETRAIN_TRIGGER.write_text(str(time.time()))
+
+    return MLConfig(**cfg)
+
+
+@router.post("/retrain", response_model=RetrainStatus)
+async def trigger_retrain() -> RetrainStatus:
+    """Manuellen Sofort-Retrain anstoßen."""
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    RETRAIN_TRIGGER.write_text(str(now))
+    return RetrainStatus(triggered=True, triggered_at=now)
