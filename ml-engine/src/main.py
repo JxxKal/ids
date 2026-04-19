@@ -23,6 +23,7 @@ import logging
 import signal
 import sys
 import time
+from pathlib import Path
 
 import orjson
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
@@ -30,6 +31,20 @@ from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 from bootstrap import load_flows
 from config import Config
 from model import AnomalyModel
+
+_ML_CONFIG_FILE = None  # wird in run() gesetzt
+
+
+def _read_runtime_config(models_dir: str) -> dict:
+    """Liest ml_config.json aus dem geteilten Models-Volume."""
+    import json
+    path = Path(models_dir) / "ml_config.json"
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except Exception:
+            pass
+    return {}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,8 +58,9 @@ ALERTS_TOPIC = "alerts-raw"
 POLL_TIMEOUT = 1.0
 GROUP_ID     = "ml-engine"
 
-# Score-Schwellwert ab dem ein Alert erzeugt wird
-ALERT_THRESHOLD = 0.65
+# Score-Schwellwert ab dem ein Alert erzeugt wird (überschreibbar via ml_config.json)
+ALERT_THRESHOLD   = 0.65
+CONFIG_POLL_FLOWS = 500   # Alle N Flows Konfig-Datei prüfen
 
 
 def _make_consumer(brokers: str) -> Consumer:
@@ -124,8 +140,11 @@ def run(cfg: Config) -> None:
     running = True
     flows_since_partial = 0
     flows_since_save    = 0
+    flows_since_cfg_poll = 0
     total_flows  = 0
     total_alerts = 0
+    alert_threshold = _read_runtime_config(cfg.models_dir).get("alert_threshold", ALERT_THRESHOLD)
+    partial_fit_interval = cfg.partial_fit_interval
 
     def _stop(sig, _frame):
         nonlocal running
@@ -159,17 +178,31 @@ def run(cfg: Config) -> None:
                 continue
 
             total_flows += 1
-            flows_since_partial += 1
-            flows_since_save    += 1
+            flows_since_partial  += 1
+            flows_since_save     += 1
+            flows_since_cfg_poll += 1
 
             # Buffer für Scaler-Update füllen
             model.add_to_buffer(flow)
+
+            # Konfig-Datei periodisch neu lesen (Threshold-Änderungen zur Laufzeit)
+            if flows_since_cfg_poll >= CONFIG_POLL_FLOWS:
+                rt = _read_runtime_config(cfg.models_dir)
+                new_thr = rt.get("alert_threshold", ALERT_THRESHOLD)
+                new_pfi = rt.get("partial_fit_interval", cfg.partial_fit_interval)
+                if abs(new_thr - alert_threshold) > 0.001:
+                    log.info("Threshold updated: %.3f → %.3f", alert_threshold, new_thr)
+                    alert_threshold = new_thr
+                if new_pfi != partial_fit_interval:
+                    log.info("partial_fit_interval updated: %d → %d", partial_fit_interval, new_pfi)
+                    partial_fit_interval = new_pfi
+                flows_since_cfg_poll = 0
 
             # Score berechnen (nur wenn Modell bereit)
             if model.is_ready:
                 score = model.score(flow)
 
-                if score >= ALERT_THRESHOLD:
+                if score >= alert_threshold:
                     total_alerts += 1
                     alert = _make_alert(flow, score)
                     log.info(
@@ -188,7 +221,7 @@ def run(cfg: Config) -> None:
                     producer.poll(0)
 
             # Inkrementeller Scaler-Update
-            if flows_since_partial >= cfg.partial_fit_interval:
+            if flows_since_partial >= partial_fit_interval:
                 model.partial_fit_scaler()
                 flows_since_partial = 0
 

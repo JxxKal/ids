@@ -18,11 +18,13 @@ Label-Mapping:
 """
 from __future__ import annotations
 
+import json
 import logging
 import signal
 import sys
 import threading
 import time
+from pathlib import Path
 
 import orjson
 from confluent_kafka import Consumer, KafkaError
@@ -182,8 +184,15 @@ def run(cfg: Config) -> None:
             if now - last_retrain_ts < cfg.retrain_interval_s:
                 continue
 
+            # Sofort-Retrain via Trigger-Datei (z.B. nach Konfig-Änderung im UI)
+            trigger_file = Path(cfg.models_dir) / "retrain.trigger"
+            force_retrain = trigger_file.exists()
+            if force_retrain:
+                log.info("Retrain-Trigger erkannt – starte sofortigen Retrain")
+                trigger_file.unlink(missing_ok=True)
+
             new_count = db.count_new_samples(last_retrain_ts)
-            if new_count < cfg.min_new_samples and last_retrain_ts > 0:
+            if not force_retrain and new_count < cfg.min_new_samples and last_retrain_ts > 0:
                 log.info(
                     "Only %d new samples (need %d) – skipping retrain",
                     new_count,
@@ -192,7 +201,18 @@ def run(cfg: Config) -> None:
                 last_retrain_ts = now  # Intervall zurücksetzen
                 continue
 
-            log.info("Starting retrain (%d new samples since last run)", new_count)
+            log.info("Starting retrain (%d new samples since last run, forced=%s)", new_count, force_retrain)
+
+            # Contamination aus ml_config.json lesen (falls vorhanden)
+            contamination = cfg.contamination
+            cfg_file = Path(cfg.models_dir) / "ml_config.json"
+            if cfg_file.exists():
+                try:
+                    rt_cfg = json.loads(cfg_file.read_text())
+                    contamination = float(rt_cfg.get("contamination", contamination))
+                    log.info("Using contamination=%.4f from ml_config.json", contamination)
+                except Exception:
+                    pass
 
             normal_flows    = db.load_flows_for_bootstrap(cfg.max_train_samples)
             labeled_samples = db.load_samples(cfg.max_train_samples)
@@ -201,7 +221,7 @@ def run(cfg: Config) -> None:
                 normal_flows=normal_flows,
                 labeled_samples=labeled_samples,
                 models_dir=cfg.models_dir,
-                contamination=cfg.contamination,
+                contamination=contamination,
             )
 
             if success:

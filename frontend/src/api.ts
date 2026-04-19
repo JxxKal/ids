@@ -1,4 +1,4 @@
-import type { Alert, Host, KnownNetwork, MLStatus, RuleListResponse, RuleSource, SamlConfig, TestRun, ThreatLevel, UpdateStatus, User } from './types';
+import type { Alert, Host, KnownNetwork, MLConfig, MLStatus, RuleListResponse, RuleSource, SamlConfig, TestRun, ThreatLevel, UpdateStatus, User } from './types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
@@ -226,6 +226,18 @@ export async function deleteUser(id: string): Promise<void> {
 
 export async function fetchMLStatus(): Promise<MLStatus> {
   return req('/api/ml/status');
+}
+
+export async function fetchMLConfig(): Promise<MLConfig> {
+  return req('/api/ml/config');
+}
+
+export async function saveMLConfig(data: Partial<MLConfig>): Promise<MLConfig> {
+  return req('/api/ml/config', { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function triggerMLRetrain(): Promise<{ triggered: boolean; triggered_at: number }> {
+  return req('/api/ml/retrain', { method: 'POST' });
 }
 
 // ── Rules Engine ─────────────────────────────────────────────────────────────
