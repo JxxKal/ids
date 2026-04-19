@@ -310,7 +310,7 @@ services:
       ML_BOOTSTRAP_MIN: ${ML_BOOTSTRAP_MIN:-500}
     volumes:
       - snort-rules:/rules
-      - ml-models:/models:ro
+      - ml-models:/models
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
 
