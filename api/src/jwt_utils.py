@@ -6,11 +6,16 @@ from datetime import datetime, timedelta, timezone
 from jose import JWTError, jwt
 
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 8
+TOKEN_EXPIRE_HOURS     = 8
+API_TOKEN_EXPIRE_DAYS  = 365
 
 
 def create_token(secret: str, user_id: str, username: str, role: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
+    """Erstellt ein JWT – API-User erhalten ein Token mit 365 Tagen Laufzeit."""
+    if role == "api":
+        expire = datetime.now(timezone.utc) + timedelta(days=API_TOKEN_EXPIRE_DAYS)
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
     return jwt.encode(
         {"sub": user_id, "username": username, "role": role, "exp": expire},
         secret,
