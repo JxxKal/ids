@@ -25,22 +25,36 @@ export function useWebSocket() {
       try {
         const msg = JSON.parse(ev.data) as WsMessage;
         if (msg.type === 'initial') {
-          // Merge mit bestehendem State: Feedback/pcap-Flags aus lokalem State behalten,
-          // falls der DB-Snapshot sie noch nicht hat (Race condition beim Reconnect)
+          // Merge mit bestehendem State:
+          // 1. DB-Snapshot ist Source of Truth für neue Felder
+          // 2. Lokale Flags (feedback, pcap) haben Vorrang vor dem DB-Snapshot
+          //    (Race condition: DB-Snapshot kann veraltet sein)
+          // 3. Alerts aus lokalem State die NICHT im DB-Snapshot sind, bleiben erhalten
+          //    (z.B. ML-Alert oder ältere Alerts die aus dem 50er-Fenster rausgefallen sind)
           setAlerts(prev => {
-            const prevMap = new Map(prev.map(a => [a.alert_id, a]));
-            const merged = msg.data.map(incoming => {
+            const incomingMap = new Map(msg.data.map(a => [a.alert_id, a]));
+            const prevMap     = new Map(prev.map(a => [a.alert_id, a]));
+
+            // DB-Snapshot mit lokalen Flags mergen
+            const fromDb: Alert[] = msg.data.map(incoming => {
               const existing = prevMap.get(incoming.alert_id);
               if (!existing) return incoming;
               return {
                 ...incoming,
-                feedback:      existing.feedback      ?? incoming.feedback,
-                feedback_ts:   existing.feedback_ts   ?? incoming.feedback_ts,
-                feedback_note: existing.feedback_note ?? incoming.feedback_note,
+                feedback:       existing.feedback       ?? incoming.feedback,
+                feedback_ts:    existing.feedback_ts    ?? incoming.feedback_ts,
+                feedback_note:  existing.feedback_note  ?? incoming.feedback_note,
                 pcap_available: existing.pcap_available || incoming.pcap_available,
-              };
+              } satisfies Alert;
             });
-            return merged.slice(-MAX_ALERTS);
+
+            // Lokale Alerts die nicht im DB-Snapshot sind, erhalten bleiben
+            const localOnly = prev.filter(a => !incomingMap.has(a.alert_id));
+
+            // Zusammenführen, nach Timestamp sortieren, auf MAX_ALERTS begrenzen
+            return [...localOnly, ...fromDb]
+              .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+              .slice(0, MAX_ALERTS);
           });
         } else if (msg.type === 'alert') {
           setAlerts(prev => {
@@ -60,7 +74,12 @@ export function useWebSocket() {
         } else if (msg.type === 'feedback_updated') {
           const { alert_id, feedback, feedback_ts, feedback_note } = msg.data;
           setAlerts(prev => prev.map(a =>
-            a.alert_id === alert_id ? { ...a, feedback, feedback_ts, feedback_note } : a,
+            a.alert_id === alert_id ? {
+              ...a,
+              feedback,
+              feedback_ts:   feedback_ts   ?? undefined,
+              feedback_note: feedback_note ?? undefined,
+            } : a,
           ));
         }
       } catch {
