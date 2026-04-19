@@ -26,6 +26,7 @@ import logging
 import signal
 import sys
 import time
+from datetime import datetime, timezone
 
 import orjson
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
@@ -99,7 +100,17 @@ def _handle_alert(msg_value: bytes, pending: list[PendingAlert], window_s: float
         alert    = orjson.loads(msg_value)
         log.info("Alert received: keys=%s", list(alert.keys()))
         alert_id = alert.get("alert_id")
-        alert_ts = float(alert.get("ts") or time.time())
+        ts_raw = alert.get("ts")
+        if ts_raw:
+            try:
+                alert_ts = datetime.fromisoformat(str(ts_raw)).timestamp()
+            except (ValueError, TypeError):
+                try:
+                    alert_ts = float(ts_raw)
+                except (ValueError, TypeError):
+                    alert_ts = time.time()
+        else:
+            alert_ts = time.time()
         if not alert_id:
             log.warning("Alert dropped: no alert_id field. Full alert: %s", alert)
             return
