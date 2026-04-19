@@ -33,6 +33,9 @@ export default function App() {
   const [showTest, setShowTest] = useState(
     () => localStorage.getItem('showTest') === 'true'
   );
+  const [mlOnly, setMlOnly] = useState(
+    () => localStorage.getItem('mlOnly') === 'true'
+  );
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('live');
   const [historicAlerts, setHistoricAlerts] = useState<Alert[]>([]);
   const [isLoading, setIsLoading]   = useState(false);
@@ -53,13 +56,18 @@ export default function App() {
     let cancelled = false;
     setIsLoading(true);
 
-    fetchAlerts({ ts_from: Date.now() / 1000 - win.seconds, limit: 500, is_test: showTest ? null : false })
+    fetchAlerts({
+      ts_from: Date.now() / 1000 - win.seconds,
+      limit: 500,
+      is_test: showTest ? null : false,
+      source: mlOnly ? 'ml' : undefined,
+    })
       .then(r  => { if (!cancelled) setHistoricAlerts(r.alerts); })
       .catch(e => { console.error('historic fetch:', e); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [timeWindow, refreshKey, showTest]);
+  }, [timeWindow, refreshKey, showTest, mlOnly]);
 
   const handleWindowSelect = (w: TimeWindow) => {
     if (w === timeWindow && w !== 'live') {
@@ -71,7 +79,9 @@ export default function App() {
   };
 
   const displayAlerts = timeWindow === 'live' ? alerts : historicAlerts;
-  const alertCount    = displayAlerts.filter(a => showTest || !a.is_test).length;
+  const alertCount    = displayAlerts.filter(a =>
+    (showTest || !a.is_test) && (!mlOnly || a.source === 'ml')
+  ).length;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -151,6 +161,24 @@ export default function App() {
                 {isLoading ? 'Lade…' : `${alertCount} Alerts`}
               </span>
 
+              {/* KI/ML-Filter – immer sichtbar */}
+              <label htmlFor="ml-only-toggle" className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                <input
+                  id="ml-only-toggle"
+                  name="ml-only-toggle"
+                  type="checkbox"
+                  className="accent-cyan-500"
+                  checked={mlOnly}
+                  onChange={e => {
+                    setMlOnly(e.target.checked);
+                    localStorage.setItem('mlOnly', String(e.target.checked));
+                  }}
+                />
+                <span className={mlOnly ? 'text-cyan-400 font-medium' : 'text-slate-500'}>
+                  Nur KI/ML-Alarme
+                </span>
+              </label>
+
               {/* Test-Toggle – nur im Live-Modus */}
               {timeWindow === 'live' && (
                 <label htmlFor="show-test-toggle" className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
@@ -183,6 +211,7 @@ export default function App() {
                   alerts={displayAlerts}
                   onUpdate={handleUpdate}
                   showTest={showTest}
+                  mlOnly={mlOnly}
                 />
               </ErrorBoundary>
             </div>

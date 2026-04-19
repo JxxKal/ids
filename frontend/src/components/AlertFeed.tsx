@@ -52,6 +52,7 @@ interface Props {
   alerts: Alert[];
   onUpdate: (a: Alert) => void;
   showTest: boolean;
+  mlOnly: boolean;
 }
 
 const SEVERITIES = ['', 'critical', 'high', 'medium', 'low'];
@@ -117,7 +118,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
 
 // ── Komponente ─────────────────────────────────────────────────────────────────
 
-export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
+export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
   const [selected,  setSelected]  = useState<Alert | null>(null);
   const [severityF, setSeverityF] = useState('');
   const [search,    setSearch]    = useState('');
@@ -125,6 +126,7 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
 
   const filtered = alerts.filter(a => {
     if (!showTest && a.is_test) return false;
+    if (mlOnly && a.source !== 'ml') return false;
     if (severityF && a.severity !== severityF) return false;
     if (search) {
       const q = search.toLowerCase();
