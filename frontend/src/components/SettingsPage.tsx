@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   addRuleSource, createUser, deleteRuleSource, deleteUser,
-  fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
+  fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
   fetchSamlConfig, fetchUsers, patchRuleSource,
-  saveSamlConfig, triggerRuleUpdate, updateUser,
+  saveMLConfig, saveSamlConfig, triggerMLRetrain, triggerRuleUpdate, updateUser,
 } from '../api';
-import type { MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
+import type { MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -406,10 +406,69 @@ function PhaseIndicator({ phase }: { phase: MLStatus['phase'] }) {
   );
 }
 
+const PARAM_DOCS = [
+  {
+    key: 'alert_threshold' as const,
+    label: 'Alert-Schwellwert',
+    min: 0.50, max: 0.95, step: 0.01,
+    fmt: (v: number) => v.toFixed(2),
+    hint: 'Score ab dem ein Flow als Anomalie gilt (0.50–0.95). Höher = weniger, aber konfidentere Alerts. Für große Umgebungen mit viel Hintergrundrauschen empfohlen: 0.75–0.85.',
+    presets: [
+      { label: 'Sensibel',     value: 0.60, desc: 'Viele Alerts, frühe Erkennung' },
+      { label: 'Ausgewogen',   value: 0.65, desc: 'Standard' },
+      { label: 'Präzise',     value: 0.75, desc: 'Weniger Alerts, höhere Konfidenz' },
+      { label: 'Konservativ', value: 0.85, desc: 'Nur eindeutige Anomalien' },
+    ],
+  },
+  {
+    key: 'contamination' as const,
+    label: 'Contamination',
+    min: 0.001, max: 0.2, step: 0.001,
+    fmt: (v: number) => `${(v * 100).toFixed(1)} %`,
+    hint: 'Erwarteter Anteil anomaler Flows im Trainingsdatensatz (0.1 %–20 %). Änderung löst automatisch einen Retrain aus. OT/SCADA mit stabilem Traffic: 0.5–1 %. Große IT-Netze: 2–5 %.',
+    presets: [
+      { label: 'OT/SCADA',  value: 0.005, desc: 'Sehr stabiles Protokollbild' },
+      { label: 'Standard',  value: 0.010, desc: 'Ausgewogen' },
+      { label: 'Gemischtes Netz', value: 0.030, desc: 'IT + OT kombiniert' },
+      { label: 'Große IT',  value: 0.050, desc: 'Viel diverser Verkehr' },
+    ],
+  },
+  {
+    key: 'bootstrap_min_samples' as const,
+    label: 'Mindest-Flows für Training',
+    min: 100, max: 50000, step: 100,
+    fmt: (v: number) => v.toLocaleString(),
+    hint: 'Anzahl Flows die gesammelt werden müssen bevor das erste Modell trainiert wird. Für große Netze mit breitem Traffic-Profil: 2.000–10.000.',
+    presets: [
+      { label: 'Klein',   value: 500,   desc: 'Schneller Start' },
+      { label: 'Mittel',  value: 2000,  desc: 'Ausgewogen' },
+      { label: 'Groß',    value: 10000, desc: 'Breites Traffic-Profil' },
+      { label: 'Sehr groß', value: 50000, desc: 'Großes Rechenzentrum' },
+    ],
+  },
+  {
+    key: 'partial_fit_interval' as const,
+    label: 'Scaler-Update-Intervall',
+    min: 50, max: 5000, step: 50,
+    fmt: (v: number) => `alle ${v.toLocaleString()} Flows`,
+    hint: 'Wie oft der Feature-Normalisierer (StandardScaler) inkrementell angepasst wird. Kleinerer Wert = schnellere Adaption an neue Traffic-Muster, höhere CPU-Last.',
+    presets: [
+      { label: 'Reaktiv',   value: 100,  desc: 'Schnelle Adaption' },
+      { label: 'Standard',  value: 200,  desc: '' },
+      { label: 'Stabil',    value: 1000, desc: 'Weniger CPU-Last' },
+    ],
+  },
+];
+
 function MLStatusSection() {
   const [status,  setStatus]  = useState<MLStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
+  const [cfg,     setCfg]     = useState<MLConfig | null>(null);
+  const [cfgDraft, setCfgDraft] = useState<MLConfig | null>(null);
+  const [saving,   setSaving]  = useState(false);
+  const [saveMsg,  setSaveMsg] = useState('');
+  const [retraining, setRetraining] = useState(false);
 
   useEffect(() => {
     fetchMLStatus()
@@ -417,6 +476,40 @@ function MLStatusSection() {
       .catch(() => setError('ML-Status konnte nicht geladen werden'))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    fetchMLConfig()
+      .then(c => { setCfg(c); setCfgDraft(c); })
+      .catch(() => {/* Backend liefert Defaults */});
+  }, []);
+
+  async function handleSaveConfig() {
+    if (!cfgDraft) return;
+    setSaving(true); setSaveMsg('');
+    try {
+      const updated = await saveMLConfig(cfgDraft);
+      setCfg(updated); setCfgDraft(updated);
+      setSaveMsg('ok');
+      setTimeout(() => setSaveMsg(''), 3000);
+    } catch (err: unknown) {
+      setSaveMsg('err:' + (err instanceof Error ? err.message : 'Fehler beim Speichern'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRetrain() {
+    setRetraining(true); setSaveMsg('');
+    try {
+      await triggerMLRetrain();
+      setSaveMsg('retrain');
+      setTimeout(() => setSaveMsg(''), 5000);
+    } catch (err: unknown) {
+      setSaveMsg('err:' + (err instanceof Error ? err.message : 'Fehler'));
+    } finally {
+      setRetraining(false);
+    }
+  }
 
   if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
   if (error)   return <p className="text-red-400 text-sm">{error}</p>;
@@ -556,6 +649,89 @@ function MLStatusSection() {
         <p className="text-xs text-slate-600 italic">
           In den letzten 24 Stunden keine ML-Alerts – kein anomaler Verkehr erkannt oder ML-Filter zu lax konfiguriert.
         </p>
+      )}
+
+      {/* ── ML-Konfiguration ─────────────────────────────────────────── */}
+      {cfgDraft && (
+        <div className="border-t border-slate-800 pt-5 space-y-5">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-200">Filter-Konfiguration</h3>
+            <div className="flex items-center gap-2">
+              {saveMsg === 'ok'     && <span className="text-xs text-green-400">Gespeichert ✓</span>}
+              {saveMsg === 'retrain'&& <span className="text-xs text-blue-400">Retrain ausgelöst ✓</span>}
+              {saveMsg.startsWith('err:') && <span className="text-xs text-red-400">{saveMsg.slice(4)}</span>}
+              <button
+                className="btn-ghost text-xs"
+                disabled={retraining}
+                onClick={handleRetrain}
+              >
+                {retraining ? 'Wird ausgelöst…' : '↺ Retrain jetzt starten'}
+              </button>
+              <button
+                className="btn-primary text-xs"
+                disabled={saving || !cfg || JSON.stringify(cfgDraft) === JSON.stringify(cfg)}
+                onClick={handleSaveConfig}
+              >
+                {saving ? 'Speichern…' : 'Speichern'}
+              </button>
+            </div>
+          </div>
+
+          {PARAM_DOCS.map(p => {
+            const val = cfgDraft[p.key] as number;
+            return (
+              <div key={p.key} className="space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <label className="text-xs font-medium text-slate-300">{p.label}</label>
+                  <span className="text-xs font-mono text-cyan-400">{p.fmt(val)}</span>
+                </div>
+
+                {/* Slider + Zahlenfeld */}
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={p.min} max={p.max} step={p.step}
+                    value={val}
+                    onChange={e => setCfgDraft(d => d ? { ...d, [p.key]: parseFloat(e.target.value) } : d)}
+                    className="flex-1 accent-cyan-500 cursor-pointer h-1.5"
+                  />
+                  <input
+                    type="number"
+                    min={p.min} max={p.max} step={p.step}
+                    value={val}
+                    onChange={e => {
+                      const n = parseFloat(e.target.value);
+                      if (!isNaN(n) && n >= p.min && n <= p.max)
+                        setCfgDraft(d => d ? { ...d, [p.key]: n } : d);
+                    }}
+                    className="input text-xs w-24 font-mono"
+                  />
+                </div>
+
+                {/* Preset-Buttons */}
+                <div className="flex flex-wrap gap-1.5">
+                  {p.presets.map(pr => (
+                    <button
+                      key={pr.label}
+                      onClick={() => setCfgDraft(d => d ? { ...d, [p.key]: pr.value } : d)}
+                      title={pr.desc}
+                      className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                        Math.abs(val - pr.value) < p.step * 0.5
+                          ? 'bg-cyan-900/50 border-cyan-600/60 text-cyan-300'
+                          : 'bg-slate-800/50 border-slate-700/40 text-slate-400 hover:border-slate-500/60 hover:text-slate-300'
+                      }`}
+                    >
+                      {pr.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Hinweistext */}
+                <p className="text-[11px] text-slate-600 leading-relaxed">{p.hint}</p>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
