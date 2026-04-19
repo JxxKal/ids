@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createNetwork, deleteNetwork, fetchNetworks, importNetworksCsv, networksExampleCsvUrl } from '../api';
+import { createNetwork, deleteNetwork, downloadNetworksExampleCsv, fetchNetworks, importNetworksCsv } from '../api';
 import type { KnownNetwork } from '../types';
 
 export function NetworksPage() {
@@ -63,14 +63,13 @@ export function NetworksPage() {
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-slate-300">Netzwerk hinzufügen</h2>
           <div className="flex items-center gap-2">
-            <a
-              href={networksExampleCsvUrl()}
-              download="networks_example.csv"
+            <button
+              onClick={() => downloadNetworksExampleCsv().catch(() => {})}
               className="btn-ghost text-xs text-slate-500 hover:text-slate-300"
               title="Beispiel-CSV herunterladen"
             >
               Beispiel-CSV
-            </a>
+            </button>
             <label className="btn-ghost cursor-pointer text-xs">
               CSV importieren
               <input

@@ -194,8 +194,17 @@ export async function importHostsCsv(file: File): Promise<{ imported: number; sk
   return res.json();
 }
 
-export function hostsExampleCsvUrl(): string {
-  return `${BASE}/api/hosts/example.csv`;
+export async function downloadHostsExampleCsv(): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/hosts/example.csv`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'hosts_example.csv'; a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function importNetworksCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
@@ -210,8 +219,17 @@ export async function importNetworksCsv(file: File): Promise<{ imported: number;
   return res.json();
 }
 
-export function networksExampleCsvUrl(): string {
-  return `${BASE}/api/networks/example.csv`;
+export async function downloadNetworksExampleCsv(): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/networks/example.csv`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'networks_example.csv'; a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
