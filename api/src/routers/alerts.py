@@ -150,19 +150,28 @@ async def set_feedback(
 
     alert = _row_to_alert(row)
 
-    # Feedback-Event auf Kafka publizieren (für training-loop)
     if _feedback_producer is not None:
         try:
-            event = {
-                "alert_id":  alert_id,
-                "feedback":  body.feedback,
-                "note":      body.note,
-                "rule_id":   alert.rule_id,
-                "source":    alert.source,
-                "score":     alert.score,
-                "ts":        time.time(),
-            }
-            _feedback_producer.produce("feedback", value=orjson.dumps(event))
+            # Training-Event für training-loop
+            _feedback_producer.produce("feedback", value=orjson.dumps({
+                "alert_id": alert_id,
+                "feedback": body.feedback,
+                "note":     body.note,
+                "rule_id":  alert.rule_id,
+                "source":   alert.source,
+                "score":    alert.score,
+                "ts":       time.time(),
+            }))
+            # WS-Push-Event damit alle Clients den Status live sehen
+            _feedback_producer.produce("alerts-enriched-push", value=orjson.dumps({
+                "type": "feedback_updated",
+                "data": {
+                    "alert_id":     alert_id,
+                    "feedback":     body.feedback,
+                    "feedback_ts":  alert.feedback_ts.isoformat() if alert.feedback_ts else None,
+                    "feedback_note": body.note,
+                },
+            }))
             _feedback_producer.poll(0)
         except Exception:
             pass  # Kafka-Fehler darf UI nicht blockieren
