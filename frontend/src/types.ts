@@ -102,6 +102,29 @@ export interface TestRun {
   error?: string;
 }
 
+export interface User {
+  id:           string;
+  username:     string;
+  email?:       string;
+  display_name?: string;
+  role:         'admin' | 'viewer';
+  source:       'local' | 'saml';
+  active:       boolean;
+  created_at:   string;
+  last_login?:  string;
+}
+
+export interface SamlConfig {
+  enabled:              boolean;
+  idp_metadata_url:     string;
+  sp_entity_id:         string;
+  acs_url:              string;
+  attribute_username:   string;
+  attribute_email:      string;
+  attribute_display_name: string;
+  default_role:         'admin' | 'viewer';
+}
+
 export type WsMessage =
   | { type: 'initial';       data: Alert[] }
   | { type: 'alert';         data: Alert }

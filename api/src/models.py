@@ -133,6 +133,36 @@ class ConfigUpdate(BaseModel):
     value: dict[str, Any]
 
 
+# ── Users ─────────────────────────────────────────────────────────────────────
+
+class UserResponse(BaseModel):
+    id:           UUID
+    username:     str
+    email:        str | None = None
+    display_name: str | None = None
+    role:         str
+    source:       str
+    active:       bool
+    created_at:   datetime
+    last_login:   datetime | None = None
+
+
+class UserCreate(BaseModel):
+    username:     str = Field(..., min_length=2, max_length=64, pattern=r'^[a-zA-Z0-9._@-]+$')
+    email:        str | None = None
+    display_name: str | None = None
+    role:         str = Field(default='viewer', pattern='^(admin|viewer)$')
+    password:     str = Field(..., min_length=8)
+
+
+class UserUpdate(BaseModel):
+    email:        str | None = None
+    display_name: str | None = None
+    role:         str | None = Field(default=None, pattern='^(admin|viewer)$')
+    active:       bool | None = None
+    password:     str | None = Field(default=None, min_length=8)
+
+
 # ── Test Runs ─────────────────────────────────────────────────────────────────
 
 class TestRunRequest(BaseModel):
