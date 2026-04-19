@@ -113,6 +113,28 @@ class NetworkCreate(BaseModel):
     color:       str | None = None
 
 
+# ── Connection Graph ──────────────────────────────────────────────────────────
+
+class ConnectionSummary(BaseModel):
+    src_ip:     str
+    dst_ip:     str
+    dst_port:   int | None
+    proto:      str
+    flow_count: int
+    pkt_count:  int
+    byte_count:  int
+    first_seen: datetime
+    last_seen:  datetime
+
+
+class ConnectionGraphResponse(BaseModel):
+    src_ip:      str
+    dst_ip:      str
+    window_min:  int
+    total_flows: int
+    connections: list[ConnectionSummary]
+
+
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 class ThreatLevelResponse(BaseModel):

@@ -240,6 +240,43 @@ export async function triggerMLRetrain(): Promise<{ triggered: boolean; triggere
   return req('/api/ml/retrain', { method: 'POST' });
 }
 
+// ── Connection Graph ─────────────────────────────────────────────────────────
+
+export interface ConnectionSummary {
+  src_ip:     string;
+  dst_ip:     string;
+  dst_port:   number | null;
+  proto:      string;
+  flow_count: number;
+  pkt_count:  number;
+  byte_count: number;
+  first_seen: string;
+  last_seen:  string;
+}
+
+export interface ConnectionGraphData {
+  src_ip:      string;
+  dst_ip:      string;
+  window_min:  number;
+  total_flows: number;
+  connections: ConnectionSummary[];
+}
+
+export async function fetchConnectionGraph(
+  srcIp: string,
+  dstIp: string,
+  centerTs: number,   // Unix seconds
+  windowMin = 5,
+): Promise<ConnectionGraphData> {
+  const p = new URLSearchParams({
+    src_ip:     srcIp,
+    dst_ip:     dstIp,
+    center_ts:  String(centerTs),
+    window_min: String(windowMin),
+  });
+  return req(`/api/flows/graph?${p}`);
+}
+
 // ── Rules Engine ─────────────────────────────────────────────────────────────
 
 export async function fetchRuleSources(): Promise<RuleSource[]> {
