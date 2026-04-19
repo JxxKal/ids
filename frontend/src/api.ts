@@ -1,4 +1,4 @@
-import type { Alert, Host, KnownNetwork, TestRun, ThreatLevel } from './types';
+import type { Alert, Host, KnownNetwork, SamlConfig, TestRun, ThreatLevel, User } from './types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
@@ -141,4 +141,45 @@ export async function deleteTestRun(runId: string): Promise<void> {
 
 export async function deleteAllTestRuns(): Promise<void> {
   return req('/api/tests/runs', { method: 'DELETE' });
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+
+export async function fetchUsers(): Promise<User[]> {
+  return req('/api/users');
+}
+
+export async function createUser(data: {
+  username: string;
+  email?: string;
+  display_name?: string;
+  role: 'admin' | 'viewer';
+  password: string;
+}): Promise<User> {
+  return req('/api/users', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateUser(id: string, data: {
+  email?: string;
+  display_name?: string;
+  role?: 'admin' | 'viewer';
+  active?: boolean;
+  password?: string;
+}): Promise<User> {
+  return req(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function deleteUser(id: string): Promise<void> {
+  return req(`/api/users/${id}`, { method: 'DELETE' });
+}
+
+// ── SAML Config ───────────────────────────────────────────────────────────────
+
+export async function fetchSamlConfig(): Promise<SamlConfig> {
+  const r = await req<{ key: string; value: SamlConfig }>('/api/config/saml');
+  return r.value;
+}
+
+export async function saveSamlConfig(value: SamlConfig): Promise<void> {
+  await req('/api/config/saml', { method: 'PATCH', body: JSON.stringify({ value }) });
 }

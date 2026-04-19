@@ -4,6 +4,7 @@ import { AlertFeed } from './components/AlertFeed';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HostsPage } from './components/HostsPage';
 import { NetworksPage } from './components/NetworksPage';
+import { SettingsPage } from './components/SettingsPage';
 import { TestsPage } from './components/TestsPage';
 import { ThreatGauge } from './components/ThreatGauge';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -224,11 +225,7 @@ export default function App() {
         {tab === 'networks'  && <NetworksPage />}
         {tab === 'hosts'     && <HostsPage />}
         {tab === 'tests'     && <TestsPage />}
-        {tab === 'settings'  && (
-          <div className="flex items-center justify-center h-full text-slate-600 text-sm">
-            Settings — coming soon
-          </div>
-        )}
+        {tab === 'settings'  && <SettingsPage />}
       </main>
     </div>
   );
