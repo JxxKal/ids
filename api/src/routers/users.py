@@ -99,7 +99,7 @@ async def update_user(
     return _row_to_user(updated)
 
 
-@router.delete("/{user_id}", status_code=204)
+@router.delete("/{user_id}", status_code=204, response_model=None)
 async def delete_user(
     user_id: UUID,
     pool:    asyncpg.Pool = Depends(get_pool),
