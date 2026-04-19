@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Alert, Enrichment } from '../types';
-import { getToken, pcapUrl } from '../api';
+import { alertsExportUrl, getToken, pcapUrl } from '../api';
 import { AlertDetail } from './AlertDetail';
 import { SeverityBadge } from './SeverityBadge';
 
@@ -196,6 +196,8 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
 export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
   const [selected,  setSelected]  = useState<Alert | null>(null);
   const [severityF, setSeverityF] = useState('');
+  const [sourceF,   setSourceF]   = useState('');
+  const [feedbackF, setFeedbackF] = useState('');
   const [search,    setSearch]    = useState('');
   const [grouped,   setGrouped]   = useState(true);
 
@@ -203,16 +205,29 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
     if (!showTest && a.is_test) return false;
     if (mlOnly && a.source !== 'ml') return false;
     if (severityF && a.severity !== severityF) return false;
+    if (sourceF   && a.source   !== sourceF)   return false;
+    if (feedbackF === 'none' && a.feedback)     return false;
+    if (feedbackF === 'fp'   && a.feedback !== 'fp') return false;
+    if (feedbackF === 'tp'   && a.feedback !== 'tp') return false;
     if (search) {
       const q = search.toLowerCase();
       return (
         a.src_ip?.includes(q) ||
         a.dst_ip?.includes(q) ||
         a.rule_id?.toLowerCase().includes(q) ||
-        a.description?.toLowerCase().includes(q)
+        a.description?.toLowerCase().includes(q) ||
+        a.tags.some(t => t.toLowerCase().includes(q))
       );
     }
     return true;
+  });
+
+  // Export-URL passend zu aktiven Filtern aufbauen
+  const exportUrl = alertsExportUrl({
+    severity: severityF  || undefined,
+    source:   sourceF    || undefined,
+    feedback: feedbackF  || undefined,
+    is_test:  showTest ? null : false,
   });
 
   const groups  = grouped ? groupAlerts(filtered) : null;
@@ -226,25 +241,34 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
   return (
     <div className="card flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-800">
         <input
           id="alert-search"
           name="alert-search"
-          className="input flex-1"
-          placeholder="Suche (IP, Regel, …)"
+          className="input flex-1 min-w-32"
+          placeholder="Suche: IP, Regel, Tag, …"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <select
-          id="alert-severity"
-          name="alert-severity"
-          className="input w-32"
-          value={severityF}
-          onChange={e => setSeverityF(e.target.value)}
-        >
+        <select className="input w-28" value={severityF} onChange={e => setSeverityF(e.target.value)}
+          title="Schweregrad filtern">
           {SEVERITIES.map(s => (
-            <option key={s} value={s}>{s || 'Alle Schweregrade'}</option>
+            <option key={s} value={s}>{s || 'Schweregrad'}</option>
           ))}
+        </select>
+        <select className="input w-28" value={sourceF} onChange={e => setSourceF(e.target.value)}
+          title="Quelle filtern">
+          <option value="">Alle Quellen</option>
+          <option value="signature">Signatur</option>
+          <option value="ml">ML / KI</option>
+          <option value="suricata">Suricata</option>
+        </select>
+        <select className="input w-28" value={feedbackF} onChange={e => setFeedbackF(e.target.value)}
+          title="Feedback-Status filtern">
+          <option value="">Alle</option>
+          <option value="none">Kein Feedback</option>
+          <option value="fp">False Positive</option>
+          <option value="tp">True Positive</option>
         </select>
 
         {/* Gruppierungs-Toggle */}
@@ -255,10 +279,20 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
               ? 'bg-blue-900/60 text-blue-200 border-blue-700'
               : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
           }`}
-          title="Gleiche Regel + Quell-IP zusammenfassen (zeigt Treffer-Anzahl)"
+          title="Gleiche Regel + Quell-IP zusammenfassen"
         >
           {grouped ? '⊞ Gruppiert' : '≡ Einzeln'}
         </button>
+
+        {/* CSV-Export */}
+        <a
+          href={exportUrl}
+          download="alerts_export.csv"
+          className="px-2.5 py-1 rounded text-xs font-medium border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
+          title="Gefilterte Alerts als CSV exportieren (max. 5000)"
+        >
+          ↓ CSV
+        </a>
 
         <span className="text-sm font-medium text-slate-300 shrink-0">
           {rowCount} <span className="text-xs font-normal text-slate-500">{grouped && groups!.some(g => g.count > 1) ? 'Gruppen' : 'Alerts'}</span>
