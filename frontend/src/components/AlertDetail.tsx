@@ -109,8 +109,36 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           )}
         </div>
 
+        {/* Feedback-Status Banner (wenn bereits gesetzt) */}
+        {alert.feedback && (
+          <div className={`mx-4 mt-3 rounded-lg border px-3 py-2.5 text-xs ${
+            alert.feedback === 'fp'
+              ? 'bg-green-950/30 border-green-700/40'
+              : 'bg-red-950/30 border-red-700/40'
+          }`}>
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`font-semibold ${alert.feedback === 'fp' ? 'text-green-300' : 'text-red-300'}`}>
+                {alert.feedback === 'fp' ? '✓ False Positive – Falschalarm bestätigt' : '⚠ True Positive – Angriff bestätigt'}
+              </span>
+              {alert.feedback_ts && (
+                <span className="text-slate-600 ml-auto">{new Date(alert.feedback_ts).toLocaleString()}</span>
+              )}
+            </div>
+            {alert.feedback_note && (
+              <p className="text-slate-400 mb-1.5">Notiz: {alert.feedback_note}</p>
+            )}
+            <p className="text-slate-600 flex items-center gap-1">
+              <span className="text-cyan-700">⬡</span>
+              Dieses Feedback fließt beim nächsten Modell-Retrain in das KI-Training ein
+              {alert.source !== 'ml'
+                ? ' (nur ML-Alerts werden als Trainings-Sample verwendet).'
+                : '.'}
+            </p>
+          </div>
+        )}
+
         {/* Actions */}
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-slate-800">
+        <div className="flex items-center gap-2 px-4 py-3 border-t border-slate-800 mt-3">
           {alert.pcap_available && (
             <a href={pcapUrl(alert.alert_id)} download className="btn-primary">
               PCAP herunterladen
@@ -125,25 +153,16 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
                 value={note}
                 onChange={e => setNote(e.target.value)}
               />
-              <button
-                onClick={() => giveFeedback('tp')}
-                disabled={loading}
-                className="btn-danger"
-              >
-                True Positive
+              <button onClick={() => giveFeedback('tp')} disabled={loading} className="btn-danger">
+                ⚠ True Positive
               </button>
-              <button
-                onClick={() => giveFeedback('fp')}
-                disabled={loading}
-                className="btn-success"
-              >
-                False Positive
+              <button onClick={() => giveFeedback('fp')} disabled={loading} className="btn-success">
+                ✓ False Positive
               </button>
             </>
           ) : (
-            <span className="text-xs text-slate-400">
-              Feedback: <span className="text-slate-200 font-medium">{alert.feedback.toUpperCase()}</span>
-              {alert.feedback_note && ` – ${alert.feedback_note}`}
+            <span className="text-xs text-slate-600 italic">
+              Feedback wurde gesetzt – Buttons deaktiviert.
             </span>
           )}
         </div>

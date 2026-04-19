@@ -130,6 +130,12 @@ interface AlertGroup {
 
 const OT_TAGS = new Set(['scada', 'ics', 'modbus', 'dnp3', 'ethernet/ip', 'bacnet', 'ot']);
 
+function FeedbackBadge({ feedback }: { feedback: 'fp' | 'tp' }) {
+  return feedback === 'fp'
+    ? <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] leading-none bg-green-950/50 text-green-300 border-green-700/40" title="False Positive – Falschalarm bestätigt, fließt in ML-Training ein">✓ FP</span>
+    : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] leading-none bg-red-950/50 text-red-300 border-red-700/40"   title="True Positive – Angriff bestätigt, fließt in ML-Training ein">⚠ TP</span>;
+}
+
 function TagList({ tags }: { tags: string[] }) {
   if (!tags.length) return <span className="text-slate-700">–</span>;
   return (
@@ -317,10 +323,13 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" />
                   </td>
                   <td className="px-3 py-2 text-right">
-                    {g.count > 1
-                      ? <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-mono">×{g.count}</span>
-                      : <span className="text-slate-600">1</span>
-                    }
+                    <div className="flex items-center justify-end gap-1.5">
+                      {g.latest.feedback && <FeedbackBadge feedback={g.latest.feedback} />}
+                      {g.count > 1
+                        ? <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-mono">×{g.count}</span>
+                        : <span className="text-slate-600">1</span>
+                      }
+                    </div>
                   </td>
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                     <PcapButton alertId={g.latest.alert_id} available={g.latest.pcap_available} />
@@ -380,11 +389,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   <td className="px-3 py-2 tabular-nums text-slate-400">{(a.score ?? 0).toFixed(2)}</td>
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1.5">
-                      {a.feedback && (
-                        <span className={`text-[11px] font-medium ${a.feedback === 'fp' ? 'text-green-500' : 'text-red-400'}`}>
-                          {a.feedback.toUpperCase()}
-                        </span>
-                      )}
+                      {a.feedback && <FeedbackBadge feedback={a.feedback} />}
                       <PcapButton alertId={a.alert_id} available={a.pcap_available} />
                     </div>
                   </td>
