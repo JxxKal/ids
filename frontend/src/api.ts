@@ -166,9 +166,33 @@ export async function deleteHost(ip: string): Promise<void> {
 export async function importHostsCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
   const fd = new FormData();
   fd.append('file', file);
-  const res = await fetch(`${BASE}/api/hosts/import/csv`, { method: 'POST', body: fd });
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/hosts/import/csv`, {
+    method: 'POST', body: fd,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
+}
+
+export function hostsExampleCsvUrl(): string {
+  return `${BASE}/api/hosts/example.csv`;
+}
+
+export async function importNetworksCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/networks/import/csv`, {
+    method: 'POST', body: fd,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+export function networksExampleCsvUrl(): string {
+  return `${BASE}/api/networks/example.csv`;
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
