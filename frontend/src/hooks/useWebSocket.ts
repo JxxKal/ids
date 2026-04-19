@@ -36,6 +36,11 @@ export function useWebSocket() {
           setAlerts(prev => prev.map(a =>
             a.alert_id === alert_id ? { ...a, enrichment } : a,
           ));
+        } else if (msg.type === 'pcap_available') {
+          const { alert_id } = msg.data;
+          setAlerts(prev => prev.map(a =>
+            a.alert_id === alert_id ? { ...a, pcap_available: true } : a,
+          ));
         }
       } catch {
         // ignore parse errors
