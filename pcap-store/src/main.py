@@ -28,12 +28,22 @@ import sys
 import time
 
 import orjson
-from confluent_kafka import Consumer, KafkaError, KafkaException
+from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 
 from buffer import PacketBuffer, PendingAlert
 from config import Config
 from pcap_writer import build_pcap
 from storage import PcapStorage
+
+PUSH_TOPIC = "alerts-enriched-push"
+
+
+def _make_producer(brokers: str) -> Producer:
+    return Producer({
+        "bootstrap.servers": brokers,
+        "acks": "1",
+        "linger.ms": 5,
+    })
 
 logging.basicConfig(
     level=logging.INFO,
@@ -97,6 +107,7 @@ def _flush_pending(
     pending: list[PendingAlert],
     buf: PacketBuffer,
     storage: PcapStorage,
+    producer: Producer,
 ) -> list[PendingAlert]:
     """
     Verarbeitet alle Pending-Alerts deren Zeitfenster abgelaufen ist.
@@ -122,6 +133,16 @@ def _flush_pending(
                     len(packets),
                     len(pcap_bytes) / 1024,
                 )
+                # WS-Clients benachrichtigen dass PCAP jetzt verfügbar ist
+                try:
+                    msg = orjson.dumps({
+                        "type": "pcap_available",
+                        "data": {"alert_id": pa.alert_id},
+                    })
+                    producer.produce(PUSH_TOPIC, value=msg)
+                    producer.poll(0)
+                except Exception as exc:
+                    log.debug("Kafka push failed: %s", exc)
         else:
             log.warning("No packets in window for alert %s", pa.alert_id[:8])
 
@@ -129,8 +150,9 @@ def _flush_pending(
 
 
 def run(cfg: Config) -> None:
-    buf     = PacketBuffer(max_window_s=cfg.pcap_window_s)
-    storage = PcapStorage(
+    buf      = PacketBuffer(max_window_s=cfg.pcap_window_s)
+    producer = _make_producer(cfg.kafka_brokers)
+    storage  = PcapStorage(
         minio_endpoint=cfg.minio_endpoint,
         minio_access_key=cfg.minio_access_key,
         minio_secret_key=cfg.minio_secret_key,
@@ -162,7 +184,7 @@ def run(cfg: Config) -> None:
             # Pending-Alerts auswerten (auch ohne neue Kafka-Nachricht)
             if pending:
                 before = len(pending)
-                pending = _flush_pending(pending, buf, storage)
+                pending = _flush_pending(pending, buf, storage, producer)
                 total_pcaps += before - len(pending)
 
             if msg is None:
@@ -201,6 +223,7 @@ def run(cfg: Config) -> None:
             total_pkts,
             total_pcaps,
         )
+        producer.flush(timeout=5)
         storage.close()
         consumer.close()
 

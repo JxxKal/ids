@@ -94,7 +94,7 @@ class AlertStreamer:
                 try:
                     payload = orjson.loads(msg.value())
                     # alerts-enriched-push already has {type, data} structure
-                    if payload.get("type") == "alert_enriched":
+                    if payload.get("type") in ("alert_enriched", "pcap_available"):
                         outmsg = payload
                     else:
                         outmsg = {"type": "alert", "data": payload}
