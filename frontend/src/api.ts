@@ -1,4 +1,4 @@
-import type { Alert, Host, KnownNetwork, SamlConfig, TestRun, ThreatLevel, User } from './types';
+import type { Alert, Host, KnownNetwork, RuleListResponse, RuleSource, SamlConfig, TestRun, ThreatLevel, UpdateStatus, User } from './types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
@@ -171,6 +171,40 @@ export async function updateUser(id: string, data: {
 
 export async function deleteUser(id: string): Promise<void> {
   return req(`/api/users/${id}`, { method: 'DELETE' });
+}
+
+// ── Rules Engine ─────────────────────────────────────────────────────────────
+
+export async function fetchRuleSources(): Promise<RuleSource[]> {
+  return req('/api/rules/sources');
+}
+
+export async function addRuleSource(data: { name: string; url: string; enabled: boolean }): Promise<RuleSource> {
+  return req('/api/rules/sources', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function patchRuleSource(id: string, data: { enabled?: boolean; name?: string; url?: string }): Promise<RuleSource> {
+  return req(`/api/rules/sources/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function deleteRuleSource(id: string): Promise<void> {
+  return req(`/api/rules/sources/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchRules(params: { search?: string; limit?: number; offset?: number } = {}): Promise<RuleListResponse> {
+  const p = new URLSearchParams();
+  if (params.search) p.set('search', params.search);
+  if (params.limit  !== undefined) p.set('limit',  String(params.limit));
+  if (params.offset !== undefined) p.set('offset', String(params.offset));
+  return req(`/api/rules?${p}`);
+}
+
+export async function triggerRuleUpdate(): Promise<UpdateStatus> {
+  return req('/api/rules/update', { method: 'POST' });
+}
+
+export async function fetchRuleUpdateStatus(): Promise<UpdateStatus> {
+  return req('/api/rules/update/status');
 }
 
 // ── SAML Config ───────────────────────────────────────────────────────────────

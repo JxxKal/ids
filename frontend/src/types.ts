@@ -125,6 +125,35 @@ export interface SamlConfig {
   default_role:         'admin' | 'viewer';
 }
 
+export interface RuleSource {
+  id:      string;
+  name:    string;
+  url:     string;
+  enabled: boolean;
+  builtin: boolean;
+  tags:    string[];
+}
+
+export interface Rule {
+  sid:       number | null;
+  msg:       string;
+  action:    string;
+  classtype: string | null;
+  enabled:   boolean;
+  file:      string;
+}
+
+export interface RuleListResponse {
+  rules: Rule[];
+  total: number;
+}
+
+export interface UpdateStatus {
+  requested:    boolean;
+  requested_at: number | null;
+  last_updated: number | null;
+}
+
 export type WsMessage =
   | { type: 'initial';       data: Alert[] }
   | { type: 'alert';         data: Alert }

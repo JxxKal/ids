@@ -38,6 +38,7 @@ from routers import alerts as alerts_router
 from routers import flows as flows_router
 from routers import hosts as hosts_router
 from routers import networks as networks_router
+from routers import rules as rules_router
 from routers import system as system_router
 from routers import tests as tests_router
 from routers import users as users_router
@@ -99,6 +100,7 @@ app.include_router(alerts_router.router)
 app.include_router(flows_router.router)
 app.include_router(hosts_router.router)
 app.include_router(networks_router.router)
+app.include_router(rules_router.router)
 app.include_router(system_router.router)
 app.include_router(tests_router.router)
 app.include_router(users_router.router)

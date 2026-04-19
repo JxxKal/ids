@@ -305,6 +305,9 @@ services:
       KAFKA_BROKERS: kafka:9092
       TEST_MODE: ${TEST_MODE:-false}
       SECRET_KEY: ${API_SECRET_KEY:-change-me-in-production}
+      RULES_DIR: /rules
+    volumes:
+      - snort-rules:/rules
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
 
