@@ -97,9 +97,11 @@ def _handle_alert(msg_value: bytes, pending: list[PendingAlert], window_s: float
     """Registriert einen neuen Alert als PendingAlert."""
     try:
         alert    = orjson.loads(msg_value)
+        log.info("Alert received: keys=%s", list(alert.keys()))
         alert_id = alert.get("alert_id")
         alert_ts = float(alert.get("ts") or time.time())
         if not alert_id:
+            log.warning("Alert dropped: no alert_id field. Full alert: %s", alert)
             return
         # ready_at: alert_ts + window_s (Echtzeit-Sekunden nach Alert)
         ready_at = time.monotonic() + window_s
@@ -110,9 +112,10 @@ def _handle_alert(msg_value: bytes, pending: list[PendingAlert], window_s: float
             ready_at=ready_at,
             alert_data=alert,
         ))
-        log.debug("Pending alert %s (ready in %.0fs)", alert_id[:8], window_s)
+        log.info("Pending alert added: %s (alert_ts=%.3f, ready in %.0fs, window=%.0fs)",
+                 alert_id[:8], alert_ts, window_s, window_s)
     except Exception as exc:
-        log.debug("Alert parse error: %s", exc)
+        log.warning("Alert parse error: %s | raw=%r", exc, msg_value[:200])
 
 
 def _flush_pending(
@@ -133,7 +136,14 @@ def _flush_pending(
             remaining.append(pa)
             continue
 
+        buf_count = len(buf._buf)
+        buf_newest = buf.newest_ts()
+        log.info(
+            "Flushing alert %s: alert_ts=%.3f window=%.0fs | buf_count=%d buf_newest=%.3f",
+            pa.alert_id[:8], pa.alert_ts, pa.window_s, buf_count, buf_newest,
+        )
         packets = buf.extract(pa.alert_ts, pa.window_s)
+        log.info("Packets extracted for %s: %d", pa.alert_id[:8], len(packets))
         if packets:
             pcap_bytes = build_pcap(packets)
             key = storage.upload_pcap(pa.alert_id, pcap_bytes)
@@ -180,6 +190,7 @@ def run(cfg: Config) -> None:
     running = True
     total_pkts   = 0
     total_pcaps  = 0
+    last_stats_log = time.monotonic()
 
     def _stop(sig, _frame):
         nonlocal running
@@ -217,6 +228,13 @@ def run(cfg: Config) -> None:
             if topic == PCAP_TOPIC:
                 _handle_packet(msg.value(), buf)
                 total_pkts += 1
+                now_mono = time.monotonic()
+                if now_mono - last_stats_log >= 30:
+                    log.info(
+                        "Buffer stats: pkts_received=%d buf_count=%d buf_newest=%.3f pending=%d",
+                        total_pkts, len(buf._buf), buf.newest_ts(), len(pending),
+                    )
+                    last_stats_log = now_mono
 
             elif topic == ALERTS_TOPIC:
                 _handle_alert(msg.value(), pending, cfg.pcap_window_s)
