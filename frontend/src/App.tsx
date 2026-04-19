@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
-import { fetchAlerts } from './api';
+import { clearToken, fetchAlerts, fetchMe, getToken } from './api';
 import { AlertFeed } from './components/AlertFeed';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HostsPage } from './components/HostsPage';
+import { LoginPage } from './components/LoginPage';
 import { NetworksPage } from './components/NetworksPage';
 import { SettingsPage } from './components/SettingsPage';
 import { TestsPage } from './components/TestsPage';
 import { ThreatGauge } from './components/ThreatGauge';
 import { useWebSocket } from './hooks/useWebSocket';
-import type { Alert } from './types';
+import type { Alert, User } from './types';
 import { type ReactNode } from 'react';
-import { LayoutDashboard, Network, Server, FlaskConical, Settings } from 'lucide-react';
+import { LayoutDashboard, Network, Server, FlaskConical, Settings, LogOut } from 'lucide-react';
 
 type Tab        = 'dashboard' | 'networks' | 'hosts' | 'tests' | 'settings';
 type TimeWindow = 'live' | '1m' | '15m' | '1h' | '4h' | '1d';
@@ -33,6 +34,42 @@ const TIME_WINDOWS: { id: TimeWindow; label: string; seconds?: number }[] = [
 ];
 
 export default function App() {
+  const [user,    setUser]    = useState<User | null>(null);
+  const [authChk, setAuthChk] = useState(true); // initial token-check läuft noch
+
+  // Token beim Start prüfen
+  useEffect(() => {
+    const token = getToken();
+    if (!token) { setAuthChk(false); return; }
+    fetchMe()
+      .then(u => setUser(u))
+      .catch(() => clearToken())
+      .finally(() => setAuthChk(false));
+  }, []);
+
+  // 401-Event → abmelden
+  useEffect(() => {
+    const handler = () => { setUser(null); clearToken(); };
+    window.addEventListener('ids:unauthorized', handler);
+    return () => window.removeEventListener('ids:unauthorized', handler);
+  }, []);
+
+  if (authChk) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <span className="text-slate-600 text-sm">Lade…</span>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage onLogin={(u, _t) => setUser(u)} />;
+  }
+
+  return <Dashboard user={user} onLogout={() => { clearToken(); setUser(null); }} />;
+}
+
+function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [tab, setTab]         = useState<Tab>('dashboard');
   const [showTest, setShowTest] = useState(
     () => localStorage.getItem('showTest') === 'true'
@@ -122,6 +159,18 @@ export default function App() {
         <div className="flex items-center gap-1.5 text-xs">
           <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`} />
           <span className="text-slate-500">{connected ? 'Live' : 'Verbinde…'}</span>
+        </div>
+
+        {/* User + Logout */}
+        <div className="flex items-center gap-2 border-l border-slate-800 pl-3 ml-1">
+          <span className="text-xs text-slate-500 hidden sm:block">{user.username}</span>
+          <button
+            onClick={onLogout}
+            title="Abmelden"
+            className="text-slate-600 hover:text-slate-300 transition-colors p-1 rounded hover:bg-slate-800"
+          >
+            <LogOut size={14} />
+          </button>
         </div>
       </header>
 
