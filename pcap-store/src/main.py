@@ -68,12 +68,24 @@ def _make_consumer(brokers: str) -> Consumer:
 
 
 def _handle_packet(msg_value: bytes, buf: PacketBuffer) -> None:
-    """Parst ein PacketEvent und fügt es dem Paketpuffer hinzu."""
+    """Parst ein PcapRecord vom Sniffer und fügt es dem Paketpuffer hinzu.
+
+    Sniffer-Schema (PcapRecord):
+        ts_sec:   u32  – Sekunden seit Epoch
+        ts_usec:  u32  – Mikrosekunden-Anteil
+        orig_len: u32  – originale Paketlänge
+        data_b64: str  – Base64-kodierte rohe Bytes
+    """
     try:
         pkt = orjson.loads(msg_value)
-        ts  = float(pkt.get("ts") or 0.0)
-        raw_b64 = pkt.get("raw_header_b64")
-        if not ts or not raw_b64:
+        # Timestamp aus ts_sec + ts_usec zusammensetzen
+        ts_sec  = pkt.get("ts_sec")
+        ts_usec = pkt.get("ts_usec", 0)
+        if ts_sec is None:
+            return
+        ts = float(ts_sec) + float(ts_usec) / 1_000_000
+        raw_b64 = pkt.get("data_b64")
+        if not raw_b64:
             return
         raw = base64.b64decode(raw_b64)
         buf.add(ts, raw)
