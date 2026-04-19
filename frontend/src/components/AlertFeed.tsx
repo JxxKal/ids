@@ -6,12 +6,12 @@ import { SeverityBadge } from './SeverityBadge';
 
 // ── PCAP-Download ─────────────────────────────────────────────────────────────
 
-function PcapButton({ alertId, filename }: { alertId: string; filename?: string }) {
+function PcapButton({ alertId, available, filename }: { alertId: string; available: boolean; filename?: string }) {
   const [loading, setLoading] = useState(false);
 
   async function handleDownload(e: React.MouseEvent) {
     e.stopPropagation();
-    if (loading) return;
+    if (loading || !available) return;
     setLoading(true);
     try {
       const token = getToken();
@@ -27,7 +27,7 @@ function PcapButton({ alertId, filename }: { alertId: string; filename?: string 
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      /* ignore – PCAP nicht verfügbar */
+      /* ignore */
     } finally {
       setLoading(false);
     }
@@ -36,10 +36,13 @@ function PcapButton({ alertId, filename }: { alertId: string; filename?: string 
   return (
     <button
       onClick={handleDownload}
-      disabled={loading}
-      title="PCAP herunterladen"
-      className="px-1.5 py-0.5 rounded text-[11px] border border-blue-700/50 text-blue-400 bg-blue-950/30
-                 hover:bg-blue-900/50 hover:text-blue-300 transition-colors disabled:opacity-40 whitespace-nowrap"
+      disabled={loading || !available}
+      title={available ? 'PCAP herunterladen' : 'Kein PCAP – Sniffer läuft nicht oder kein Paketpuffer für diesen Alert'}
+      className={`px-1.5 py-0.5 rounded text-[11px] border whitespace-nowrap transition-colors ${
+        available
+          ? 'border-blue-700/50 text-blue-400 bg-blue-950/30 hover:bg-blue-900/50 hover:text-blue-300'
+          : 'border-slate-700/30 text-slate-600 bg-transparent cursor-default'
+      } disabled:opacity-40`}
     >
       {loading ? '…' : '↓ pcap'}
     </button>
@@ -320,9 +323,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     }
                   </td>
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-                    {g.latest.pcap_available && (
-                      <PcapButton alertId={g.latest.alert_id} />
-                    )}
+                    <PcapButton alertId={g.latest.alert_id} available={g.latest.pcap_available} />
                   </td>
                 </tr>
               ))}
@@ -384,9 +385,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                           {a.feedback.toUpperCase()}
                         </span>
                       )}
-                      {a.pcap_available && (
-                        <PcapButton alertId={a.alert_id} />
-                      )}
+                      <PcapButton alertId={a.alert_id} available={a.pcap_available} />
                     </div>
                   </td>
                 </tr>
