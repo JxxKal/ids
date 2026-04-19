@@ -28,13 +28,15 @@ import logging
 
 import orjson
 from confluent_kafka import Producer
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from minio import Minio
 
 from config import Config
 from database import close_pool, init_pool
+from deps import get_current_user
 from routers import alerts as alerts_router
+from routers import auth as auth_router
 from routers import flows as flows_router
 from routers import hosts as hosts_router
 from routers import networks as networks_router
@@ -96,14 +98,20 @@ set_feedback_producer(kafka_producer)
 make_pcap_endpoint(minio_client, cfg.pcap_bucket)
 make_run_endpoint(kafka_producer)
 
-app.include_router(alerts_router.router)
-app.include_router(flows_router.router)
-app.include_router(hosts_router.router)
-app.include_router(networks_router.router)
-app.include_router(rules_router.router)
-app.include_router(system_router.router)
-app.include_router(tests_router.router)
-app.include_router(users_router.router)
+_auth = [Depends(get_current_user)]
+
+# Auth-Router ohne Schutz (Login ist öffentlich)
+app.include_router(auth_router.router)
+
+# Alle anderen Routen erfordern gültiges JWT
+app.include_router(alerts_router.router,   dependencies=_auth)
+app.include_router(flows_router.router,    dependencies=_auth)
+app.include_router(hosts_router.router,    dependencies=_auth)
+app.include_router(networks_router.router, dependencies=_auth)
+app.include_router(rules_router.router,    dependencies=_auth)
+app.include_router(system_router.router,   dependencies=_auth)
+app.include_router(tests_router.router,    dependencies=_auth)
+app.include_router(users_router.router,    dependencies=_auth)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
