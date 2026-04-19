@@ -28,9 +28,10 @@ import logging
 
 import orjson
 from confluent_kafka import Producer
-from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from jose import JWTError
 from minio import Minio
 
 from config import Config
@@ -192,7 +193,21 @@ async def _broadcast_loop() -> None:
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/alerts")
-async def ws_alerts(ws: WebSocket) -> None:
+async def ws_alerts(
+    ws:    WebSocket,
+    token: str | None = Query(default=None),
+) -> None:
+    # JWT-Prüfung – Token kommt als ?token=... da Browser-WS keine Header unterstützen
+    from jwt_utils import decode_token
+    if not token:
+        await ws.close(code=4001, reason="Nicht authentifiziert")
+        return
+    try:
+        decode_token(cfg.secret_key, token)
+    except JWTError:
+        await ws.close(code=4001, reason="Token ungültig")
+        return
+
     await ws_manager.connect(ws)
     try:
         # Letzte 50 Alerts als initiales Paket senden

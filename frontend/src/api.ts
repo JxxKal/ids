@@ -113,6 +113,25 @@ export function pcapUrl(alertId: string): string {
   return `${BASE}/api/alerts/${alertId}/pcap`;
 }
 
+export function alertsExportUrl(params: {
+  severity?: string; source?: string; rule_id?: string;
+  src_ip?: string; ts_from?: number; ts_to?: number;
+  is_test?: boolean | null; feedback?: string; limit?: number;
+} = {}): string {
+  const p = new URLSearchParams();
+  if (params.severity)              p.set('severity', params.severity);
+  if (params.source)                p.set('source',   params.source);
+  if (params.rule_id)               p.set('rule_id',  params.rule_id);
+  if (params.src_ip)                p.set('src_ip',   params.src_ip);
+  if (params.ts_from !== undefined) p.set('ts_from',  String(params.ts_from));
+  if (params.ts_to   !== undefined) p.set('ts_to',    String(params.ts_to));
+  if (params.is_test !== null && params.is_test !== undefined)
+    p.set('is_test', String(params.is_test));
+  if (params.feedback)              p.set('feedback', params.feedback);
+  p.set('limit', String(params.limit ?? 5000));
+  return `${BASE}/api/alerts/export.csv?${p}`;
+}
+
 // ── Threat Level ──────────────────────────────────────────────────────────────
 
 export async function fetchThreatLevel(): Promise<ThreatLevel> {

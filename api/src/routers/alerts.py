@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import time
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ import asyncpg
 import orjson
 from confluent_kafka import Producer
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from minio import Minio
 
 from database import get_pool
@@ -114,6 +115,88 @@ async def list_alerts(
         total=total,
         offset=offset,
         limit=limit,
+    )
+
+
+@router.get("/export.csv")
+async def export_alerts_csv(
+    severity: str | None   = None,
+    source:   str | None   = None,
+    rule_id:  str | None   = None,
+    src_ip:   str | None   = None,
+    ts_from:  float | None = None,
+    ts_to:    float | None = None,
+    is_test:  bool | None  = None,
+    feedback: str | None   = None,
+    limit:    Annotated[int, Query(ge=1, le=10000)] = 5000,
+    pool:     asyncpg.Pool = Depends(get_pool),
+) -> Response:
+    """Exportiert gefilterte Alerts als CSV-Datei."""
+    filters: list[str] = []
+    params:  list = []
+    idx = 1
+
+    if is_test is not None:
+        filters.append(f"is_test = ${idx}"); params.append(is_test); idx += 1
+    if severity:
+        filters.append(f"severity = ${idx}"); params.append(severity); idx += 1
+    if source:
+        filters.append(f"source = ${idx}"); params.append(source); idx += 1
+    if rule_id:
+        filters.append(f"rule_id = ${idx}"); params.append(rule_id); idx += 1
+    if src_ip:
+        filters.append(f"src_ip = ${idx}::inet"); params.append(src_ip); idx += 1
+    if ts_from is not None:
+        filters.append(f"ts >= ${idx}"); params.append(datetime.fromtimestamp(ts_from, tz=timezone.utc)); idx += 1
+    if ts_to is not None:
+        filters.append(f"ts <= ${idx}"); params.append(datetime.fromtimestamp(ts_to, tz=timezone.utc)); idx += 1
+    if feedback:
+        if feedback == "none":
+            filters.append("feedback IS NULL")
+        else:
+            filters.append(f"feedback = ${idx}"); params.append(feedback); idx += 1
+
+    where = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT * FROM alerts {where} ORDER BY ts DESC LIMIT ${idx}",
+            *params, limit,
+        )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "alert_id", "ts", "source", "rule_id", "severity", "score",
+        "src_ip", "dst_ip", "proto", "dst_port",
+        "description", "tags", "feedback", "feedback_ts", "feedback_note",
+        "pcap_available", "is_test",
+    ])
+    for r in rows:
+        writer.writerow([
+            r["alert_id"],
+            r["ts"].isoformat() if r["ts"] else "",
+            r["source"],
+            r["rule_id"] or "",
+            r["severity"],
+            r["score"],
+            str(r["src_ip"]) if r["src_ip"] else "",
+            str(r["dst_ip"]) if r["dst_ip"] else "",
+            r["proto"] or "",
+            r["dst_port"] or "",
+            r["description"] or "",
+            ";".join(r["tags"] or []),
+            r["feedback"] or "",
+            r["feedback_ts"].isoformat() if r["feedback_ts"] else "",
+            r["feedback_note"] or "",
+            r["pcap_available"],
+            r["is_test"],
+        ])
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="alerts_export.csv"'},
     )
 
 

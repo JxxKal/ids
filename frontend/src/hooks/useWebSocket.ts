@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getToken } from '../api';
 import type { Alert, WsMessage } from '../types';
 
 const WS_BASE = import.meta.env.VITE_WS_URL
@@ -16,7 +17,9 @@ export function useWebSocket() {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(`${WS_BASE}/ws/alerts`);
+    const token = getToken();
+    const url   = `${WS_BASE}/ws/alerts${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+    const ws    = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => setConnected(true);
