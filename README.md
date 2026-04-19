@@ -12,10 +12,11 @@ Passives Netzwerk-IDS das an einem Mirror-Port eines Switches Traffic mitschneid
 Mirror Port
     │
     ▼
-┌─────────────┐   raw-packets    ┌──────────────┐
-│  Sniffer    │ ───────────────► │    Kafka     │
-│  (Rust)     │   pcap-headers   │   (KRaft)    │
-└─────────────┘                  └──────┬───────┘
+┌─────────────┐   pcap-headers   ┌──────────────┐
+│  Sniffer    │ ───────────────► │              │
+│  (Rust)     │   raw-packets    │    Kafka     │
+└─────────────┘ ───────────────► │   (KRaft)    │
+                                 └──────┬───────┘
                                         │
                      ┌──────────────────┼──────────────────┐
                      ▼                  ▼                   ▼
@@ -27,8 +28,8 @@ Mirror Port
                    │  flows          │ alerts-raw        │
                    └────────┬────────┘                   │
                             ▼                            │
-                   ┌──────────────┐                      │
-                   │    Alert     │◄─────────────────────┘
+                   ┌──────────────┐◄────────────────────┘
+                   │    Alert     │
                    │   Manager   │
                    └──────┬───────┘
                           │ alerts-enriched
@@ -41,17 +42,16 @@ Mirror Port
                │    TimescaleDB      │
                └──────────┬──────────┘
                           │
-               ┌──────────▼──────────┐   WebSocket
-               │    API Backend      │ ──────────────► Frontend (React)
-               │    (FastAPI)        │◄────────────────  (Feedback)
+               ┌──────────▼──────────┐   WebSocket / REST
+               │    API Backend      │ ──────────────────► Frontend (React)
+               │    (FastAPI)        │◄────────────────────  (Feedback, Config)
                └──────────┬──────────┘
                           │ feedback
                ┌──────────▼──────────┐
                │   Training Loop     │
-               │   (Python)          │
                └─────────────────────┘
 
-PCAP Store ──────────────────────────► MinIO (ids-pcaps)
+PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 ```
 
 ---
@@ -60,19 +60,19 @@ PCAP Store ───────────────────────
 
 | Modul | Sprache | Status | Beschreibung |
 |---|---|---|---|
-| `sniffer` | Rust | ✅ fertig | AF_PACKET Capture, Header-Parsing, Kafka-Publishing |
-| `flow-aggregator` | Python | ✅ fertig | Pakete → Flows, statistische Features (Welford, IAT-Entropie) |
-| `signature-engine` | Python | ✅ fertig | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
-| `ml-engine` | Python | ✅ fertig | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update |
-| `alert-manager` | Python | ✅ fertig | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung an alerts-enriched |
-| `enrichment-service` | Python | ✅ fertig | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache, Host-Trust-Prüfung, UNKNOWN_HOST-Alert, Push-Kanal für Live-Enrichment |
-| `pcap-store` | Python | ✅ fertig | Sliding-Window-Paketpuffer, PCAP-Datei-Writer, MinIO-Upload, DB-Update |
-| `api` | Python FastAPI | ✅ fertig | REST + WebSocket, Alerts/Flows/Networks/Config/Tests/Hosts/Users/Rules, MinIO-Proxy, Threat-Level, CSV-Import |
-| `frontend` | React + Vite + TS | ✅ fertig | Echtzeit Alert-Feed (WebSocket), Threat-Level, Enrichment, PCAP-Download, Feedback, Netzwerke, Hosts, Tests, Settings |
-| `training-loop` | Python | ✅ fertig | Feedback-Collector (Kafka), semi-supervised Retrain, atomares Modell-Update |
-| `traffic-generator` | Python/Scapy | ✅ fertig | 5 Test-Szenarien, Alert-Polling, TestRun-Update in DB |
-| `snort` | Suricata | ✅ fertig | Paketerfassung auf Mirror-/Test-Interface, ET Open + OT/ICS-Regelsets, EVE JSON Output, Live-Reload via SIGUSR2 |
-| `snort-bridge` | Python | ✅ fertig | Liest Suricata EVE JSON → normalisiert → Kafka alerts-raw; transparente Integration ohne Pipeline-Umbau |
+| `sniffer` | Rust | ✅ | AF_PACKET Capture, Header-Parsing, Kafka-Publishing (raw-packets + pcap-headers) |
+| `flow-aggregator` | Python | ✅ | Pakete → Flows, statistische Features (Welford, IAT-Entropie) |
+| `signature-engine` | Python | ✅ | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
+| `ml-engine` | Python | ✅ | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update, konfigurierbarer Threshold |
+| `alert-manager` | Python | ✅ | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung |
+| `enrichment-service` | Python | ✅ | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache, Host-Trust-Prüfung |
+| `pcap-store` | Python | ✅ | Sliding-Window-Paketpuffer, PCAP-Writer, MinIO-Upload, DB-Update, WS-Push nach Upload |
+| `api` | Python FastAPI | ✅ | REST + WebSocket, JWT-Auth, Swagger UI mit Bearer-Auth, alle Datenpfade |
+| `frontend` | React + Vite + TS | ✅ | Echtzeit Alert-Feed, Verbindungsgraph, PCAP-Download, Feedback, ML-Konfiguration, Sidebar-Navigation |
+| `training-loop` | Python | ✅ | Feedback-Collector (Kafka), semi-supervised Retrain, atomares Modell-Update |
+| `traffic-generator` | Python/Scapy | ✅ | 5 Test-Szenarien, Alert-Polling, TestRun-Update in DB |
+| `snort` | Suricata | ✅ | Paketerfassung auf Mirror-/Test-Interface, ET Open + OT/ICS-Regelsets, EVE JSON Output |
+| `snort-bridge` | Python | ✅ | Liest Suricata EVE JSON → normalisiert → Kafka alerts-raw |
 
 ---
 
@@ -85,7 +85,7 @@ PCAP Store ───────────────────────
 | Datenbank | TimescaleDB (PostgreSQL 16, Hypertables) |
 | Cache / Enrichment | Redis 7 |
 | PCAP Storage | MinIO (S3-kompatibel) |
-| ML | Python, Scikit-learn / PyTorch, River (Online-ML) |
+| ML | Python, Scikit-learn (IsolationForest), River (Online-Scaler) |
 | API | Python FastAPI + WebSocket |
 | Frontend | React + Vite + TypeScript + Tailwind CSS |
 | Deployment | Docker Compose |
@@ -96,7 +96,7 @@ PCAP Store ───────────────────────
 
 ### Voraussetzungen
 
-- Docker Desktop (Mac/Windows) oder Docker Engine (Linux)
+- Docker Engine (Linux) oder Docker Desktop (Mac/Windows)
 - `docker compose` v2
 
 ### Konfiguration
@@ -108,7 +108,7 @@ cp .env.example .env
 
 ### Test-Mode (Docker Desktop / Entwicklung)
 
-Ein Interface für alles, synthetischer Testverkehr via `traffic-generator`.
+Synthetischer Testverkehr via `traffic-generator`, kein physisches Interface nötig.
 
 ```bash
 # TEST_MODE=true in .env setzen
@@ -119,29 +119,50 @@ docker compose --profile test up -d
 |---|---|
 | Dashboard | http://localhost:3000 |
 | API | http://localhost:8001 |
-| API Docs | http://localhost:8001/api/docs |
+| **Swagger UI** | **http://localhost:8001/api/docs** |
+| ReDoc | http://localhost:8001/api/redoc |
 | Kafka UI | http://localhost:8080 |
 | MinIO Console | http://localhost:9001 |
 
 ### Produktion
 
-Separates Mirror- und Management-Interface. `MIRROR_IFACE`, `MANAGEMENT_IFACE` und `MANAGEMENT_IP` in `.env` setzen.
+Separates Mirror- und Management-Interface.
 
 ```bash
-# TEST_MODE=false in .env
+# .env: MIRROR_IFACE, MANAGEMENT_IFACE, MANAGEMENT_IP, TEST_MODE=false
 docker compose --profile prod up -d
 ```
 
 Dashboard und API sind nur über `MANAGEMENT_IP` erreichbar.
 
-### DB-Migrationen
+### Mit Suricata
 
 ```bash
-# Initial (nach erstem Start):
-docker exec -i ids-timescaledb psql -U ids -d ids < infra/timescaledb/migrations/001_initial.sql
-docker exec -i ids-timescaledb psql -U ids -d ids < infra/timescaledb/migrations/002_host_trust.sql
-docker exec -i ids-timescaledb psql -U ids -d ids < infra/timescaledb/migrations/003_users.sql
+# Produktion + Suricata
+docker compose --profile prod --profile snort up -d
+
+# Test/Dev + Suricata
+docker compose --profile test --profile snort-test up -d
 ```
+
+### DB-Migrationen
+
+Beim ersten Start (leeres Volume) laufen die Migrations automatisch über `docker-entrypoint-initdb.d`.
+
+Bei **bestehendem Volume** neue Migrationen manuell ausführen:
+
+```bash
+# Einmalig nach Update ausführen – prüfen welche bereits gelaufen sind:
+docker exec -i ids-timescaledb psql -U ids -d ids \
+  < infra/timescaledb/migrations/004_alert_tags.sql
+```
+
+| Migration | Inhalt |
+|---|---|
+| `001_initial.sql` | Alle Basistabellen, Hypertables, Funktionen |
+| `002_host_trust.sql` | Trust-Quellen-Spalten für host_info |
+| `003_users.sql` | Benutzerverwaltung + Standard-Admin |
+| `004_alert_tags.sql` | `tags TEXT[]`-Spalte für alerts + GIN-Index |
 
 ---
 
@@ -152,261 +173,238 @@ docker exec -i ids-timescaledb psql -U ids -d ids < infra/timescaledb/migrations
 | `TEST_MODE` | `false` | `true` = Docker Desktop / Entwicklung |
 | `MIRROR_IFACE` | – | Mirror-Port Interface (Pflicht in Prod) |
 | `MANAGEMENT_IFACE` | `eth0` | Management Interface (API, Ping, DNS) |
-| `MANAGEMENT_IP` | `192.168.1.100` | IP für Port-Binding |
+| `MANAGEMENT_IP` | `0.0.0.0` | IP für Port-Binding |
 | `TEST_IFACE` | `eth0` | Interface bei TEST_MODE=true |
 | `CAPTURE_SNAPLEN` | `128` | Bytes pro Paket (nur Header) |
 | `CAPTURE_RING_BUFFER_MB` | `64` | AF_PACKET Ring-Buffer |
-| `POSTGRES_PASSWORD` | – | TimescaleDB Passwort |
-| `MINIO_ACCESS_KEY` | `ids-access` | MinIO Zugangsdaten |
-| `MINIO_SECRET_KEY` | – | MinIO Secret |
-| `API_SECRET_KEY` | – | JWT/Session Signing Key |
+| `POSTGRES_PASSWORD` | `ids-change-me` | TimescaleDB Passwort |
+| `MINIO_ACCESS_KEY` | `ids-access` | MinIO Access Key |
+| `MINIO_SECRET_KEY` | `ids-secret-change-me` | MinIO Secret Key |
+| `API_SECRET_KEY` | `change-me-in-production` | JWT Signing Key |
+| `API_PORT` | `8001` | Externer API-Port |
 | `FLOW_TIMEOUT_S` | `30` | Flow-Inaktivitäts-Timeout |
 | `DEDUP_WINDOW_S` | `300` | Alert-Deduplication Zeitfenster |
 | `PCAP_WINDOW_S` | `60` | ±Sekunden PCAP-Fenster pro Alert |
 | `RETRAIN_INTERVAL_S` | `86400` | ML Retrain-Interval (24h) |
+| `ML_BOOTSTRAP_MIN` | `500` | Mindest-Flows vor ML-Aktivierung |
 
 ---
 
 ## Dashboard
 
-Das React-Frontend bietet fünf Tabs:
+### Alert-Feed
 
-### Dashboard
-
-- **Echtzeit Alert-Feed** via WebSocket – gruppierte und Einzelansicht umschaltbar
-- **Zeitfenster-Selector** – Live, 1 Min, 15 Min, 1 Std, 4 Std, 1 Tag (Snapshot-Modus)
-- **Threat-Level Anzeige** – Gauge 0–100 (grün → rot), basierend auf Alert-Gewichtung der letzten 15 min
-- **KI/ML-Filter** – Ansicht auf ML-Alarme einschränken (`source=ml`)
-- **Testverkehr-Toggle** – Test-Alerts ein-/ausblenden
-- **Tags-Spalte** – Suricata-Regel-Tags je Alert (OT/ICS-Tags orange hervorgehoben)
+- **Echtzeit-Stream** via WebSocket, automatischer Reconnect
+- **Gruppiert / Einzeln** umschaltbar
+- **Zeitfenster-Selector** – Live, 1 Min, 15 Min, 1 Std, 4 Std, 1 Tag
+- **Threat-Level Gauge** – 0–100 (grün → rot), Gewichtung nach Severity
+- **Tags** – Suricata/Signatur-Tags je Alert (OT/ICS-Tags orange hervorgehoben)
 - **Enrichment** – Hostname, Netzwerk-Badge, Trust-Status, GeoIP, ASN
-- **PCAP-Download** – Header-only `.pcap` pro Alert (Wireshark-kompatibel)
-- **Feedback** – TP/FP-Bewertung direkt im Alert-Detail → fließt in ML-Training zurück
+- **FP/TP-Badge** – grün (False Positive) / rot (True Positive) direkt in der Zeile
+- **PCAP-Button** – grau (nicht verfügbar) / blau (Download bereit), mit Tooltip
+
+### Alert-Detailansicht
+
+- Alle Felder inkl. vollständiges Enrichment-Panel
+- **Verbindungsgraph** – SVG-Overlay mit allen Flows zwischen Quelle und Ziel im ±5-min-Fenster
+  - Pfeile mit Richtung (wer initiiert), Protokoll:Port, Anzahl Flows, Datenmenge
+  - Farbcodierung: TCP=blau, UDP=orange, ICMP=lila
+- **PCAP herunterladen** – Wireshark-kompatibles `.pcap` (nur Header, kein Payload)
+- **Feedback geben** – True/False Positive mit optionaler Notiz
+  - Feedback-Banner nach Setzen (grün/rot) mit Zeitstempel und Notiz
+  - Fließt beim nächsten ML-Retrain als Trainings-Sample ein
 
 ### Netzwerke
 
-- Bekannte Netzwerke (CIDR + Name + Farbe) anlegen, bearbeiten, löschen
-- Alerts zeigen Netzwerk-Badge für bekannte Subnetze
+- Bekannte Netzwerke (CIDR + Name + Beschreibung + Farbe) anlegen und löschen
+- **CSV-Import** – Bulk-Import aus Datei
+- **Beispiel-CSV** – Download-Button mit vollständig kommentierten Beispieldaten
 
 ### Hosts
 
-- Host-Verzeichnis mit Trust-Status, Hostname, ASN, GeoIP
-- Manuell anlegen, Display-Namen setzen, Trust-Flag ändern
-- CSV-Bulk-Import (`Hostname;IP` oder `IP;Hostname`)
+- Host-Verzeichnis mit Trust-Status, Hostname, ASN, GeoIP, Last-Seen
+- Manuell anlegen, Display-Namen und Trust-Flag bearbeiten, löschen
+- **CSV-Import** – `Hostname;IP` oder `IP;Hostname`, Semikolon oder Komma
+- **Beispiel-CSV** – Download-Button
 
 ### Tests
 
-- Test-Szenarien direkt aus dem Dashboard auslösen
-- Ergebnis-Protokoll mit Latenz und Treffer-Status
+- 5 Test-Szenarien direkt aus dem Dashboard auslösen
+- Ergebnis-Protokoll: Latenz, Alert-ID, Treffer-Status
 
-### Settings
+### Settings (Sidebar-Navigation)
 
-#### User Management
+#### Benutzer
+Lokale und SAML-synchronisierte Benutzer: Tabelle, Anlegen, Inline-Bearbeitung, Löschen.
+Standard nach Erstinstallation: `admin` / `changeme` → **sofort ändern!**
 
-Lokale und SAML-synchronisierte Benutzer verwalten:
+#### SAML / SSO
+IdP-Metadata-URL, SP Entity-ID, ACS-URL, Attribut-Mapping, Standard-Rolle.
 
-- Benutzertabelle mit Rolle, Quelle (lokal/SAML), Last-Login, Aktiv-Toggle
-- Neuen lokalen Benutzer anlegen (Username, Passwort, Rolle)
-- Inline-Bearbeitung (Anzeigename, E-Mail, Rolle, Passwort-Reset für lokale User)
-- Löschen (letzter Admin ist geschützt)
+#### ML-Status
+Live-Anzeige: Phase (Passthrough / Learning / Active), Bootstrap-Fortschritt, 24h-Statistiken, Top-Anomalie-Features.
 
-Standard-Login nach Erstinstallation: `admin` / `changeme` → **sofort ändern!**
+#### ML-Filter-Konfiguration
+- Alert-Threshold, Contamination, Bootstrap-Min-Samples, Partial-Fit-Interval
+- Slider mit Preset-Buttons, sofort wirkende Kontaminationsänderung löst Retrain aus
 
-#### Rules Engine
-
-Suricata-Regelsets verwalten ohne Neustart:
-
-- **Quellen-Verwaltung** – Toggle-Schalter je Quelle, eigene URLs hinzufügen
-- **Update-Button** – schreibt Trigger-Datei → Suricata lädt Regeln live neu (SIGUSR2, kein Neustart)
-- **Regelübersicht** – alle aktiven Regeln mit Suche, Pagination, Aktion-Badges
+#### Regelquellen
+Toggle-Schalter je Quelle, eigene URLs hinzufügen, Update-Button (Suricata Live-Reload via SIGUSR2).
 
 Vorkonfigurierte OT/ICS-Quellen (deaktiviert, bei Bedarf aktivieren):
 
 | Quelle | Protokoll/Fokus |
 |---|---|
 | ET SCADA / ICS | Allgemeine SCADA-Signaturen |
-| Digital Bond Quickdraw – Modbus TCP | Modbus-Anomalien und -Angriffe |
+| Digital Bond Quickdraw – Modbus TCP | Modbus-Anomalien |
 | Digital Bond Quickdraw – DNP3 | DNP3-Protokollmissbrauch |
-| Digital Bond Quickdraw – EtherNet/IP (CIP) | Rockwell/Allen-Bradley |
+| Digital Bond Quickdraw – EtherNet/IP | Rockwell/Allen-Bradley |
 | Digital Bond Quickdraw – BACnet | Gebäudeautomation |
-| Positive Technologies SCADA Attack Detection | ICS-Angriffserkennung |
+| Positive Technologies SCADA | ICS-Angriffserkennung |
 
-#### SAML / SSO
-
-IdP-Metadata-URL, SP Entity-ID, ACS-URL, Attribut-Mapping, Standard-Rolle für neue SSO-User.
-
----
-
-## Host-Trust-System
-
-Jeder Host kann als **trusted** (bekannt) markiert werden. Das senkt das Alarm-Rauschen für interne Geräte, die nicht via DNS aufgelöst werden.
-
-### Trust-Quellen
-
-| Quelle | Beschreibung |
-|---|---|
-| `dns` | Hostname automatisch per Reverse-DNS aufgelöst |
-| `csv` | Manueller Import über CSV-Datei |
-| `manual` | Direkt im Dashboard oder via API angelegt |
-
-Trust wird **nie herabgestuft** – ein manuell gesetztes `trusted=true` bleibt erhalten, auch wenn der DNS-Lookup fehlschlägt.
-
-### UNKNOWN_HOST-Alert
-
-Der Enrichment-Service erzeugt automatisch einen Alert (`UNKNOWN_HOST_001`, Severity `low`) wenn ein privater IP-Host auftaucht, der nicht in `host_info` als trusted hinterlegt ist. Deduplication: max. 1 Alert pro IP pro Stunde.
-
-### CSV-Import
-
-Format: `Hostname;IP-Adresse` oder `IP-Adresse;Hostname` – Semikolon oder Komma als Trennzeichen, `#` für Kommentare.
-
-```
-# Netzwerkgeräte
-Router;192.168.1.1
-192.168.1.2;Drucker-EG
-```
-
-**Endpunkt:** `POST /api/hosts/import/csv` (multipart/form-data, Feld `file`)
+#### Regelübersicht
+Alle aktiven Regeln, Suche, Pagination, Aktion-Badges.
 
 ---
 
-## Suricata Integration (optional)
+## API – Swagger UI
 
-> **Hinweis:** Ursprünglich als Snort 3 geplant – Snort 3 hat kein offizielles Debian/Ubuntu-Paket. Suricata ist funktional gleichwertig, hat bessere Paket-Verfügbarkeit und die Emerging Threats Open Rules werden primär für Suricata gepflegt.
+Die API stellt eine vollständige interaktive Dokumentation bereit:
 
-Suricata läuft als parallele Detection-Engine auf demselben Mirror-Port. Alerts fließen über einen Bridge-Service in die bestehende Kafka-Pipeline – Alert-Manager, Enrichment, Deduplication und Dashboard funktionieren ohne Änderungen.
+- **Swagger UI:** `http://<host>:8001/api/docs`
+- **ReDoc:** `http://<host>:8001/api/redoc`
+- **OpenAPI JSON:** `http://<host>:8001/api/openapi.json`
 
-```
-Mirror Port ──► Rust Sniffer ──► flows ──► Signature Engine ─┐
-              │                        ──► ML Engine          ├──► alerts-raw ──► Alert-Manager ──► ...
-              └──► Suricata ──► eve.json ──► snort-bridge ────┘
-                   (Container)  (Shared Vol.)  (Python)
-```
+### Authentifizierung in der Swagger UI
 
-### Starten
-
-```bash
-# Produktion + Suricata
-docker compose --profile prod --profile snort up -d
-
-# Test/Dev + Suricata
-docker compose --profile test --profile snort-test up -d
-```
-
-### Regelsets
-
-| Wert (`SNORT_RULESET`) | Quelle | Signaturen | Hinweis |
-|---|---|---|---|
-| `emerging-threats` _(Standard)_ | emergingthreats.net | ~40.000 | ET Open, nativ für Suricata |
-| `none` | – | 0 | Nur Traffic-Analyse ohne Signaturen |
-
-Regeln werden beim ersten Start heruntergeladen und im Volume `snort-rules` gecacht. Für Updates über das Dashboard: **Settings → Rules Engine → Update starten**.
-
-Für manuelles Update beim Start:
-
-```bash
-SNORT_UPDATE_RULES=true docker compose --profile snort up -d snort
-```
-
-### Live-Reload
-
-Das API-Backend und Suricata teilen das `snort-rules` Volume:
-
-1. Dashboard schreibt `update-sources.txt` + `update.trigger` ins Volume
-2. Suricata-Entrypoint erkennt den Trigger innerhalb von 30 s
-3. Konfigurierte Quellen werden per `curl` heruntergeladen
-4. Suricata lädt die neuen Regeln via `SIGUSR2` **ohne Neustart**
-
-### Alert-Erkennung im Dashboard
-
-Suricata-Alerts erscheinen mit `source=suricata` und `rule_id=SURICATA:GID:SID:REV` (z.B. `SURICATA:1:2001219:20`). Severity und Score werden aus dem Suricata-Severity-Feld abgeleitet (1=critical, 2=high, 3=medium, 4=low). Feedback (TP/FP) und Enrichment funktionieren identisch zu eigenen Signaturen.
+1. `POST /api/auth/login` aufrufen (Username + Passwort im Request Body)
+2. `access_token` aus der Antwort kopieren
+3. Oben rechts **Authorize** klicken
+4. Token eintragen → alle weiteren Requests werden automatisch authentifiziert
 
 ---
 
-## Kafka Topics
+## API – Endpunkte
 
-| Topic | Producer | Consumer | Retention | Beschreibung |
-|---|---|---|---|---|
-| `raw-packets` | sniffer | flow-aggregator | 10 min | Geparste Pakete (JSON) |
-| `flows` | flow-aggregator | signature-engine, ml-engine | 1h | Aggregierte Flows + Features |
-| `pcap-headers` | sniffer | pcap-store | 30 min | Rohe Header-Bytes für PCAP-Archiv |
-| `alerts-raw` | signature-engine, ml-engine, snort-bridge | alert-manager | 24h | Rohe Alarme |
-| `alerts-enriched` | alert-manager | enrichment-service, api, db-writer | 7 Tage | Angereicherte Alarme |
-| `alerts-enriched-push` | enrichment-service | api (WebSocket) | 1h | Live-Enrichment-Updates |
-| `feedback` | api | training-loop | 30 Tage | False-Positive/True-Positive Feedback |
-| `test-commands` | api | traffic-generator | 1h | Test-Szenarien auslösen |
+### Authentifizierung
 
----
-
-## Datenbank (TimescaleDB)
-
-| Tabelle | Typ | Beschreibung |
+| Method | Path | Beschreibung |
 |---|---|---|
-| `flows` | Hypertable | Aggregierte Netzwerkflows |
-| `alerts` | Hypertable | Alarme mit Enrichment + Feedback |
-| `host_info` | Tabelle | Enrichment-Cache pro IP |
-| `known_networks` | Tabelle (GiST-Index) | Bekannte Netzwerke (CSV-Import) |
-| `system_config` | Tabelle | Betriebskonfiguration (key/value JSONB) |
-| `training_samples` | Tabelle | Gelabelte Flows für ML-Retrain |
-| `test_runs` | Hypertable | Ergebnis-Protokoll der Dashboard-Tests |
-| `users` | Tabelle | Lokale und SAML-synchronisierte Benutzer |
+| POST | `/api/auth/login` | Login, gibt JWT zurück (kein Auth erforderlich) |
+| GET | `/api/auth/me` | Eingeloggter Benutzer |
 
-PostgreSQL `LISTEN/NOTIFY` auf Channel `config_changed`: Services reagieren auf Interface-Änderungen ohne Polling.
-
----
-
-## API – Details
-
-### Endpunkte
+### Alerts
 
 | Method | Path | Beschreibung |
 |---|---|---|
 | GET | `/api/alerts` | Alert-Liste (Filter: severity, source, rule_id, src_ip, is_test, ts_from, ts_to) |
 | GET | `/api/alerts/{id}` | Einzelner Alert |
-| PATCH | `/api/alerts/{id}/feedback` | Feedback setzen (`fp` / `tp`) |
+| PATCH | `/api/alerts/{id}/feedback` | Feedback setzen (`fp` / `tp` + optionale Notiz) |
 | GET | `/api/alerts/{id}/pcap` | PCAP-Download (MinIO-Proxy, Wireshark-kompatibel) |
+
+### Flows
+
+| Method | Path | Beschreibung |
+|---|---|---|
 | GET | `/api/flows` | Flow-Liste (Filter: src_ip, dst_ip, proto, dst_port) |
-| GET | `/api/stats/threat-level` | Threat-Level 0–100 (letzte 15 min, gewichtet nach Severity) |
+| GET | `/api/flows/graph` | Verbindungsgraph: alle Flows zwischen zwei IPs im Zeitfenster |
+
+`/api/flows/graph` Parameter: `src_ip`, `dst_ip`, `center_ts` (Unix-Sekunden), `window_min` (Standard: 5).
+
+### Netzwerke
+
+| Method | Path | Beschreibung |
+|---|---|---|
 | GET | `/api/networks` | Bekannte Netzwerke |
 | POST | `/api/networks` | Netzwerk anlegen (CIDR, Name, Farbe) |
 | DELETE | `/api/networks/{id}` | Netzwerk löschen |
+| POST | `/api/networks/import/csv` | Bulk-Import aus CSV |
+| GET | `/api/networks/example.csv` | Beispiel-CSV herunterladen |
+
+### Hosts
+
+| Method | Path | Beschreibung |
+|---|---|---|
 | GET | `/api/hosts` | Host-Liste (`?trusted=`, `?search=`) |
 | POST | `/api/hosts` | Host anlegen (trust_source=manual) |
 | PUT | `/api/hosts/{ip}` | Display-Name / trusted-Flag ändern |
 | DELETE | `/api/hosts/{ip}` | Host entfernen |
 | POST | `/api/hosts/import/csv` | Bulk-Import aus CSV |
+| GET | `/api/hosts/example.csv` | Beispiel-CSV herunterladen |
+
+### ML / KI-Engine
+
+| Method | Path | Beschreibung |
+|---|---|---|
+| GET | `/api/ml/status` | Aktueller ML-Status (Phase, Bootstrap, 24h-Stats, Top-Features) |
+| GET | `/api/ml/config` | ML-Konfiguration lesen |
+| PATCH | `/api/ml/config` | ML-Konfiguration aktualisieren |
+| POST | `/api/ml/retrain` | Sofortigen Retrain auslösen |
+
+### Regeln
+
+| Method | Path | Beschreibung |
+|---|---|---|
+| GET | `/api/rules/sources` | Konfigurierte Regelquellen |
+| POST | `/api/rules/sources` | Neue Quelle hinzufügen |
+| PATCH | `/api/rules/sources/{id}` | Quelle aktivieren/deaktivieren |
+| DELETE | `/api/rules/sources/{id}` | Benutzerdefinierte Quelle entfernen |
+| GET | `/api/rules` | Aktive Regeln (`?search=`, `?limit=`, `?offset=`) |
+| POST | `/api/rules/update` | Update-Trigger (Suricata Live-Reload) |
+| GET | `/api/rules/update/status` | Update-Status |
+
+### Benutzer
+
+| Method | Path | Beschreibung |
+|---|---|---|
 | GET | `/api/users` | Benutzerliste |
 | POST | `/api/users` | Lokalen Benutzer anlegen |
 | PATCH | `/api/users/{id}` | Benutzer aktualisieren (Rolle, Passwort, aktiv) |
 | DELETE | `/api/users/{id}` | Benutzer löschen (letzter Admin geschützt) |
-| GET | `/api/rules/sources` | Konfigurierte Rule-Quellen |
-| POST | `/api/rules/sources` | Neue Quelle hinzufügen |
-| PATCH | `/api/rules/sources/{id}` | Quelle aktivieren/deaktivieren |
-| DELETE | `/api/rules/sources/{id}` | Benutzerdefinierte Quelle entfernen |
-| GET | `/api/rules` | Aktive Regeln lesen + filtern (`?search=`, `?limit=`, `?offset=`) |
-| POST | `/api/rules/update` | Update-Trigger auslösen (Suricata Live-Reload) |
-| GET | `/api/rules/update/status` | Update-Status abfragen |
+
+### System
+
+| Method | Path | Beschreibung |
+|---|---|---|
+| GET | `/api/stats/threat-level` | Threat-Level 0–100 (letzte 15 min) |
 | GET | `/api/config` | Alle System-Config-Keys |
 | PATCH | `/api/config/{key}` | Config-Key aktualisieren |
-| POST | `/api/tests/run` | Test-Szenario auslösen → `test-commands` Kafka-Topic |
+| POST | `/api/tests/run` | Test-Szenario auslösen |
 | GET | `/api/tests/runs` | Test-Run-Protokoll |
-| WS | `/ws/alerts` | Echtzeit-Alert-Stream (initial: letzte 50 Alerts) |
-| GET | `/health` | Health-Check |
-| GET | `/api/docs` | Swagger UI |
+| GET | `/health` | Health-Check (kein Auth) |
 
-### WebSocket-Protokoll
+### WebSocket
+
+| Protokoll | Path | Beschreibung |
+|---|---|---|
+| WS | `/ws/alerts` | Echtzeit-Alert-Stream (JWT als Query-Parameter oder Header) |
+
+---
+
+## WebSocket-Protokoll
+
+Verbindung: `ws://<host>:8001/ws/alerts` mit JWT im `Authorization`-Header.
 
 ```jsonc
-// Initial-Nachricht beim Verbinden:
-{ "type": "initial", "data": [/* letzte 50 Alert-Objekte */] }
+// Initial beim Verbinden (letzte 50 Alerts aus DB):
+{ "type": "initial", "data": [ /* Alert-Objekte */ ] }
 
-// Neue Alerts in Echtzeit:
+// Neuer Alert in Echtzeit:
 { "type": "alert", "data": { /* Alert-Objekt */ } }
 
-// Live-Enrichment-Updates (DNS/Ping/GeoIP asynchron nachgeliefert):
-{ "type": "alert_enriched", "data": { "alert_id": "uuid", "enrichment": { /* Enrichment-Objekt */ } } }
+// Live-Enrichment-Update (DNS/Ping/GeoIP asynchron):
+{ "type": "alert_enriched", "data": { "alert_id": "uuid", "enrichment": { /* ... */ } } }
+
+// PCAP wurde archiviert und ist zum Download bereit:
+{ "type": "pcap_available", "data": { "alert_id": "uuid" } }
+
+// Feedback wurde von einem User gesetzt (Multi-Client-Sync):
+{ "type": "feedback_updated", "data": { "alert_id": "uuid", "feedback": "fp|tp", "feedback_ts": "ISO", "feedback_note": "..." } }
 ```
 
-### Threat-Level
+---
+
+## Threat-Level
 
 Score basiert auf Alerts der letzten 15 Minuten (Testverkehr ausgeschlossen):
 
@@ -421,85 +419,141 @@ Score wird auf 0–100 normiert (Cap bei 200 Rohpunkten).
 
 ---
 
-## User Management
+## Host-Trust-System
 
-### Benutzerquellen
-
-| Quelle | Beschreibung |
+| Trust-Quelle | Beschreibung |
 |---|---|
-| `local` | Passwort-basiert (bcrypt), vollständig vom Admin verwaltbar |
-| `saml` | Automatisch beim SSO-Login angelegt/synchronisiert, kein lokales Passwort |
+| `dns` | Hostname automatisch per Reverse-DNS aufgelöst |
+| `csv` | Import über CSV-Datei |
+| `manual` | Direkt im Dashboard oder via API angelegt |
 
-### Standard-Admin
+Trust wird nie herabgestuft – manuell gesetztes `trusted=true` bleibt auch bei fehlendem DNS-Lookup erhalten.
 
-Nach der Migration `003_users.sql` wird automatisch ein Admin-Benutzer angelegt:
+**UNKNOWN_HOST-Alert:** Der Enrichment-Service erzeugt automatisch einen Alert (`UNKNOWN_HOST_001`, Severity `low`) wenn ein privater IP-Host auftaucht, der nicht als trusted hinterlegt ist. Deduplication: max. 1 Alert pro IP pro Stunde.
 
-- **Username:** `admin`
-- **Passwort:** `changeme`
+### CSV-Format Hosts
 
-**Das Passwort muss sofort nach der ersten Anmeldung geändert werden!**
+```csv
+# Spalten: hostname;ip  (oder ip;hostname – wird automatisch erkannt)
+# Trennzeichen: Semikolon oder Komma
+hostname;ip
+router.local;192.168.1.1
+fileserver;192.168.1.10
+```
 
-### Sicherheitsregeln
+### CSV-Format Netzwerke
 
-- Der letzte aktive Admin-Benutzer kann nicht gelöscht werden
-- SAML-Benutzer können kein lokales Passwort setzen
-- Passwörter werden mit bcrypt (Faktor 12) gehasht
+```csv
+# Spalten: cidr;name;description;color
+# description und color sind optional
+cidr;name;description;color
+192.168.1.0/24;LAN Büro;Hauptbüro;#3b82f6
+10.0.0.0/8;VPN;VPN-Tunnel;#8b5cf6
+```
+
+---
+
+## Kafka Topics
+
+| Topic | Producer | Consumer | Beschreibung |
+|---|---|---|---|
+| `raw-packets` | sniffer | flow-aggregator | Geparste Pakete (JSON) |
+| `flows` | flow-aggregator | signature-engine, ml-engine | Aggregierte Flows + Features |
+| `pcap-headers` | sniffer | pcap-store | Rohe Header-Bytes für PCAP-Archiv |
+| `alerts-raw` | signature-engine, ml-engine, snort-bridge | alert-manager | Rohe Alarme |
+| `alerts-enriched` | alert-manager | enrichment-service, api, pcap-store | Angereicherte Alarme |
+| `alerts-enriched-push` | enrichment-service, pcap-store, api | api (WebSocket) | Live-Updates: Enrichment, PCAP, Feedback |
+| `feedback` | api | training-loop | FP/TP-Feedback für ML-Training |
+| `test-commands` | api | traffic-generator | Test-Szenarien |
+
+---
+
+## Datenbank (TimescaleDB)
+
+| Tabelle | Typ | Beschreibung |
+|---|---|---|
+| `flows` | Hypertable | Aggregierte Netzwerkflows mit statistischen Features |
+| `alerts` | Hypertable | Alarme mit Enrichment, Feedback, Tags, PCAP-Referenz |
+| `host_info` | Tabelle | Enrichment-Cache pro IP (Hostname, Trust, GeoIP, ASN) |
+| `known_networks` | Tabelle (GiST) | Bekannte Netzwerke – CIDR-Containment via `>>` Operator |
+| `system_config` | Tabelle | Betriebskonfiguration (key/value JSONB) |
+| `training_samples` | Tabelle | Gelabelte Flows für ML-Retrain |
+| `test_runs` | Hypertable | Ergebnis-Protokoll der Dashboard-Tests |
+| `users` | Tabelle | Lokale und SAML-synchronisierte Benutzer |
+
+PostgreSQL `LISTEN/NOTIFY` auf Channel `config_changed` für Interface-Änderungen ohne Polling.
+
+---
+
+## ML Engine – Details
+
+### Phasen
+
+| Phase | Beschreibung |
+|---|---|
+| `passthrough` | Zu wenig Trainingsdaten – alle Flows durchgelassen |
+| `learning` | Bootstrap läuft – Modell sammelt Baseline-Daten |
+| `active` | Modell aktiv – anomale Flows erzeugen ML-Alerts |
+
+### Konfiguration (via Dashboard oder `PATCH /api/ml/config`)
+
+| Parameter | Standard | Beschreibung |
+|---|---|---|
+| `alert_threshold` | `0.7` | Anomalie-Score ab dem ein Alert erzeugt wird (0–1) |
+| `contamination` | `0.01` | Erwarteter Anteil anomaler Flows (1% = 1 von 100) |
+| `bootstrap_min_samples` | `500` | Mindest-Flows für erste Modell-Erstellung |
+| `partial_fit_interval` | `500` | Flows zwischen inkrementellen Scaler-Updates |
+
+Kontaminationsänderung löst sofortigen Retrain aus.
 
 ---
 
 ## Training Loop – Details
 
-### Lifecycle
+### Feedback → Training
 
 ```
-feedback (Kafka)
-    │  { alert_id, feedback=tp/fp, rule_id, score }
+feedback (Kafka)  { alert_id, feedback=tp/fp }
     │
-    ▼  [Background-Thread]
-alert → flow JOIN in DB → features extrahieren
-    │
-    └──► training_samples (label=attack/normal)
+    ▼  alert → flow JOIN in DB → Features extrahieren
+    └──► training_samples (label: tp→attack, fp→normal)
 
-[Haupt-Thread, alle RETRAIN_INTERVAL_S]
+[Alle RETRAIN_INTERVAL_S oder nach Trigger]
     │
-    ├── count_new_samples() ≥ MIN_NEW_SAMPLES?
-    │
-    ▼
-load_flows_for_bootstrap() + load_samples()
-    │
-    ▼
-IsolationForest retrain (semi-supervised)
-  normal Flows → Baseline
-  attack-labeled Samples → contamination anpassen
-    │
-    └──► /models/scaler.joblib + iforest.joblib (atomar via tmp→rename)
+    ▼  IsolationForest retrain (semi-supervised)
+    └──► /models/iforest.joblib + scaler.joblib (atomar via tmp→rename)
          /models/meta.json
 ```
 
-### Label-Mapping
+---
 
-| Feedback | Label | Bedeutung |
-|---|---|---|
-| `tp` | `attack` | Echter Angriff → als Outlier trainieren |
-| `fp` | `normal` | Kein Angriff → als Inlier trainieren |
+## PCAP Store – Details
 
-### Umgebungsvariablen
+```
+pcap-headers (Kafka)       alerts-enriched (Kafka)
+     │  ts_sec, ts_usec,        │  alert_id, ts
+     │  data_b64                │
+     ▼                          ▼
+PacketBuffer              PendingAlert (ready_at = jetzt + window_s)
+(sliding window ±120s)         │
+     │                         │  wenn Zeit abgelaufen:
+     └─────────────────────────┤
+                               ▼
+                    Pakete extrahieren [ts ± window_s]
+                               │
+                    ┌──────────▼──────────┐
+                    │  PCAP bauen         │  libpcap-Format, nur Header
+                    │  MinIO upload       │  ids-pcaps/alerts/{id}.pcap
+                    │  DB: pcap_available │
+                    │  WS: pcap_available │  → Frontend-Button wird blau
+                    └─────────────────────┘
+```
 
-| Variable | Standard | Beschreibung |
-|---|---|---|
-| `KAFKA_BROKERS` | `localhost:9092` | Kafka |
-| `POSTGRES_DSN` | – | TimescaleDB |
-| `MODELS_DIR` | `/models` | Geteiltes Volume mit ml-engine |
-| `RETRAIN_INTERVAL_S` | `86400` | Mindestabstand zwischen Retrains (24h) |
-| `MIN_NEW_SAMPLES` | `50` | Mindest-Neulabels für Retrain |
-| `MAX_TRAIN_SAMPLES` | `100000` | Max. Trainings-Samples |
-| `CONTAMINATION` | `0.01` | IsolationForest-Basiswert |
+PCAP-Dateien sind im nativen libpcap-Format (`LINKTYPE_ETHERNET`). Sie enthalten nur Header-Bytes (snaplen 128), **keinen Payload**. Öffenbar mit Wireshark, tcpdump, tshark.
 
 ---
 
-## Traffic Generator – Details
-
-### Test-Szenarien
+## Traffic Generator – Test-Szenarien
 
 | Szenario | Methode | Ausgelöste Regel |
 |---|---|---|
@@ -507,127 +561,75 @@ IsolationForest retrain (semi-supervised)
 | `SCAN_001` | 100 TCP SYN an zufällige Ports in ~3s | SCAN_001 |
 | `DOS_SYN_001` | 600 TCP SYN an Port 80 in ~6s | DOS_SYN_001 |
 | `RECON_003` | ICMP Echo an 25 IPs | RECON_003 |
-| `DNS_DGA_001` | 15 DNS-Queries mit zufälligen Hochentropie-Domains | DNS_DGA_001 |
-
-### Flow
-
-```
-test-commands (Kafka)
-    │  { run_id, scenario_id, ts }
-    ▼
-Scapy-Szenario ausführen
-    │
-    └── DB pollen: alerts WHERE rule_id=expected AND ts > start_ts (max 30s)
-              │
-              ├── Alert gefunden → test_runs SET triggered=true, latency_ms, alert_id
-              └── Timeout       → test_runs SET triggered=false
-```
+| `DNS_DGA_001` | 15 DNS-Queries mit Hochentropie-Domains | DNS_DGA_001 |
 
 ---
 
 ## Datenschemas
 
-### `raw-packets` – PacketEvent
+### PcapRecord (pcap-headers Topic)
 
 ```jsonc
 {
-  "ts": 1713000000.123456,        // Unix-Timestamp (Mikrosekunden)
-  "iface": "eth1",
-  "pkt_len": 60,                  // Originale Paketlänge
-  "eth": {
-    "src_mac": "aa:bb:cc:dd:ee:ff",
-    "dst_mac": "11:22:33:44:55:66",
-    "ethertype": 2048              // 2048=IPv4, 34525=IPv6, 2054=ARP
-  },
-  "ip": {
-    "version": 4,                  // 4 oder 6
-    "src": "192.168.1.10",
-    "dst": "10.0.0.1",
-    "ttl": 64,
-    "proto": 6,                    // 6=TCP, 17=UDP, 1=ICMP, 58=ICMPv6
-    "frag": false,
-    "dscp": 0
-  },
-  "transport": {
-    "proto": "TCP",                // TCP|UDP|ICMP|ICMPv6|OTHER
-    "src_port": 54321,
-    "dst_port": 443,
-    "tcp": {
-      "flags": ["SYN"],
-      "seq": 123456789,
-      "ack": 0,
-      "window": 65535,
-      "options": ["MSS:1460", "SACK_PERM", "WScale:7", "Timestamps"]
-    }
-  },
-  "raw_header_b64": "RQAA..."     // Base64, max snaplen Bytes, kein Payload
+  "ts_sec":  1713000000,    // Sekunden seit Epoch
+  "ts_usec": 123456,        // Mikrosekunden-Anteil
+  "orig_len": 60,           // Originale Paketlänge
+  "data_b64": "RQAA..."     // Base64-kodierte rohe Header-Bytes (max snaplen)
 }
 ```
 
-### `alerts-enriched` – AlertEvent
+### AlertEvent (alerts-enriched Topic)
 
 ```jsonc
 {
-  "alert_id": "uuid-v4",
-  "ts": 1713000045.0,
-  "flow_id": "uuid-v4",
-  "source": "signature",           // signature|ml|correlation|suricata
-  "rule_id": "SCAN_001",
-  "severity": "high",              // low|medium|high|critical
-  "score": 0.87,
-  "src_ip": "192.168.1.10",
-  "dst_ip": "10.0.0.1",
-  "proto": "TCP",
-  "dst_port": 443,
+  "alert_id":    "uuid-v4",
+  "ts":          "2026-04-19T14:15:57.624665+00:00",
+  "flow_id":     "uuid-v4",
+  "source":      "signature",     // signature | ml | suricata | test
+  "rule_id":     "SCAN_001",
+  "severity":    "high",          // low | medium | high | critical
+  "score":       0.87,
+  "src_ip":      "192.168.1.10",
+  "dst_ip":      "10.0.0.1",
+  "proto":       "TCP",
+  "dst_port":    443,
   "description": "TCP SYN Portscan – 73 Ports in 60s",
-  "tags": ["Portscan", "Reconnaissance"],
+  "tags":        ["recon", "scan"],
   "enrichment": {
-    "src_hostname": "laptop.local",
-    "dst_hostname": "cloudflare.com",
-    "src_network": { "cidr": "192.168.1.0/24", "name": "Office LAN", "color": "#4CAF50" },
-    "src_trusted": true,
+    "src_hostname":    "laptop.local",
+    "dst_hostname":    "cloudflare.com",
+    "src_network":     { "cidr": "192.168.1.0/24", "name": "Office LAN", "color": "#4CAF50" },
+    "src_trusted":     true,
     "src_trust_source": "manual",
-    "dst_asn": { "number": 13335, "org": "Cloudflare" },
-    "dst_geo": { "country": "US", "city": "San Jose" }
+    "dst_asn":         { "number": 13335, "org": "Cloudflare" },
+    "dst_geo":         { "country": "US", "city": "San Jose" }
   },
   "pcap_available": true,
-  "pcap_key": "alerts/uuid-v4.pcap",
-  "feedback": null,                // null|fp|tp
-  "is_test": false
+  "pcap_key":    "alerts/uuid-v4.pcap",
+  "feedback":    null,            // null | fp | tp
+  "is_test":     false
 }
 ```
 
 ---
 
-## PCAP Store – Details
+## Suricata Integration (optional)
 
-### Pipeline
+Suricata läuft als parallele Detection-Engine auf demselben Mirror-Port. Alerts fließen über einen Bridge-Service in die bestehende Kafka-Pipeline.
 
 ```
-pcap-headers (Kafka)           alerts-enriched (Kafka)
-     │  PacketEvent (JSON)           │  AlertEvent (JSON)
-     │  raw_header_b64               │
-     ▼                               ▼
-PacketBuffer                   PendingAlert anlegen
-(sliding window ±window_s*2)   (ready_at = jetzt + window_s)
-     │                               │
-     └──────────────┬────────────────┘
-                    │  wenn Buffer-Timestamp > ready_at:
-                    ▼
-            Pakete extrahieren
-            [alert_ts - window_s, alert_ts + window_s]
-                    │
-                    ▼
-            PCAP-Datei bauen (libpcap-Format, kein Payload)
-                    │
-                    ├──► MinIO  ids-pcaps/alerts/{alert_id}.pcap
-                    └──► DB     alerts SET pcap_available=true, pcap_key=...
+Mirror Port ──► Rust Sniffer ──► Signature Engine ─┐
+              │                ──► ML Engine         ├──► alerts-raw ──► Alert-Manager
+              └──► Suricata ──► eve.json ──► snort-bridge ──────────────┘
 ```
 
-### PCAP-Format
+Suricata-Alerts erscheinen mit `source=suricata`, `rule_id=SURICATA:GID:SID:REV`. Feedback und Enrichment funktionieren identisch zu eigenen Signaturen.
 
-Natives libpcap-Format (`LINKTYPE_ETHERNET`, little-endian). Enthält nur Header-Bytes (snaplen 128), **keinen Payload**. Öffenbar mit Wireshark, tcpdump, tshark.
+### Regelsets
 
-### Pending-Alert-Mechanismus
+| `SNORT_RULESET` | Quelle | Signaturen |
+|---|---|---|
+| `emerging-threats` (Standard) | emergingthreats.net | ~40.000 ET Open |
+| `none` | – | 0 |
 
-Alerts werden mit `ready_at = jetzt + window_s` gepuffert. Erst wenn der Paketpuffer Pakete bis mindestens `alert_ts + window_s` enthält, wird das PCAP erstellt. Dadurch landen auch Pakete **nach** dem Alert-Timestamp im PCAP.
+Live-Reload: Dashboard → Settings → Regelquellen → Update starten (SIGUSR2 an Suricata, kein Neustart).
