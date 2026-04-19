@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
-import { createNetwork, deleteNetwork, fetchNetworks } from '../api';
+import { useEffect, useRef, useState } from 'react';
+import { createNetwork, deleteNetwork, fetchNetworks, importNetworksCsv, networksExampleCsvUrl } from '../api';
 import type { KnownNetwork } from '../types';
 
 export function NetworksPage() {
-  const [networks, setNetworks] = useState<KnownNetwork[]>([]);
-  const [form, setForm]         = useState({ cidr: '', name: '', description: '', color: '#4CAF50' });
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [networks, setNetworks]         = useState<KnownNetwork[]>([]);
+  const [form, setForm]                 = useState({ cidr: '', name: '', description: '', color: '#4CAF50' });
+  const [error, setError]               = useState('');
+  const [loading, setLoading]           = useState(false);
+  const [importResult, setImportResult] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () =>
     fetchNetworks()
@@ -36,11 +38,52 @@ export function NetworksPage() {
     load();
   };
 
+  const handleCsv = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportResult('');
+    setError('');
+    try {
+      const result = await importNetworksCsv(file);
+      setImportResult(
+        `Importiert: ${result.imported} | Übersprungen: ${result.skipped}` +
+        (result.errors.length ? ` | Fehler: ${result.errors.slice(0, 3).join('; ')}` : '')
+      );
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import-Fehler');
+    }
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
   return (
     <div className="space-y-4">
       {/* Form */}
       <div className="card p-4">
-        <h2 className="text-sm font-semibold text-slate-300 mb-3">Netzwerk hinzufügen</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-300">Netzwerk hinzufügen</h2>
+          <div className="flex items-center gap-2">
+            <a
+              href={networksExampleCsvUrl()}
+              download="networks_example.csv"
+              className="btn-ghost text-xs text-slate-500 hover:text-slate-300"
+              title="Beispiel-CSV herunterladen"
+            >
+              Beispiel-CSV
+            </a>
+            <label className="btn-ghost cursor-pointer text-xs">
+              CSV importieren
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".csv,.txt"
+                className="hidden"
+                onChange={handleCsv}
+              />
+            </label>
+            {importResult && <span className="text-xs text-green-400">{importResult}</span>}
+          </div>
+        </div>
         <form onSubmit={submit} className="flex flex-wrap gap-2 items-end">
           <label className="flex flex-col gap-1">
             <span className="text-xs text-slate-500">CIDR *</span>

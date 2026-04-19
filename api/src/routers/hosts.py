@@ -165,6 +165,30 @@ async def delete_host(ip: str, pool: asyncpg.Pool = Depends(get_pool)) -> None:
         raise HTTPException(status_code=404, detail="Host not found")
 
 
+@router.get("/example.csv")
+async def hosts_example_csv():
+    """Beispiel-CSV zum Download – zeigt das erwartete Format."""
+    content = (
+        "# Bekannte Hosts – Cyjan IDS\n"
+        "# Spalten: hostname;ip  (oder ip;hostname – Reihenfolge wird automatisch erkannt)\n"
+        "# Trennzeichen: Semikolon oder Komma\n"
+        "# Zeilen die mit # beginnen sowie Leerzeilen werden ignoriert.\n"
+        "hostname;ip\n"
+        "router.local;192.168.1.1\n"
+        "fileserver;192.168.1.10\n"
+        "printer-flur;192.168.1.20\n"
+        "dc01.corp.example.com;10.0.0.5\n"
+        "# IPv6 wird ebenfalls unterstützt\n"
+        "ipv6-host;2001:db8::1\n"
+    )
+    from fastapi.responses import Response
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="hosts_example.csv"'},
+    )
+
+
 @router.post("/import/csv", response_model=dict)
 async def import_csv(
     file: UploadFile = File(...),
