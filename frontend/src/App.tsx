@@ -92,7 +92,7 @@ export default function App() {
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-4">
         <div className="flex items-center mr-2">
-          <img src="/cyjan.jpeg" alt="Cyjan" className="h-8 w-auto rounded" />
+          <img src="/cyjan.png" alt="Cyjan" className="h-8 w-auto" />
         </div>
 
         {/* Tabs */}
