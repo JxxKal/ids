@@ -129,7 +129,7 @@ export default function App() {
                     className={`px-2.5 py-1 text-xs font-medium transition-colors
                       border-r border-slate-700 last:border-r-0 ${
                       timeWindow === w.id
-                        ? 'bg-slate-700 text-slate-100'
+                        ? 'bg-blue-900/70 text-blue-100 font-semibold'
                         : 'bg-slate-900 text-slate-500 hover:text-slate-300 hover:bg-slate-800'
                     }`}
                   >
@@ -154,15 +154,17 @@ export default function App() {
 
               {/* Test-Toggle – nur im Live-Modus */}
               {timeWindow === 'live' && (
-                <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                <label htmlFor="show-test-toggle" className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
                   <input
+                    id="show-test-toggle"
+                    name="show-test-toggle"
                     type="checkbox"
                     className="accent-blue-500"
                     checked={showTest}
                     onChange={e => {
-                setShowTest(e.target.checked);
-                localStorage.setItem('showTest', String(e.target.checked));
-              }}
+                      setShowTest(e.target.checked);
+                      localStorage.setItem('showTest', String(e.target.checked));
+                    }}
                   />
                   Testverkehr anzeigen
                 </label>

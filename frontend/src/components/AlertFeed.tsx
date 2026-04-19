@@ -151,18 +151,22 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800">
         <input
+          id="alert-search"
+          name="alert-search"
           className="input flex-1"
           placeholder="Suche (IP, Regel, …)"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
         <select
+          id="alert-severity"
+          name="alert-severity"
           className="input w-32"
           value={severityF}
           onChange={e => setSeverityF(e.target.value)}
         >
           {SEVERITIES.map(s => (
-            <option key={s} value={s}>{s || 'Alle'}</option>
+            <option key={s} value={s}>{s || 'Alle Schweregrade'}</option>
           ))}
         </select>
 
@@ -171,15 +175,17 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
           onClick={() => setGrouped(g => !g)}
           className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
             grouped
-              ? 'bg-slate-700 text-slate-100 border-slate-600'
+              ? 'bg-blue-900/60 text-blue-200 border-blue-700'
               : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
           }`}
-          title="Alerts mit gleicher Regel-ID und Quell-IP zu einer Zeile zusammenfassen und Treffer-Anzahl anzeigen"
+          title="Gleiche Regel + Quell-IP zusammenfassen (zeigt Treffer-Anzahl)"
         >
-          {grouped ? 'Zusammengefasst' : 'Einzeln'}
+          {grouped ? '⊞ Gruppiert' : '≡ Einzeln'}
         </button>
 
-        <span className="text-xs text-slate-500 shrink-0">{rowCount} {grouped && groups!.some(g => g.count > 1) ? 'Gruppen' : 'Alerts'}</span>
+        <span className="text-sm font-medium text-slate-300 shrink-0">
+          {rowCount} <span className="text-xs font-normal text-slate-500">{grouped && groups!.some(g => g.count > 1) ? 'Gruppen' : 'Alerts'}</span>
+        </span>
       </div>
 
       {/* Table */}
@@ -212,7 +218,7 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                     {fmtTime(g.last_ts)}
                     {g.count > 1 && (
                       <div className="text-slate-600 text-xs">
-                        ab {fmtTime(g.first_ts)}
+                        {fmtTime(g.first_ts)} –
                       </div>
                     )}
                   </td>
@@ -223,8 +229,10 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                     {g.rule_id ?? '–'}
                     {g.latest.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
                   </td>
-                  <td className="px-3 py-2 text-slate-400 max-w-xs truncate">
-                    {g.description ?? '–'}
+                  <td className="px-3 py-2 text-slate-400 max-w-sm">
+                    <span className="line-clamp-2" title={g.description ?? undefined}>
+                      {g.description ?? '–'}
+                    </span>
                   </td>
                   <td className="px-3 py-2">
                     <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
@@ -275,8 +283,10 @@ export function AlertFeed({ alerts, onUpdate, showTest }: Props) {
                     {a.rule_id}
                     {a.is_test && <span className="ml-1 text-blue-400 text-xs">[TEST]</span>}
                   </td>
-                  <td className="px-3 py-2 text-slate-400 max-w-xs truncate">
-                    {a.description ?? '–'}
+                  <td className="px-3 py-2 text-slate-400 max-w-sm">
+                    <span className="line-clamp-2" title={a.description ?? undefined}>
+                      {a.description ?? '–'}
+                    </span>
                   </td>
                   <td className="px-3 py-2">
                     <IpCell ip={a.src_ip} enrichment={a.enrichment} dir="src" />

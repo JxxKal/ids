@@ -35,30 +35,30 @@ export function ThreatGauge() {
   const color = TEXT_COLORS[data.label] ?? TEXT_COLORS.green;
 
   return (
-    <div className="card px-5 py-3 flex items-center gap-5 min-w-[280px]">
-      {/* Gauge bar */}
-      <div className="flex-1">
-        <div className="flex justify-between text-xs text-slate-500 mb-1">
-          <span>Threat Level</span>
-          <span className="text-slate-400">{data.window_min} min</span>
+    <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/60 min-w-[260px]">
+      {/* Score */}
+      <div className={`text-2xl font-bold tabular-nums leading-none ${color}`}>
+        {data.level}
+      </div>
+      {/* Gauge + counts */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
+          <span className="font-medium text-slate-400">Threat Level</span>
+          <span>{data.window_min} min</span>
         </div>
-        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+        <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full bg-gradient-to-r ${grad} transition-all duration-700`}
             style={{ width: `${data.level}%` }}
           />
         </div>
-        <div className="flex justify-between mt-1.5 text-xs text-slate-500">
+        <div className="flex gap-2.5 mt-1 text-[10px] text-slate-500">
           {['critical', 'high', 'medium', 'low'].map(sev => (
             <span key={sev}>
-              {sev[0].toUpperCase()}: <span className="text-slate-300">{data.alert_counts[sev] ?? 0}</span>
+              {sev[0].toUpperCase()}: <span className="text-slate-300 font-medium">{data.alert_counts[sev] ?? 0}</span>
             </span>
           ))}
         </div>
-      </div>
-      {/* Score */}
-      <div className={`text-3xl font-bold tabular-nums ${color}`}>
-        {data.level}
       </div>
     </div>
   );
