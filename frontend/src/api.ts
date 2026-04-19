@@ -245,7 +245,7 @@ export async function createUser(data: {
   username: string;
   email?: string;
   display_name?: string;
-  role: 'admin' | 'viewer';
+  role: 'admin' | 'viewer' | 'api';
   password: string;
 }): Promise<User> {
   return req('/api/users', { method: 'POST', body: JSON.stringify(data) });
@@ -254,7 +254,7 @@ export async function createUser(data: {
 export async function updateUser(id: string, data: {
   email?: string;
   display_name?: string;
-  role?: 'admin' | 'viewer';
+  role?: 'admin' | 'viewer' | 'api';
   active?: boolean;
   password?: string;
 }): Promise<User> {
@@ -263,6 +263,10 @@ export async function updateUser(id: string, data: {
 
 export async function deleteUser(id: string): Promise<void> {
   return req(`/api/users/${id}`, { method: 'DELETE' });
+}
+
+export async function generateApiToken(userId: string): Promise<{ token: string; expires_in_days: number }> {
+  return req(`/api/users/${userId}/token`, { method: 'POST' });
 }
 
 // ── ML / KI-Engine ───────────────────────────────────────────────────────────

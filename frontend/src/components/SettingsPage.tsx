@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   addRuleSource, createUser, deleteRuleSource, deleteUser,
   fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
-  fetchSamlConfig, fetchUsers, patchRuleSource,
+  fetchSamlConfig, fetchUsers, generateApiToken, patchRuleSource,
   saveMLConfig, saveSamlConfig, triggerMLRetrain, triggerRuleUpdate, updateUser,
 } from '../api';
 import type { MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
@@ -16,12 +16,14 @@ function SourceBadge({ source }: { source: string }) {
 }
 
 function RoleBadge({ role }: { role: string }) {
-  return role === 'admin'
-    ? <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-900/50 text-amber-300 border border-amber-700/40">Admin</span>
-    : <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">Viewer</span>;
+  if (role === 'admin')
+    return <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-900/50 text-amber-300 border border-amber-700/40">Admin</span>;
+  if (role === 'api')
+    return <span className="px-1.5 py-0.5 text-[10px] rounded bg-indigo-900/50 text-indigo-300 border border-indigo-700/40">API</span>;
+  return <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">Viewer</span>;
 }
 
-interface NewUserForm { username: string; email: string; display_name: string; role: 'admin' | 'viewer'; password: string; password2: string; }
+interface NewUserForm { username: string; email: string; display_name: string; role: 'admin' | 'viewer' | 'api'; password: string; password2: string; }
 const EMPTY_FORM: NewUserForm = { username: '', email: '', display_name: '', role: 'viewer', password: '', password2: '' };
 
 // ── UserManagement ────────────────────────────────────────────────────────────
@@ -36,6 +38,7 @@ function UserManagement() {
   const [showNew, setShowNew] = useState(false);
   const [editId,  setEditId]  = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<User & { password: string; password2: string }>>({});
+  const [apiToken, setApiToken] = useState<{ userId: string; token: string } | null>(null);
 
   useEffect(() => {
     fetchUsers()
@@ -47,7 +50,12 @@ function UserManagement() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setFormErr('');
-    if (form.password !== form.password2) { setFormErr('Passwörter stimmen nicht überein'); return; }
+    // API-User: kein Passwort nötig → zufälliges generieren
+    const isApi = form.role === 'api';
+    const pw = isApi
+      ? crypto.getRandomValues(new Uint8Array(16)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '')
+      : form.password;
+    if (!isApi && form.password !== form.password2) { setFormErr('Passwörter stimmen nicht überein'); return; }
     setSaving(true);
     try {
       const u = await createUser({
@@ -55,15 +63,29 @@ function UserManagement() {
         email:        form.email || undefined,
         display_name: form.display_name || undefined,
         role:         form.role,
-        password:     form.password,
+        password:     pw,
       });
       setUsers(prev => [...prev, u]);
       setForm(EMPTY_FORM);
       setShowNew(false);
+      // Direkt Token generieren für neuen API-User
+      if (isApi) {
+        const t = await generateApiToken(u.id);
+        setApiToken({ userId: u.id, token: t.token });
+      }
     } catch (err: unknown) {
       setFormErr(err instanceof Error ? err.message : 'Fehler beim Erstellen');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleGenerateToken(userId: string) {
+    try {
+      const t = await generateApiToken(userId);
+      setApiToken({ userId, token: t.token });
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Fehler beim Token-Generieren');
     }
   }
 
@@ -73,7 +95,7 @@ function UserManagement() {
       const payload: Parameters<typeof updateUser>[1] = {};
       if (editData.email        !== undefined) payload.email        = editData.email;
       if (editData.display_name !== undefined) payload.display_name = editData.display_name;
-      if (editData.role         !== undefined) payload.role         = editData.role as 'admin' | 'viewer';
+      if (editData.role         !== undefined) payload.role         = editData.role as 'admin' | 'viewer' | 'api';
       if (editData.password) {
         if (editData.password !== editData.password2) { setFormErr('Passwörter stimmen nicht überein'); setSaving(false); return; }
         payload.password = editData.password;
@@ -112,6 +134,28 @@ function UserManagement() {
 
   return (
     <div>
+      {/* API Token Banner */}
+      {apiToken && (
+        <div className="mb-4 p-3 rounded border border-indigo-700/50 bg-indigo-950/40 text-xs">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-indigo-300 font-semibold">API-Token generiert (nur einmal sichtbar!)</span>
+            <button className="text-slate-500 hover:text-slate-300 text-base leading-none" onClick={() => setApiToken(null)}>✕</button>
+          </div>
+          <div className="flex gap-2 items-center">
+            <code className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-200 break-all font-mono text-[11px] select-all">
+              {apiToken.token}
+            </code>
+            <button
+              className="btn-ghost text-xs shrink-0"
+              onClick={() => navigator.clipboard.writeText(apiToken.token)}
+            >
+              Kopieren
+            </button>
+          </div>
+          <p className="mt-1 text-slate-500">Speichere den Token sicher – er kann nicht erneut abgerufen werden.</p>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold text-slate-200">Benutzer</h2>
         <button className="btn-primary text-xs" onClick={() => { setShowNew(v => !v); setFormErr(''); }}>
@@ -140,21 +184,29 @@ function UserManagement() {
           <div className="flex flex-col gap-1">
             <label htmlFor="new-role" className="text-slate-400">Rolle</label>
             <select id="new-role" name="new-role" className="input"
-              value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as 'admin' | 'viewer' }))}>
+              value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as 'admin' | 'viewer' | 'api' }))}>
               <option value="viewer">Viewer</option>
               <option value="admin">Admin</option>
+              <option value="api">API (Service-Account)</option>
             </select>
           </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="new-pw" className="text-slate-400">Passwort * (min. 8 Zeichen)</label>
-            <input id="new-pw" name="new-pw" type="password" className="input" required minLength={8}
-              value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="new-pw2" className="text-slate-400">Passwort wiederholen *</label>
-            <input id="new-pw2" name="new-pw2" type="password" className="input" required
-              value={form.password2} onChange={e => setForm(f => ({ ...f, password2: e.target.value }))} />
-          </div>
+          {form.role !== 'api' && <>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-pw" className="text-slate-400">Passwort * (min. 8 Zeichen)</label>
+              <input id="new-pw" name="new-pw" type="password" className="input" required minLength={8}
+                value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-pw2" className="text-slate-400">Passwort wiederholen *</label>
+              <input id="new-pw2" name="new-pw2" type="password" className="input" required
+                value={form.password2} onChange={e => setForm(f => ({ ...f, password2: e.target.value }))} />
+            </div>
+          </>}
+          {form.role === 'api' && (
+            <p className="col-span-2 text-indigo-400/80 text-xs bg-indigo-950/30 rounded px-3 py-2 border border-indigo-800/40">
+              API-User nutzen langlebige JWT-Token (365 Tage) statt Passwörter. Nach dem Anlegen wird der Token einmalig angezeigt.
+            </p>
+          )}
           {formErr && <p className="col-span-2 text-red-400 text-xs">{formErr}</p>}
           <div className="col-span-2 flex justify-end gap-2">
             <button type="button" className="btn-ghost text-xs" onClick={() => setShowNew(false)}>Abbrechen</button>
@@ -205,9 +257,10 @@ function UserManagement() {
                   <td className="py-2 pr-4">
                     <select className="input"
                       value={editData.role ?? u.role}
-                      onChange={e => setEditData(d => ({ ...d, role: e.target.value as 'admin' | 'viewer' }))}>
+                      onChange={e => setEditData(d => ({ ...d, role: e.target.value as 'admin' | 'viewer' | 'api' }))}>
                       <option value="viewer">Viewer</option>
                       <option value="admin">Admin</option>
+                      <option value="api">API</option>
                     </select>
                   </td>
                   <td className="py-2 pr-4"><SourceBadge source={u.source} /></td>
@@ -247,6 +300,15 @@ function UserManagement() {
                   </td>
                   <td className="py-2 text-right">
                     <div className="flex gap-1.5 justify-end">
+                      {u.role === 'api' && (
+                        <button
+                          className="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded hover:bg-indigo-950/30 transition-colors"
+                          onClick={() => handleGenerateToken(u.id)}
+                          title="Neues API-Token generieren (invalidiert vorheriges Token nicht)"
+                        >
+                          Token
+                        </button>
+                      )}
                       <button className="btn-ghost text-xs"
                         onClick={() => { setEditId(u.id); setEditData({}); setFormErr(''); }}>
                         Bearbeiten

@@ -6,13 +6,26 @@ from uuid import UUID
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from passlib.context import CryptContext
+from pydantic import BaseModel
 
+from config import Config
 from database import get_pool
+from jwt_utils import create_token
 from models import UserCreate, UserResponse, UserUpdate
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 _pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _cfg() -> Config:
+    from main import cfg
+    return cfg
+
+
+class TokenResponse(BaseModel):
+    token: str
+    expires_in_days: int
 
 
 def _row_to_user(row: asyncpg.Record) -> UserResponse:
@@ -118,3 +131,25 @@ async def delete_user(
                 raise HTTPException(status_code=400, detail="Letzten Admin-Benutzer kann nicht gelöscht werden")
 
         await conn.execute("DELETE FROM users WHERE id = $1", user_id)
+
+
+@router.post("/{user_id}/token", response_model=TokenResponse)
+async def generate_api_token(
+    user_id: UUID,
+    pool: asyncpg.Pool = Depends(get_pool),
+    cfg:  Config       = Depends(_cfg),
+) -> TokenResponse:
+    """Generiert ein langlaufendes JWT (365 Tage) für einen API-User."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, username, role FROM users WHERE id = $1 AND active = true",
+            user_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+    if row["role"] != "api":
+        raise HTTPException(status_code=400, detail="Token-Generierung nur für API-User")
+
+    from jwt_utils import API_TOKEN_EXPIRE_DAYS
+    token = create_token(cfg.secret_key, str(row["id"]), row["username"], row["role"])
+    return TokenResponse(token=token, expires_in_days=API_TOKEN_EXPIRE_DAYS)
