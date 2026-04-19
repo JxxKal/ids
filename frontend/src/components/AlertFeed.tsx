@@ -1,7 +1,50 @@
 import { useState } from 'react';
 import type { Alert, Enrichment } from '../types';
+import { getToken, pcapUrl } from '../api';
 import { AlertDetail } from './AlertDetail';
 import { SeverityBadge } from './SeverityBadge';
+
+// ── PCAP-Download ─────────────────────────────────────────────────────────────
+
+function PcapButton({ alertId, filename }: { alertId: string; filename?: string }) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleDownload(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (loading) return;
+    setLoading(true);
+    try {
+      const token = getToken();
+      const res = await fetch(pcapUrl(alertId), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = filename ?? `alert-${alertId.slice(0, 8)}.pcap`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore – PCAP nicht verfügbar */
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={handleDownload}
+      disabled={loading}
+      title="PCAP herunterladen"
+      className="px-1.5 py-0.5 rounded text-[11px] border border-blue-700/50 text-blue-400 bg-blue-950/30
+                 hover:bg-blue-900/50 hover:text-blue-300 transition-colors disabled:opacity-40 whitespace-nowrap"
+    >
+      {loading ? '…' : '↓ pcap'}
+    </button>
+  );
+}
 
 // ── IP-Zelle mit Hostname + Trust-Badge ────────────────────────────────────────
 
@@ -228,11 +271,12 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                 <th className="px-3 py-2">Quelle</th>
                 <th className="px-3 py-2">Ziel</th>
                 <th className="px-3 py-2 text-right">Treffer</th>
+                <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {groups!.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
+                <tr><td colSpan={9} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
               )}
               {groups!.map(g => (
                 <tr
@@ -274,6 +318,11 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                       ? <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-mono">×{g.count}</span>
                       : <span className="text-slate-600">1</span>
                     }
+                  </td>
+                  <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                    {g.latest.pcap_available && (
+                      <PcapButton alertId={g.latest.alert_id} />
+                    )}
                   </td>
                 </tr>
               ))}
@@ -328,13 +377,17 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     <IpCell ip={a.dst_ip} port={a.dst_port} enrichment={a.enrichment} dir="dst" />
                   </td>
                   <td className="px-3 py-2 tabular-nums text-slate-400">{(a.score ?? 0).toFixed(2)}</td>
-                  <td className="px-3 py-2 text-slate-600">
-                    {a.feedback && (
-                      <span className={a.feedback === 'fp' ? 'text-green-500' : 'text-red-400'}>
-                        {a.feedback.toUpperCase()}
-                      </span>
-                    )}
-                    {a.pcap_available && !a.feedback && <span className="text-blue-500">▶</span>}
+                  <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-1.5">
+                      {a.feedback && (
+                        <span className={`text-[11px] font-medium ${a.feedback === 'fp' ? 'text-green-500' : 'text-red-400'}`}>
+                          {a.feedback.toUpperCase()}
+                        </span>
+                      )}
+                      {a.pcap_available && (
+                        <PcapButton alertId={a.alert_id} />
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
