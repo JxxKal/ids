@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  createUser, deleteUser, fetchSamlConfig, fetchUsers,
-  saveSamlConfig, updateUser,
+  addRuleSource, createUser, deleteRuleSource, deleteUser,
+  fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
+  fetchSamlConfig, fetchUsers, patchRuleSource,
+  saveSamlConfig, triggerRuleUpdate, updateUser,
 } from '../api';
-import type { SamlConfig, User } from '../types';
+import type { Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -377,6 +379,278 @@ function SamlSettings() {
   );
 }
 
+// ── RulesEngine ───────────────────────────────────────────────────────────────
+
+const OT_TAGS = ['OT', 'ICS', 'SCADA', 'Modbus', 'DNP3', 'EtherNet/IP', 'BACnet', 'Rockwell', 'Gebäudeautomation', 'Angriffserkennung'];
+
+function TagBadges({ tags }: { tags: string[] }) {
+  return (
+    <span className="flex flex-wrap gap-1">
+      {tags.map(t => (
+        <span key={t} className={`px-1.5 py-0.5 text-[10px] rounded border ${
+          OT_TAGS.includes(t)
+            ? 'bg-orange-900/40 text-orange-300 border-orange-700/40'
+            : 'bg-slate-700/50 text-slate-400 border-slate-600/30'
+        }`}>{t}</span>
+      ))}
+    </span>
+  );
+}
+
+function RulesEngine() {
+  const [sources,   setSources]   = useState<RuleSource[]>([]);
+  const [status,    setStatus]    = useState<UpdateStatus | null>(null);
+  const [rules,     setRules]     = useState<Rule[]>([]);
+  const [total,     setTotal]     = useState(0);
+  const [search,    setSearch]    = useState('');
+  const [offset,    setOffset]    = useState(0);
+  const [loadingR,  setLoadingR]  = useState(false);
+  const [updating,  setUpdating]  = useState(false);
+  const [showAdd,   setShowAdd]   = useState(false);
+  const [newName,   setNewName]   = useState('');
+  const [newUrl,    setNewUrl]    = useState('');
+  const [newErr,    setNewErr]    = useState('');
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const LIMIT = 100;
+
+  // Quellen + Update-Status initial laden
+  useEffect(() => {
+    fetchRuleSources().then(setSources).catch(() => {});
+    fetchRuleUpdateStatus().then(setStatus).catch(() => {});
+  }, []);
+
+  // Polling wenn Update angefordert
+  useEffect(() => {
+    if (!status?.requested) { if (pollRef.current) clearTimeout(pollRef.current); return; }
+    pollRef.current = setTimeout(async () => {
+      const s = await fetchRuleUpdateStatus().catch(() => null);
+      if (s) setStatus(s);
+    }, 5000);
+    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
+  }, [status]);
+
+  // Regelliste laden
+  useEffect(() => {
+    setLoadingR(true);
+    fetchRules({ search, limit: LIMIT, offset })
+      .then(r => { setRules(r.rules); setTotal(r.total); })
+      .catch(() => {})
+      .finally(() => setLoadingR(false));
+  }, [search, offset]);
+
+  async function handleToggleSource(src: RuleSource) {
+    const updated = await patchRuleSource(src.id, { enabled: !src.enabled }).catch(() => null);
+    if (updated) setSources(prev => prev.map(s => s.id === src.id ? updated : s));
+  }
+
+  async function handleDeleteSource(src: RuleSource) {
+    if (!confirm(`Quelle "${src.name}" entfernen?`)) return;
+    await deleteRuleSource(src.id).catch(() => {});
+    setSources(prev => prev.filter(s => s.id !== src.id));
+  }
+
+  async function handleAddSource(e: React.FormEvent) {
+    e.preventDefault();
+    setNewErr('');
+    try {
+      const src = await addRuleSource({ name: newName, url: newUrl, enabled: true });
+      setSources(prev => [...prev, src]);
+      setNewName(''); setNewUrl(''); setShowAdd(false);
+    } catch (err: unknown) {
+      setNewErr(err instanceof Error ? err.message : 'Fehler');
+    }
+  }
+
+  async function handleTriggerUpdate() {
+    setUpdating(true);
+    try {
+      const s = await triggerRuleUpdate();
+      setStatus(s);
+    } catch { /* ignore */ } finally {
+      setUpdating(false);
+    }
+  }
+
+  const fmtTs = (ts: number | null) => ts
+    ? new Date(ts * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
+    : '—';
+
+  const pages = Math.ceil(total / LIMIT);
+  const page  = Math.floor(offset / LIMIT);
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── Quellen ─────────────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-200">Rule-Quellen</h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleTriggerUpdate}
+              disabled={updating || !!status?.requested}
+              className="btn-primary text-xs"
+            >
+              {status?.requested ? '⏳ Update läuft…' : updating ? '…' : '↻ Update starten'}
+            </button>
+            <button className="btn-ghost text-xs" onClick={() => { setShowAdd(v => !v); setNewErr(''); }}>
+              {showAdd ? 'Abbrechen' : '+ Quelle'}
+            </button>
+          </div>
+        </div>
+
+        {/* Status-Zeile */}
+        {status && (
+          <p className="text-xs text-slate-500 mb-3">
+            {status.requested
+              ? `Update angefordert um ${fmtTs(status.requested_at)} – Suricata lädt gerade neu…`
+              : status.last_updated
+                ? `Letzte Aktualisierung: ${fmtTs(status.last_updated)}`
+                : 'Noch kein Update durchgeführt'}
+          </p>
+        )}
+
+        {/* Neue Quelle */}
+        {showAdd && (
+          <form onSubmit={handleAddSource} className="card p-3 mb-3 flex flex-wrap gap-2 items-end text-xs">
+            <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
+              <label className="text-slate-400">Name</label>
+              <input className="input" required value={newName} onChange={e => setNewName(e.target.value)} placeholder="Meine Custom Rules" />
+            </div>
+            <div className="flex flex-col gap-1 flex-[2] min-w-[260px]">
+              <label className="text-slate-400">URL (.rules oder .tar.gz)</label>
+              <input className="input" required type="url" value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://example.com/my.rules" />
+            </div>
+            {newErr && <p className="w-full text-red-400">{newErr}</p>}
+            <button type="submit" className="btn-primary text-xs">Hinzufügen</button>
+          </form>
+        )}
+
+        {/* Quellen-Liste */}
+        <div className="space-y-1.5">
+          {sources.map(src => (
+            <div key={src.id} className={`flex items-center gap-3 px-3 py-2.5 rounded border text-xs transition-colors ${
+              src.enabled ? 'bg-slate-800/50 border-slate-700/60' : 'bg-slate-900/30 border-slate-800/40 opacity-60'
+            }`}>
+              {/* Toggle */}
+              <button
+                onClick={() => handleToggleSource(src)}
+                className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${src.enabled ? 'bg-green-600' : 'bg-slate-700'}`}
+                title={src.enabled ? 'Aktiviert – klicken zum Deaktivieren' : 'Deaktiviert'}
+              >
+                <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${src.enabled ? 'left-4' : 'left-0.5'}`} />
+              </button>
+
+              {/* Name + Tags */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`font-medium ${src.enabled ? 'text-slate-200' : 'text-slate-500'}`}>{src.name}</span>
+                  {src.builtin && (
+                    <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/50 text-slate-500 border border-slate-600/30">Built-in</span>
+                  )}
+                  <TagBadges tags={src.tags} />
+                </div>
+                <div className="text-slate-600 truncate mt-0.5 font-mono text-[10px]">{src.url}</div>
+              </div>
+
+              {/* Löschen (nur Custom) */}
+              {!src.builtin && (
+                <button
+                  onClick={() => handleDeleteSource(src)}
+                  className="text-red-500 hover:text-red-400 px-1.5 py-1 rounded hover:bg-red-950/30 transition-colors flex-shrink-0"
+                  title="Quelle entfernen"
+                >✕</button>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Aktive Regeln ───────────────────────────────────────────────── */}
+      <div>
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 className="text-sm font-semibold text-slate-200">
+            Aktive Regeln
+            {total > 0 && <span className="ml-2 text-slate-500 font-normal">{total.toLocaleString()}</span>}
+          </h2>
+          <input
+            className="input text-xs w-56"
+            placeholder="Suche nach msg, sid, classtype, Datei…"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setOffset(0); }}
+          />
+        </div>
+
+        {loadingR ? (
+          <p className="text-slate-500 text-xs">Lade…</p>
+        ) : rules.length === 0 ? (
+          <p className="text-slate-600 text-xs">
+            {total === 0
+              ? 'Keine Regeln geladen – bitte ein Update starten.'
+              : 'Keine Treffer.'}
+          </p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="border-b border-slate-800">
+                  <tr className="text-left text-slate-500">
+                    <th className="pb-2 pr-3 w-20">SID</th>
+                    <th className="pb-2 pr-3">Beschreibung (msg)</th>
+                    <th className="pb-2 pr-3 w-28">Classtype</th>
+                    <th className="pb-2 pr-3 w-16">Aktion</th>
+                    <th className="pb-2 pr-3 w-16">Status</th>
+                    <th className="pb-2 w-40">Datei</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rules.map((r, i) => (
+                    <tr key={`${r.sid}-${i}`} className={`border-b border-slate-800/40 hover:bg-slate-800/20 ${!r.enabled ? 'opacity-40' : ''}`}>
+                      <td className="py-1.5 pr-3 font-mono text-slate-400">{r.sid ?? '—'}</td>
+                      <td className="py-1.5 pr-3 text-slate-300 max-w-xs truncate" title={r.msg}>{r.msg}</td>
+                      <td className="py-1.5 pr-3 text-slate-500 truncate">{r.classtype ?? '—'}</td>
+                      <td className="py-1.5 pr-3">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                          r.action === 'drop' ? 'bg-red-900/40 text-red-300' :
+                          r.action === 'pass' ? 'bg-green-900/40 text-green-300' :
+                          'bg-slate-700/50 text-slate-400'
+                        }`}>{r.action}</span>
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <span className={`text-[10px] ${r.enabled ? 'text-green-500' : 'text-slate-600'}`}>
+                          {r.enabled ? '● aktiv' : '○ aus'}
+                        </span>
+                      </td>
+                      <td className="py-1.5 font-mono text-slate-600 text-[10px] truncate">{r.file}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {pages > 1 && (
+              <div className="flex items-center gap-2 mt-3 text-xs text-slate-500">
+                <button
+                  className="btn-ghost text-xs disabled:opacity-30"
+                  disabled={page === 0}
+                  onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                >← Zurück</button>
+                <span>{page + 1} / {pages}</span>
+                <button
+                  className="btn-ghost text-xs disabled:opacity-30"
+                  disabled={page >= pages - 1}
+                  onClick={() => setOffset(offset + LIMIT)}
+                >Weiter →</button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── SettingsPage ──────────────────────────────────────────────────────────────
 
 export function SettingsPage() {
@@ -385,6 +659,9 @@ export function SettingsPage() {
       <div className="max-w-4xl mx-auto py-6 px-4 space-y-8">
         <section className="card p-5">
           <UserManagement />
+        </section>
+        <section className="card p-5">
+          <RulesEngine />
         </section>
         <section className="card p-5">
           <SamlSettings />
