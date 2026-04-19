@@ -41,6 +41,8 @@ export function useWebSocket() {
               if (!existing) return incoming;
               return {
                 ...incoming,
+                // Lokale Flags haben Vorrang über den (möglicherweise veralteten) DB-Snapshot
+                tags:           (incoming.tags?.length ? incoming.tags : null) ?? existing.tags,
                 feedback:       existing.feedback       ?? incoming.feedback,
                 feedback_ts:    existing.feedback_ts    ?? incoming.feedback_ts,
                 feedback_note:  existing.feedback_note  ?? incoming.feedback_note,
