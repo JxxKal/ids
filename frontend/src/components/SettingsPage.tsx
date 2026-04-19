@@ -19,7 +19,8 @@ function RoleBadge({ role }: { role: string }) {
     : <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">Viewer</span>;
 }
 
-const EMPTY_FORM = { username: '', email: '', display_name: '', role: 'viewer' as const, password: '', password2: '' };
+interface NewUserForm { username: string; email: string; display_name: string; role: 'admin' | 'viewer'; password: string; password2: string; }
+const EMPTY_FORM: NewUserForm = { username: '', email: '', display_name: '', role: 'viewer', password: '', password2: '' };
 
 // ── UserManagement ────────────────────────────────────────────────────────────
 
