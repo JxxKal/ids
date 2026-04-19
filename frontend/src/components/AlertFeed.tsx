@@ -74,11 +74,32 @@ interface AlertGroup {
   dst_ip?:      string;
   proto?:       string;
   description?: string;
+  tags:         string[];
   count:        number;
   first_ts:     string;
   last_ts:      string;
   latest:       Alert;
   enrichment?:  Enrichment;
+}
+
+const OT_TAGS = new Set(['scada', 'ics', 'modbus', 'dnp3', 'ethernet/ip', 'bacnet', 'ot']);
+
+function TagList({ tags }: { tags: string[] }) {
+  if (!tags.length) return <span className="text-slate-700">–</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {tags.map(t => {
+        const isOt = OT_TAGS.has(t.toLowerCase());
+        return (
+          <span key={t} className={`px-1.5 py-0.5 text-[10px] rounded border leading-none ${
+            isOt
+              ? 'bg-orange-900/40 text-orange-300 border-orange-700/40'
+              : 'bg-slate-700/50 text-slate-400 border-slate-600/30'
+          }`}>{t}</span>
+        );
+      })}
+    </div>
+  );
 }
 
 /** Wandelt ts (ISO-String oder Unix-Float) in Millisekunden um. */
@@ -102,11 +123,13 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
       if (tsMs(a.ts) > tsMs(g.last_ts)) { g.last_ts = a.ts; g.latest = a; g.description = a.description; }
       if (tsMs(a.ts) < tsMs(g.first_ts)) g.first_ts = a.ts;
       if (!g.enrichment && a.enrichment) g.enrichment = a.enrichment;
+      if (a.tags?.length) g.tags = [...new Set([...g.tags, ...a.tags])];
     } else {
       map.set(k, {
         key: k, severity: a.severity,
         rule_id: a.rule_id, src_ip: a.src_ip, dst_ip: a.dst_ip,
         proto: a.proto, description: a.description,
+        tags: [...(a.tags ?? [])],
         count: 1, first_ts: a.ts, last_ts: a.ts, latest: a,
         enrichment: a.enrichment ?? undefined,
       });
@@ -201,6 +224,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                 <th className="px-3 py-2">Severity</th>
                 <th className="px-3 py-2">Regel</th>
                 <th className="px-3 py-2">Beschreibung</th>
+                <th className="px-3 py-2">Tags</th>
                 <th className="px-3 py-2">Quelle</th>
                 <th className="px-3 py-2">Ziel</th>
                 <th className="px-3 py-2 text-right">Treffer</th>
@@ -208,7 +232,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             </thead>
             <tbody>
               {groups!.length === 0 && (
-                <tr><td colSpan={7} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
+                <tr><td colSpan={8} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
               )}
               {groups!.map(g => (
                 <tr
@@ -236,6 +260,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                       {g.description ?? '–'}
                     </span>
                   </td>
+                  <td className="px-3 py-2 max-w-[140px]">
+                    <TagList tags={g.tags} />
+                  </td>
                   <td className="px-3 py-2">
                     <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
                   </td>
@@ -261,6 +288,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                 <th className="px-3 py-2">Severity</th>
                 <th className="px-3 py-2">Regel</th>
                 <th className="px-3 py-2">Beschreibung</th>
+                <th className="px-3 py-2">Tags</th>
                 <th className="px-3 py-2">Quelle</th>
                 <th className="px-3 py-2">Ziel</th>
                 <th className="px-3 py-2">Score</th>
@@ -269,7 +297,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={8} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
+                <tr><td colSpan={9} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
               )}
               {filtered.map(a => (
                 <tr
@@ -289,6 +317,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     <span className="line-clamp-2" title={a.description ?? undefined}>
                       {a.description ?? '–'}
                     </span>
+                  </td>
+                  <td className="px-3 py-2 max-w-[140px]">
+                    <TagList tags={a.tags ?? []} />
                   </td>
                   <td className="px-3 py-2">
                     <IpCell ip={a.src_ip} enrichment={a.enrichment} dir="src" />
