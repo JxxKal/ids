@@ -77,9 +77,8 @@ export default function App() {
     <div className="min-h-screen flex flex-col">
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-4">
-        <div className="flex items-center gap-2 mr-2">
-          <span className="text-base font-bold text-slate-100">IDS</span>
-          <span className="text-slate-600 text-xs">Dashboard</span>
+        <div className="flex items-center mr-2">
+          <img src="/cyjan.jpeg" alt="Cyjan" className="h-8 w-auto rounded" />
         </div>
 
         {/* Tabs */}
