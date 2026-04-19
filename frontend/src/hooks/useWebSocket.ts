@@ -25,7 +25,23 @@ export function useWebSocket() {
       try {
         const msg = JSON.parse(ev.data) as WsMessage;
         if (msg.type === 'initial') {
-          setAlerts(msg.data.slice(-MAX_ALERTS));
+          // Merge mit bestehendem State: Feedback/pcap-Flags aus lokalem State behalten,
+          // falls der DB-Snapshot sie noch nicht hat (Race condition beim Reconnect)
+          setAlerts(prev => {
+            const prevMap = new Map(prev.map(a => [a.alert_id, a]));
+            const merged = msg.data.map(incoming => {
+              const existing = prevMap.get(incoming.alert_id);
+              if (!existing) return incoming;
+              return {
+                ...incoming,
+                feedback:      existing.feedback      ?? incoming.feedback,
+                feedback_ts:   existing.feedback_ts   ?? incoming.feedback_ts,
+                feedback_note: existing.feedback_note ?? incoming.feedback_note,
+                pcap_available: existing.pcap_available || incoming.pcap_available,
+              };
+            });
+            return merged.slice(-MAX_ALERTS);
+          });
         } else if (msg.type === 'alert') {
           setAlerts(prev => {
             const next = [msg.data, ...prev];
@@ -40,6 +56,11 @@ export function useWebSocket() {
           const { alert_id } = msg.data;
           setAlerts(prev => prev.map(a =>
             a.alert_id === alert_id ? { ...a, pcap_available: true } : a,
+          ));
+        } else if (msg.type === 'feedback_updated') {
+          const { alert_id, feedback, feedback_ts, feedback_note } = msg.data;
+          setAlerts(prev => prev.map(a =>
+            a.alert_id === alert_id ? { ...a, feedback, feedback_ts, feedback_note } : a,
           ));
         }
       } catch {
