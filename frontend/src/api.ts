@@ -1,4 +1,4 @@
-import type { Alert, Host, KnownNetwork, RuleListResponse, RuleSource, SamlConfig, TestRun, ThreatLevel, UpdateStatus, User } from './types';
+import type { Alert, Host, KnownNetwork, MLStatus, RuleListResponse, RuleSource, SamlConfig, TestRun, ThreatLevel, UpdateStatus, User } from './types';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
@@ -220,6 +220,12 @@ export async function updateUser(id: string, data: {
 
 export async function deleteUser(id: string): Promise<void> {
   return req(`/api/users/${id}`, { method: 'DELETE' });
+}
+
+// ── ML / KI-Engine ───────────────────────────────────────────────────────────
+
+export async function fetchMLStatus(): Promise<MLStatus> {
+  return req('/api/ml/status');
 }
 
 // ── Rules Engine ─────────────────────────────────────────────────────────────
