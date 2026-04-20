@@ -220,15 +220,15 @@ function UserManagement() {
 
       {/* Benutzertabelle */}
       <div className="overflow-x-auto">
-      <table className="w-full min-w-[640px] text-xs">
+      <table className="w-full text-xs">
         <thead className="border-b border-slate-800">
           <tr className="text-left text-slate-500">
-            <th className="pb-2 pr-4">Benutzer</th>
-            <th className="pb-2 pr-4">E-Mail</th>
-            <th className="pb-2 pr-4">Rolle</th>
-            <th className="pb-2 pr-4">Quelle</th>
-            <th className="pb-2 pr-4">Letzter Login</th>
-            <th className="pb-2 pr-4">Aktiv</th>
+            <th className="pb-2 pr-3">Benutzer</th>
+            <th className="pb-2 pr-3">E-Mail</th>
+            <th className="pb-2 pr-3">Rolle</th>
+            <th className="pb-2 pr-3">Quelle</th>
+            <th className="pb-2 pr-3">Letzter Login</th>
+            <th className="pb-2 pr-3">Aktiv</th>
             <th className="pb-2"></th>
           </tr>
         </thead>
@@ -238,7 +238,7 @@ function UserManagement() {
               {editId === u.id ? (
                 /* Edit-Zeile */
                 <>
-                  <td className="py-2 pr-4">
+                  <td className="py-2 pr-3">
                     <span className="text-slate-300 font-medium">{u.username}</span>
                     {u.source === 'local' && (
                       <div className="mt-1 flex flex-col gap-1">
@@ -251,12 +251,12 @@ function UserManagement() {
                       </div>
                     )}
                   </td>
-                  <td className="py-2 pr-4">
+                  <td className="py-2 pr-3">
                     <input className="input w-full" placeholder="E-Mail" type="email"
                       value={editData.email ?? u.email ?? ''}
                       onChange={e => setEditData(d => ({ ...d, email: e.target.value }))} />
                   </td>
-                  <td className="py-2 pr-4">
+                  <td className="py-2 pr-3">
                     <select className="input"
                       value={editData.role ?? u.role}
                       onChange={e => setEditData(d => ({ ...d, role: e.target.value as 'admin' | 'viewer' | 'api' }))}>
@@ -265,9 +265,9 @@ function UserManagement() {
                       <option value="api">API</option>
                     </select>
                   </td>
-                  <td className="py-2 pr-4"><SourceBadge source={u.source} /></td>
-                  <td className="py-2 pr-4 text-slate-500">—</td>
-                  <td className="py-2 pr-4">—</td>
+                  <td className="py-2 pr-3"><SourceBadge source={u.source} /></td>
+                  <td className="py-2 pr-3 text-slate-500">—</td>
+                  <td className="py-2 pr-3">—</td>
                   <td className="py-2 text-right">
                     {formErr && <p className="text-red-400 mb-1">{formErr}</p>}
                     <div className="flex gap-1.5 justify-end">
@@ -281,17 +281,17 @@ function UserManagement() {
               ) : (
                 /* Anzeigezeile */
                 <>
-                  <td className="py-2 pr-4">
+                  <td className="py-2 pr-3">
                     <span className="text-slate-200 font-medium">{u.username}</span>
                     {u.display_name && <div className="text-slate-500">{u.display_name}</div>}
                   </td>
-                  <td className="py-2 pr-4 text-slate-400">{u.email ?? '—'}</td>
-                  <td className="py-2 pr-4"><RoleBadge role={u.role} /></td>
-                  <td className="py-2 pr-4"><SourceBadge source={u.source} /></td>
-                  <td className="py-2 pr-4 text-slate-500">
+                  <td className="py-2 pr-3 text-slate-400">{u.email ?? '—'}</td>
+                  <td className="py-2 pr-3"><RoleBadge role={u.role} /></td>
+                  <td className="py-2 pr-3"><SourceBadge source={u.source} /></td>
+                  <td className="py-2 pr-3 text-slate-500">
                     {u.last_login ? new Date(u.last_login).toLocaleString() : '—'}
                   </td>
-                  <td className="py-2 pr-4">
+                  <td className="py-2 pr-3">
                     <button
                       onClick={() => handleToggleActive(u)}
                       className={`w-8 h-4 rounded-full transition-colors relative ${u.active ? 'bg-green-600' : 'bg-slate-700'}`}
@@ -997,7 +997,7 @@ function RulesList() {
       ) : (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-xs">
+            <table className="w-full text-xs">
               <thead className="border-b border-slate-800">
                 <tr className="text-left text-slate-500">
                   <th className="pb-2 pr-3 w-20">SID</th>
@@ -1110,7 +1110,7 @@ export function SettingsPage() {
 
       {/* ── Content ──────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-3xl mx-auto py-6 px-6">
+        <div className="max-w-4xl mx-auto py-6 px-6">
           <div className="card p-5">
             {active === 'users'         && <UserManagement />}
             {active === 'saml'          && <SamlSettings />}
