@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { createNetwork, deleteNetwork, downloadNetworksExampleCsv, fetchNetworks, importNetworksCsv } from '../api';
+import { createNetwork, deleteNetwork, downloadNetworksExampleCsv, fetchNetworks, importNetworksCsv, updateNetwork } from '../api';
 import type { KnownNetwork } from '../types';
+import { ConfirmDialog } from './ConfirmDialog';
+
+type EditState = { name: string; description: string; color: string } | null;
 
 export function NetworksPage() {
   const [networks, setNetworks]         = useState<KnownNetwork[]>([]);
@@ -8,6 +11,10 @@ export function NetworksPage() {
   const [error, setError]               = useState('');
   const [loading, setLoading]           = useState(false);
   const [importResult, setImportResult] = useState('');
+  const [editId, setEditId]             = useState<string | null>(null);
+  const [editState, setEditState]       = useState<EditState>(null);
+  const [editError, setEditError]       = useState('');
+  const [confirmId, setConfirmId]       = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () =>
@@ -32,8 +39,32 @@ export function NetworksPage() {
     }
   };
 
+  const startEdit = (n: KnownNetwork) => {
+    setEditId(n.id);
+    setEditState({ name: n.name, description: n.description ?? '', color: n.color ?? '#4CAF50' });
+    setEditError('');
+  };
+
+  const cancelEdit = () => { setEditId(null); setEditState(null); setEditError(''); };
+
+  const saveEdit = async () => {
+    if (!editId || !editState) return;
+    setEditError('');
+    try {
+      await updateNetwork(editId, {
+        name:        editState.name || undefined,
+        description: editState.description || undefined,
+        color:       editState.color || undefined,
+      });
+      setEditId(null);
+      setEditState(null);
+      load();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Fehler');
+    }
+  };
+
   const remove = async (id: string) => {
-    if (!confirm('Netzwerk löschen?')) return;
     await deleteNetwork(id).catch(() => {});
     load();
   };
@@ -55,6 +86,8 @@ export function NetworksPage() {
     }
     if (fileRef.current) fileRef.current.value = '';
   };
+
+  const confirmNetwork = networks.find(n => n.id === confirmId);
 
   return (
     <div className="space-y-4">
@@ -150,32 +183,89 @@ export function NetworksPage() {
             {networks.map(n => (
               <tr key={n.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                 <td className="px-4 py-2 font-mono text-slate-200">{n.cidr}</td>
-                <td className="px-4 py-2 text-slate-300">{n.name}</td>
-                <td className="px-4 py-2 text-slate-500">{n.description ?? '–'}</td>
                 <td className="px-4 py-2">
-                  {n.color && (
-                    <span className="flex items-center gap-1.5">
-                      <span
-                        className="w-3 h-3 rounded-full inline-block"
-                        style={{ backgroundColor: n.color }}
-                      />
-                      <span className="text-slate-500">{n.color}</span>
-                    </span>
+                  {editId === n.id && editState ? (
+                    <input
+                      autoFocus
+                      className="input w-36"
+                      value={editState.name}
+                      onChange={e => setEditState(s => s ? { ...s, name: e.target.value } : s)}
+                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                    />
+                  ) : (
+                    <span className="text-slate-300">{n.name}</span>
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  {editId === n.id && editState ? (
+                    <input
+                      className="input w-44"
+                      placeholder="optional"
+                      value={editState.description}
+                      onChange={e => setEditState(s => s ? { ...s, description: e.target.value } : s)}
+                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                    />
+                  ) : (
+                    <span className="text-slate-500">{n.description ?? '–'}</span>
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  {editId === n.id && editState ? (
+                    <input
+                      type="color"
+                      className="h-8 w-10 rounded bg-slate-800 border border-slate-700 cursor-pointer"
+                      value={editState.color}
+                      onChange={e => setEditState(s => s ? { ...s, color: e.target.value } : s)}
+                    />
+                  ) : (
+                    n.color && (
+                      <span className="flex items-center gap-1.5">
+                        <span
+                          className="w-3 h-3 rounded-full inline-block"
+                          style={{ backgroundColor: n.color }}
+                        />
+                        <span className="text-slate-500">{n.color}</span>
+                      </span>
+                    )
                   )}
                 </td>
                 <td className="px-4 py-2 text-right">
-                  <button
-                    onClick={() => remove(n.id)}
-                    className="btn-ghost text-red-500 hover:text-red-400"
-                  >
-                    Löschen
-                  </button>
+                  {editId === n.id ? (
+                    <div className="flex gap-1.5 justify-end">
+                      {editError && <span className="text-red-400 text-xs self-center">{editError}</span>}
+                      <button onClick={saveEdit} className="btn-primary text-xs">Speichern</button>
+                      <button onClick={cancelEdit} className="btn-ghost text-xs">Abbrechen</button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-1.5 justify-end">
+                      <button
+                        onClick={() => startEdit(n)}
+                        className="btn-ghost text-xs"
+                      >
+                        Bearbeiten
+                      </button>
+                      <button
+                        onClick={() => setConfirmId(n.id)}
+                        className="btn-ghost text-xs text-red-500 hover:text-red-400"
+                      >
+                        Löschen
+                      </button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {confirmId && confirmNetwork && (
+        <ConfirmDialog
+          message={`Netzwerk "${confirmNetwork.name}" (${confirmNetwork.cidr}) löschen?`}
+          onConfirm={() => { setConfirmId(null); remove(confirmId); }}
+          onCancel={() => setConfirmId(null)}
+        />
+      )}
     </div>
   );
 }

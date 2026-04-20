@@ -6,6 +6,7 @@ import {
   saveMLConfig, saveSamlConfig, triggerMLRetrain, triggerRuleUpdate, updateUser,
 } from '../api';
 import type { MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
+import { ConfirmDialog } from './ConfirmDialog';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ function UserManagement() {
   const [editId,  setEditId]  = useState<string | null>(null);
   const [editData, setEditData] = useState<Partial<User & { password: string; password2: string }>>({});
   const [apiToken, setApiToken] = useState<{ userId: string; token: string } | null>(null);
+  const [confirmUser, setConfirmUser] = useState<User | null>(null);
 
   useEffect(() => {
     fetchUsers()
@@ -120,7 +122,6 @@ function UserManagement() {
   }
 
   async function handleDelete(user: User) {
-    if (!confirm(`Benutzer "${user.username}" wirklich löschen?`)) return;
     try {
       await deleteUser(user.id);
       setUsers(prev => prev.filter(x => x.id !== user.id));
@@ -314,7 +315,7 @@ function UserManagement() {
                         Bearbeiten
                       </button>
                       <button className="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded hover:bg-red-950/30 transition-colors"
-                        onClick={() => handleDelete(u)}>
+                        onClick={() => setConfirmUser(u)}>
                         Löschen
                       </button>
                     </div>
@@ -325,6 +326,14 @@ function UserManagement() {
           ))}
         </tbody>
       </table>
+
+      {confirmUser && (
+        <ConfirmDialog
+          message={`Benutzer "${confirmUser.username}" wirklich löschen?`}
+          onConfirm={() => { const u = confirmUser; setConfirmUser(null); handleDelete(u); }}
+          onCancel={() => setConfirmUser(null)}
+        />
+      )}
     </div>
   );
 }
@@ -756,7 +765,7 @@ function MLFilterConfig() {
                 className="flex-1 accent-cyan-500 cursor-pointer h-1.5"
               />
               <input
-                type="number" min={p.min} max={p.max} step={p.step} value={val}
+                type="number" lang="en" min={p.min} max={p.max} step={p.step} value={val}
                 onChange={e => {
                   const n = parseFloat(e.target.value);
                   if (!isNaN(n) && n >= p.min && n <= p.max)
@@ -813,6 +822,7 @@ function RuleSources() {
   const [newName,   setNewName]   = useState('');
   const [newUrl,    setNewUrl]    = useState('');
   const [newErr,    setNewErr]    = useState('');
+  const [confirmSrc, setConfirmSrc] = useState<RuleSource | null>(null);
   const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Quellen + Update-Status initial laden
@@ -837,7 +847,6 @@ function RuleSources() {
   }
 
   async function handleDeleteSource(src: RuleSource) {
-    if (!confirm(`Quelle "${src.name}" entfernen?`)) return;
     await deleteRuleSource(src.id).catch(() => {});
     setSources(prev => prev.filter(s => s.id !== src.id));
   }
@@ -923,13 +932,22 @@ function RuleSources() {
               <div className="text-slate-600 truncate mt-0.5 font-mono text-[10px]">{src.url}</div>
             </div>
             {!src.builtin && (
-              <button onClick={() => handleDeleteSource(src)}
+              <button onClick={() => setConfirmSrc(src)}
                 className="text-red-500 hover:text-red-400 px-1.5 py-1 rounded hover:bg-red-950/30 transition-colors flex-shrink-0"
                 title="Quelle entfernen">✕</button>
             )}
           </div>
         ))}
       </div>
+
+      {confirmSrc && (
+        <ConfirmDialog
+          message={`Quelle "${confirmSrc.name}" entfernen?`}
+          confirmLabel="Entfernen"
+          onConfirm={() => { const s = confirmSrc; setConfirmSrc(null); handleDeleteSource(s); }}
+          onCancel={() => setConfirmSrc(null)}
+        />
+      )}
     </div>
   );
 }
@@ -977,7 +995,7 @@ function RulesList() {
       ) : (
         <>
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full min-w-[640px] text-xs">
               <thead className="border-b border-slate-800">
                 <tr className="text-left text-slate-500">
                   <th className="pb-2 pr-3 w-20">SID</th>

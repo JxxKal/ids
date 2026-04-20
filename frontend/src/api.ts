@@ -153,6 +153,10 @@ export async function createNetwork(data: {
   return req('/api/networks', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function updateNetwork(id: string, data: { name?: string; description?: string; color?: string }): Promise<KnownNetwork> {
+  return req(`/api/networks/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
 export async function deleteNetwork(id: string): Promise<void> {
   await req(`/api/networks/${id}`, { method: 'DELETE' });
 }

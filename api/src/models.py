@@ -113,6 +113,12 @@ class NetworkCreate(BaseModel):
     color:       str | None = None
 
 
+class NetworkUpdate(BaseModel):
+    name:        str | None = None
+    description: str | None = None
+    color:       str | None = None
+
+
 # ── Connection Graph ──────────────────────────────────────────────────────────
 
 class ConnectionSummary(BaseModel):

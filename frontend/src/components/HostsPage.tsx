@@ -8,11 +8,13 @@ import {
   updateHost,
 } from '../api';
 import type { Host } from '../types';
+import { ConfirmDialog } from './ConfirmDialog';
 import { TrustBadge } from './TrustBadge';
 
 type EditState = { ip: string; display_name: string; trusted: boolean } | null;
 
 export function HostsPage() {
+  const [confirmIp, setConfirmIp] = useState<string | null>(null);
   const [hosts, setHosts]       = useState<Host[]>([]);
   const [search, setSearch]     = useState('');
   const [filter, setFilter]     = useState<'all' | 'trusted' | 'unknown'>('all');
@@ -64,7 +66,6 @@ export function HostsPage() {
   };
 
   const remove = async (ip: string) => {
-    if (!confirm(`Host ${ip} entfernen?`)) return;
     await deleteHost(ip).catch(() => {});
     load();
   };
@@ -245,8 +246,8 @@ export function HostsPage() {
                       >
                         Bearbeiten
                       </button>
-                      <button onClick={() => remove(h.ip)} className="btn-ghost text-red-500">
-                        Entfernen
+                      <button onClick={() => setConfirmIp(h.ip)} className="btn-ghost text-red-500">
+                        Löschen
                       </button>
                     </div>
                   )}
@@ -256,6 +257,14 @@ export function HostsPage() {
           </tbody>
         </table>
       </div>
+
+      {confirmIp && (
+        <ConfirmDialog
+          message={`Host ${confirmIp} löschen?`}
+          onConfirm={() => { setConfirmIp(null); remove(confirmIp); }}
+          onCancel={() => setConfirmIp(null)}
+        />
+      )}
     </div>
   );
 }
