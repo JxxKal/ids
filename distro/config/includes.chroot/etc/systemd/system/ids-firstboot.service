@@ -1,0 +1,19 @@
+[Unit]
+Description=Cyjan IDS First-Boot Setup Wizard
+After=network.target docker.service
+Requires=docker.service
+ConditionPathExists=/etc/cyjan/FIRSTBOOT
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ids-setup
+RemainAfterExit=yes
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,41 @@
+#!/bin/bash
+# Cyjan IDS – Update-Script
+# Zieht den aktuellen Stand von GitHub und baut geänderte Images neu.
+set -euo pipefail
+
+IDS_DIR="/opt/ids"
+LOG="/var/log/cyjan/update.log"
+CYJAN_STATE="/etc/cyjan"
+
+echo "=== Cyjan IDS Update $(date) ===" | tee -a "$LOG"
+
+# Proxy laden falls konfiguriert
+[ -f /etc/environment ] && source /etc/environment || true
+
+cd "$IDS_DIR"
+
+# Aktuellen Commit merken
+OLD_COMMIT=$(git rev-parse HEAD)
+
+echo "[update] Git pull..."
+git pull --ff-only origin main | tee -a "$LOG"
+
+NEW_COMMIT=$(git rev-parse HEAD)
+
+if [ "$OLD_COMMIT" = "$NEW_COMMIT" ]; then
+  echo "[update] Keine Änderungen – Stack unverändert."
+  exit 0
+fi
+
+echo "[update] Neue Commits: $(git log --oneline "${OLD_COMMIT}..${NEW_COMMIT}")"
+
+# Profil laden
+PROFILE=$(cat "$CYJAN_STATE/profile" 2>/dev/null || echo "prod")
+
+echo "[update] Baue geänderte Images..."
+docker compose --profile "$PROFILE" build | tee -a "$LOG"
+
+echo "[update] Starte geänderte Dienste neu..."
+docker compose --profile "$PROFILE" up -d | tee -a "$LOG"
+
+echo "[update] Update abgeschlossen $(date)" | tee -a "$LOG"
