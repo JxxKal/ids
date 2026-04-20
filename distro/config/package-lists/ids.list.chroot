@@ -29,3 +29,16 @@ sudo
 bash-completion
 locales
 console-setup
+
+# Disk-Installer
+parted
+rsync
+pv
+dosfstools
+e2fsprogs
+grub-efi-amd64
+grub-pc-bin
+grub2-common
+efibootmgr
+util-linux
+lsblk
