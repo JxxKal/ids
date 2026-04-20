@@ -1,21 +1,16 @@
 #!/bin/sh
 # live-build Konfiguration für Cyjan IDS
 # Aufruf: sudo lb config  (aus dem distro/-Verzeichnis)
-set -e
+set -ex
 
 lb config noauto \
-  --distribution        bookworm \
-  --archive-areas       "main contrib non-free non-free-firmware" \
-  --binary-images       iso-hybrid \
-  --bootloaders         "syslinux,grub-efi" \
-  --debian-installer    none \
-  --memtest             none \
-  --win32-loader        false \
-  --iso-application     "Cyjan IDS" \
-  --iso-volume          "CYJAN_IDS" \
-  --hostname            "cyjan-ids" \
-  --username            "ids" \
-  --password            "ids" \
-  --autologin           true \
-  --apt-recommends      false \
+  --distribution      bookworm \
+  --archive-areas     "main contrib non-free non-free-firmware" \
+  --binary-images     iso-hybrid \
+  --bootloaders       "syslinux,grub-efi" \
+  --debian-installer  none \
+  --memtest           none \
+  --hostname          "cyjan-ids" \
+  --username          "ids" \
+  --password          "ids" \
   "${@}"

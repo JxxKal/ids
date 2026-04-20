@@ -1,0 +1,20 @@
+#!/bin/bash
+# Autologin für ids-User auf tty1 via systemd getty-Override
+set -euo pipefail
+
+echo "[cyjan] Konfiguriere Autologin für User 'ids' auf tty1..."
+
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin ids --noclear %I $TERM
+EOF
+
+# ids-User anlegen falls noch nicht vorhanden
+if ! id ids &>/dev/null; then
+  useradd -m -s /bin/bash -G sudo,docker ids
+  echo "ids:ids" | chpasswd
+fi
+
+echo "[cyjan] Autologin konfiguriert."
