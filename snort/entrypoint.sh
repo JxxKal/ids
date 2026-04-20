@@ -24,8 +24,8 @@ mkdir -p "$LOG_DIR" "$RULES_DIR"
 
 # ─── Suricata-Version ermitteln (für ET-Regel-URL) ────────────────────────────
 SUR_MAJOR=$(suricata --build-info 2>/dev/null \
-    | awk '/^Version:/{print $2}' \
-    | cut -d. -f1 || echo "6")
+    | grep -oE 'version [0-9]+' | grep -oE '[0-9]+' | head -1 || echo "6")
+[ -z "$SUR_MAJOR" ] && SUR_MAJOR="6" 
 ET_BASE="https://rules.emergingthreats.net/open/suricata-${SUR_MAJOR}.0"
 
 # ─── Hilfsfunktion: einzelne URL laden ────────────────────────────────────────
