@@ -11,13 +11,16 @@ on:
         type: boolean
         default: false
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # Node.js 24 ab Juni 2026
+
 jobs:
   build-iso:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     permissions:
-      contents: write   # Für Release-Asset-Upload
+      contents: write
 
     steps:
       - name: Repository auschecken
@@ -33,42 +36,55 @@ jobs:
             xorriso \
             isolinux \
             syslinux-common \
+            syslinux-efi \
             grub-efi-amd64-bin \
             grub-pc-bin \
             mtools \
-            dosfstools
-
-      - name: Disk-Platz prüfen
-        run: df -h
+            dosfstools \
+            ca-certificates
+          echo "=== Versionen ==="
+          lb --version
+          debootstrap --version
+          xorriso --version 2>&1 | head -1
+          echo "=== Disk ==="
+          df -h
 
       - name: live-build konfigurieren
         working-directory: distro
-        run: sudo lb config
+        run: |
+          sudo lb config
+          echo "=== lb config gesetzt ==="
+          cat config/binary 2>/dev/null || true
+          cat config/bootstrap 2>/dev/null || true
 
       - name: ISO bauen
         working-directory: distro
         run: |
-          sudo lb build 2>&1 | tee ../build.log
-          echo "Build abgeschlossen"
-          ls -lh live-image-amd64.hybrid.iso 2>/dev/null || \
-            ls -lh *.iso 2>/dev/null || \
-            (echo "FEHLER: Keine ISO gefunden!" && exit 1)
+          LOG="${GITHUB_WORKSPACE}/build.log"
+          sudo lb build 2>&1 | tee "$LOG"
+          BUILD_EXIT=${PIPESTATUS[0]}
+          echo "=== lb build exit code: $BUILD_EXIT ==="
+          if [ "$BUILD_EXIT" -ne 0 ]; then
+            echo "BUILD FEHLGESCHLAGEN – letzte 50 Zeilen Log:"
+            tail -50 "$LOG"
+            exit 1
+          fi
+          ISO=$(ls live-image-amd64.hybrid.iso *.iso 2>/dev/null | head -1 || true)
+          if [ -z "$ISO" ]; then
+            echo "FEHLER: Keine ISO-Datei gefunden!"
+            ls -la
+            exit 1
+          fi
+          echo "ISO_SRC=$ISO" >> "$GITHUB_ENV"
+          echo "ISO erzeugt: $ISO ($(du -sh "$ISO" | cut -f1))"
 
       - name: ISO umbenennen
-        working-directory: distro
         run: |
-          ISO_SRC=$(ls live-image-amd64.hybrid.iso *.iso 2>/dev/null | head -1)
-          ISO_NAME="cyjan-ids-$(git -C .. describe --tags --always).iso"
-          cp "$ISO_SRC" "../${ISO_NAME}"
-          echo "ISO_NAME=${ISO_NAME}" >> $GITHUB_ENV
-          echo "ISO gebaut: ${ISO_NAME} ($(du -sh ../${ISO_NAME} | cut -f1))"
-
-      - name: ISO als Artefakt hochladen
-        uses: actions/upload-artifact@v4
-        with:
-          name: cyjan-ids-iso
-          path: ${{ env.ISO_NAME }}
-          retention-days: 30
+          VERSION=$(git describe --tags --always 2>/dev/null || echo "dev")
+          ISO_NAME="cyjan-ids-${VERSION}.iso"
+          cp "distro/${{ env.ISO_SRC }}" "$ISO_NAME"
+          echo "ISO_NAME=${ISO_NAME}" >> "$GITHUB_ENV"
+          echo "Umbenannt: ${ISO_NAME} ($(du -sh "$ISO_NAME" | cut -f1))"
 
       - name: Build-Log als Artefakt hochladen
         if: always()
@@ -76,7 +92,15 @@ jobs:
         with:
           name: build-log
           path: build.log
+          if-no-files-found: warn
           retention-days: 7
+
+      - name: ISO als Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyjan-ids-iso
+          path: ${{ env.ISO_NAME }}
+          retention-days: 30
 
       - name: GitHub Release erstellen (bei Tag-Push)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -87,13 +111,16 @@ jobs:
             ## Cyjan IDS ${{ github.ref_name }}
 
             ### Installation
-            1. ISO auf USB-Stick schreiben: `dd if=${{ env.ISO_NAME }} of=/dev/sdX bs=4M status=progress`
+            1. ISO auf USB-Stick schreiben:
+               ```bash
+               dd if=${{ env.ISO_NAME }} of=/dev/sdX bs=4M status=progress
+               ```
             2. Von USB-Stick booten (UEFI oder BIOS)
-            3. First-Boot-Wizard startet automatisch
+            3. First-Boot-Wizard startet automatisch auf der Konsole
 
             ### Konfiguration
-            Der Setup-Wizard führt durch:
-            - Proxy-Einstellungen
+            Der Setup-Wizard (`ids-setup`) führt durch:
+            - Proxy-Einstellungen (HTTP/HTTPS/No-Proxy)
             - Passwörter & Sicherheitsschlüssel
             - Netzwerk-Interfaces
             - IRMA-Integration (optional)
