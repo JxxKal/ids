@@ -219,7 +219,8 @@ function UserManagement() {
       )}
 
       {/* Benutzertabelle */}
-      <table className="w-full text-xs">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[640px] text-xs">
         <thead className="border-b border-slate-800">
           <tr className="text-left text-slate-500">
             <th className="pb-2 pr-4">Benutzer</th>
@@ -326,6 +327,7 @@ function UserManagement() {
           ))}
         </tbody>
       </table>
+      </div>
 
       {confirmUser && (
         <ConfirmDialog
