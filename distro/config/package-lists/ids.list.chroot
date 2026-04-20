@@ -1,0 +1,31 @@
+# Basis-System
+curl
+wget
+git
+ca-certificates
+gnupg
+lsb-release
+apt-transport-https
+software-properties-common
+
+# TUI / Wizard
+whiptail
+dialog
+
+# Netzwerk-Tools
+net-tools
+iproute2
+iputils-ping
+tcpdump
+ncat
+dnsutils
+
+# Editoren & System
+vim
+nano
+htop
+less
+sudo
+bash-completion
+locales
+console-setup

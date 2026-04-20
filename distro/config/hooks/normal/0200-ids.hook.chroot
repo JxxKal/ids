@@ -1,0 +1,30 @@
+#!/bin/bash
+# Hook: Cyjan IDS Repository nach /opt/ids klonen und First-Boot-Service aktivieren
+set -euo pipefail
+
+echo "[cyjan] Richte Cyjan IDS ein..."
+
+IDS_DIR="/opt/ids"
+REPO_URL="https://github.com/JxxKal/ids.git"
+
+# Repository klonen (kein --depth für Update-Fähigkeit)
+git clone "$REPO_URL" "$IDS_DIR"
+chown -R ids:ids "$IDS_DIR"
+
+# Verzeichnisse anlegen
+mkdir -p /etc/cyjan
+mkdir -p /var/log/cyjan
+
+# First-Boot-Flag
+touch /etc/cyjan/FIRSTBOOT
+
+# ids-Benutzer: sudo für docker compose erlauben
+echo "ids ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/git" \
+  > /etc/sudoers.d/ids-docker
+chmod 440 /etc/sudoers.d/ids-docker
+
+# systemd service aktivieren
+systemctl enable ids-firstboot.service
+
+echo "[cyjan] IDS-Verzeichnis: $IDS_DIR"
+echo "[cyjan] First-Boot-Service aktiviert"

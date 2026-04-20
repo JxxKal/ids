@@ -1,0 +1,303 @@
+#!/bin/bash
+# ══════════════════════════════════════════════════════════════════════════════
+# Cyjan IDS – First-Boot Setup Wizard
+# ══════════════════════════════════════════════════════════════════════════════
+# Wird beim ersten Boot von systemd (ids-firstboot.service) auf TTY1 gestartet.
+# Schreibt /opt/ids/.env, konfiguriert Proxy und startet den Stack.
+# ══════════════════════════════════════════════════════════════════════════════
+
+set -euo pipefail
+
+IDS_DIR="/opt/ids"
+ENV_FILE="$IDS_DIR/.env"
+DOCKER_PROXY_DIR="/etc/systemd/system/docker.service.d"
+CYJAN_STATE="/etc/cyjan"
+LOG="/var/log/cyjan/setup.log"
+TITLE="Cyjan IDS Setup"
+W=70   # Fensterbreite
+H=20   # Fensterhöhe
+
+mkdir -p "$(dirname "$LOG")"
+exec > >(tee -a "$LOG") 2>&1
+echo "=== Cyjan IDS Setup $(date) ==="
+
+# ── Hilfsfunktionen ───────────────────────────────────────────────────────────
+
+msg()      { whiptail --title "$TITLE" --msgbox     "$1" $H $W 3>&1 1>&2 2>&3; }
+yesno()    { whiptail --title "$TITLE" --yesno      "$1" $H $W 3>&1 1>&2 2>&3; }
+input()    { whiptail --title "$TITLE" --inputbox   "$2" $H $W "$3" 3>&1 1>&2 2>&3; }
+password() { whiptail --title "$TITLE" --passwordbox "$2" $H $W "" 3>&1 1>&2 2>&3; }
+gauge()    { whiptail --title "$TITLE" --gauge       "$1" 8 $W "$2"; }
+
+gen_secret() {
+  tr -dc 'A-Za-z0-9!@#$%^&*()_+' </dev/urandom | head -c 32
+}
+
+# ── Schritt 1: Willkommen ─────────────────────────────────────────────────────
+
+clear
+whiptail --title "$TITLE" --msgbox \
+"Willkommen beim Cyjan IDS First-Boot-Setup.
+
+Dieser Wizard konfiguriert:
+  • Proxy-Einstellungen (optional)
+  • Datenbank- und Sicherheitspasswörter
+  • Netzwerk-Schnittstellen
+  • IRMA-Integration (optional)
+
+Alle Einstellungen werden in $ENV_FILE gespeichert.
+Der IDS-Stack startet automatisch nach Abschluss.
+
+Weiter mit OK." $H $W
+
+# ── Schritt 2: Proxy ──────────────────────────────────────────────────────────
+
+PROXY_HTTP=""
+PROXY_HTTPS=""
+PROXY_NO=""
+
+if yesno "Benötigt dieses System einen HTTP-Proxy für Internetzugriff?\n\n(Wird für: Rule-Updates, GitHub-Pulls, Docker-Image-Downloads)"; then
+
+  PROXY_HTTP=$(input "HTTP-Proxy" \
+    "HTTP-Proxy-URL:\n(Beispiel: http://proxy.firma.de:3128)" \
+    "http://proxy.firma.de:3128") || true
+
+  PROXY_HTTPS=$(input "HTTPS-Proxy" \
+    "HTTPS-Proxy-URL:\n(leer lassen = gleiche URL wie HTTP-Proxy)" \
+    "${PROXY_HTTP}") || true
+
+  PROXY_NO=$(input "No-Proxy" \
+    "Kein Proxy für folgende Hosts (kommagetrennt):" \
+    "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16") || true
+
+  # System-Proxy setzen
+  cat > /etc/environment <<EOF
+HTTP_PROXY="${PROXY_HTTP}"
+HTTPS_PROXY="${PROXY_HTTPS:-$PROXY_HTTP}"
+NO_PROXY="${PROXY_NO}"
+http_proxy="${PROXY_HTTP}"
+https_proxy="${PROXY_HTTPS:-$PROXY_HTTP}"
+no_proxy="${PROXY_NO}"
+EOF
+
+  # APT-Proxy
+  cat > /etc/apt/apt.conf.d/90proxy <<EOF
+Acquire::http::Proxy  "${PROXY_HTTP}";
+Acquire::https::Proxy "${PROXY_HTTPS:-$PROXY_HTTP}";
+EOF
+
+  # Docker-Daemon-Proxy
+  mkdir -p "$DOCKER_PROXY_DIR"
+  cat > "$DOCKER_PROXY_DIR/proxy.conf" <<EOF
+[Service]
+Environment="HTTP_PROXY=${PROXY_HTTP}"
+Environment="HTTPS_PROXY=${PROXY_HTTPS:-$PROXY_HTTP}"
+Environment="NO_PROXY=${PROXY_NO}"
+EOF
+  systemctl daemon-reload
+  systemctl restart docker
+
+  # Git-Proxy
+  git config --global http.proxy  "${PROXY_HTTP}"
+  git config --global https.proxy "${PROXY_HTTPS:-$PROXY_HTTP}"
+
+  msg "Proxy-Einstellungen gespeichert."
+fi
+
+# ── Schritt 3: Management-Interface ──────────────────────────────────────────
+
+# Verfügbare Interfaces ermitteln
+IFACES=$(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$' | \
+  while read -r IF; do echo "$IF" "$(ip -4 addr show "$IF" 2>/dev/null | \
+    awk '/inet /{print $2}' | head -1 || echo 'keine IP')"; done)
+
+MGMT_IP=$(input "Management-IP" \
+  "IP-Adresse für das Web-Interface und die API:\n(0.0.0.0 = alle Interfaces)\n\nVerfügbare Interfaces:\n${IFACES}" \
+  "0.0.0.0") || MGMT_IP="0.0.0.0"
+
+API_PORT=$(input "API-Port" \
+  "Port für die REST-API und das Web-Interface:" \
+  "8001") || API_PORT="8001"
+
+# ── Schritt 4: Mirror-Interface (Sniffer) ─────────────────────────────────────
+
+MIRROR_IFACE=""
+if yesno "Ist ein Mirror/SPAN-Port-Interface für den Packet-Sniffer vorhanden?"; then
+  MIRROR_IFACE=$(input "Mirror-Interface" \
+    "Name des Mirror-Interfaces:\n(Beispiel: eth1, ens4, enp3s0)" \
+    "eth1") || MIRROR_IFACE="eth1"
+fi
+
+# ── Schritt 5: Sicherheitspasswörter ─────────────────────────────────────────
+
+msg "Sicherheitseinstellungen\n\nIm nächsten Schritt werden Passwörter konfiguriert.\nFalls Sie keine eingeben, werden sichere Zufallswerte generiert."
+
+POSTGRES_PASSWORD=$(password "Datenbankpasswort" \
+  "PostgreSQL-Passwort (leer = Zufallswert generieren):") || true
+if [ -z "$POSTGRES_PASSWORD" ]; then
+  POSTGRES_PASSWORD=$(gen_secret)
+  msg "Datenbankpasswort wurde automatisch generiert.\nBitte notieren Sie es aus der Datei:\n$ENV_FILE"
+fi
+
+API_SECRET=$(gen_secret)   # immer zufällig (JWT-Signing)
+
+MINIO_ACCESS=$(input "MinIO Access Key" \
+  "MinIO Access Key (leer = 'ids-access'):" \
+  "ids-access") || MINIO_ACCESS="ids-access"
+
+MINIO_SECRET=$(password "MinIO Secret Key" \
+  "MinIO Secret Key (leer = Zufallswert):") || true
+if [ -z "$MINIO_SECRET" ]; then
+  MINIO_SECRET=$(gen_secret)
+fi
+
+# ── Schritt 6: IRMA-Integration ───────────────────────────────────────────────
+
+IRMA_USER_VAL=""
+IRMA_PASS_VAL=""
+IRMA_BASE_URL="https://10.133.168.115/rest"
+
+if yesno "IRMA IDS-Integration aktivieren?\n\n(Importiert Alarme von einem externen IRMA-System)"; then
+
+  IRMA_BASE_URL=$(input "IRMA URL" \
+    "IRMA REST-API URL:" \
+    "https://10.133.168.115/rest") || IRMA_BASE_URL="https://10.133.168.115/rest"
+
+  IRMA_USER_VAL=$(input "IRMA Benutzer" \
+    "IRMA Benutzername (Rolle: RestAPI):" \
+    "") || true
+
+  IRMA_PASS_VAL=$(password "IRMA Passwort" \
+    "IRMA Passwort:") || true
+fi
+
+# ── Schritt 7: Suricata-Profil ────────────────────────────────────────────────
+
+COMPOSE_PROFILE="prod"
+if yesno "Suricata IDS aktivieren?\n\n(Benötigt ein Mirror-Interface; liefert signaturbasierte Alarme)"; then
+  COMPOSE_PROFILE="prod,snort"
+fi
+
+# ── Schritt 8: Zusammenfassung ────────────────────────────────────────────────
+
+SUMMARY="Folgende Konfiguration wird gespeichert:
+
+  Management-IP:   ${MGMT_IP}
+  API-Port:        ${API_PORT}
+  Mirror-Interface: ${MIRROR_IFACE:-nicht konfiguriert}
+  Compose-Profile: ${COMPOSE_PROFILE}
+  HTTP-Proxy:      ${PROXY_HTTP:-keiner}
+  IRMA:            ${IRMA_USER_VAL:-deaktiviert}
+
+Passwörter werden in $ENV_FILE gespeichert.
+
+Weiter mit OK – der Stack wird gestartet."
+
+if ! whiptail --title "$TITLE" --yesno "$SUMMARY" $H $W; then
+  msg "Setup abgebrochen. Starten Sie 'sudo ids-setup' zum Wiederholen."
+  exit 1
+fi
+
+# ── Schritt 9: .env schreiben ─────────────────────────────────────────────────
+
+cat > "$ENV_FILE" <<EOF
+# Cyjan IDS Konfiguration
+# Generiert von ids-setup am $(date)
+# Bearbeitung: sudo nano $ENV_FILE, dann: cd $IDS_DIR && sudo docker compose up -d
+
+# ── Datenbank ─────────────────────────────────────────────────────────────────
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+
+# ── API / JWT ─────────────────────────────────────────────────────────────────
+API_SECRET_KEY=${API_SECRET}
+API_PORT=${API_PORT}
+MANAGEMENT_IP=${MGMT_IP}
+
+# ── MinIO (PCAP-Speicher) ─────────────────────────────────────────────────────
+MINIO_ACCESS_KEY=${MINIO_ACCESS}
+MINIO_SECRET_KEY=${MINIO_SECRET}
+
+# ── Netzwerk ──────────────────────────────────────────────────────────────────
+MIRROR_IFACE=${MIRROR_IFACE:-eth1}
+
+# ── IRMA-Integration ──────────────────────────────────────────────────────────
+IRMA_BASE_URL=${IRMA_BASE_URL}
+IRMA_USER=${IRMA_USER_VAL}
+IRMA_PASS=${IRMA_PASS_VAL}
+IRMA_POLL_INTERVAL=30
+IRMA_SSL_VERIFY=false
+
+# ── Proxy ─────────────────────────────────────────────────────────────────────
+HTTP_PROXY=${PROXY_HTTP}
+HTTPS_PROXY=${PROXY_HTTPS:-$PROXY_HTTP}
+NO_PROXY=${PROXY_NO}
+
+# ── Sonstige ──────────────────────────────────────────────────────────────────
+TEST_MODE=false
+DEDUP_WINDOW_S=300
+PCAP_WINDOW_S=60
+EOF
+
+chmod 600 "$ENV_FILE"
+chown ids:ids "$ENV_FILE"
+echo "[setup] .env geschrieben: $ENV_FILE"
+
+# ── Schritt 10: GitHub Update (wenn Internet vorhanden) ───────────────────────
+
+if [ -n "$PROXY_HTTP" ] || curl -s --max-time 5 https://github.com > /dev/null 2>&1; then
+  {
+    echo 10
+    echo "# Prüfe GitHub auf Updates..."
+    cd "$IDS_DIR"
+    git pull --ff-only origin main 2>/dev/null || true
+    echo 40
+    echo "# Code aktualisiert."
+  } | gauge "GitHub-Update..." 10
+fi
+
+# ── Schritt 11: Stack starten ─────────────────────────────────────────────────
+
+{
+  echo 0;  echo "# Baue Docker-Images (kann 10–15 Minuten dauern)..."
+  cd "$IDS_DIR"
+  # Proxy für docker build durchreichen
+  BUILD_ARGS=""
+  if [ -n "$PROXY_HTTP" ]; then
+    BUILD_ARGS="--build-arg HTTP_PROXY=${PROXY_HTTP} --build-arg HTTPS_PROXY=${PROXY_HTTPS:-$PROXY_HTTP}"
+  fi
+  docker compose --profile "$COMPOSE_PROFILE" build $BUILD_ARGS 2>&1 | \
+    tee -a "$LOG" | grep -c "Step\|---" | \
+    awk '{p=int($1/200*80)+20; if(p>99)p=99; print p; print "# Baue Images..."}'
+  echo 100; echo "# Images fertig."
+} | gauge "Docker-Images bauen..." 0
+
+cd "$IDS_DIR"
+docker compose --profile "$COMPOSE_PROFILE" up -d
+
+# ── Schritt 12: First-Boot-Flag entfernen ────────────────────────────────────
+
+rm -f "$CYJAN_STATE/FIRSTBOOT"
+echo "$COMPOSE_PROFILE" > "$CYJAN_STATE/profile"
+echo "[setup] First-Boot abgeschlossen."
+
+# ── Fertig ────────────────────────────────────────────────────────────────────
+
+IP_ADDR=$(hostname -I | awk '{print $1}')
+whiptail --title "$TITLE" --msgbox \
+"✓ Cyjan IDS wurde erfolgreich eingerichtet!
+
+  Web-Interface: http://${IP_ADDR}:${API_PORT}
+  API / Swagger: http://${IP_ADDR}:${API_PORT}/api/docs
+
+  Standard-Login:   admin / admin-change-me
+  Konfigurationsdatei: $ENV_FILE
+
+Zum Neustart des Stacks:
+  cd $IDS_DIR && docker compose up -d
+
+Zum Update (ids-update):
+  sudo ids-update
+
+Das System ist jetzt einsatzbereit." $H $W
+
+echo "=== Setup abgeschlossen $(date) ===" >> "$LOG"
