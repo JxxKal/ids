@@ -36,40 +36,36 @@ jobs:
 
       - name: Konfigurieren, Bauen und ISO sichern
         id: build
+        shell: bash
         run: |
+          set -euo pipefail
           LOG="${GITHUB_WORKSPACE}/build.log"
-          exec > >(tee "$LOG") 2>&1   # alles ab jetzt in den Log
+          touch "$LOG"   # Log sofort anlegen – auch wenn spätere Schritte fehlschlagen
 
-          echo "=== lb config ==="
+          log() { echo "$*" | tee -a "$LOG"; }
+
+          log "=== lb config ==="
           cd "${GITHUB_WORKSPACE}/distro"
-          cat auto/config
-          sudo lb config
+          cat auto/config | tee -a "$LOG"
+          sudo lb config 2>&1 | tee -a "$LOG"
 
-          echo "=== lb config/binary ==="
-          cat config/binary 2>/dev/null || true
+          log "=== lb config/binary ==="
+          cat config/binary 2>/dev/null | tee -a "$LOG" || true
 
-          echo "=== lb build ==="
-          sudo lb build
-          BUILD_EXIT=$?
-
-          echo "=== Build exit: $BUILD_EXIT ==="
-          if [ "$BUILD_EXIT" -ne 0 ]; then
-            echo "BUILD FEHLGESCHLAGEN"
-            exit 1
-          fi
+          log "=== lb build ==="
+          sudo lb build 2>&1 | tee -a "$LOG"
+          # set -o pipefail + set -e fängt Fehler im obigen Pipe-Aufruf
 
           ISO=$(ls live-image-amd64.hybrid.iso *.iso 2>/dev/null | head -1 || true)
           if [ -z "$ISO" ]; then
-            echo "FEHLER: Keine ISO gefunden"
-            ls -la
-            exit 1
+            log "FEHLER: Keine ISO gefunden"; ls -la | tee -a "$LOG"; exit 1
           fi
 
           VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
           ISO_NAME="cyjan-ids-${VERSION}.iso"
           cp "$ISO" "${GITHUB_WORKSPACE}/${ISO_NAME}"
           echo "iso_name=${ISO_NAME}" >> "$GITHUB_OUTPUT"
-          echo "ISO: ${ISO_NAME} ($(du -sh "${GITHUB_WORKSPACE}/${ISO_NAME}" | cut -f1))"
+          log "ISO: ${ISO_NAME} ($(du -sh "${GITHUB_WORKSPACE}/${ISO_NAME}" | cut -f1))"
 
       - name: Build-Log hochladen
         if: always()
