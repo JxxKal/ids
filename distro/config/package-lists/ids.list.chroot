@@ -41,4 +41,3 @@ grub-pc-bin
 grub2-common
 efibootmgr
 util-linux
-lsblk
