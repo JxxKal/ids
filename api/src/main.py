@@ -44,10 +44,13 @@ from routers import hosts as hosts_router
 from routers import networks as networks_router
 from routers import ml as ml_router
 from routers import rules as rules_router
+from routers import ssl as ssl_router
 from routers import system as system_router
 from routers import tests as tests_router
 from routers import users as users_router
 from routers.alerts import make_pcap_endpoint, set_feedback_producer
+from routers.syslog_fwd import router as syslog_router
+from routers.syslog_fwd import syslog_forwarder_loop
 from routers.tests import make_run_endpoint
 from ws.manager import AlertStreamer, ConnectionManager
 
@@ -149,6 +152,8 @@ app.include_router(rules_router.router,    dependencies=_auth)
 app.include_router(system_router.router,   dependencies=_auth)
 app.include_router(tests_router.router,    dependencies=_auth)
 app.include_router(users_router.router,    dependencies=_auth)
+app.include_router(ssl_router.router,      dependencies=_auth)
+app.include_router(syslog_router,          dependencies=_auth)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -166,6 +171,9 @@ async def startup() -> None:
     loop = asyncio.get_event_loop()
     streamer = AlertStreamer(cfg.kafka_brokers, alert_queue)
     streamer.start(loop)
+
+    # Syslog-Forwarder
+    asyncio.create_task(syslog_forwarder_loop(get_pool))
     log.info("API startup complete")
 
 

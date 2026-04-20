@@ -25,6 +25,7 @@ volumes:
   snort-rules:    # Persistenter Regel-Cache (Community + ET Open)
   snort-alerts:   # Shared Volume: Snort → snort-bridge
   irma-data:      # Persistiert letzte bekannte IRMA-Alarm-ID
+  ids-certs:      # TLS-Zertifikate (API schreibt, nginx liest)
 
 services:
 
@@ -315,6 +316,7 @@ services:
     volumes:
       - snort-rules:/rules
       - ml-models:/models
+      - ids-certs:/certs
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
 
@@ -329,8 +331,11 @@ services:
       VITE_API_URL: http://${MANAGEMENT_IP:-localhost}:${API_PORT:-8001}
       VITE_WS_URL: ws://${MANAGEMENT_IP:-localhost}:${API_PORT:-8001}
       VITE_TEST_MODE: ${TEST_MODE:-false}
+    volumes:
+      - ids-certs:/certs:ro
     ports:
-      - "${MANAGEMENT_IP:-0.0.0.0}:3000:3000"
+      - "${MANAGEMENT_IP:-0.0.0.0}:80:80"
+      - "${MANAGEMENT_IP:-0.0.0.0}:443:443"
 
   training-loop:
     build: ./training-loop
