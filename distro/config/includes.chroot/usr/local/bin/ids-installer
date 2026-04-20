@@ -1,0 +1,209 @@
+#!/bin/bash
+# ══════════════════════════════════════════════════════════════════════════════
+# Cyjan IDS – Disk Installer
+# Partitioniert die gesamte Zielfestplatte und installiert das System.
+# ══════════════════════════════════════════════════════════════════════════════
+set -euo pipefail
+
+TITLE="Cyjan IDS Installer"
+W=72
+H=20
+LOG="/tmp/ids-install.log"
+MOUNT="/mnt/ids-target"
+
+exec > >(tee -a "$LOG") 2>&1
+echo "=== Cyjan IDS Installer $(date) ==="
+
+# ── Hilfsfunktionen ───────────────────────────────────────────────────────────
+msg()    { whiptail --title "$TITLE" --msgbox   "$1" $H $W 3>&1 1>&2 2>&3; }
+yesno()  { whiptail --title "$TITLE" --yesno    "$1" $H $W; }
+gauge()  { whiptail --title "$TITLE" --gauge    "$1" 8 $W 0; }
+
+abort() { msg "FEHLER: $1\n\nInstallation abgebrochen.\nDetails: $LOG"; exit 1; }
+
+# ── Willkommen ────────────────────────────────────────────────────────────────
+whiptail --title "$TITLE" --msgbox \
+"Willkommen beim Cyjan IDS Installer.
+
+Dieser Installer:
+  • Partitioniert die gesamte Zielfestplatte (alle Daten werden gelöscht!)
+  • Erstellt EFI-Partition (512 MB) + Root-Partition (Rest)
+  • Kopiert das Live-System auf die Festplatte
+  • Installiert den Bootloader (GRUB EFI + Legacy)
+
+Weiter mit OK." $H $W
+
+# ── Festplatten ermitteln ─────────────────────────────────────────────────────
+DISKS=()
+while IFS= read -r line; do
+  DEV=$(echo "$line" | awk '{print $1}')
+  SIZE=$(echo "$line" | awk '{print $2}')
+  MODEL=$(echo "$line" | awk '{$1=$2=""; print $0}' | xargs)
+  DISKS+=("/dev/$DEV" "$SIZE  $MODEL")
+done < <(lsblk -d -n -o NAME,SIZE,MODEL | grep -v '^loop\|^sr\|^fd')
+
+[ ${#DISKS[@]} -eq 0 ] && abort "Keine installierbaren Festplatten gefunden."
+
+TARGET=$(whiptail --title "$TITLE" --menu \
+  "Zielfestplatte wählen (ALLE DATEN WERDEN GELÖSCHT):" \
+  $H $W 8 "${DISKS[@]}" 3>&1 1>&2 2>&3) || { msg "Installation abgebrochen."; exit 0; }
+
+# Größe prüfen (mind. 20 GB)
+SIZE_BYTES=$(lsblk -b -d -n -o SIZE "$TARGET")
+[ "$SIZE_BYTES" -lt $((20 * 1024 * 1024 * 1024)) ] && \
+  abort "Festplatte zu klein (mind. 20 GB benötigt)."
+
+# Letzte Bestätigung
+yesno "ACHTUNG: Alle Daten auf $TARGET werden UNWIDERRUFLICH gelöscht!\n\nFestplatte: $TARGET\nGröße: $(lsblk -d -n -o SIZE "$TARGET")\n\nFortfahren?" || \
+  { msg "Installation abgebrochen."; exit 0; }
+
+# ── EFI-Modus prüfen ─────────────────────────────────────────────────────────
+EFI_MODE=0
+[ -d /sys/firmware/efi ] && EFI_MODE=1
+
+# ── Partitionierung ───────────────────────────────────────────────────────────
+{
+  echo 5;  echo "# Partitionierungstabelle wird erstellt..."
+  # Vorhandene Mounts lösen
+  umount -R "$MOUNT" 2>/dev/null || true
+  swapoff -a 2>/dev/null || true
+
+  # GPT-Tabelle anlegen
+  parted -s "$TARGET" mklabel gpt
+
+  if [ "$EFI_MODE" -eq 1 ]; then
+    echo 10; echo "# EFI-Partition (512 MB)..."
+    parted -s "$TARGET" mkpart ESP fat32 1MiB 513MiB
+    parted -s "$TARGET" set 1 esp on
+    echo 15; echo "# Root-Partition..."
+    parted -s "$TARGET" mkpart primary ext4 513MiB 100%
+    EFI_PART="${TARGET}1"
+    ROOT_PART="${TARGET}2"
+  else
+    echo 10; echo "# BIOS-Boot-Partition (1 MB)..."
+    parted -s "$TARGET" mkpart primary 1MiB 2MiB
+    parted -s "$TARGET" set 1 bios_grub on
+    echo 15; echo "# Root-Partition..."
+    parted -s "$TARGET" mkpart primary ext4 2MiB 100%
+    EFI_PART=""
+    ROOT_PART="${TARGET}2"
+  fi
+
+  # Partitionstabelle neu einlesen
+  sleep 1
+  partprobe "$TARGET" 2>/dev/null || true
+  sleep 1
+
+  echo 20; echo "# Dateisysteme werden formatiert..."
+  if [ -n "$EFI_PART" ]; then
+    mkfs.vfat -F32 -n EFI "$EFI_PART"
+  fi
+  mkfs.ext4 -F -L cyjan-root "$ROOT_PART"
+
+  echo 30; echo "# Dateisysteme werden gemountet..."
+  mkdir -p "$MOUNT"
+  mount "$ROOT_PART" "$MOUNT"
+  if [ -n "$EFI_PART" ]; then
+    mkdir -p "$MOUNT/boot/efi"
+    mount "$EFI_PART" "$MOUNT/boot/efi"
+  fi
+
+  echo 35; echo "# System wird kopiert (kann 5–10 Minuten dauern)..."
+} | gauge "Partitionierung..." 0
+
+# ── System kopieren ───────────────────────────────────────────────────────────
+RSYNC_EXCLUDE="--exclude=/proc/* --exclude=/sys/* --exclude=/dev/* \
+  --exclude=/run/* --exclude=/mnt/* --exclude=/media/* \
+  --exclude=/tmp/* --exclude=/live --exclude=/cdrom"
+
+rsync -aAX $RSYNC_EXCLUDE / "$MOUNT/" 2>>"$LOG" | \
+  pv -n -s "$(du -sb / --exclude=/proc --exclude=/sys --exclude=/dev \
+    --exclude=/run --exclude=/mnt --exclude=/live 2>/dev/null | awk '{print $1}')" \
+    2>&1 >/dev/null | \
+  whiptail --title "$TITLE" --gauge "System wird kopiert..." 8 $W 0 || \
+  rsync -aAX $RSYNC_EXCLUDE / "$MOUNT/" >> "$LOG" 2>&1
+
+# ── Verzeichnisse für Pseudo-FS ───────────────────────────────────────────────
+for D in proc sys dev run tmp media; do
+  mkdir -p "$MOUNT/$D"
+done
+
+# ── fstab erstellen ───────────────────────────────────────────────────────────
+{
+  echo 70; echo "# /etc/fstab wird erstellt..."
+  ROOT_UUID=$(blkid -s UUID -o value "$ROOT_PART")
+
+  cat > "$MOUNT/etc/fstab" <<EOF
+# Cyjan IDS fstab – generiert von ids-installer $(date)
+UUID=$ROOT_UUID  /        ext4  errors=remount-ro  0  1
+tmpfs            /tmp     tmpfs defaults,nosuid,nodev  0  0
+EOF
+
+  if [ -n "$EFI_PART" ]; then
+    EFI_UUID=$(blkid -s UUID -o value "$EFI_PART")
+    echo "UUID=$EFI_UUID  /boot/efi  vfat  umask=0077  0  2" >> "$MOUNT/etc/fstab"
+  fi
+
+  echo 75; echo "# Bootloader wird installiert..."
+  # Chroot-Mounts
+  mount --bind /dev  "$MOUNT/dev"
+  mount --bind /proc "$MOUNT/proc"
+  mount --bind /sys  "$MOUNT/sys"
+  [ -d /sys/firmware/efi/efivars ] && mount --bind /sys/firmware/efi/efivars "$MOUNT/sys/firmware/efi/efivars" 2>/dev/null || true
+
+  if [ "$EFI_MODE" -eq 1 ]; then
+    chroot "$MOUNT" grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+      --bootloader-id="CyjanIDS" --recheck 2>>"$LOG"
+  else
+    chroot "$MOUNT" grub-install --target=i386-pc "$TARGET" 2>>"$LOG"
+  fi
+
+  echo 85; echo "# GRUB-Konfiguration wird erstellt..."
+
+  # Grub-Config ohne Live-Params
+  cat > "$MOUNT/etc/default/grub" <<'EOF'
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR="Cyjan IDS"
+GRUB_CMDLINE_LINUX_DEFAULT="nomodeset"
+GRUB_CMDLINE_LINUX=""
+GRUB_TERMINAL=console
+EOF
+
+  chroot "$MOUNT" update-grub 2>>"$LOG"
+
+  echo 90; echo "# Live-System-Reste werden bereinigt..."
+  # Live-spezifische Pakete/Configs entfernen
+  rm -f "$MOUNT/etc/live/config.conf" 2>/dev/null || true
+  rm -f "$MOUNT/etc/initramfs-tools/conf.d/live" 2>/dev/null || true
+  rm -rf "$MOUNT/live" 2>/dev/null || true
+
+  # Hostname auf installiertes System setzen
+  echo "cyjan-ids" > "$MOUNT/etc/hostname"
+  sed -i "s/127.0.1.1.*/127.0.1.1\tcyjan-ids/" "$MOUNT/etc/hosts" 2>/dev/null || \
+    echo "127.0.1.1 cyjan-ids" >> "$MOUNT/etc/hosts"
+
+  echo 95; echo "# Aushängen..."
+  umount "$MOUNT/sys/firmware/efi/efivars" 2>/dev/null || true
+  umount "$MOUNT/sys"  2>/dev/null || true
+  umount "$MOUNT/proc" 2>/dev/null || true
+  umount "$MOUNT/dev"  2>/dev/null || true
+  [ -n "$EFI_PART" ] && umount "$MOUNT/boot/efi" 2>/dev/null || true
+  umount "$MOUNT" 2>/dev/null || true
+
+  echo 100; echo "# Fertig."
+} | gauge "Bootloader und Konfiguration..." 0
+
+# ── Fertig ────────────────────────────────────────────────────────────────────
+whiptail --title "$TITLE" --msgbox \
+"✓ Cyjan IDS wurde erfolgreich auf $TARGET installiert!
+
+Das System ist jetzt startbereit.
+Bitte ISO/USB entfernen und neu starten.
+
+  Login nach Boot: ids / ids
+  Dann: sudo ids-setup
+
+Installationslog: $LOG" $H $W
+
+echo "=== Installation abgeschlossen $(date) ==="

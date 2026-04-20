@@ -1,0 +1,38 @@
+#!/bin/bash
+# Hook: Plymouth deaktivieren, Installer-Service einrichten
+set -euo pipefail
+
+echo "[cyjan] Deaktiviere Plymouth (verhindert schwarzen Bildschirm)..."
+apt-get remove -y --purge plymouth plymouth-themes 2>/dev/null || true
+apt-get autoremove -y 2>/dev/null || true
+
+# Installer-Trigger-Service: startet ids-installer wenn ids.install=1 auf Kernel-Cmdline
+echo "[cyjan] Richte Installer-Trigger-Service ein..."
+
+cat > /etc/systemd/system/ids-install-trigger.service <<'EOF'
+[Unit]
+Description=Cyjan IDS Disk Installer Trigger
+ConditionKernelCommandLine=ids.install=1
+After=multi-user.target live-config.service
+Wants=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ids-installer
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl enable ids-install-trigger.service
+
+chmod +x /usr/local/bin/ids-installer
+
+echo "[cyjan] Boot-Hooks abgeschlossen."
