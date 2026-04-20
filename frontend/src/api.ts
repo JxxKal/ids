@@ -443,3 +443,33 @@ export async function uploadSslCert(cert: File, key: File, ca?: File): Promise<S
   if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`${res.status}: ${t}`); }
   return res.json();
 }
+
+// ── Syslog ────────────────────────────────────────────────────────────────────
+
+export interface SyslogConfig {
+  enabled:      boolean;
+  host:         string;
+  port:         number;
+  protocol:     'udp' | 'tcp';
+  format:       'rfc5424' | 'cef' | 'leef';
+  min_severity: 'low' | 'medium' | 'high' | 'critical';
+}
+
+export interface SyslogTestRequest {
+  host:     string;
+  port:     number;
+  protocol: 'udp' | 'tcp';
+  format:   'rfc5424' | 'cef' | 'leef';
+}
+
+export async function fetchSyslogConfig(): Promise<SyslogConfig> {
+  return req('/api/syslog/config');
+}
+
+export async function saveSyslogConfig(cfg: SyslogConfig): Promise<SyslogConfig> {
+  return req('/api/syslog/config', { method: 'PATCH', body: JSON.stringify(cfg) });
+}
+
+export async function testSyslog(body: SyslogTestRequest): Promise<{ status: string; message: string }> {
+  return req('/api/syslog/test', { method: 'POST', body: JSON.stringify(body) });
+}

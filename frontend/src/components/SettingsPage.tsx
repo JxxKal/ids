@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
   fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
-  fetchSamlConfig, fetchSslStatus, fetchUsers, generateApiToken, patchRuleSource,
-  saveMLConfig, saveSamlConfig, triggerMLRetrain, triggerRuleUpdate, updateUser, uploadSslCert,
+  fetchSamlConfig, fetchSslStatus, fetchSyslogConfig, fetchUsers, generateApiToken, patchRuleSource,
+  saveMLConfig, saveSamlConfig, saveSyslogConfig, testSyslog, triggerMLRetrain, triggerRuleUpdate,
+  updateUser, uploadSslCert,
 } from '../api';
-import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus } from '../api';
+import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
 import type { MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -1290,9 +1291,129 @@ function SslSettings() {
   );
 }
 
+// ── SyslogSettings ────────────────────────────────────────────────────────────
+
+const SYSLOG_DEFAULT: SyslogConfig = {
+  enabled: false, host: '', port: 514, protocol: 'udp', format: 'rfc5424', min_severity: 'low',
+};
+
+function SyslogSettings() {
+  const [cfg,     setCfg]     = useState<SyslogConfig>(SYSLOG_DEFAULT);
+  const [saving,  setSaving]  = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [msg,     setMsg]     = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  useEffect(() => {
+    fetchSyslogConfig().then(setCfg).catch(() => {});
+  }, []);
+
+  function flash(type: 'ok' | 'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try { await saveSyslogConfig(cfg); flash('ok', 'Gespeichert ✓'); }
+    catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Fehler'); }
+    finally { setSaving(false); }
+  }
+
+  async function handleTest() {
+    if (!cfg.host) { flash('err', 'Bitte zuerst einen Syslog-Host eingeben'); return; }
+    setTesting(true);
+    try {
+      const r = await testSyslog({ host: cfg.host, port: cfg.port, protocol: cfg.protocol, format: cfg.format });
+      flash('ok', r.message);
+    } catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Test fehlgeschlagen'); }
+    finally { setTesting(false); }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">Syslog / SIEM-Export</h2>
+        <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
+          <input type="checkbox" className="accent-cyan-500"
+            checked={cfg.enabled}
+            onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
+          <span className={cfg.enabled ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
+            Export aktiviert
+          </span>
+        </label>
+      </div>
+
+      <p className="text-xs text-slate-500">
+        Leitet neue Alerts alle 30 Sekunden an einen Syslog-Server weiter. Unterstützt RFC 5424, CEF (ArcSight, QRadar) und LEEF (IBM QRadar).
+      </p>
+
+      <div className={`space-y-4 ${!cfg.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+          <div className="flex flex-col gap-1 col-span-2">
+            <label className="text-slate-400">Syslog-Host / IP *</label>
+            <input className="input" placeholder="192.168.1.100 oder siem.firma.de"
+              value={cfg.host} onChange={e => setCfg(c => ({ ...c, host: e.target.value }))} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Port</label>
+            <input className="input" type="number" min={1} max={65535}
+              value={cfg.port} onChange={e => setCfg(c => ({ ...c, port: parseInt(e.target.value) || 514 }))} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Protokoll</label>
+            <select className="input" value={cfg.protocol}
+              onChange={e => setCfg(c => ({ ...c, protocol: e.target.value as 'udp' | 'tcp' }))}>
+              <option value="udp">UDP</option>
+              <option value="tcp">TCP</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Format</label>
+            <select className="input" value={cfg.format}
+              onChange={e => setCfg(c => ({ ...c, format: e.target.value as SyslogConfig['format'] }))}>
+              <option value="rfc5424">RFC 5424 (Standard)</option>
+              <option value="cef">CEF (ArcSight / QRadar)</option>
+              <option value="leef">LEEF (IBM QRadar)</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Mindest-Schweregrad</label>
+            <select className="input" value={cfg.min_severity}
+              onChange={e => setCfg(c => ({ ...c, min_severity: e.target.value as SyslogConfig['min_severity'] }))}>
+              <option value="low">Low und höher (alle)</option>
+              <option value="medium">Medium und höher</option>
+              <option value="high">High und höher</option>
+              <option value="critical">Nur Critical</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+        <div>
+          {msg?.type === 'ok'  && <span className="text-xs text-green-400">{msg.text}</span>}
+          {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
+        </div>
+        <div className="flex gap-2">
+          <button type="button" className="btn-ghost text-xs" disabled={testing || !cfg.host} onClick={handleTest}>
+            {testing ? 'Teste…' : 'Verbindung testen'}
+          </button>
+          <button type="submit" className="btn-primary text-xs" disabled={saving}>
+            {saving ? 'Speichern…' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog';
 
 interface NavItem { id: SectionId; label: string }
 interface NavGroup { label: string; items: NavItem[] }
@@ -1322,7 +1443,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
-      { id: 'ssl', label: 'SSL-Zertifikat' },
+      { id: 'ssl',    label: 'SSL-Zertifikat' },
+      { id: 'syslog', label: 'Syslog / SIEM' },
     ],
   },
 ];
@@ -1368,6 +1490,7 @@ export function SettingsPage() {
             {active === 'rules-sources' && <RuleSources />}
             {active === 'rules-list'    && <RulesList />}
             {active === 'ssl'           && <SslSettings />}
+            {active === 'syslog'        && <SyslogSettings />}
           </div>
         </div>
       </div>
