@@ -13,7 +13,12 @@ on:
 
 jobs:
   build-iso:
+    # Debian Bookworm Container: live-build unterstützt hier alle Optionen.
+    # --privileged ist zwingend – lb build mountet Filesysteme im Chroot.
     runs-on: ubuntu-24.04
+    container:
+      image: debian:bookworm
+      options: --privileged
     timeout-minutes: 90
     permissions:
       contents: write
@@ -21,17 +26,16 @@ jobs:
     steps:
       - name: Repository auschecken
         uses: actions/checkout@v4
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       - name: System-Abhängigkeiten installieren
+        shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
             live-build debootstrap squashfs-tools xorriso \
             isolinux syslinux-common grub-efi-amd64-bin grub-pc-bin \
-            mtools dosfstools ca-certificates
-          echo "live-build: $(dpkg -l live-build | tail -1 | awk '{print $3}')"
+            mtools dosfstools ca-certificates git curl
+          echo "live-build: $(lb --version)"
           df -h /
 
       - name: Konfigurieren, Bauen und ISO sichern
@@ -40,25 +44,27 @@ jobs:
         run: |
           set -euo pipefail
           LOG="${GITHUB_WORKSPACE}/build.log"
-          touch "$LOG"   # Log sofort anlegen – auch wenn spätere Schritte fehlschlagen
+          touch "$LOG"
 
           log() { echo "$*" | tee -a "$LOG"; }
 
           log "=== lb config ==="
           cd "${GITHUB_WORKSPACE}/distro"
           cat auto/config | tee -a "$LOG"
-          sudo lb config 2>&1 | tee -a "$LOG"
+          # Kein sudo nötig – Container läuft als root
+          lb config 2>&1 | tee -a "$LOG"
 
           log "=== lb config/binary ==="
           cat config/binary 2>/dev/null | tee -a "$LOG" || true
 
           log "=== lb build ==="
-          sudo lb build 2>&1 | tee -a "$LOG"
-          # set -o pipefail + set -e fängt Fehler im obigen Pipe-Aufruf
+          lb build 2>&1 | tee -a "$LOG"
 
           ISO=$(ls live-image-amd64.hybrid.iso *.iso 2>/dev/null | head -1 || true)
           if [ -z "$ISO" ]; then
-            log "FEHLER: Keine ISO gefunden"; ls -la | tee -a "$LOG"; exit 1
+            log "FEHLER: Keine ISO-Datei gefunden"
+            ls -la | tee -a "$LOG"
+            exit 1
           fi
 
           VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
@@ -70,8 +76,6 @@ jobs:
       - name: Build-Log hochladen
         if: always()
         uses: actions/upload-artifact@v4
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         with:
           name: build-log
           path: build.log
@@ -81,8 +85,6 @@ jobs:
       - name: ISO als Artefakt hochladen
         if: steps.build.outputs.iso_name != ''
         uses: actions/upload-artifact@v4
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         with:
           name: cyjan-ids-iso
           path: ${{ steps.build.outputs.iso_name }}
@@ -98,10 +100,9 @@ jobs:
 
             ### Installation
             ```bash
-            # ISO auf USB-Stick schreiben
             dd if=${{ steps.build.outputs.iso_name }} of=/dev/sdX bs=4M status=progress
             ```
-            Von USB booten → First-Boot-Wizard startet automatisch.
+            Von USB booten (UEFI oder BIOS) → First-Boot-Wizard startet automatisch.
 
             ### First-Boot-Wizard konfiguriert
             - Proxy (HTTP/HTTPS/No-Proxy)
