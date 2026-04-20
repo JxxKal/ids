@@ -1,14 +1,13 @@
 #!/bin/sh
 # live-build Konfiguration für Cyjan IDS
 # Aufruf: sudo lb config  (aus dem distro/-Verzeichnis)
-
 set -e
 
 lb config noauto \
   --distribution        bookworm \
   --archive-areas       "main contrib non-free non-free-firmware" \
   --binary-images       iso-hybrid \
-  --bootloaders         "grub-efi,syslinux" \
+  --bootloaders         "syslinux,grub-efi" \
   --debian-installer    none \
   --memtest             none \
   --win32-loader        false \
