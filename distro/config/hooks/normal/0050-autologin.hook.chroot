@@ -13,7 +13,7 @@ EOF
 
 # ids-User anlegen falls noch nicht vorhanden
 if ! id ids &>/dev/null; then
-  useradd -m -s /bin/bash -G sudo,docker ids
+  useradd -m -s /bin/bash -G sudo ids
   echo "ids:ids" | chpasswd
 fi
 
