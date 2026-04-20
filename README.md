@@ -15,8 +15,8 @@ Mirror Port
 ┌─────────────┐   pcap-headers   ┌──────────────┐
 │  Sniffer    │ ───────────────► │              │
 │  (Rust)     │   raw-packets    │    Kafka     │
-└─────────────┘ ───────────────► │   (KRaft)    │
-                                 └──────┬───────┘
+└─────────────┘ ───────────────► │   (KRaft)    │◄── irma-bridge (IRMA REST-API Poll)
+                                 └──────┬───────┘◄── snort-bridge (Suricata EVE JSON)
                                         │
                      ┌──────────────────┼──────────────────┐
                      ▼                  ▼                   ▼
@@ -33,12 +33,12 @@ Mirror Port
                    │   Manager   │
                    └──────┬───────┘
                           │ alerts-enriched
-               ┌──────────▼──────────┐         ┌──────────────────────┐
-               │  Enrichment Service │         │   Suricata (opt.)    │
-               │  DNS/Ping/GeoIP     │         │   + snort-bridge     │
-               └──────────┬──────────┘         └──────────┬───────────┘
-                          │ alerts-enriched-push           │ alerts-raw
-               ┌──────────▼──────────┐◄───────────────────┘
+               ┌──────────▼──────────┐
+               │  Enrichment Service │
+               │  DNS/Ping/GeoIP     │
+               └──────────┬──────────┘
+                          │ alerts-enriched-push
+               ┌──────────▼──────────┐
                │    TimescaleDB      │
                └──────────┬──────────┘
                           │
@@ -67,12 +67,13 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | `alert-manager` | Python | ✅ | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung |
 | `enrichment-service` | Python | ✅ | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache, Host-Trust-Prüfung |
 | `pcap-store` | Python | ✅ | Sliding-Window-Paketpuffer, PCAP-Writer, MinIO-Upload, DB-Update, WS-Push nach Upload |
-| `api` | Python FastAPI | ✅ | REST + WebSocket, JWT-Auth, Swagger UI mit Bearer-Auth, alle Datenpfade |
+| `api` | Python FastAPI | ✅ | REST + WebSocket, JWT-Auth (8h / 365d API), Swagger UI mit Bearer-Auth, alle Datenpfade |
 | `frontend` | React + Vite + TS | ✅ | Echtzeit Alert-Feed, Verbindungsgraph, PCAP-Download, Feedback, ML-Konfiguration, Sidebar-Navigation |
 | `training-loop` | Python | ✅ | Feedback-Collector (Kafka), semi-supervised Retrain, atomares Modell-Update |
 | `traffic-generator` | Python/Scapy | ✅ | 5 Test-Szenarien, Alert-Polling, TestRun-Update in DB |
 | `snort` | Suricata | ✅ | Paketerfassung auf Mirror-/Test-Interface, ET Open + OT/ICS-Regelsets, EVE JSON Output |
-| `snort-bridge` | Python | ✅ | Liest Suricata EVE JSON → normalisiert → Kafka alerts-raw |
+| `snort-bridge` | Python | ✅ | Liest Suricata EVE JSON → normalisiert → Kafka alerts-raw (`source=suricata`) |
+| `irma-bridge` | Python | ✅ | Pollt IRMA REST-API, importiert externe Alarme → Kafka alerts-raw (`source=external`) |
 
 ---
 
@@ -88,25 +89,59 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | ML | Python, Scikit-learn (IsolationForest), River (Online-Scaler) |
 | API | Python FastAPI + WebSocket |
 | Frontend | React + Vite + TypeScript + Tailwind CSS |
-| Deployment | Docker Compose |
+| Deployment | Docker Compose / Debian Live ISO |
 
 ---
 
-## Deployment
+## Installation
 
-### Voraussetzungen
+### Option A – Debian Live ISO (empfohlen für Produktion)
+
+Fertige ISO von GitHub Releases herunterladen oder selbst bauen (siehe [ISO bauen](#iso-bauen)).
+
+```bash
+# ISO auf USB-Stick schreiben
+dd if=cyjan-ids-v1.x.x.iso of=/dev/sdX bs=4M status=progress
+
+# Von USB-Stick booten (UEFI oder BIOS)
+# → First-Boot-Wizard startet automatisch auf der Konsole
+```
+
+Der **First-Boot-Wizard** (`ids-setup`) führt durch:
+
+1. **Proxy** – HTTP/HTTPS/No-Proxy für apt, Docker-Daemon, git und System
+2. **Management-IP + Port** – für Web-Interface und API
+3. **Mirror-Interface** – für den Packet-Sniffer (optional)
+4. **Passwörter** – PostgreSQL, MinIO (Zufallsgeneration möglich), API-Secret (immer zufällig)
+5. **IRMA-Integration** – URL, Benutzer, Passwort (optional)
+6. **Suricata** – optionales Compose-Profil aktivieren
+7. → schreibt `/opt/ids/.env`, baut Docker-Images, startet den Stack
+
+Nach dem Setup:
+
+```bash
+# System aktualisieren (git pull + docker compose build + up)
+sudo ids-update
+
+# Konfiguration erneut aufrufen
+sudo ids-setup
+```
+
+### Option B – Manuell (Docker Compose)
+
+#### Voraussetzungen
 
 - Docker Engine (Linux) oder Docker Desktop (Mac/Windows)
 - `docker compose` v2
 
-### Konfiguration
+#### Konfiguration
 
 ```bash
 cp .env.example .env
 # .env anpassen (Interfaces, Passwörter, IPs)
 ```
 
-### Test-Mode (Docker Desktop / Entwicklung)
+#### Test-Mode (Docker Desktop / Entwicklung)
 
 Synthetischer Testverkehr via `traffic-generator`, kein physisches Interface nötig.
 
@@ -124,7 +159,7 @@ docker compose --profile test up -d
 | Kafka UI | http://localhost:8080 |
 | MinIO Console | http://localhost:9001 |
 
-### Produktion
+#### Produktion
 
 Separates Mirror- und Management-Interface.
 
@@ -133,9 +168,7 @@ Separates Mirror- und Management-Interface.
 docker compose --profile prod up -d
 ```
 
-Dashboard und API sind nur über `MANAGEMENT_IP` erreichbar.
-
-### Mit Suricata
+#### Mit Suricata
 
 ```bash
 # Produktion + Suricata
@@ -145,16 +178,46 @@ docker compose --profile prod --profile snort up -d
 docker compose --profile test --profile snort-test up -d
 ```
 
-### DB-Migrationen
+---
 
-Beim ersten Start (leeres Volume) laufen die Migrations automatisch über `docker-entrypoint-initdb.d`.
+## ISO bauen
+
+Das `distro/`-Verzeichnis enthält eine vollständige `live-build`-Konfiguration für ein Debian Bookworm (amd64) Live-ISO.
+
+### Automatisch via GitHub Actions
+
+Bei jedem Tag-Push (`v*`) baut GitHub Actions automatisch eine ISO und hängt sie als Release-Asset an:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+# → ISO erscheint unter github.com/JxxKal/ids/releases
+```
+
+Manueller Build: Actions → „Build Cyjan IDS ISO" → **Run workflow**
+
+### Lokal bauen (Debian/Ubuntu)
+
+```bash
+sudo apt-get install -y live-build debootstrap squashfs-tools xorriso
+
+cd distro
+sudo lb config
+sudo lb build
+# → live-image-amd64.hybrid.iso
+```
+
+---
+
+## DB-Migrationen
+
+Beim ersten Start (leeres Volume) laufen alle Migrations automatisch über `docker-entrypoint-initdb.d`.
 
 Bei **bestehendem Volume** neue Migrationen manuell ausführen:
 
 ```bash
-# Einmalig nach Update ausführen – prüfen welche bereits gelaufen sind:
-docker exec -i ids-timescaledb psql -U ids -d ids \
-  < infra/timescaledb/migrations/004_alert_tags.sql
+docker compose exec -T timescaledb psql -U ids -d ids \
+  -f /docker-entrypoint-initdb.d/005_api_role.sql
 ```
 
 | Migration | Inhalt |
@@ -163,6 +226,9 @@ docker exec -i ids-timescaledb psql -U ids -d ids \
 | `002_host_trust.sql` | Trust-Quellen-Spalten für host_info |
 | `003_users.sql` | Benutzerverwaltung + Standard-Admin |
 | `004_alert_tags.sql` | `tags TEXT[]`-Spalte für alerts + GIN-Index |
+| `005_api_role.sql` | `api`-Rolle in users-Tabellen CHECK-Constraint |
+| `006_suricata_source.sql` | `suricata` als gültige Alert-Quelle |
+| `007_external_source.sql` | `external` als gültige Alert-Quelle (IRMA-Bridge) |
 
 ---
 
@@ -187,6 +253,14 @@ docker exec -i ids-timescaledb psql -U ids -d ids \
 | `PCAP_WINDOW_S` | `60` | ±Sekunden PCAP-Fenster pro Alert |
 | `RETRAIN_INTERVAL_S` | `86400` | ML Retrain-Interval (24h) |
 | `ML_BOOTSTRAP_MIN` | `500` | Mindest-Flows vor ML-Aktivierung |
+| `IRMA_BASE_URL` | `https://10.133.168.115/rest` | IRMA REST-API Basis-URL |
+| `IRMA_USER` | – | IRMA-Benutzername (Rolle: RestAPI) |
+| `IRMA_PASS` | – | IRMA-Passwort |
+| `IRMA_POLL_INTERVAL` | `30` | Sekunden zwischen IRMA-Abfragen |
+| `IRMA_SSL_VERIFY` | `false` | SSL-Zertifikat der IRMA prüfen |
+| `HTTP_PROXY` | – | HTTP-Proxy (für apt, Docker, git) |
+| `HTTPS_PROXY` | – | HTTPS-Proxy |
+| `NO_PROXY` | – | Proxy-Ausnahmen (kommagetrennt) |
 
 ---
 
@@ -194,14 +268,19 @@ docker exec -i ids-timescaledb psql -U ids -d ids \
 
 ### Alert-Feed
 
-- **Echtzeit-Stream** via WebSocket, automatischer Reconnect
+- **Echtzeit-Stream** via WebSocket, automatischer Reconnect mit Token-Auth
 - **Gruppiert / Einzeln** umschaltbar
 - **Zeitfenster-Selector** – Live, 1 Min, 15 Min, 1 Std, 4 Std, 1 Tag
+- **Quellenfilter** – Alle / Signatur / ML·KI / Suricata / Extern (IRMA)
+- **Feedback-Filter** – Alle / Kein Feedback / False Positive / True Positive
+- **Tag-Suche** – Tags durchsuchbar über das globale Suchfeld
 - **Threat-Level Gauge** – 0–100 (grün → rot), Gewichtung nach Severity
 - **Tags** – Suricata/Signatur-Tags je Alert (OT/ICS-Tags orange hervorgehoben)
+- **IRMA-Badge** – violettes „IRMA"-Label bei Alarmen aus der IRMA-Bridge
 - **Enrichment** – Hostname, Netzwerk-Badge, Trust-Status, GeoIP, ASN
 - **FP/TP-Badge** – grün (False Positive) / rot (True Positive) direkt in der Zeile
 - **PCAP-Button** – grau (nicht verfügbar) / blau (Download bereit), mit Tooltip
+- **CSV-Export** – gefilterte Alerts als CSV (max. 5.000 Zeilen)
 
 ### Alert-Detailansicht
 
@@ -218,14 +297,14 @@ docker exec -i ids-timescaledb psql -U ids -d ids \
 
 - Bekannte Netzwerke (CIDR + Name + Beschreibung + Farbe) anlegen und löschen
 - **CSV-Import** – Bulk-Import aus Datei
-- **Beispiel-CSV** – Download-Button mit vollständig kommentierten Beispieldaten
+- **Beispiel-CSV** – Download-Button (authentifizierter Fetch)
 
 ### Hosts
 
 - Host-Verzeichnis mit Trust-Status, Hostname, ASN, GeoIP, Last-Seen
 - Manuell anlegen, Display-Namen und Trust-Flag bearbeiten, löschen
 - **CSV-Import** – `Hostname;IP` oder `IP;Hostname`, Semikolon oder Komma
-- **Beispiel-CSV** – Download-Button
+- **Beispiel-CSV** – Download-Button (authentifizierter Fetch)
 
 ### Tests
 
@@ -235,20 +314,35 @@ docker exec -i ids-timescaledb psql -U ids -d ids \
 ### Settings (Sidebar-Navigation)
 
 #### Benutzer
+
 Lokale und SAML-synchronisierte Benutzer: Tabelle, Anlegen, Inline-Bearbeitung, Löschen.
 Standard nach Erstinstallation: `admin` / `changeme` → **sofort ändern!**
 
+**Rollen:**
+
+| Rolle | Token-Laufzeit | Beschreibung |
+|---|---|---|
+| `admin` | 8 Stunden | Vollzugriff inkl. Benutzerverwaltung |
+| `viewer` | 8 Stunden | Lesezugriff, Feedback setzen |
+| `api` | 365 Tage | Service-Account für externe Integrationen |
+
+Für API-User wird kein Passwort benötigt – nach dem Anlegen wird ein langlebiges JWT **einmalig** angezeigt. Über den „Token"-Button in der Benutzertabelle kann jederzeit ein neues Token generiert werden.
+
 #### SAML / SSO
+
 IdP-Metadata-URL, SP Entity-ID, ACS-URL, Attribut-Mapping, Standard-Rolle.
 
 #### ML-Status
+
 Live-Anzeige: Phase (Passthrough / Learning / Active), Bootstrap-Fortschritt, 24h-Statistiken, Top-Anomalie-Features.
 
 #### ML-Filter-Konfiguration
+
 - Alert-Threshold, Contamination, Bootstrap-Min-Samples, Partial-Fit-Interval
 - Slider mit Preset-Buttons, sofort wirkende Kontaminationsänderung löst Retrain aus
 
 #### Regelquellen
+
 Toggle-Schalter je Quelle, eigene URLs hinzufügen, Update-Button (Suricata Live-Reload via SIGUSR2).
 
 Vorkonfigurierte OT/ICS-Quellen (deaktiviert, bei Bedarf aktivieren):
@@ -263,7 +357,59 @@ Vorkonfigurierte OT/ICS-Quellen (deaktiviert, bei Bedarf aktivieren):
 | Positive Technologies SCADA | ICS-Angriffserkennung |
 
 #### Regelübersicht
+
 Alle aktiven Regeln, Suche, Pagination, Aktion-Badges.
+
+---
+
+## IRMA-Bridge
+
+Integriert Alarme eines externen [IRMA IDS](https://irma-security.de) in den Cyjan Alert-Feed.
+
+```
+IRMA REST-API (https://10.x.x.x/rest)
+    │  GET /alarm?after={last_id}  (alle 30 s)
+    ▼
+irma-bridge
+    │  IRMA-Token läuft 2 min ab → proaktive Erneuerung alle 90 s
+    │  Letzte Alarm-ID persistiert in /data/irma_last_id (kein Doppel-Import)
+    ▼
+Kafka alerts-raw  →  Alert-Manager  →  TimescaleDB + WebSocket
+```
+
+**Alarm-Mapping:**
+
+| IRMA-Feld | Cyjan-Feld |
+|---|---|
+| `createTimestamp` | `ts` |
+| `note` | `rule_id` |
+| `msg` | `description` |
+| `srcIp` / `dstIp` | `src_ip` / `dst_ip` |
+| `port` | `dst_port` |
+| `proto` | `proto` |
+| – | `source = "external"` |
+| – | `tags = ["irma", "external"]` |
+| – | `severity` (Heuristik via note/proto, Standard: medium) |
+
+OT-Protokolle (Modbus, DNP3, EtherNet/IP, BACnet, S7) erhalten automatisch `severity=high` und den `ot`-Tag.
+
+**Konfiguration (.env):**
+
+```env
+IRMA_BASE_URL=https://10.133.168.115/rest
+IRMA_USER=restuser
+IRMA_PASS=geheim
+IRMA_POLL_INTERVAL=30   # Sekunden
+IRMA_SSL_VERIFY=false   # false für selbstsignierte Zertifikate
+```
+
+**Deploy:**
+
+```bash
+docker compose build irma-bridge
+docker compose up -d irma-bridge
+docker compose logs -f irma-bridge
+```
 
 ---
 
@@ -297,10 +443,11 @@ Die API stellt eine vollständige interaktive Dokumentation bereit:
 
 | Method | Path | Beschreibung |
 |---|---|---|
-| GET | `/api/alerts` | Alert-Liste (Filter: severity, source, rule_id, src_ip, is_test, ts_from, ts_to) |
+| GET | `/api/alerts` | Alert-Liste (Filter: severity, source, rule_id, src_ip, is_test, ts_from, ts_to, feedback) |
 | GET | `/api/alerts/{id}` | Einzelner Alert |
 | PATCH | `/api/alerts/{id}/feedback` | Feedback setzen (`fp` / `tp` + optionale Notiz) |
 | GET | `/api/alerts/{id}/pcap` | PCAP-Download (MinIO-Proxy, Wireshark-kompatibel) |
+| GET | `/api/alerts/export.csv` | Gefilterte Alerts als CSV (max. 5.000 Zeilen, alle Filter) |
 
 ### Flows
 
@@ -358,9 +505,10 @@ Die API stellt eine vollständige interaktive Dokumentation bereit:
 | Method | Path | Beschreibung |
 |---|---|---|
 | GET | `/api/users` | Benutzerliste |
-| POST | `/api/users` | Lokalen Benutzer anlegen |
+| POST | `/api/users` | Lokalen Benutzer anlegen (Rollen: admin, viewer, api) |
 | PATCH | `/api/users/{id}` | Benutzer aktualisieren (Rolle, Passwort, aktiv) |
 | DELETE | `/api/users/{id}` | Benutzer löschen (letzter Admin geschützt) |
+| POST | `/api/users/{id}/token` | 365-Tage-JWT für API-User generieren |
 
 ### System
 
@@ -377,13 +525,13 @@ Die API stellt eine vollständige interaktive Dokumentation bereit:
 
 | Protokoll | Path | Beschreibung |
 |---|---|---|
-| WS | `/ws/alerts` | Echtzeit-Alert-Stream (JWT als Query-Parameter oder Header) |
+| WS | `/ws/alerts?token=<jwt>` | Echtzeit-Alert-Stream (JWT als Query-Parameter) |
 
 ---
 
 ## WebSocket-Protokoll
 
-Verbindung: `ws://<host>:8001/ws/alerts` mit JWT im `Authorization`-Header.
+Verbindung: `ws://<host>:8001/ws/alerts?token=<jwt>`
 
 ```jsonc
 // Initial beim Verbinden (letzte 50 Alerts aus DB):
@@ -460,7 +608,7 @@ cidr;name;description;color
 | `raw-packets` | sniffer | flow-aggregator | Geparste Pakete (JSON) |
 | `flows` | flow-aggregator | signature-engine, ml-engine | Aggregierte Flows + Features |
 | `pcap-headers` | sniffer | pcap-store | Rohe Header-Bytes für PCAP-Archiv |
-| `alerts-raw` | signature-engine, ml-engine, snort-bridge | alert-manager | Rohe Alarme |
+| `alerts-raw` | signature-engine, ml-engine, snort-bridge, irma-bridge | alert-manager | Rohe Alarme aller Quellen |
 | `alerts-enriched` | alert-manager | enrichment-service, api, pcap-store | Angereicherte Alarme |
 | `alerts-enriched-push` | enrichment-service, pcap-store, api | api (WebSocket) | Live-Updates: Enrichment, PCAP, Feedback |
 | `feedback` | api | training-loop | FP/TP-Feedback für ML-Training |
@@ -479,7 +627,7 @@ cidr;name;description;color
 | `system_config` | Tabelle | Betriebskonfiguration (key/value JSONB) |
 | `training_samples` | Tabelle | Gelabelte Flows für ML-Retrain |
 | `test_runs` | Hypertable | Ergebnis-Protokoll der Dashboard-Tests |
-| `users` | Tabelle | Lokale und SAML-synchronisierte Benutzer |
+| `users` | Tabelle | Lokale und SAML-synchronisierte Benutzer (Rollen: admin, viewer, api) |
 
 PostgreSQL `LISTEN/NOTIFY` auf Channel `config_changed` für Interface-Änderungen ohne Polling.
 
@@ -585,9 +733,9 @@ PCAP-Dateien sind im nativen libpcap-Format (`LINKTYPE_ETHERNET`). Sie enthalten
   "alert_id":    "uuid-v4",
   "ts":          "2026-04-19T14:15:57.624665+00:00",
   "flow_id":     "uuid-v4",
-  "source":      "signature",     // signature | ml | suricata | test
+  "source":      "signature",  // signature | ml | suricata | external | test
   "rule_id":     "SCAN_001",
-  "severity":    "high",          // low | medium | high | critical
+  "severity":    "high",       // low | medium | high | critical
   "score":       0.87,
   "src_ip":      "192.168.1.10",
   "dst_ip":      "10.0.0.1",
@@ -606,7 +754,7 @@ PCAP-Dateien sind im nativen libpcap-Format (`LINKTYPE_ETHERNET`). Sie enthalten
   },
   "pcap_available": true,
   "pcap_key":    "alerts/uuid-v4.pcap",
-  "feedback":    null,            // null | fp | tp
+  "feedback":    null,         // null | fp | tp
   "is_test":     false
 }
 ```
