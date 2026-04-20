@@ -35,7 +35,7 @@ from jose import JWTError
 from minio import Minio
 
 from config import Config
-from database import close_pool, init_pool
+from database import close_pool, get_pool, init_pool
 from deps import get_current_user
 from routers import alerts as alerts_router
 from routers import auth as auth_router
