@@ -1,6 +1,5 @@
 #!/bin/sh
 # live-build Konfiguration für Cyjan IDS
-# Aufruf: sudo lb config  (aus dem distro/-Verzeichnis)
 set -ex
 
 lb config noauto \
@@ -10,7 +9,4 @@ lb config noauto \
   --bootloaders       "syslinux,grub-efi" \
   --debian-installer  none \
   --memtest           none \
-  --hostname          "cyjan-ids" \
-  --username          "ids" \
-  --password          "ids" \
   "${@}"
