@@ -390,3 +390,56 @@ export async function fetchSamlConfig(): Promise<SamlConfig> {
 export async function saveSamlConfig(value: SamlConfig): Promise<void> {
   await req('/api/config/saml', { method: 'PATCH', body: JSON.stringify({ value }) });
 }
+
+// ── SSL / TLS ─────────────────────────────────────────────────────────────────
+
+export interface SslStatus {
+  mode: 'none' | 'upload' | 'self-signed' | 'acme';
+  active: boolean;
+  subject?: string;
+  issuer?: string;
+  not_after?: string;
+  domains?: string[];
+  acme_email?: string;
+  acme_ca?: string;
+}
+
+export interface SslSelfSignedRequest {
+  common_name: string;
+  days: number;
+  country?: string;
+  org?: string;
+}
+
+export interface SslAcmeConfig {
+  domains: string[];
+  email: string;
+  ca_url?: string;
+}
+
+export async function fetchSslStatus(): Promise<SslStatus> {
+  return req('/api/ssl/status');
+}
+
+export async function applySslSelfSigned(cfg: SslSelfSignedRequest): Promise<SslStatus> {
+  return req('/api/ssl/self-signed', { method: 'POST', body: JSON.stringify(cfg) });
+}
+
+export async function applySslAcme(cfg: SslAcmeConfig): Promise<SslStatus> {
+  return req('/api/ssl/acme', { method: 'POST', body: JSON.stringify(cfg) });
+}
+
+export async function uploadSslCert(cert: File, key: File, ca?: File): Promise<SslStatus> {
+  const token = getToken();
+  const fd = new FormData();
+  fd.append('cert', cert);
+  fd.append('key', key);
+  if (ca) fd.append('ca', ca);
+  const res = await fetch(`${BASE}/api/ssl/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`${res.status}: ${t}`); }
+  return res.json();
+}

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  addRuleSource, createUser, deleteRuleSource, deleteUser,
+  addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
   fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
-  fetchSamlConfig, fetchUsers, generateApiToken, patchRuleSource,
-  saveMLConfig, saveSamlConfig, triggerMLRetrain, triggerRuleUpdate, updateUser,
+  fetchSamlConfig, fetchSslStatus, fetchUsers, generateApiToken, patchRuleSource,
+  saveMLConfig, saveSamlConfig, triggerMLRetrain, triggerRuleUpdate, updateUser, uploadSslCert,
 } from '../api';
+import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus } from '../api';
 import type { MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -1047,9 +1048,251 @@ function RulesList() {
   );
 }
 
+// ── SslSettings ───────────────────────────────────────────────────────────────
+
+type SslMode = 'upload' | 'self-signed' | 'acme';
+
+function SslStatusBadge({ status }: { status: SslStatus }) {
+  if (!status.active || status.mode === 'none')
+    return <span className="px-2 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">Kein TLS</span>;
+  const expiry = status.not_after ? new Date(status.not_after) : null;
+  const daysLeft = expiry ? Math.ceil((expiry.getTime() - Date.now()) / 86400000) : null;
+  const color = daysLeft == null ? 'green' : daysLeft < 14 ? 'red' : daysLeft < 30 ? 'yellow' : 'green';
+  return (
+    <span className={`px-2 py-0.5 text-[10px] rounded border ${
+      color === 'green' ? 'bg-green-950/40 text-green-300 border-green-700/40' :
+      color === 'yellow' ? 'bg-yellow-950/40 text-yellow-300 border-yellow-700/40' :
+      'bg-red-950/40 text-red-300 border-red-700/40'
+    }`}>
+      TLS aktiv {daysLeft != null ? `· ${daysLeft}d` : ''}
+    </span>
+  );
+}
+
+function SslSettings() {
+  const [status,  setStatus]  = useState<SslStatus | null>(null);
+  const [mode,    setMode]    = useState<SslMode>('self-signed');
+  const [saving,  setSaving]  = useState(false);
+  const [msg,     setMsg]     = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  // Upload state
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const [keyFile,  setKeyFile]  = useState<File | null>(null);
+  const [caFile,   setCaFile]   = useState<File | null>(null);
+
+  // Self-signed state
+  const [ss, setSs] = useState<SslSelfSignedRequest>({ common_name: '', days: 365, country: 'DE', org: '' });
+
+  // ACME state
+  const [acme, setAcme] = useState<SslAcmeConfig>({
+    domains: [],
+    email: '',
+    ca_url: 'https://acme-v02.api.letsencrypt.org/directory',
+  });
+  const [acmeDomainInput, setAcmeDomainInput] = useState('');
+
+  useEffect(() => {
+    fetchSslStatus()
+      .then(s => { setStatus(s); if (s.mode !== 'none') setMode(s.mode as SslMode); })
+      .catch(() => setStatus({ mode: 'none', active: false }));
+  }, []);
+
+  function flash(type: 'ok' | 'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  async function handleApply() {
+    setSaving(true);
+    try {
+      let s: SslStatus;
+      if (mode === 'upload') {
+        if (!certFile || !keyFile) { flash('err', 'Zertifikat und Schlüssel sind erforderlich'); setSaving(false); return; }
+        s = await uploadSslCert(certFile, keyFile, caFile ?? undefined);
+      } else if (mode === 'self-signed') {
+        if (!ss.common_name) { flash('err', 'Common Name ist erforderlich'); setSaving(false); return; }
+        s = await applySslSelfSigned(ss);
+      } else {
+        if (!acme.email || acme.domains.length === 0) { flash('err', 'E-Mail und mindestens eine Domain erforderlich'); setSaving(false); return; }
+        s = await applySslAcme(acme);
+      }
+      setStatus(s);
+      flash('ok', 'SSL-Konfiguration gespeichert ✓');
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Fehler');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const TAB_LABEL: Record<SslMode, string> = {
+    'upload':      'Zertifikat hochladen',
+    'self-signed': 'Self-Signed generieren',
+    'acme':        'ACME / Let\'s Encrypt',
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">SSL / TLS-Zertifikat</h2>
+        {status && <SslStatusBadge status={status} />}
+      </div>
+
+      {/* Aktuelles Zertifikat */}
+      {status?.active && status.mode !== 'none' && (
+        <div className="rounded-lg border border-slate-700/60 bg-slate-800/30 px-4 py-3 text-xs space-y-1">
+          <p className="text-slate-400 font-medium">Aktives Zertifikat</p>
+          {status.subject  && <p className="text-slate-300">Subject: <span className="font-mono">{status.subject}</span></p>}
+          {status.issuer   && <p className="text-slate-500">Issuer: <span className="font-mono">{status.issuer}</span></p>}
+          {status.not_after && <p className="text-slate-500">Gültig bis: {new Date(status.not_after).toLocaleDateString('de-DE')}</p>}
+          {status.domains?.length ? <p className="text-slate-500">Domains: {status.domains.join(', ')}</p> : null}
+        </div>
+      )}
+
+      {/* Modus-Tabs */}
+      <div className="flex gap-1 border-b border-slate-800 pb-0">
+        {(['upload', 'self-signed', 'acme'] as SslMode[]).map(m => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`px-3 py-1.5 text-xs rounded-t transition-colors border-b-2 -mb-px ${
+              mode === m
+                ? 'text-cyan-300 border-cyan-500 bg-cyan-950/30'
+                : 'text-slate-500 border-transparent hover:text-slate-300'
+            }`}
+          >{TAB_LABEL[m]}</button>
+        ))}
+      </div>
+
+      {/* Upload */}
+      {mode === 'upload' && (
+        <div className="space-y-3 text-xs">
+          <p className="text-slate-500">Lade ein bestehendes PEM-Zertifikat und den zugehörigen privaten Schlüssel hoch.</p>
+          {[
+            { label: 'Zertifikat (cert.pem) *', set: setCertFile, accept: '.pem,.crt,.cer' },
+            { label: 'Privater Schlüssel (key.pem) *', set: setKeyFile, accept: '.pem,.key' },
+            { label: 'CA-Chain (optional)', set: setCaFile, accept: '.pem,.crt,.cer' },
+          ].map(({ label, set, accept }) => (
+            <div key={label} className="flex flex-col gap-1">
+              <label className="text-slate-400">{label}</label>
+              <input
+                type="file" accept={accept}
+                className="block text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer"
+                onChange={e => set(e.target.files?.[0] ?? null)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Self-Signed */}
+      {mode === 'self-signed' && (
+        <div className="space-y-3 text-xs">
+          <p className="text-slate-500">Generiert ein selbstsigniertes Zertifikat direkt auf dem Server. Geeignet für interne Deployments ohne öffentliche Domain.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1 col-span-2">
+              <label className="text-slate-400">Common Name (CN) / Hostname *</label>
+              <input className="input" placeholder="ids.local oder 192.168.1.79"
+                value={ss.common_name} onChange={e => setSs(s => ({ ...s, common_name: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Gültigkeit (Tage)</label>
+              <input className="input" type="number" min={1} max={3650}
+                value={ss.days} onChange={e => setSs(s => ({ ...s, days: parseInt(e.target.value) || 365 }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Land (2-stellig)</label>
+              <input className="input" maxLength={2} placeholder="DE"
+                value={ss.country ?? ''} onChange={e => setSs(s => ({ ...s, country: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1 col-span-2">
+              <label className="text-slate-400">Organisation</label>
+              <input className="input" placeholder="Cyjan IDS"
+                value={ss.org ?? ''} onChange={e => setSs(s => ({ ...s, org: e.target.value }))} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ACME */}
+      {mode === 'acme' && (
+        <div className="space-y-3 text-xs">
+          <p className="text-slate-500">Automatische Zertifikatsvergabe via ACME (z.B. Let's Encrypt). Der Server muss über Port 80/443 erreichbar sein.</p>
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">E-Mail-Adresse *</label>
+            <input className="input" type="email" placeholder="admin@example.com"
+              value={acme.email} onChange={e => setAcme(a => ({ ...a, email: e.target.value }))} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Domains *</label>
+            <div className="flex gap-2">
+              <input className="input flex-1" placeholder="ids.example.com"
+                value={acmeDomainInput}
+                onChange={e => setAcmeDomainInput(e.target.value)}
+                onKeyDown={e => {
+                  if ((e.key === 'Enter' || e.key === ',') && acmeDomainInput.trim()) {
+                    e.preventDefault();
+                    setAcme(a => ({ ...a, domains: [...a.domains, acmeDomainInput.trim()] }));
+                    setAcmeDomainInput('');
+                  }
+                }}
+              />
+              <button type="button" className="btn-ghost text-xs"
+                onClick={() => { if (acmeDomainInput.trim()) { setAcme(a => ({ ...a, domains: [...a.domains, acmeDomainInput.trim()] })); setAcmeDomainInput(''); } }}>
+                + Hinzufügen
+              </button>
+            </div>
+            {acme.domains.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {acme.domains.map(d => (
+                  <span key={d} className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[11px]">
+                    {d}
+                    <button onClick={() => setAcme(a => ({ ...a, domains: a.domains.filter(x => x !== d) }))}
+                      className="text-slate-500 hover:text-red-400 leading-none">✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">ACME-Verzeichnis-URL</label>
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { label: 'Let\'s Encrypt (Prod)',    url: 'https://acme-v02.api.letsencrypt.org/directory' },
+                { label: 'Let\'s Encrypt (Staging)', url: 'https://acme-staging-v02.api.letsencrypt.org/directory' },
+              ].map(p => (
+                <button key={p.label} type="button"
+                  onClick={() => setAcme(a => ({ ...a, ca_url: p.url }))}
+                  className={`px-2 py-0.5 text-[11px] rounded border transition-colors ${
+                    acme.ca_url === p.url
+                      ? 'bg-cyan-900/50 border-cyan-600/60 text-cyan-300'
+                      : 'bg-slate-800/50 border-slate-700/40 text-slate-400 hover:border-slate-500/60 hover:text-slate-300'
+                  }`}>{p.label}</button>
+              ))}
+            </div>
+            <input className="input mt-1" type="url" placeholder="https://acme-v02.api.letsencrypt.org/directory"
+              value={acme.ca_url ?? ''} onChange={e => setAcme(a => ({ ...a, ca_url: e.target.value }))} />
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-1">
+        <div>
+          {msg?.type === 'ok'  && <span className="text-xs text-green-400">{msg.text}</span>}
+          {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
+        </div>
+        <button className="btn-primary text-xs" disabled={saving} onClick={handleApply}>
+          {saving ? 'Wird angewendet…' : 'Anwenden'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl';
 
 interface NavItem { id: SectionId; label: string }
 interface NavGroup { label: string; items: NavItem[] }
@@ -1074,6 +1317,12 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'rules-sources', label: 'Rule-Quellen' },
       { id: 'rules-list',    label: 'Aktive Regeln' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { id: 'ssl', label: 'SSL-Zertifikat' },
     ],
   },
 ];
@@ -1118,6 +1367,7 @@ export function SettingsPage() {
             {active === 'ml-config'     && <MLFilterConfig />}
             {active === 'rules-sources' && <RuleSources />}
             {active === 'rules-list'    && <RulesList />}
+            {active === 'ssl'           && <SslSettings />}
           </div>
         </div>
       </div>
