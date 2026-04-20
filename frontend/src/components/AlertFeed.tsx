@@ -253,7 +253,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
         <select className="input w-28" value={severityF} onChange={e => setSeverityF(e.target.value)}
           title="Schweregrad filtern">
           {SEVERITIES.map(s => (
-            <option key={s} value={s}>{s || 'Schweregrad'}</option>
+            <option key={s} value={s}>{s || 'Alle'}</option>
           ))}
         </select>
         <select className="input w-28" value={sourceF} onChange={e => setSourceF(e.target.value)}

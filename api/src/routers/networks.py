@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from database import get_pool
-from models import NetworkCreate, NetworkResponse
+from models import NetworkCreate, NetworkResponse, NetworkUpdate
 
 router = APIRouter(prefix="/api/networks", tags=["networks"])
 
@@ -169,6 +169,40 @@ async def import_networks_csv(
                 errors.append(f"Zeile {lineno} ({cidr}): {exc}")
 
     return {"imported": imported, "skipped": skipped, "errors": errors[:20]}
+
+
+@router.patch("/{network_id}", response_model=NetworkResponse)
+async def update_network(
+    network_id: str,
+    body: NetworkUpdate,
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> NetworkResponse:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, cidr, name, description, color FROM known_networks WHERE id = $1::uuid",
+            network_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Network not found")
+        new_name  = body.name        if body.name        is not None else row["name"]
+        new_desc  = body.description if body.description is not None else row["description"]
+        new_color = body.color       if body.color       is not None else row["color"]
+        row = await conn.fetchrow(
+            """
+            UPDATE known_networks
+               SET name = $2, description = $3, color = $4
+             WHERE id = $1::uuid
+            RETURNING id, cidr, name, description, color
+            """,
+            network_id, new_name, new_desc, new_color,
+        )
+    return NetworkResponse(
+        id=row["id"],
+        cidr=str(row["cidr"]),
+        name=row["name"],
+        description=row["description"],
+        color=row["color"],
+    )
 
 
 @router.delete("/{network_id}", status_code=204, response_model=None)
