@@ -129,7 +129,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-4">
         <div className="flex items-center mr-2">
-          <img src="/cyjan_logo_compact.svg" alt="Cyjan" className="h-14 w-auto" />
+          <img src="/cyjan_logo_cyan_max.svg" alt="Cyjan" className="h-14 w-auto" />
         </div>
 
         {/* Tabs */}

@@ -33,7 +33,7 @@ export function LoginPage({ onLogin }: Props) {
 
         {/* Logo + Titel */}
         <div className="flex flex-col items-center mb-8 gap-3">
-          <img src="/cyjan_logo_compact.svg" alt="Cyjan" className="h-16 w-auto" />
+          <img src="/cyjan_logo_cyan_max.svg" alt="Cyjan" className="h-16 w-auto" />
           <div className="text-center">
             <h1 className="text-xl font-semibold text-slate-100">Cyjan IDS</h1>
             <p className="text-xs text-slate-500 mt-0.5">OT Sentrymode</p>
