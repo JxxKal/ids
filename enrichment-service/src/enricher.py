@@ -4,11 +4,11 @@ IP-Enrichment: DNS, Ping, GeoIP, ASN, Known Networks.
 Alle Funktionen sind best-effort – bei Fehler wird None zurückgegeben,
 kein Exception-Propagation nach oben.
 
-GeoIP/ASN benötigt MaxMind GeoLite2-Datenbanken:
-  /geoip/GeoLite2-City.mmdb
-  /geoip/GeoLite2-ASN.mmdb
-  Download: https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
-  (kostenloses Konto erforderlich)
+GeoIP/ASN nutzt DB-IP.com Free-Datenbanken (kein Account erforderlich):
+  /geoip/GeoLite2-City.mmdb  ← dbip-city-lite-YYYY-MM.mmdb
+  /geoip/GeoLite2-ASN.mmdb   ← dbip-asn-lite-YYYY-MM.mmdb
+  Download: https://db-ip.com/db/lite.php
+Kompatibel auch mit MaxMind GeoLite2 (.mmdb).
 """
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ _asn_reader  = None
 
 
 def init_geoip(city_db: str, asn_db: str) -> None:
-    """Lädt MaxMind-Datenbanken. Stille Fehler wenn Dateien fehlen."""
+    """Lädt mmdb-Datenbanken via maxminddb (MaxMind + DB-IP kompatibel)."""
     global _city_reader, _asn_reader
     try:
-        import geoip2.database
+        import maxminddb
         if Path(city_db).exists():
-            _city_reader = geoip2.database.Reader(city_db)
+            _city_reader = maxminddb.open_database(city_db)
             log.info("GeoIP City DB loaded: %s", city_db)
         else:
             log.warning("GeoIP City DB not found: %s – geo enrichment disabled", city_db)
@@ -41,9 +41,9 @@ def init_geoip(city_db: str, asn_db: str) -> None:
         log.warning("GeoIP City init failed: %s", exc)
 
     try:
-        import geoip2.database
+        import maxminddb
         if Path(asn_db).exists():
-            _asn_reader = geoip2.database.Reader(asn_db)
+            _asn_reader = maxminddb.open_database(asn_db)
             log.info("GeoIP ASN DB loaded: %s", asn_db)
         else:
             log.warning("GeoIP ASN DB not found: %s – ASN enrichment disabled", asn_db)
@@ -82,31 +82,40 @@ def ping_host(ip: str, timeout_ms: int) -> float | None:
 
 
 def geo_lookup(ip: str) -> dict[str, Any] | None:
-    """GeoIP-Lookup. Gibt Dict oder None zurück."""
+    """GeoIP-Lookup via maxminddb (MaxMind + DB-IP). Gibt Dict oder None zurück."""
     if _city_reader is None:
         return None
     try:
-        resp = _city_reader.city(ip)
+        data = _city_reader.get(ip)
+        if not data:
+            return None
+        country  = data.get("country") or {}
+        city     = data.get("city") or {}
+        location = data.get("location") or {}
+        names    = country.get("names") or {}
+        cnames   = city.get("names") or {}
         return {
-            "country":      resp.country.name,
-            "country_code": resp.country.iso_code,
-            "city":         resp.city.name,
-            "lat":          resp.location.latitude,
-            "lon":          resp.location.longitude,
+            "country":      names.get("en") or names.get("de"),
+            "country_code": country.get("iso_code"),
+            "city":         cnames.get("en") or cnames.get("de"),
+            "lat":          location.get("latitude"),
+            "lon":          location.get("longitude"),
         }
     except Exception:
         return None
 
 
 def asn_lookup(ip: str) -> dict[str, Any] | None:
-    """ASN-Lookup. Gibt Dict oder None zurück."""
+    """ASN-Lookup via maxminddb (MaxMind + DB-IP). Gibt Dict oder None zurück."""
     if _asn_reader is None:
         return None
     try:
-        resp = _asn_reader.asn(ip)
+        data = _asn_reader.get(ip)
+        if not data:
+            return None
         return {
-            "number": resp.autonomous_system_number,
-            "org":    resp.autonomous_system_organization,
+            "number": data.get("autonomous_system_number"),
+            "org":    data.get("autonomous_system_organization"),
         }
     except Exception:
         return None
