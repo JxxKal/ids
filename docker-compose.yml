@@ -264,6 +264,8 @@ services:
       DNS_TIMEOUT_MS: ${DNS_TIMEOUT_MS:-2000}
       CACHE_TTL_S: ${CACHE_TTL_S:-3600}
       TEST_MODE: ${TEST_MODE:-false}
+    volumes:
+      - ./geoip:/geoip:ro
 
   pcap-store:
     build: ./pcap-store
