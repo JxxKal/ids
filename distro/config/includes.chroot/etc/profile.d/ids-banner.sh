@@ -3,12 +3,14 @@
 IDS_DIR="/opt/ids"
 CYJAN_STATE="/etc/cyjan"
 
-if [ -f "$CYJAN_STATE/FIRSTBOOT" ]; then
+if [ -f "$CYJAN_STATE/FIRSTBOOT" ] && [ -t 0 ]; then
+  clear
   echo ""
   echo "  ╔══════════════════════════════════════╗"
-  echo "  ║  Cyjan IDS – First-Boot Setup läuft  ║"
+  echo "  ║  Cyjan IDS – First-Boot Setup        ║"
   echo "  ╚══════════════════════════════════════╝"
   echo ""
+  sudo /usr/local/bin/ids-setup
   return
 fi
 

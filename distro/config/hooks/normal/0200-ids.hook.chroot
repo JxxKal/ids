@@ -19,7 +19,7 @@ mkdir -p /var/log/cyjan
 touch /etc/cyjan/FIRSTBOOT
 
 # ids-Benutzer: sudo für docker compose erlauben
-echo "ids ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/git" \
+echo "ids ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/git, /usr/local/bin/ids-setup, /usr/local/bin/ids-update" \
   > /etc/sudoers.d/ids-docker
 chmod 440 /etc/sudoers.d/ids-docker
 
