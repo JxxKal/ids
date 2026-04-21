@@ -8,7 +8,7 @@ mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'EOF'
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty --autologin ids --noclear %I $TERM
+ExecStart=-/sbin/agetty --autologin ids --noclear %I linux
 EOF
 
 # ids-User anlegen falls noch nicht vorhanden
