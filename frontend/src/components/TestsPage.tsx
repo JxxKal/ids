@@ -113,15 +113,15 @@ export function TestsPage() {
           </div>
         </div>
         <table className="w-full text-xs">
-          <thead className="border-b border-slate-800 text-slate-500 text-left">
+          <thead className="cyjan-table-head text-left">
             <tr>
-              <th className="px-4 py-2">Zeit</th>
-              <th className="px-4 py-2">Szenario</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Erwartet</th>
-              <th className="px-4 py-2">Ausgelöst</th>
-              <th className="px-4 py-2">Latenz</th>
-              <th className="px-4 py-2"></th>
+              <th>Zeit</th>
+              <th>Szenario</th>
+              <th>Status</th>
+              <th>Erwartet</th>
+              <th>Ausgelöst</th>
+              <th>Latenz</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
