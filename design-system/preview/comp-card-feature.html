@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 24px; gap: 14px; background: var(--cy-bg-void); background-image: var(--cy-bg-hexgrid); background-size: 56px 100px; }
+  .ft {
+    background: rgba(15,23,42,0.80);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(14,165,233,0.15);
+    border-radius: 16px;
+    padding: 22px 22px 20px;
+    box-shadow: 0 0 20px rgba(14,165,233,0.05);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .ic {
+    width: 42px; height: 42px; border-radius: 10px;
+    background: linear-gradient(135deg, rgba(14,165,233,0.15), rgba(56,189,248,0.05));
+    border: 1px solid rgba(14,165,233,0.30);
+    display: flex; align-items: center; justify-content: center;
+    color: #38bdf8;
+  }
+  .ft h4 { font-family: var(--cy-font-sans); font-weight: 700; color: #e0f2fe; font-size: 16px; }
+  .ft p  { font-family: var(--cy-font-sans); font-size: 13px; color: #94a3b8; line-height: 1.55; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="grid2">
+    <div class="ft">
+      <div class="ic">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M12 2L3 7v6c0 5 4 9 9 9s9-4 9-9V7l-9-5z"/>
+        </svg>
+      </div>
+      <h4>Zero network impact</h4>
+      <p>Rust-based sniffer captures at line rate — headers only, no payload.</p>
+    </div>
+    <div class="ft">
+      <div class="ic">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+        </svg>
+      </div>
+      <h4>ML anomaly engine</h4>
+      <p>Isolation Forest flags behaviour outside baseline, with per-host scoring.</p>
+    </div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>CYJAN — Alert-Flow-Visualizer (Popup)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cy-slate-950: #020617;
+    --cy-slate-900: #0b1220;
+    --cy-slate-850: #0f1a2d;
+    --cy-slate-800: #1e293b;
+    --cy-slate-700: #334155;
+    --cy-slate-600: #475569;
+    --cy-slate-400: #94a3b8;
+    --cy-slate-300: #cbd5e1;
+    --cy-slate-200: #e2e8f0;
+    --cy-cyan-700:  #0e7490;
+    --cy-cyan-600:  #0891b2;
+    --cy-cyan-500:  #06b6d4;
+    --cy-cyan-400:  #22d3ee;
+    --cy-cyan-300:  #67e8f9;
+    --cy-cyan-200:  #a5f3fc;
+    --cy-sev-critical: #ef4444;
+    --cy-sev-high:     #f97316;
+    --cy-sev-medium:   #eab308;
+    --cy-sev-low:      #22c55e;
+    --cy-sev-info:     #38bdf8;
+    --cy-ot:           #fb923c;
+    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--cy-slate-950);
+    color: var(--cy-slate-200);
+    font-family: var(--font-mono);
+    min-height: 100vh;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(ellipse at 30% 20%, rgba(14,165,233,0.06), transparent 60%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='52' viewBox='0 0 60 52'><polygon points='30,2 58,18 58,34 30,50 2,34 2,18' fill='none' stroke='%23164e63' stroke-width='0.6' stroke-opacity='0.25'/></svg>");
+    background-size: auto, 60px 52px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ---- Dashboard background (simulated alert list) ---- */
+  .bg-app {
+    position: relative;
+    z-index: 1;
+    max-width: 1160px;
+    margin: 40px auto;
+    padding: 0 24px;
+  }
+  .bg-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px;
+    border: 1px solid rgba(34,211,238,0.15);
+    border-radius: 8px 8px 0 0;
+    background: rgba(15,26,45,0.6);
+    font-family: var(--font-mono);
+  }
+  .bg-header h1 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--cy-cyan-300);
+    letter-spacing: 1px;
+  }
+  .bg-header .meta {
+    font-size: 10px;
+    color: var(--cy-slate-400);
+  }
+  .bg-header .meta span { color: var(--cy-cyan-400); }
+
+  .alert-list {
+    border: 1px solid rgba(34,211,238,0.12);
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    background: rgba(11,18,32,0.7);
+    overflow: hidden;
+  }
+  .alert-row {
+    display: grid;
+    grid-template-columns: 80px 90px 2fr 2fr 1fr 80px 90px;
+    gap: 10px;
+    padding: 11px 16px;
+    font-size: 11px;
+    align-items: center;
+    border-top: 1px solid rgba(148,163,184,0.06);
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .alert-row:first-child { border-top: none; }
+  .alert-row.head {
+    background: rgba(2,6,23,0.6);
+    color: var(--cy-slate-400);
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 600;
+    cursor: default;
+  }
+  .alert-row:not(.head):hover {
+    background: rgba(34,211,238,0.05);
+  }
+  .alert-row .sev {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  .sev.critical { background: rgba(239,68,68,0.15); color: var(--cy-sev-critical); }
+  .sev.high     { background: rgba(249,115,22,0.15); color: var(--cy-sev-high); }
+  .sev.medium   { background: rgba(234,179,8,0.15);  color: var(--cy-sev-medium); }
+  .sev.low      { background: rgba(34,197,94,0.15);  color: var(--cy-sev-low); }
+  .alert-row .when  { color: var(--cy-slate-400); }
+  .alert-row .rule  { color: var(--cy-slate-200); }
+  .alert-row .hosts { color: var(--cy-cyan-300); }
+  .alert-row .proto { color: var(--cy-slate-300); }
+  .alert-row .count { color: var(--cy-slate-400); text-align: right; font-variant-numeric: tabular-nums; }
+  .alert-row .status { text-align: right; color: var(--cy-cyan-400); font-size: 10px; }
+
+  /* ---- Modal / Popup ---- */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(2,6,23,0.82);
+    backdrop-filter: blur(4px);
+    z-index: 20;
+    display: none;
+    align-items: center; justify-content: center;
+    animation: fadein 160ms ease-out;
+  }
+  .modal-backdrop.open { display: flex; }
+  @keyframes fadein { from { opacity: 0 } to { opacity: 1 } }
+
+  .modal {
+    width: min(960px, 96vw);
+    max-height: 90vh;
+    background: linear-gradient(180deg, var(--cy-slate-900) 0%, var(--cy-slate-950) 100%);
+    border: 1px solid rgba(34,211,238,0.28);
+    border-radius: 10px;
+    box-shadow:
+      0 0 0 1px rgba(34,211,238,0.08),
+      0 20px 60px rgba(2,6,23,0.7),
+      0 0 80px rgba(34,211,238,0.08);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    animation: pop 220ms cubic-bezier(.2,.7,.3,1);
+  }
+  @keyframes pop {
+    from { transform: translateY(10px) scale(0.985); opacity: 0 }
+    to   { transform: translateY(0)    scale(1);     opacity: 1 }
+  }
+
+  .modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(34,211,238,0.15);
+    background: rgba(15,26,45,0.6);
+  }
+  .modal-head .titlegroup {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .modal-head .pill {
+    font-size: 9px; font-weight: 700; padding: 3px 7px;
+    border-radius: 3px; letter-spacing: 1.5px;
+  }
+  .modal-head h2 {
+    margin: 0; font-family: var(--font-mono); font-weight: 600; font-size: 13px;
+    color: var(--cy-slate-200); letter-spacing: 0.5px;
+  }
+  .modal-head h2 .rule-id {
+    color: var(--cy-cyan-400); margin-right: 8px;
+  }
+  .modal-head .close {
+    background: transparent; border: 1px solid rgba(148,163,184,0.2);
+    color: var(--cy-slate-300);
+    font-family: var(--font-mono); font-size: 11px;
+    padding: 4px 10px; border-radius: 4px; cursor: pointer;
+    transition: all 120ms;
+  }
+  .modal-head .close:hover {
+    border-color: var(--cy-cyan-400); color: var(--cy-cyan-300);
+    background: rgba(34,211,238,0.06);
+  }
+
+  .modal-meta {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    padding: 10px 18px;
+    border-bottom: 1px solid rgba(148,163,184,0.08);
+    background: rgba(2,6,23,0.4);
+    font-size: 10px;
+  }
+  .modal-meta .cell {
+    border-right: 1px solid rgba(148,163,184,0.06);
+    padding: 0 14px 0 0;
+  }
+  .modal-meta .cell:first-child { padding-left: 0; }
+  .modal-meta .cell:last-child { border-right: none; }
+  .modal-meta .label {
+    color: var(--cy-slate-400);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .modal-meta .value {
+    color: var(--cy-slate-200);
+    font-variant-numeric: tabular-nums;
+  }
+  .modal-meta .value.cyan { color: var(--cy-cyan-300); }
+
+  /* ---- Flow stage ---- */
+  .stage {
+    position: relative;
+    height: 380px;
+    background:
+      radial-gradient(ellipse at center, rgba(14,165,233,0.07), transparent 70%),
+      linear-gradient(180deg, rgba(11,18,32,0.5), rgba(2,6,23,0.7));
+    overflow: hidden;
+  }
+  .stage svg {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+  }
+
+  .hostcard {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 190px;
+    padding: 14px;
+    border-radius: 8px;
+    background: rgba(11,18,32,0.92);
+    border: 1px solid rgba(34,211,238,0.25);
+    box-shadow: 0 0 30px rgba(34,211,238,0.12);
+    font-family: var(--font-mono);
+    z-index: 3;
+  }
+  .hostcard.left  { left: 22px; }
+  .hostcard.right { right: 22px; text-align: right; }
+  .hostcard .kind {
+    display: inline-block;
+    font-size: 9px; font-weight: 700; letter-spacing: 1.5px;
+    padding: 2px 6px; border-radius: 3px;
+    background: rgba(34,211,238,0.12); color: var(--cy-cyan-300);
+  }
+  .hostcard .ip {
+    margin-top: 8px; font-size: 13px; font-weight: 600;
+    color: var(--cy-slate-100);
+  }
+  .hostcard .name {
+    margin-top: 2px; font-size: 10px; color: var(--cy-slate-400);
+  }
+  .hostcard .role {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid rgba(148,163,184,0.1);
+    font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--cy-slate-500);
+  }
+  .hostcard .role b { color: var(--cy-cyan-400); font-weight: 600; }
+  .hostcard.alert {
+    border-color: rgba(239,68,68,0.45);
+    box-shadow: 0 0 30px rgba(239,68,68,0.22);
+  }
+  .hostcard.alert .kind {
+    background: rgba(239,68,68,0.15); color: var(--cy-sev-critical);
+  }
+
+  .icon-host {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 36px; height: 36px;
+    margin-bottom: 4px;
+    border: 1px solid rgba(34,211,238,0.35);
+    border-radius: 6px;
+    color: var(--cy-cyan-300);
+    background: rgba(34,211,238,0.06);
+  }
+  .hostcard.right .icon-host { margin-left: auto; }
+
+  /* ---- Footer ---- */
+  .modal-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 18px;
+    border-top: 1px solid rgba(148,163,184,0.08);
+    background: rgba(2,6,23,0.5);
+    font-size: 10px;
+    color: var(--cy-slate-400);
+  }
+  .modal-foot .legend { display: flex; gap: 14px; flex-wrap: wrap; }
+  .modal-foot .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .modal-foot .legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .modal-foot .actions { display: flex; gap: 8px; }
+  .modal-foot button {
+    background: transparent; border: 1px solid rgba(148,163,184,0.22);
+    color: var(--cy-slate-300);
+    font-family: var(--font-mono); font-size: 10px;
+    padding: 5px 10px; border-radius: 4px; cursor: pointer;
+    letter-spacing: 0.5px;
+  }
+  .modal-foot button.primary {
+    border-color: var(--cy-cyan-600); background: rgba(14,165,233,0.1);
+    color: var(--cy-cyan-300);
+  }
+  .modal-foot button:hover {
+    border-color: var(--cy-cyan-400); color: var(--cy-cyan-200);
+  }
+
+  /* ---- Counter / status chip on stage ---- */
+  .stage .live-chip {
+    position: absolute; top: 14px; right: 18px;
+    z-index: 4;
+    font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase;
+    color: var(--cy-cyan-300);
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 8px;
+    border: 1px solid rgba(34,211,238,0.3);
+    border-radius: 3px;
+    background: rgba(11,18,32,0.7);
+  }
+  .stage .live-chip .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #22d3ee;
+    box-shadow: 0 0 8px #22d3ee;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.4; transform: scale(1.3); }
+  }
+  .stage .live-chip.alert { border-color: rgba(239,68,68,0.4); color: #fca5a5; }
+  .stage .live-chip.alert .dot { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+
+  /* helper card */
+  .helper {
+    max-width: 1160px;
+    margin: 0 auto 30px;
+    padding: 14px 20px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--cy-slate-400);
+    border-left: 2px solid var(--cy-cyan-600);
+    background: rgba(14,165,233,0.04);
+    line-height: 1.55;
+  }
+  .helper b { color: var(--cy-cyan-300); }
+  .helper code {
+    color: var(--cy-cyan-400);
+    background: rgba(2,6,23,0.5);
+    padding: 1px 5px; border-radius: 3px;
+  }
+  h3.hint {
+    max-width: 1160px; margin: 0 auto 8px; padding: 0 24px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px;
+    color: var(--cy-slate-500); text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<div class="helper">
+  <b>Was du siehst:</b> Simuliertes IDS-Dashboard — klick eine Alarmzeile an, das Popup öffnet sich und zeigt den Live-Flow zwischen beiden Hosts. Verbindungen werden von einem Demo-Driver eingespeist; in der echten App ersetzt du den Driver durch <code>CyjanFlow.setState([...])</code>. API-Dokumentation am Ende der Datei.
+</div>
+
+<h3 class="hint">IDS — Alarme (letzte 24 h)</h3>
+
+<div class="bg-app">
+  <div class="bg-header">
+    <h1>ALERT · FEED</h1>
+    <div class="meta"><span id="rowCount">6</span> offen · auto-refresh: 5s · <span>LIVE</span></div>
+  </div>
+  <div class="alert-list" id="alertList">
+    <div class="alert-row head">
+      <span>SEVERITY</span><span>TIME</span><span>RULE</span><span>HOSTS</span><span>PROTO</span><span>COUNT</span><span>STATUS</span>
+    </div>
+    <!-- rows injected by script -->
+  </div>
+</div>
+
+<!-- ============================ MODAL ============================ -->
+<div class="modal-backdrop" id="modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <div class="titlegroup">
+        <span class="pill sev critical" id="modalSev">CRITICAL</span>
+        <h2 id="modalTitle"><span class="rule-id">RULE·1024</span><span id="modalRuleName">Modbus Function Code Anomaly</span></h2>
+      </div>
+      <button class="close" onclick="closeModal()">ESC ·  ✕</button>
+    </div>
+
+    <div class="modal-meta">
+      <div class="cell"><div class="label">Alert ID</div><div class="value cyan" id="metaId">A-2024-10-31-1024</div></div>
+      <div class="cell"><div class="label">First seen</div><div class="value" id="metaFirst">14:22:09</div></div>
+      <div class="cell"><div class="label">Session</div><div class="value" id="metaSession">00:03:42</div></div>
+      <div class="cell"><div class="label">IDS sensor</div><div class="value" id="metaSensor">cyjan-sniffer-01</div></div>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="live-chip" id="liveChip">
+        <span class="dot"></span> LIVE · <span id="chipConns">0</span> CONNS
+      </div>
+
+      <!-- host A -->
+      <div class="hostcard left" id="hostA">
+        <span class="kind" id="hostAKind">PLC</span>
+        <div class="ip" id="hostAIp">10.10.20.14</div>
+        <div class="name" id="hostAName">PLC·S7-1500</div>
+        <div class="role">ROLE: <b id="hostARole">Control</b></div>
+      </div>
+
+      <!-- host B -->
+      <div class="hostcard right" id="hostB">
+        <span class="kind" id="hostBKind">HMI</span>
+        <div class="ip" id="hostBIp">10.10.20.41</div>
+        <div class="name" id="hostBName">HMI·WinCC</div>
+        <div class="role">ROLE: <b id="hostBRole">Operator</b></div>
+      </div>
+
+      <!-- flow lines go here -->
+      <svg id="flowSvg" viewBox="0 0 1000 380" preserveAspectRatio="none"></svg>
+    </div>
+
+    <div class="modal-foot">
+      <div class="legend">
+        <span><span class="dot" style="background:#38bdf8"></span>TCP</span>
+        <span><span class="dot" style="background:#fb923c"></span>UDP</span>
+        <span><span class="dot" style="background:#a78bfa"></span>ICMP</span>
+        <span><span class="dot" style="background:#ef4444"></span>Alert</span>
+        <span style="color:var(--cy-slate-500)">→ Richtung = Aufbau (SYN)</span>
+      </div>
+      <div class="actions">
+        <button onclick="closeModal()">Close</button>
+        <button onclick="CyjanFlow._demoAddBurst()">Inject burst</button>
+        <button class="primary">Mark as threat</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ SCRIPT ============================ -->
+<script>
+/**
+ * CyjanFlow — imperative + declarative flow visualizer between two hosts.
+ *
+ * Public API (call from the IDS app):
+ *
+ *   CyjanFlow.setHosts({
+ *     a: { ip, name, kind, role },
+ *     b: { ip, name, kind, role },
+ *     alertHost: 'a' | 'b' | null,   // which host card gets red border
+ *   })
+ *
+ *   CyjanFlow.setState([              // declarative: full list of active conns
+ *     { id, from:'a'|'b', to:'a'|'b', proto:'TCP'|'UDP'|'ICMP',
+ *       port: 502, packets: 127, threat: false, label?: 'Modbus' },
+ *     ...
+ *   ])
+ *
+ *   CyjanFlow.push(conn)              // imperative: add/replace single conn
+ *   CyjanFlow.close(id)               // remove conn (fades out)
+ *   CyjanFlow.tick(id, deltaPackets)  // bump packet counter
+ *
+ * The visualizer handles smooth entrance (0.5 s stroke-draw), travelling
+ * packet dots, and exit fades automatically.
+ */
+const CyjanFlow = (function() {
+  const svg = document.getElementById('flowSvg');
+  const NS  = 'http://www.w3.org/2000/svg';
+  const chipConns = document.getElementById('chipConns');
+  const liveChip  = document.getElementById('liveChip');
+
+  // internal state
+  let conns = new Map();           // id -> { ...data, born, dying }
+  let lastFrame = performance.now();
+  const VB_W = 1000, VB_H = 380;
+
+  // anchors in viewBox coords — must match CSS positions of host cards
+  const A_X = 222, A_Y = VB_H / 2;   // left edge of gap between cards
+  const B_X = 778, B_Y = VB_H / 2;
+
+  // per-proto visuals
+  const protoColor = { TCP:'#38bdf8', UDP:'#fb923c', ICMP:'#a78bfa' };
+
+  // ---- rendering ------------------------------------------------------------
+  function render(now) {
+    const dt = now - lastFrame; lastFrame = now;
+
+    // layout: distribute conns vertically across the stage
+    const active = [...conns.values()].filter(c => !c.dying || (now - c.dying) < 500);
+    const n = active.length;
+
+    // remove dying past 500ms
+    for (const c of [...conns.values()]) {
+      if (c.dying && (now - c.dying) > 500) conns.delete(c.id);
+    }
+
+    svg.innerHTML = '';
+
+    // defs (arrow markers, per instance so color can vary)
+    const defs = document.createElementNS(NS, 'defs');
+    svg.appendChild(defs);
+
+    active.forEach((c, i) => {
+      const age = (now - c.born) / 500;   // 0..1 over entrance
+      const draw = Math.min(1, age);
+      const exit = c.dying ? 1 - Math.min(1, (now - c.dying) / 500) : 1;
+      const opacity = exit;
+
+      // vertical slot — spread conns evenly around middle
+      const slot = n === 1 ? 0 : (i - (n-1)/2);
+      const spread = Math.min(70, 260 / Math.max(1, n));
+      const yOffset = slot * spread;
+
+      // curve upward (above middle) vs downward
+      const lift = 26 * (Math.abs(slot) + 0.2) * (slot === 0 ? 0.6 : 1);
+      const fromLeft = c.from === 'a';
+      const sx = fromLeft ? A_X : B_X;
+      const tx = fromLeft ? B_X : A_X;
+      const sy = A_Y + yOffset;
+      const ty = B_Y + yOffset;
+      const mx = (sx + tx) / 2;
+      const my = sy - lift;
+
+      const color  = c.threat ? '#ef4444' : (protoColor[c.proto] || '#38bdf8');
+      const strokeW = c.threat ? 2.0 : 1.3;
+      const markerId = `arr-${c.id}-${c.threat?'t':'n'}`;
+
+      // arrow marker
+      const marker = document.createElementNS(NS, 'marker');
+      marker.setAttribute('id', markerId);
+      marker.setAttribute('viewBox', '0 0 10 10');
+      marker.setAttribute('refX', '9');
+      marker.setAttribute('refY', '5');
+      marker.setAttribute('markerWidth', '7');
+      marker.setAttribute('markerHeight', '7');
+      marker.setAttribute('orient', 'auto-start-reverse');
+      const mpath = document.createElementNS(NS, 'path');
+      mpath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+      mpath.setAttribute('fill', color);
+      mpath.setAttribute('opacity', opacity);
+      marker.appendChild(mpath);
+      defs.appendChild(marker);
+
+      // main curve
+      const g = document.createElementNS(NS, 'g');
+      g.setAttribute('opacity', opacity);
+
+      const path = document.createElementNS(NS, 'path');
+      const d = `M ${sx} ${sy} Q ${mx} ${my} ${tx} ${ty}`;
+      path.setAttribute('d', d);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', color);
+      path.setAttribute('stroke-width', strokeW);
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-opacity', c.threat ? 0.95 : 0.75);
+      path.setAttribute('marker-end', `url(#${markerId})`);
+      if (c.threat) path.setAttribute('stroke-dasharray', '6 4');
+
+      // entrance draw: dasharray trick
+      if (draw < 1) {
+        // approximate length
+        const approxLen = Math.hypot(tx-sx, ty-sy) + Math.abs(lift);
+        path.setAttribute('stroke-dasharray', c.threat ? '6 4' : `${approxLen}`);
+        path.setAttribute('stroke-dashoffset', `${approxLen * (1 - draw)}`);
+      }
+
+      g.appendChild(path);
+
+      // travelling packet dots along the curve
+      if (draw >= 1 && !c.dying) {
+        const travel = ((now - c.born) / (c.proto === 'ICMP' ? 1600 : 1100)) % 1;
+        // two dots offset
+        [travel, (travel + 0.5) % 1].forEach(t => {
+          const bx = (1-t)*(1-t)*sx + 2*(1-t)*t*mx + t*t*tx;
+          const by = (1-t)*(1-t)*sy + 2*(1-t)*t*my + t*t*ty;
+          const dot = document.createElementNS(NS, 'circle');
+          dot.setAttribute('cx', bx);
+          dot.setAttribute('cy', by);
+          dot.setAttribute('r', c.threat ? 3 : 2.2);
+          dot.setAttribute('fill', color);
+          dot.setAttribute('style', `filter: drop-shadow(0 0 5px ${color})`);
+          g.appendChild(dot);
+        });
+      }
+
+      // label — proto + port, packets, direction
+      // place near the control-point
+      const labelX = mx;
+      const labelY = my + 4;
+      const label = document.createElementNS(NS, 'g');
+      label.setAttribute('transform', `translate(${labelX}, ${labelY})`);
+      label.setAttribute('opacity', draw);
+
+      // background rect
+      const labelText = `${c.proto} :${c.port}`;
+      const labelPkts = `${c.packets.toLocaleString()} pkts`;
+      const arrowText = fromLeft ? '→' : '←';
+      const lw = Math.max(70, labelText.length * 6.4 + 40);
+
+      const rect = document.createElementNS(NS, 'rect');
+      rect.setAttribute('x', -lw/2);
+      rect.setAttribute('y', -20);
+      rect.setAttribute('width', lw);
+      rect.setAttribute('height', 36);
+      rect.setAttribute('rx', 4);
+      rect.setAttribute('fill', 'rgba(11,18,32,0.92)');
+      rect.setAttribute('stroke', color);
+      rect.setAttribute('stroke-opacity', c.threat ? 0.9 : 0.45);
+      rect.setAttribute('stroke-width', c.threat ? 1.2 : 0.8);
+      label.appendChild(rect);
+
+      // top line: arrow + proto + port
+      const t1 = document.createElementNS(NS, 'text');
+      t1.setAttribute('x', 0);
+      t1.setAttribute('y', -6);
+      t1.setAttribute('text-anchor', 'middle');
+      t1.setAttribute('font-family', 'JetBrains Mono, monospace');
+      t1.setAttribute('font-size', '10');
+      t1.setAttribute('font-weight', '600');
+      t1.setAttribute('fill', color);
+      t1.textContent = `${arrowText}  ${labelText}`;
+      label.appendChild(t1);
+
+      // bottom line: packet count
+      const t2 = document.createElementNS(NS, 'text');
+      t2.setAttribute('x', 0);
+      t2.setAttribute('y', 9);
+      t2.setAttribute('text-anchor', 'middle');
+      t2.setAttribute('font-family', 'JetBrains Mono, monospace');
+      t2.setAttribute('font-size', '9');
+      t2.setAttribute('fill', c.threat ? '#fca5a5' : '#94a3b8');
+      t2.textContent = labelPkts + (c.label ? ' · ' + c.label : '');
+      label.appendChild(t2);
+
+      g.appendChild(label);
+      svg.appendChild(g);
+    });
+
+    // chip
+    chipConns.textContent = active.filter(c => !c.dying).length;
+    const anyThreat = active.some(c => c.threat && !c.dying);
+    liveChip.classList.toggle('alert', anyThreat);
+
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+
+  // ---- public API -----------------------------------------------------------
+  function setHosts({ a, b, alertHost }) {
+    const setCard = (side, d) => {
+      document.getElementById(`host${side}Kind`).textContent = d.kind || '';
+      document.getElementById(`host${side}Ip`).textContent   = d.ip   || '';
+      document.getElementById(`host${side}Name`).textContent = d.name || '';
+      document.getElementById(`host${side}Role`).textContent = d.role || '—';
+    };
+    if (a) setCard('A', a);
+    if (b) setCard('B', b);
+    document.getElementById('hostA').classList.toggle('alert', alertHost === 'a');
+    document.getElementById('hostB').classList.toggle('alert', alertHost === 'b');
+  }
+
+  function push(c) {
+    const existing = conns.get(c.id);
+    if (existing) {
+      Object.assign(existing, c);
+      existing.dying = null;
+    } else {
+      conns.set(c.id, { ...c, born: performance.now(), dying: null });
+    }
+  }
+
+  function close(id) {
+    const c = conns.get(id);
+    if (c && !c.dying) c.dying = performance.now();
+  }
+
+  function tick(id, delta=1) {
+    const c = conns.get(id);
+    if (c) c.packets = (c.packets || 0) + delta;
+  }
+
+  function setState(list) {
+    const now = performance.now();
+    const seen = new Set(list.map(c => c.id));
+    // close conns that disappeared
+    for (const [id, c] of conns) {
+      if (!seen.has(id) && !c.dying) c.dying = now;
+    }
+    // push / update
+    list.forEach(c => push(c));
+  }
+
+  function clear() {
+    const now = performance.now();
+    for (const c of conns.values()) c.dying = now;
+  }
+
+  // ---- demo driver (remove in production) -----------------------------------
+  let demoInterval = null;
+  let demoStep = 0;
+
+  function _demoStart(scenario) {
+    clear();
+    if (demoInterval) clearInterval(demoInterval);
+    demoStep = 0;
+    const seed = scenario.seed || [];
+    seed.forEach(s => push(s));
+
+    demoInterval = setInterval(() => {
+      demoStep++;
+      // tick packet counters
+      [...conns.values()].forEach(c => {
+        if (!c.dying) tick(c.id, Math.floor(Math.random() * 12) + 1);
+      });
+      // occasionally spawn / retire
+      if (Math.random() > 0.72 && conns.size < (scenario.max || 6)) {
+        const tpl = scenario.pool[Math.floor(Math.random()*scenario.pool.length)];
+        push({ ...tpl, id: tpl.id + '-' + demoStep, packets: Math.floor(Math.random() * 40) + 5 });
+      }
+      if (Math.random() > 0.82) {
+        const keys = [...conns.keys()].filter(k => !conns.get(k).dying);
+        if (keys.length > 2) close(keys[0]);
+      }
+    }, 850);
+  }
+
+  function _demoAddBurst() {
+    const colors = ['TCP','TCP','UDP','ICMP'];
+    for (let i=0;i<4;i++) {
+      push({
+        id: 'burst-' + performance.now() + '-' + i,
+        from: Math.random() > 0.5 ? 'a' : 'b',
+        to:   Math.random() > 0.5 ? 'b' : 'a',
+        proto: colors[Math.floor(Math.random()*colors.length)],
+        port: [502, 102, 44818, 20000, 47808][Math.floor(Math.random()*5)],
+        packets: Math.floor(Math.random()*30)+1,
+        threat: Math.random() > 0.7,
+      });
+    }
+  }
+
+  function _demoStop() {
+    if (demoInterval) clearInterval(demoInterval);
+    demoInterval = null;
+  }
+
+  return { setHosts, setState, push, close, tick, clear,
+           _demoStart, _demoStop, _demoAddBurst };
+})();
+
+// =========================== ALERT LIST (DEMO) ===============================
+
+const ALERTS = [
+  {
+    id: 'A-2024-10-31-1024',
+    sev: 'critical',
+    time: '14:22:09',
+    rule: 'RULE·1024',
+    ruleName: 'Modbus Function Code Anomaly',
+    hosts: '10.10.20.14 ⇄ 10.10.20.41',
+    proto: 'Modbus',
+    count: 47,
+    status: 'OPEN',
+    scenario: {
+      a: { ip:'10.10.20.14', name:'PLC·S7-1500',  kind:'PLC', role:'Control'  },
+      b: { ip:'10.10.20.41', name:'HMI·WinCC',    kind:'HMI', role:'Operator' },
+      alertHost: 'a',
+      seed: [
+        { id:'c1', from:'b', to:'a', proto:'TCP',  port:502,   packets: 213, threat: true,  label:'Modbus' },
+        { id:'c2', from:'a', to:'b', proto:'TCP',  port:502,   packets: 199, threat: false, label:'Modbus' },
+        { id:'c3', from:'b', to:'a', proto:'TCP',  port:102,   packets: 44,  threat: false, label:'S7' },
+      ],
+      pool: [
+        { from:'a', to:'b', proto:'TCP', port:502,  threat:false, label:'Modbus' },
+        { from:'b', to:'a', proto:'TCP', port:502,  threat:true,  label:'Modbus' },
+        { from:'b', to:'a', proto:'TCP', port:102,  threat:false, label:'S7' },
+        { from:'a', to:'b', proto:'UDP', port:47808,threat:false, label:'BACnet' },
+      ],
+      max: 6,
+    },
+  },
+  {
+    id: 'A-2024-10-31-1023',
+    sev: 'high',
+    time: '14:18:44',
+    rule: 'RULE·307',
+    ruleName: 'Unauthorized Engineering Access',
+    hosts: '10.10.20.14 ⇄ 10.10.30.99',
+    proto: 'S7',
+    count: 12,
+    status: 'OPEN',
+    scenario: {
+      a: { ip:'10.10.20.14', name:'PLC·S7-1500',  kind:'PLC', role:'Control'        },
+      b: { ip:'10.10.30.99', name:'ENG·unknown',  kind:'ENG', role:'Engineering'    },
+      alertHost: 'b',
+      seed: [
+        { id:'c1', from:'b', to:'a', proto:'TCP', port:102,  packets:  8, threat: true,  label:'S7 STOP' },
+        { id:'c2', from:'b', to:'a', proto:'TCP', port:22,   packets: 14, threat: true,  label:'SSH' },
+      ],
+      pool: [
+        { from:'b', to:'a', proto:'TCP', port:102, threat:true,  label:'S7' },
+        { from:'a', to:'b', proto:'TCP', port:102, threat:false, label:'S7' },
+        { from:'b', to:'a', proto:'TCP', port:22,  threat:true,  label:'SSH' },
+      ],
+      max: 5,
+    },
+  },
+  {
+    id: 'A-2024-10-31-1022',
+    sev: 'medium',
+    time: '14:09:12',
+    rule: 'RULE·812',
+    ruleName: 'BACnet Broadcast Storm',
+    hosts: '10.20.1.5 ⇄ 10.20.1.255',
+    proto: 'BACnet',
+    count: 1280,
+    status: 'GROUPED',
+    scenario: {
+      a: { ip:'10.20.1.5',   name:'HMI·Niagara', kind:'HMI', role:'Broadcaster' },
+      b: { ip:'10.20.1.255', name:'BCAST·net',   kind:'NET', role:'Broadcast'   },
+      alertHost: null,
+      seed: [
+        { id:'c1', from:'a', to:'b', proto:'UDP', port:47808, packets: 1820, threat: false, label:'Who-Is' },
+        { id:'c2', from:'a', to:'b', proto:'UDP', port:47808, packets:  902, threat: true,  label:'flood' },
+      ],
+      pool: [
+        { from:'a', to:'b', proto:'UDP', port:47808, threat:false, label:'Who-Is' },
+        { from:'a', to:'b', proto:'UDP', port:47808, threat:true,  label:'flood'  },
+      ],
+      max: 5,
+    },
+  },
+  {
+    id: 'A-2024-10-31-1021',
+    sev: 'high',
+    time: '13:51:30',
+    rule: 'RULE·455',
+    ruleName: 'DNP3 Integrity Violation',
+    hosts: '10.5.2.7 ⇄ 10.5.2.9',
+    proto: 'DNP3',
+    count: 6,
+    status: 'OPEN',
+    scenario: {
+      a: { ip:'10.5.2.7', name:'RTU·Sub-7', kind:'RTU',   role:'Substation' },
+      b: { ip:'10.5.2.9', name:'SCADA·core',kind:'SCADA', role:'Master'     },
+      alertHost: 'a',
+      seed: [
+        { id:'c1', from:'b', to:'a', proto:'TCP', port:20000, packets: 31, threat: true, label:'DNP3' },
+      ],
+      pool: [
+        { from:'b', to:'a', proto:'TCP', port:20000, threat:true,  label:'DNP3' },
+        { from:'a', to:'b', proto:'TCP', port:20000, threat:false, label:'DNP3' },
+        { from:'b', to:'a', proto:'ICMP',port:0,     threat:false, label:'ping' },
+      ],
+      max: 4,
+    },
+  },
+  {
+    id: 'A-2024-10-31-1020',
+    sev: 'low',
+    time: '13:44:03',
+    rule: 'RULE·112',
+    ruleName: 'New Host Detected',
+    hosts: '10.10.20.77 ⇄ 10.10.20.1',
+    proto: 'ARP',
+    count: 2,
+    status: 'INFO',
+    scenario: {
+      a: { ip:'10.10.20.77', name:'HOST·new',   kind:'???', role:'Unknown'   },
+      b: { ip:'10.10.20.1',  name:'GW·edge',    kind:'GW',  role:'Gateway'   },
+      alertHost: 'a',
+      seed: [
+        { id:'c1', from:'a', to:'b', proto:'ICMP', port:0, packets: 2, threat: false, label:'ARP' },
+      ],
+      pool: [
+        { from:'a', to:'b', proto:'ICMP', port:0,  threat:false, label:'ARP'  },
+        { from:'a', to:'b', proto:'UDP',  port:67, threat:false, label:'DHCP' },
+      ],
+      max: 3,
+    },
+  },
+  {
+    id: 'A-2024-10-31-1019',
+    sev: 'critical',
+    time: '13:12:55',
+    rule: 'RULE·201',
+    ruleName: 'External Egress from OT Host',
+    hosts: '10.10.20.14 ⇄ 203.0.113.44',
+    proto: 'HTTPS',
+    count: 22,
+    status: 'OPEN',
+    scenario: {
+      a: { ip:'10.10.20.14',   name:'PLC·S7-1500', kind:'PLC', role:'Control' },
+      b: { ip:'203.0.113.44',  name:'WAN·unknown', kind:'WAN', role:'External'},
+      alertHost: 'b',
+      seed: [
+        { id:'c1', from:'a', to:'b', proto:'TCP', port:443,  packets:  8, threat: true,  label:'TLS' },
+        { id:'c2', from:'a', to:'b', proto:'TCP', port:8443, packets: 14, threat: true,  label:'TLS' },
+      ],
+      pool: [
+        { from:'a', to:'b', proto:'TCP', port:443,  threat:true,  label:'TLS' },
+        { from:'a', to:'b', proto:'TCP', port:8443, threat:true,  label:'TLS' },
+        { from:'b', to:'a', proto:'TCP', port:443,  threat:true,  label:'beacon' },
+      ],
+      max: 4,
+    },
+  },
+];
+
+function renderList() {
+  const list = document.getElementById('alertList');
+  const head = list.querySelector('.head');
+  list.innerHTML = '';
+  list.appendChild(head);
+  ALERTS.forEach((a, i) => {
+    const row = document.createElement('div');
+    row.className = 'alert-row';
+    row.innerHTML = `
+      <span><span class="sev ${a.sev}">${a.sev.toUpperCase()}</span></span>
+      <span class="when">${a.time}</span>
+      <span class="rule">${a.rule} · ${a.ruleName}</span>
+      <span class="hosts">${a.hosts}</span>
+      <span class="proto">${a.proto}</span>
+      <span class="count">${a.count.toLocaleString()}</span>
+      <span class="status">${a.status}</span>
+    `;
+    row.addEventListener('click', () => openAlert(a));
+    list.appendChild(row);
+  });
+  document.getElementById('rowCount').textContent = ALERTS.length;
+}
+renderList();
+
+function openAlert(a) {
+  // fill header
+  document.getElementById('modalSev').className = 'pill sev ' + a.sev;
+  document.getElementById('modalSev').textContent = a.sev.toUpperCase();
+  document.getElementById('modalTitle').innerHTML =
+    `<span class="rule-id">${a.rule}</span>${a.ruleName}`;
+  document.getElementById('metaId').textContent = a.id;
+  document.getElementById('metaFirst').textContent = a.time;
+
+  CyjanFlow.setHosts(a.scenario);
+  CyjanFlow._demoStart(a.scenario);
+
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+  CyjanFlow._demoStop();
+  CyjanFlow.clear();
+}
+document.getElementById('modal').addEventListener('click', e => {
+  if (e.target.id === 'modal') closeModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+// auto-open first alert so visitor sees the animation immediately
+setTimeout(() => openAlert(ALERTS[0]), 400);
+</script>
+
+</body>
+</html>

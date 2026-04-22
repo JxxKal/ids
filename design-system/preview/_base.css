@@ -1,0 +1,36 @@
+/* Shared card scaffolding for Design System preview cards */
+@import url('../colors_and_type.css');
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--cy-bg-void);
+  color: var(--cy-fg-body);
+  font-family: var(--cy-font-sans);
+  width: 100%;
+  min-height: 100vh;
+  overflow: hidden;
+}
+.card-frame {
+  width: 700px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background:
+    var(--cy-bg-hexgrid),
+    radial-gradient(ellipse 100% 70% at 50% 0%, rgba(14,165,233,0.06) 0%, transparent 60%),
+    var(--cy-bg-void);
+  background-size: 56px 100px, auto, auto;
+}
+.card-frame--flat { background: var(--cy-bg-void); }
+.row { display: flex; align-items: center; gap: 12px; }
+.row--wrap { flex-wrap: wrap; }
+.grid { display: grid; gap: 10px; }
+.meta { color: var(--cy-fg-dim); font-size: 11px; font-family: var(--cy-font-mono); letter-spacing: 0.04em; }
+.label-eyebrow {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--cy-sky-400);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}

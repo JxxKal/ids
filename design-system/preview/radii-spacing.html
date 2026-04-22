@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 10px; }
+  .radii { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .r {
+    aspect-ratio: 1 / 1;
+    background: #0f172a;
+    border: 1px solid rgba(14,165,233,0.30);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-family: var(--cy-font-mono);
+    font-size: 10px;
+    color: #94a3b8;
+  }
+  .r .px { color: #e0f2fe; font-size: 13px; font-weight: 600; }
+  .spacing-vis { display: flex; align-items: center; gap: 2px; padding: 10px 12px; background: #0f172a; border: 1px solid #172033; border-radius: 6px; }
+  .spacing-vis .box { background: rgba(14,165,233,0.5); height: 14px; }
+  .spacing-vis .lbl { font-family: var(--cy-font-mono); font-size: 9px; color: #64748b; min-width: 26px; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Radii · 4 → 9999</div>
+  <div class="radii">
+    <div class="r" style="border-radius:4px"><span class="px">4</span><span>sm</span></div>
+    <div class="r" style="border-radius:6px"><span class="px">6</span><span>md</span></div>
+    <div class="r" style="border-radius:8px"><span class="px">8</span><span>lg</span></div>
+    <div class="r" style="border-radius:12px"><span class="px">12</span><span>xl</span></div>
+    <div class="r" style="border-radius:16px"><span class="px">16</span><span>2xl</span></div>
+    <div class="r" style="border-radius:9999px"><span class="px">∞</span><span>pill</span></div>
+  </div>
+  <div class="label-eyebrow" style="margin-top:6px">Spacing · 4 px grid</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+    <div class="spacing-vis"><span class="lbl">1 · 4</span><div class="box" style="width:4px"></div></div>
+    <div class="spacing-vis"><span class="lbl">2 · 8</span><div class="box" style="width:8px"></div></div>
+    <div class="spacing-vis"><span class="lbl">3 · 12</span><div class="box" style="width:12px"></div></div>
+    <div class="spacing-vis"><span class="lbl">4 · 16</span><div class="box" style="width:16px"></div></div>
+    <div class="spacing-vis"><span class="lbl">6 · 24</span><div class="box" style="width:24px"></div></div>
+    <div class="spacing-vis"><span class="lbl">8 · 32</span><div class="box" style="width:32px"></div></div>
+    <div class="spacing-vis"><span class="lbl">12 · 48</span><div class="box" style="width:48px"></div></div>
+    <div class="spacing-vis"><span class="lbl">16 · 64</span><div class="box" style="width:64px"></div></div>
+  </div>
+</div>
+</body></html>

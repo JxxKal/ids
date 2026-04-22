@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 14px; }
+  .row3 { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+  .btn {
+    font-family: var(--cy-font-sans); font-weight: 600; font-size: 14px;
+    padding: 10px 20px; border-radius: 12px; border: 1px solid transparent; cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn--primary { background: linear-gradient(135deg,#0ea5e9,#0284c7); color: #fff; box-shadow: 0 0 30px rgba(14,165,233,0.30); }
+  .btn--ghost   { background: transparent; color: #bae6fd; border-color: rgba(3,105,161,0.5); }
+  .btn--danger  { background: linear-gradient(135deg,#dc2626,#b91c1c); color:#fff; }
+  .btn--small   { padding: 6px 12px; font-size: 12px; border-radius: 6px; }
+  .btn--dash    { background: #0ea5e9; color:#fff; padding: 6px 12px; font-size: 12px; border-radius: 4px; font-weight: 500; }
+  .btn--dash-ghost { background: #1e293b; color:#cbd5e1; padding: 6px 12px; font-size: 12px; border-radius: 4px; border: 1px solid #334155; font-weight: 500; }
+  .arrow { font-family: var(--cy-font-mono); }
+  .eb { font-size: 10px; color: #64748b; letter-spacing: 0.18em; text-transform: uppercase; min-width: 80px; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Buttons · marketing (left) · dashboard (right)</div>
+  <div class="row3">
+    <span class="eb">Marketing</span>
+    <button class="btn btn--primary">Download Brochure <span class="arrow">↓</span></button>
+    <button class="btn btn--ghost">View on GitHub →</button>
+  </div>
+  <div class="row3">
+    <span class="eb">Dashboard</span>
+    <button class="btn btn--dash">Anmelden</button>
+    <button class="btn btn--dash-ghost">Filter zurücksetzen</button>
+    <button class="btn btn--small btn--danger">Delete</button>
+    <button class="btn btn--dash-ghost" style="padding:4px 8px;font-size:11px;font-family:var(--cy-font-mono)">↓ pcap</button>
+    <button class="btn btn--dash-ghost" style="padding:4px 8px;font-size:11px;font-family:var(--cy-font-mono)">↓ CSV</button>
+  </div>
+  <div class="row3">
+    <span class="eb">Feedback</span>
+    <button class="btn btn--small" style="background:rgba(22,101,52,0.3);color:#86efac;border:1px solid rgba(21,128,61,0.5)">✓ True Positive</button>
+    <button class="btn btn--small" style="background:rgba(127,29,29,0.3);color:#fca5a5;border:1px solid rgba(185,28,28,0.5)">⚠ False Positive</button>
+  </div>
+</div>
+</body></html>

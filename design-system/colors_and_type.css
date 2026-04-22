@@ -1,0 +1,309 @@
+/* ============================================================
+   CYJAN IDS — Design Tokens
+   Colors, typography, spacing, effects
+   ------------------------------------------------------------
+   Source of truth:
+   - Marketing site: JxxKal/cyjan-ids-website/index.html (Tailwind inline)
+   - Dashboard:      JxxKal/ids/frontend/ (Tailwind + @layer components)
+   - Logo/splash SVGs (uploaded)
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ─────────────────────────────────────────────────────────
+     CORE PALETTE — Sky / Slate
+     ───────────────────────────────────────────────────────── */
+
+  /* Backgrounds — deep slate, layered darkest → card */
+  --cy-bg-void:       #020617;   /* slate-950 — page background behind hex grid */
+  --cy-bg-base:       #0b1120;   /* dashboard body */
+  --cy-bg-raised:     #0f172a;   /* card body, fake browser chrome */
+  --cy-bg-raised-2:   #172033;   /* slate-850 — hover/elevated */
+  --cy-bg-input:      #1e293b;   /* slate-800 — input, muted chip */
+
+  /* Foregrounds */
+  --cy-fg-primary:    #e0f2fe;   /* headings on dark — sky-100 */
+  --cy-fg-body:       #e2e8f0;   /* body text — slate-200 */
+  --cy-fg-muted:      #94a3b8;   /* slate-400 — secondary copy */
+  --cy-fg-dim:        #64748b;   /* slate-500 — labels, meta */
+  --cy-fg-faint:      #475569;   /* slate-600 — disabled, subtle */
+  --cy-fg-ghost:      #334155;   /* slate-700 — ghost separators */
+
+  /* Brand — Cyan / Sky (hero accent) */
+  --cy-cyan-50:       #ecfeff;
+  --cy-cyan-100:      #cffafe;
+  --cy-cyan-300:      #67e8f9;
+  --cy-cyan-400:      #22d3ee;
+  --cy-cyan-500:      #06b6d4;   /* pure cyan — used in uploaded logos */
+  --cy-cyan-600:      #0891b2;
+
+  --cy-sky-100:       #e0f2fe;
+  --cy-sky-200:       #bae6fd;
+  --cy-sky-300:       #7dd3fc;   /* secondary accent */
+  --cy-sky-400:       #38bdf8;   /* primary brand — logo ring, links */
+  --cy-sky-500:       #0ea5e9;   /* ★ PRIMARY — borders, CTAs, glow */
+  --cy-sky-600:       #0284c7;   /* CTA gradient endpoint */
+  --cy-sky-700:       #0369a1;
+  --cy-sky-900:       #0c4a6e;
+  --cy-sky-950:       #082f49;
+
+  /* OT/ICS accent — orange (tag highlight) */
+  --cy-orange-300:    #fdba74;
+  --cy-orange-400:    #fb923c;
+  --cy-orange-500:    #f97316;
+  --cy-orange-600:    #ea580c;
+  --cy-orange-700:    #c2410c;
+  --cy-orange-900:    #7c2d12;
+
+  /* IRMA / external — violet */
+  --cy-violet-300:    #c4b5fd;
+  --cy-violet-400:    #a78bfa;
+  --cy-violet-500:    #8b5cf6;
+
+  /* ─────────────────────────────────────────────────────────
+     SEMANTIC — Severity (from dashboard index.css badge classes)
+     ───────────────────────────────────────────────────────── */
+  --cy-sev-critical:      #ef4444;   /* red-500 */
+  --cy-sev-critical-bg:   rgba(127, 29, 29, 0.70);
+  --cy-sev-critical-br:   rgba(220, 38, 38, 0.60);
+
+  --cy-sev-high:          #dc2626;   /* red-600 */
+  --cy-sev-high-bg:       rgba(127, 29, 29, 0.50);
+  --cy-sev-high-br:       rgba(185, 28, 28, 0.50);
+
+  --cy-sev-medium:        #f97316;   /* orange-500 */
+  --cy-sev-medium-bg:     rgba(124, 45, 18, 0.60);
+  --cy-sev-medium-br:     rgba(194, 65, 12, 0.50);
+
+  --cy-sev-low:           #22c55e;   /* green-500 */
+  --cy-sev-low-bg:        rgba(22, 101, 52, 0.50);
+  --cy-sev-low-br:        rgba(21, 128, 61, 0.50);
+
+  /* Status */
+  --cy-ok:            #22c55e;   /* live dot, up */
+  --cy-warn:          #eab308;
+  --cy-err:           #ef4444;
+  --cy-info:          var(--cy-sky-500);
+
+  /* Protocol accents (alert-manager pipeline nodes) */
+  --cy-proto-tcp:     var(--cy-sky-400);
+  --cy-proto-udp:     var(--cy-orange-400);
+  --cy-proto-icmp:    var(--cy-violet-400);
+
+  /* ─────────────────────────────────────────────────────────
+     TYPOGRAPHY
+     ───────────────────────────────────────────────────────── */
+  --cy-font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --cy-font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+  --cy-font-display: 'Inter', system-ui, sans-serif;  /* same as sans; weight 800/900 carries display role */
+
+  /* Dashboard default body is MONO (per index.css @layer base body).
+     Marketing site default body is SANS. Use these to choose explicitly. */
+  --cy-font-body-dashboard: var(--cy-font-mono);
+  --cy-font-body-marketing: var(--cy-font-sans);
+
+  /* Sizes — covering both contexts */
+  --cy-text-2xs:   10px;   /* micro badges, trust chips */
+  --cy-text-xs:    11px;   /* table cells, small labels (dashboard default 12/14 area) */
+  --cy-text-sm:    13px;
+  --cy-text-base:  14px;   /* body */
+  --cy-text-md:    16px;
+  --cy-text-lg:    18px;
+  --cy-text-xl:    20px;
+  --cy-text-2xl:   24px;
+  --cy-text-3xl:   30px;
+  --cy-text-4xl:   36px;
+  --cy-text-5xl:   48px;   /* section h2 on marketing */
+  --cy-text-6xl:   60px;   /* hero */
+  --cy-text-7xl:   72px;
+
+  /* Letter-spacing — logo and all-caps micro-labels use wide tracking */
+  --cy-tracking-tight:   -0.02em;
+  --cy-tracking-normal:   0;
+  --cy-tracking-wide:     0.08em;
+  --cy-tracking-wider:    0.12em;    /* logo wordmark-ish */
+  --cy-tracking-widest:   0.24em;    /* CYJAN logo, section eyebrows */
+
+  /* Line-height */
+  --cy-leading-tight:   1.1;
+  --cy-leading-snug:    1.35;
+  --cy-leading-normal:  1.5;
+  --cy-leading-relaxed: 1.65;
+
+  /* Weights */
+  --cy-weight-light:    300;
+  --cy-weight-regular:  400;
+  --cy-weight-medium:   500;
+  --cy-weight-semibold: 600;
+  --cy-weight-bold:     700;
+  --cy-weight-black:    900;
+
+  /* ─────────────────────────────────────────────────────────
+     SPACING — 4px base grid
+     ───────────────────────────────────────────────────────── */
+  --cy-space-0:   0;
+  --cy-space-1:   4px;
+  --cy-space-2:   8px;
+  --cy-space-3:   12px;
+  --cy-space-4:   16px;
+  --cy-space-5:   20px;
+  --cy-space-6:   24px;
+  --cy-space-8:   32px;
+  --cy-space-10:  40px;
+  --cy-space-12:  48px;
+  --cy-space-16:  64px;
+  --cy-space-20:  80px;
+  --cy-space-24:  96px;
+
+  /* ─────────────────────────────────────────────────────────
+     RADIUS
+     ───────────────────────────────────────────────────────── */
+  --cy-radius-xs:  2px;
+  --cy-radius-sm:  4px;    /* inputs, small buttons */
+  --cy-radius-md:  6px;    /* dashboard card — matches tailwind rounded */
+  --cy-radius-lg:  8px;    /* lg card */
+  --cy-radius-xl:  12px;   /* chips, marketing buttons */
+  --cy-radius-2xl: 16px;   /* marketing cards (rounded-2xl) */
+  --cy-radius-full: 9999px;
+
+  /* ─────────────────────────────────────────────────────────
+     SHADOWS & GLOWS — cyan halo is the brand's signature
+     ───────────────────────────────────────────────────────── */
+  --cy-shadow-sm:    0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --cy-shadow-md:    0 4px 12px -2px rgba(0, 0, 0, 0.5);
+  --cy-shadow-lg:    0 20px 40px -12px rgba(0, 0, 0, 0.7);
+
+  /* Cyan border-glow trio — rest, hover, and hero */
+  --cy-glow-border:       0 0 0 1px rgba(14, 165, 233, 0.30), 0 0 20px rgba(14, 165, 233, 0.05);
+  --cy-glow-border-hover: 0 0 0 1px rgba(14, 165, 233, 0.60), 0 0 30px rgba(14, 165, 233, 0.15);
+  --cy-glow-hero:         0 0 0 1px rgba(14, 165, 233, 0.20), 0 0 60px rgba(14, 165, 233, 0.08);
+  --cy-glow-cta:          0 0 30px rgba(14, 165, 233, 0.30);
+  --cy-glow-cta-lg:       0 0 40px rgba(14, 165, 233, 0.25);
+  --cy-glow-text:         0 0 30px rgba(14, 165, 233, 0.60);
+  --cy-glow-logo:         drop-shadow(0 0 40px rgba(14, 165, 233, 0.30));
+
+  /* ─────────────────────────────────────────────────────────
+     GRADIENTS & BACKGROUNDS
+     ───────────────────────────────────────────────────────── */
+  --cy-grad-primary:      linear-gradient(135deg, #0ea5e9, #0284c7);       /* primary CTA */
+  --cy-grad-hero-text:    linear-gradient(135deg, #e0f2fe 0%, #7dd3fc 50%, #0ea5e9 100%);  /* gradient-text */
+  --cy-grad-icon-bg:      linear-gradient(135deg, rgba(14,165,233,0.15), rgba(56,189,248,0.05));
+  --cy-grad-hero-halo:    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(14,165,233,0.08) 0%, transparent 60%);
+  --cy-grad-danger:       linear-gradient(135deg, #dc2626, #b91c1c);
+
+  /* Hex-grid background — signature motif (from marketing .hex-bg)
+     Use on dark surfaces; opacity 0.12 in the grid itself. */
+  --cy-bg-hexgrid: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='100'%3E%3Cpath d='M28 66L0 50V16L28 0l28 16v34L28 66zm0-2l26-15V17L28 2 2 17v32l26 15z' fill='none' stroke='%230ea5e9' stroke-width='0.3' opacity='0.12'/%3E%3C/svg%3E");
+
+  /* Card background — translucent slate with backdrop blur */
+  --cy-card-bg:       rgba(15, 23, 42, 0.80);
+  --cy-card-border:   rgba(14, 165, 233, 0.15);
+  --cy-card-blur:     blur(8px);
+
+  /* ─────────────────────────────────────────────────────────
+     MOTION
+     ───────────────────────────────────────────────────────── */
+  --cy-dur-fast:    150ms;
+  --cy-dur-base:    250ms;
+  --cy-dur-slow:    500ms;
+  --cy-dur-anim:    800ms;     /* fade-in */
+  --cy-ease:        cubic-bezier(0.4, 0, 0.2, 1);
+  --cy-ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ─────────────────────────────────────────────────────────
+     Z-INDEX
+     ───────────────────────────────────────────────────────── */
+  --cy-z-base:    1;
+  --cy-z-sticky: 10;
+  --cy-z-ticker: 40;
+  --cy-z-nav:    50;
+  --cy-z-modal:  80;
+  --cy-z-toast:  90;
+}
+
+
+/* ============================================================
+   SEMANTIC TYPE STYLES
+   Apply with class OR use as reference for component styles.
+   ============================================================ */
+
+.cy-display-1 {
+  font-family: var(--cy-font-display);
+  font-size: clamp(48px, 7vw, 72px);
+  font-weight: var(--cy-weight-black);
+  line-height: var(--cy-leading-tight);
+  letter-spacing: var(--cy-tracking-tight);
+  background: var(--cy-grad-hero-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: var(--cy-glow-text);
+}
+.cy-display-2 {
+  font-family: var(--cy-font-display);
+  font-size: clamp(36px, 5vw, 48px);
+  font-weight: var(--cy-weight-black);
+  line-height: var(--cy-leading-tight);
+  letter-spacing: var(--cy-tracking-tight);
+  background: var(--cy-grad-hero-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.cy-h1 { font-family: var(--cy-font-sans); font-size: var(--cy-text-4xl); font-weight: var(--cy-weight-bold); color: var(--cy-fg-primary); line-height: var(--cy-leading-snug); letter-spacing: var(--cy-tracking-tight); }
+.cy-h2 { font-family: var(--cy-font-sans); font-size: var(--cy-text-3xl); font-weight: var(--cy-weight-bold); color: var(--cy-fg-primary); line-height: var(--cy-leading-snug); }
+.cy-h3 { font-family: var(--cy-font-sans); font-size: var(--cy-text-xl); font-weight: var(--cy-weight-bold); color: var(--cy-fg-primary); line-height: var(--cy-leading-snug); }
+.cy-h4 { font-family: var(--cy-font-sans); font-size: var(--cy-text-lg); font-weight: var(--cy-weight-semibold); color: var(--cy-fg-primary); line-height: var(--cy-leading-snug); }
+
+.cy-eyebrow {
+  font-family: var(--cy-font-sans);
+  font-size: var(--cy-text-xs);
+  font-weight: var(--cy-weight-medium);
+  color: var(--cy-sky-400);
+  letter-spacing: var(--cy-tracking-widest);
+  text-transform: uppercase;
+}
+
+.cy-body { font-family: var(--cy-font-sans); font-size: var(--cy-text-md); color: var(--cy-fg-body); line-height: var(--cy-leading-relaxed); }
+.cy-body-sm { font-family: var(--cy-font-sans); font-size: var(--cy-text-base); color: var(--cy-fg-muted); line-height: var(--cy-leading-relaxed); }
+.cy-caption { font-family: var(--cy-font-sans); font-size: var(--cy-text-xs); color: var(--cy-fg-dim); }
+
+.cy-mono    { font-family: var(--cy-font-mono); font-size: var(--cy-text-sm); color: var(--cy-fg-body); }
+.cy-mono-xs { font-family: var(--cy-font-mono); font-size: var(--cy-text-2xs); color: var(--cy-fg-dim); letter-spacing: 0.02em; }
+.cy-code    { font-family: var(--cy-font-mono); font-size: var(--cy-text-sm); color: var(--cy-sky-300); background: var(--cy-bg-void); padding: 2px 6px; border-radius: var(--cy-radius-sm); }
+
+/* Wordmark — CYJAN all-caps with wide tracking, as in logo + headers */
+.cy-wordmark {
+  font-family: var(--cy-font-sans);
+  font-weight: var(--cy-weight-bold);
+  letter-spacing: var(--cy-tracking-widest);
+  color: var(--cy-fg-primary);
+  text-transform: uppercase;
+}
+.cy-wordmark-accent { color: var(--cy-sky-400); }
+
+
+/* ============================================================
+   BASE SURFACES
+   ============================================================ */
+.cy-surface-void   { background: var(--cy-bg-void);   color: var(--cy-fg-body); }
+.cy-surface-base   { background: var(--cy-bg-base);   color: var(--cy-fg-body); }
+.cy-surface-raised { background: var(--cy-bg-raised); color: var(--cy-fg-body); }
+.cy-surface-hex    { background: var(--cy-bg-void); background-image: var(--cy-bg-hexgrid); }
+
+.cy-card {
+  background: var(--cy-card-bg);
+  backdrop-filter: var(--cy-card-blur);
+  border: 1px solid var(--cy-card-border);
+  border-radius: var(--cy-radius-2xl);
+  padding: var(--cy-space-6);
+}
+.cy-card--glow { box-shadow: var(--cy-glow-border); }
+.cy-card--glow:hover { box-shadow: var(--cy-glow-border-hover); }
+
+.cy-card-dashboard {
+  background: var(--cy-bg-raised);
+  border: 1px solid var(--cy-fg-ghost);
+  border-radius: var(--cy-radius-lg);
+}

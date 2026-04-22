@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 8px; background: #0b1120; }
+  .alert-row {
+    display: grid;
+    grid-template-columns: 80px 70px 1fr 120px 60px 60px;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 4px;
+    font-family: var(--cy-font-mono);
+    font-size: 11px;
+    color: #e2e8f0;
+    align-items: center;
+    border-left: 3px solid transparent;
+    background: #0f172a;
+    border: 1px solid #172033;
+  }
+  .alert-row.critical { border-left-color: #ef4444; background: rgba(127,29,29,0.20); }
+  .alert-row.medium   { border-left-color: #f97316; background: rgba(124,45,18,0.20); }
+  .alert-row.low      { border-left-color: #22c55e; }
+  .ts { color: #64748b; font-size: 10px; }
+  .score { font-weight: 700; }
+  .score.c { color: #f87171; } .score.m { color:#fdba74; } .score.l { color: #86efac; }
+  .rule { color: #e2e8f0; }
+  .ip { color: #7dd3fc; }
+  .tag-ot { padding: 1px 6px; border-radius: 999px; background: rgba(249,115,22,0.15); color:#fb923c; font-size: 10px; border: 1px solid rgba(249,115,22,0.40); }
+  .action { color: #64748b; }
+  .head {
+    display: grid; grid-template-columns: 80px 70px 1fr 120px 60px 60px; gap: 10px;
+    padding: 6px 14px; font-size: 9px; color: #475569; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Alert Row</div>
+  <div class="head">
+    <span>time</span><span>score</span><span>rule / src → dst</span><span>tags</span><span>pcap</span><span>fb</span>
+  </div>
+  <div class="alert-row critical">
+    <span class="ts">14:23:07</span>
+    <span class="score c">92</span>
+    <span><span class="rule">ET·SCADA·2018927</span> · <span class="ip">10.42.0.118</span> → <span class="ip">10.42.7.3:502</span></span>
+    <span><span class="tag-ot">Modbus TCP</span></span>
+    <span class="action">↓ pcap</span>
+    <span class="action">⚠ ✓</span>
+  </div>
+  <div class="alert-row medium">
+    <span class="ts">14:22:41</span>
+    <span class="score m">58</span>
+    <span><span class="rule">ML·Anomaly·host-behaviour</span> · <span class="ip">10.42.0.12</span></span>
+    <span><span class="tag-ot">DNP3</span></span>
+    <span class="action">↓ pcap</span>
+    <span class="action">⚠ ✓</span>
+  </div>
+  <div class="alert-row low">
+    <span class="ts">14:22:08</span>
+    <span class="score l">14</span>
+    <span><span class="rule">ET·Info·scan</span> · <span class="ip">10.42.0.200</span> → <span class="ip">10.42.255.255</span></span>
+    <span></span>
+    <span class="action">—</span>
+    <span class="action">⚠ ✓</span>
+  </div>
+</div>
+</body></html>

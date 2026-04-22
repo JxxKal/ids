@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>CYJAN Dashboard — UI Kit</title>
+<link rel="icon" href="../../assets/logos/cyjan_logo_compact.svg">
+<link rel="stylesheet" href="../../colors_and_type.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: #0b1120; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; height: 100%; }
+  @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: #0b1120; }
+  ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" src="DashboardComponents.jsx"></script>
+<script type="text/babel" data-presets="react">
+const SEED_ALERTS = [
+  { time:'14:23:07', score:92, rule:'ET·SCADA·2018927',         src:'10.42.0.118', dst:'10.42.7.3:502',  tags:['Modbus TCP'],  source:'Sniffer' },
+  { time:'14:22:41', score:58, rule:'ML·Anomaly·host-behaviour', src:'10.42.0.12',  dst:'—',             tags:['DNP3','plc'],  source:'ML' },
+  { time:'14:22:08', score:14, rule:'ET·Info·scan',              src:'10.42.0.200', dst:'10.42.255.255', tags:[],              source:'Sniffer' },
+  { time:'14:21:55', score:81, rule:'ET·POLICY·Modbus·unauth',   src:'10.42.0.44',  dst:'10.42.7.11:502',tags:['Modbus TCP'], source:'Sniffer' },
+  { time:'14:21:12', score:44, rule:'Anomaly·unusual-port',      src:'10.42.0.77',  dst:'10.42.7.9:4840',tags:['OPC-UA'],     source:'ML' },
+  { time:'14:20:38', score:67, rule:'IRMA·external·blocklist',   src:'10.42.0.5',   dst:'203.0.113.54',  tags:['DNP3'],       source:'IRMA' },
+  { time:'14:20:01', score:22, rule:'ET·Info·DHCP',              src:'10.42.0.1',   dst:'broadcast',     tags:[],              source:'Sniffer' },
+];
+
+const SEED_HOSTS = [
+  { ip:'10.42.0.118', name:'plc-boiler-01', protocols:['Modbus TCP'],      online:true,  score:92 },
+  { ip:'10.42.0.12',  name:'hmi-ops-02',    protocols:['DNP3'],            online:true,  score:58 },
+  { ip:'10.42.7.3',   name:'scada-core',    protocols:['Modbus TCP','S7'], online:true,  score:41 },
+  { ip:'10.42.0.77',  name:'rtu-substation', protocols:['OPC-UA'],         online:true,  score:22 },
+  { ip:'10.42.0.200', name:'eng-ws-11',     protocols:[],                  online:false, score:0 },
+];
+
+function App() {
+  const { useState, useEffect } = React;
+  const [active, setActive] = useState('dashboard');
+  const [tab, setTab] = useState('live');
+  const [sev, setSev] = useState('all');
+  const [rows, setRows] = useState(SEED_ALERTS);
+
+  // simulate live alerts
+  useEffect(() => {
+    const t = setInterval(() => {
+      setRows(prev => {
+        if (tab !== 'live') return prev;
+        const now = new Date();
+        const hh = String(now.getHours()).padStart(2,'0');
+        const mm = String(now.getMinutes()).padStart(2,'0');
+        const ss = String(now.getSeconds()).padStart(2,'0');
+        const templates = [
+          { score: 88, rule:'ET·SCADA·modbus-write-single', src:'10.42.0.118', dst:'10.42.7.3:502', tags:['Modbus TCP'], source:'Sniffer' },
+          { score: 34, rule:'ML·Anomaly·flow-rate',          src:'10.42.0.12',  dst:'—',              tags:['DNP3'],       source:'ML' },
+          { score: 19, rule:'ET·Info·ARP-scan',              src:'10.42.0.200', dst:'broadcast',      tags:[],              source:'Sniffer' },
+        ];
+        const pick = templates[Math.floor(Math.random() * templates.length)];
+        return [{ time:`${hh}:${mm}:${ss}`, ...pick }, ...prev].slice(0, 8);
+      });
+    }, 3500);
+    return () => clearInterval(t);
+  }, [tab]);
+
+  const filtered = rows.filter(r => {
+    if (sev === 'all') return true;
+    if (sev === 'critical') return r.score >= 75;
+    if (sev === 'high')     return r.score >= 50 && r.score < 75;
+    if (sev === 'medium')   return r.score >= 25 && r.score < 50;
+    if (sev === 'low')      return r.score < 25;
+    return true;
+  });
+
+  return (
+    <div data-screen-label="CYJAN Dashboard" style={{ height:'100vh', display:'flex' }}>
+      <DashSidebar active={active} onNav={setActive}/>
+      <main style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+        <DashTopBar title={
+          active === 'dashboard' ? 'Übersicht' :
+          active === 'network' ? 'Netzwerk-Inventar' :
+          active === 'hosts' ? 'Host-Inventar' :
+          active === 'scenarios' ? 'Test-Szenarien' : 'Einstellungen'
+        } kpis={[
+          { label:'alerts / 1h', value:'312', color:'#fdba74' },
+          { label:'hosts',       value:'87 / 92', color:'#7dd3fc' },
+          { label:'threat',      value:'74', color:'#f87171' },
+        ]}/>
+
+        {active === 'dashboard' && (
+          <div style={{ flex:1, overflow:'auto', padding:20, display:'flex', flexDirection:'column', gap:16 }}>
+            {/* KPI row */}
+            <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:14 }}>
+              <ThreatGauge value={74}/>
+              <div style={{ background:'#0f172a', border:'1px solid #172033', borderRadius:8, padding:16 }}>
+                <div style={{ fontFamily:'Inter', fontSize:10, color:'#64748b', letterSpacing:'0.14em', textTransform:'uppercase', marginBottom:6 }}>Alerts by severity · 1h</div>
+                {[['critical',34,'#ef4444'],['high',58,'#dc2626'],['medium',112,'#f97316'],['low',108,'#22c55e']].map(([l,v,c])=>(
+                  <div key={l} style={{ display:'grid', gridTemplateColumns:'70px 1fr 40px', alignItems:'center', gap:8, marginBottom:6 }}>
+                    <span style={{ fontSize:11, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.06em' }}>{l}</span>
+                    <div style={{ height:6, background:'#172033', borderRadius:999 }}>
+                      <div style={{ width:`${(v/112)*100}%`, height:'100%', background:c, borderRadius:999 }}/>
+                    </div>
+                    <span style={{ fontSize:11, color:'#e0f2fe', textAlign:'right' }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ background:'#0f172a', border:'1px solid #172033', borderRadius:8, padding:16 }}>
+                <div style={{ fontFamily:'Inter', fontSize:10, color:'#64748b', letterSpacing:'0.14em', textTransform:'uppercase', marginBottom:6 }}>Top protocols</div>
+                {[['Modbus TCP',47],['DNP3',23],['OPC-UA',14],['S7',9],['ICMP',7]].map(([p,pct])=>(
+                  <div key={p} style={{ display:'grid', gridTemplateColumns:'90px 1fr 36px', alignItems:'center', gap:8, marginBottom:6, fontSize:11 }}>
+                    <span style={{ color:'#fb923c' }}>{p}</span>
+                    <div style={{ height:4, background:'#172033', borderRadius:999 }}>
+                      <div style={{ width:`${pct}%`, height:'100%', background:'#fb923c', borderRadius:999 }}/>
+                    </div>
+                    <span style={{ color:'#94a3b8', textAlign:'right' }}>{pct}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Tabs + filter */}
+            <div>
+              <div style={{ display:'flex', gap:0, borderBottom:'1px solid #172033' }}>
+                {[['live','Live Alerts'],['grouped','Grouped'],['snapshot','Snapshot'],['feedback','Feedback']].map(([k,l])=>(
+                  <div key={k} onClick={()=>setTab(k)} style={{
+                    padding:'8px 16px', cursor:'pointer',
+                    fontFamily:'Inter', fontSize:13,
+                    color: tab===k ? '#38bdf8' : '#64748b',
+                    borderBottom: tab===k ? '2px solid #0ea5e9' : '2px solid transparent',
+                    marginBottom:-1,
+                  }}>{l}</div>
+                ))}
+              </div>
+              <div style={{ display:'flex', gap:8, padding:'10px 0' }}>
+                {['all','critical','high','medium','low'].map(s => (
+                  <button key={s} onClick={()=>setSev(s)} style={{
+                    padding:'4px 12px', borderRadius:4,
+                    background: sev===s ? 'rgba(14,165,233,0.12)' : '#0f172a',
+                    border:`1px solid ${sev===s ? '#0ea5e9' : '#1e293b'}`,
+                    color: sev===s ? '#7dd3fc' : '#94a3b8',
+                    fontFamily:'JetBrains Mono', fontSize:11, cursor:'pointer', textTransform:'capitalize',
+                  }}>{s==='all' ? 'alle' : s}</button>
+                ))}
+                <div style={{ flex:1 }}/>
+                <input placeholder="Tags durchsuchen…" style={{
+                  background:'#0f172a', border:'1px solid #1e293b', padding:'4px 12px',
+                  color:'#e2e8f0', borderRadius:4, fontFamily:'JetBrains Mono', fontSize:11, width:220, outline:'none',
+                }}/>
+                <button style={{ padding:'4px 12px', borderRadius:4, background:'#1e293b', border:'1px solid #334155', color:'#cbd5e1', fontFamily:'Inter', fontSize:11, cursor:'pointer' }}>↓ CSV</button>
+              </div>
+              <AlertTable rows={filtered}/>
+            </div>
+          </div>
+        )}
+
+        {active === 'hosts' && (
+          <div style={{ flex:1, overflow:'auto', padding:20 }}>
+            <div style={{ background:'#0f172a', border:'1px solid #172033', borderRadius:6 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'140px 120px 1fr 120px 90px', gap:12, padding:'8px 14px', background:'#0b1120', borderBottom:'1px solid #172033', fontFamily:'JetBrains Mono', fontSize:9, color:'#475569', letterSpacing:'0.12em', textTransform:'uppercase' }}>
+                <span>ip</span><span>hostname</span><span>protocols</span><span>status</span><span>score</span>
+              </div>
+              {SEED_HOSTS.map(h => <HostRow key={h.ip} host={h}/>)}
+            </div>
+          </div>
+        )}
+
+        {(active === 'network' || active === 'scenarios' || active === 'settings') && (
+          <div style={{ flex:1, display:'grid', placeItems:'center', color:'#475569', fontFamily:'JetBrains Mono', fontSize:13 }}>
+            <div style={{ textAlign:'center' }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>⊟</div>
+              <div>Surface available in full product — not mocked in kit.</div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

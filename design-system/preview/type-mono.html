@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 12px; }
+  .terminal {
+    background: #020617;
+    border: 1px solid #172033;
+    border-radius: 6px;
+    padding: 14px 16px;
+    font-family: var(--cy-font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .terminal .prompt { color: #64748b; }
+  .terminal .cmd { color: #7dd3fc; }
+  .terminal .out { color: #94a3b8; }
+  .terminal .ok { color: #22c55e; }
+  .ids-row {
+    font-family: var(--cy-font-mono);
+    font-size: 12px;
+    color: #e2e8f0;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #0f172a;
+    border: 1px solid #172033;
+    border-radius: 6px;
+  }
+  .ids-row .k { color: #64748b; font-size: 10px; display:block; margin-bottom:2px; letter-spacing: 0.06em; text-transform: uppercase;}
+  .ids-row .ip { color: #7dd3fc; }
+  .ids-row .port { color: #fb923c; }
+  .ids-row .id { color: #e2e8f0; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Mono — JetBrains Mono · identifiers, data, terminal</div>
+  <div class="terminal">
+    <div><span class="prompt">$</span> <span class="cmd">sudo ./cyjan-installer</span></div>
+    <div class="out">▸ detecting interface: <span style="color:#7dd3fc">eth0</span> · mirror-port</div>
+    <div class="out">▸ bootstrapping kafka (KRaft) on :9092 <span class="ok">✓</span></div>
+    <div class="out">▸ loading ET rules (<span style="color:#fb923c">39.842</span>) <span class="ok">✓</span></div>
+    <div><span class="prompt">$</span> <span class="cmd">_</span></div>
+  </div>
+  <div class="ids-row">
+    <div><span class="k">src</span><span class="ip">10.42.0.118</span></div>
+    <div><span class="k">dst</span><span class="ip">10.42.7.3</span><span class="port">:502</span></div>
+    <div><span class="k">rule</span><span class="id">ET·SCADA·2018927</span></div>
+    <div><span class="k">snap</span><span class="id">128 B</span></div>
+  </div>
+</div>
+</body></html>

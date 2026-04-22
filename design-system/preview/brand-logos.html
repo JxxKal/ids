@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  html, body { overflow: hidden; }
+  .card-frame {
+    padding: 0; background: #020617;
+    background-image: var(--cy-bg-hexgrid);
+    background-size: 56px 100px;
+    height: 440px;
+    position: relative;
+    display: grid;
+    grid-template-columns: 260px 1fr;
+  }
+  .card-frame::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 70% 60% at 65% 45%, rgba(14,165,233,0.18) 0%, transparent 65%);
+    pointer-events: none;
+  }
+  .bay {
+    position: relative;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  .bay.left {
+    gap: 14px;
+    border-right: 1px solid rgba(14,165,233,0.12);
+  }
+  .bay.right {
+    align-items: center;
+    justify-content: center;
+  }
+  .bay.right img {
+    max-width: 92%;
+    max-height: 340px;
+    filter: drop-shadow(0 0 50px rgba(14,165,233,0.45));
+  }
+  .label {
+    font-size: 10px; color: #38bdf8; letter-spacing: 0.2em;
+    text-transform: uppercase; font-weight: 500;
+    z-index: 2; position: relative;
+  }
+  .mini {
+    background: rgba(15,23,42,0.65);
+    border: 1px solid rgba(14,165,233,0.18);
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex; gap: 12px; align-items: center;
+    position: relative; z-index: 2;
+  }
+  .mini img { width: 44px; height: 44px; filter: drop-shadow(0 0 14px rgba(14,165,233,0.4)); }
+  .mini .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .mini .name { font-family: var(--cy-font-sans); font-size: 12px; font-weight: 600; color: #e0f2fe; }
+  .mini .use  { font-family: var(--cy-font-mono); font-size: 10px; color: #64748b; line-height: 1.4; }
+  .caption {
+    position: absolute; bottom: 14px; left: 20px; right: 20px;
+    font-family: var(--cy-font-mono); font-size: 10px; color: #64748b;
+    text-align: center; z-index: 2;
+  }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="bay left">
+    <div class="label">Logo variants</div>
+    <div class="mini">
+      <img src="../assets/logos/cyjan_logo_compact.svg" />
+      <div class="meta">
+        <span class="name">Compact</span>
+        <span class="use">header · favicon · tiny surfaces</span>
+      </div>
+    </div>
+    <div class="mini">
+      <img src="../assets/logos/cyjan_logo_cyan.svg" />
+      <div class="meta">
+        <span class="name">Cyan lockup</span>
+        <span class="use">section headers · secondary</span>
+      </div>
+    </div>
+    <div class="mini">
+      <img src="../assets/logos/cyjan_logo_cyan_max.svg" />
+      <div class="meta">
+        <span class="name">Cyan max</span>
+        <span class="use">login · marketing hero</span>
+      </div>
+    </div>
+    <div class="mini">
+      <img src="../assets/logos/cyjan_ids_logo_v2.svg" />
+      <div class="meta">
+        <span class="name">IDS v2</span>
+        <span class="use">fallback / earlier version</span>
+      </div>
+    </div>
+  </div>
+  <div class="bay right">
+    <div class="label" style="position: absolute; top: 20px; left: 20px;">Splash / Hero</div>
+    <img src="../assets/logos/cyjan_splash_screen.svg" />
+    <div class="caption">PROTECT · DETECT · RESPOND — splash · print covers · brochure hero</div>
+  </div>
+</div>
+</body></html>

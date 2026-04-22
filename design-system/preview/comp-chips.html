@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 10px; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px; border-radius: 999px;
+    font-family: var(--cy-font-mono); font-size: 11px; letter-spacing: 0.04em;
+    border: 1px solid transparent;
+  }
+  .chip--ot { background: rgba(249,115,22,0.15); color:#fb923c; border-color: rgba(249,115,22,0.40); }
+  .chip--proto { background: rgba(14,165,233,0.15); color:#38bdf8; border-color: rgba(14,165,233,0.40); }
+  .chip--tag { background: rgba(148,163,184,0.10); color:#cbd5e1; border-color: rgba(148,163,184,0.25); }
+  .chip--irma { background: rgba(139,92,246,0.20); color:#c4b5fd; border-color: rgba(139,92,246,0.40); border-radius: 4px; }
+  .badge {
+    padding: 2px 8px; border-radius: 4px;
+    font-family: var(--cy-font-mono); font-size: 10px; letter-spacing: 0.06em;
+    text-transform: uppercase; font-weight: 500;
+  }
+  .b-crit { background: rgba(127,29,29,0.70); color: #fecaca; border: 1px solid rgba(220,38,38,0.60); }
+  .b-high { background: rgba(127,29,29,0.50); color: #fca5a5; border: 1px solid rgba(185,28,28,0.50); }
+  .b-med  { background: rgba(124,45,18,0.60); color: #fdba74; border: 1px solid rgba(194,65,12,0.50); }
+  .b-low  { background: rgba(22,101,52,0.50); color: #86efac; border: 1px solid rgba(21,128,61,0.50); }
+  .b-live { background: rgba(14,165,233,0.15); color: #7dd3fc; border: 1px solid rgba(14,165,233,0.40); display:inline-flex; align-items:center; gap:6px; padding: 3px 10px; border-radius:999px;}
+  .live-dot { width: 6px; height: 6px; background: #22c55e; border-radius: 999px; animation: pulse 2s ease-in-out infinite; box-shadow: 0 0 8px #22c55e; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Chips & Badges</div>
+  <div class="chip-row">
+    <span class="chip chip--ot">OT/ICS</span>
+    <span class="chip chip--ot">Modbus TCP</span>
+    <span class="chip chip--ot">DNP3</span>
+    <span class="chip chip--ot">S7</span>
+    <span class="chip chip--proto">TCP</span>
+    <span class="chip chip--proto">HTTPS</span>
+    <span class="chip chip--tag">scada-net</span>
+    <span class="chip chip--tag">plc</span>
+    <span class="chip chip--irma">IRMA · external</span>
+  </div>
+  <div class="chip-row" style="margin-top:4px">
+    <span class="badge b-crit">critical</span>
+    <span class="badge b-high">high</span>
+    <span class="badge b-med">medium</span>
+    <span class="badge b-low">low</span>
+    <span class="b-live"><span class="live-dot"></span>Live</span>
+    <span class="badge" style="background:#1e293b;color:#94a3b8;border:1px solid #334155">×12</span>
+    <span class="badge" style="background:rgba(14,165,233,0.15);color:#7dd3fc;border:1px solid rgba(14,165,233,0.4)">score 87</span>
+  </div>
+</div>
+</body></html>

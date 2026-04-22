@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 8px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+  .item { display: flex; flex-direction: column; gap: 3px; }
+  .sample { color: #e2e8f0; }
+  .sample.p { font-size: 14px; line-height: 1.65; color: #cbd5e1; }
+  .sample.pm { font-size: 14px; line-height: 1.65; color: #94a3b8; }
+  .sample.cap { font-size: 12px; color: #64748b; }
+  .sample.eb { font-size: 11px; color: #38bdf8; letter-spacing: 0.22em; text-transform: uppercase; font-weight: 500;}
+  .sample.word { font-weight: 700; letter-spacing: 0.24em; text-transform: uppercase; color: #e0f2fe; font-size: 18px;}
+  .sample.word .ac { color: #38bdf8; }
+  .tag { font-family: var(--cy-font-mono); font-size: 10px; color: #475569; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Body, eyebrow & wordmark — Inter</div>
+  <div class="row3">
+    <div class="item">
+      <div class="sample eb">Capabilities</div>
+      <div class="tag">eyebrow · 11 / 500 / +0.22em</div>
+    </div>
+    <div class="item">
+      <div class="sample word">Cy<span class="ac">jan</span></div>
+      <div class="tag">wordmark · 700 / +0.24em uppercase</div>
+    </div>
+    <div class="item" style="grid-column: span 2">
+      <div class="sample p">Rust-based sniffer with AF_PACKET/TPACKET_V3 captures traffic at line rate — headers only, no payload, no decryption.</div>
+      <div class="tag">body · 14 / 400 / 1.65</div>
+    </div>
+    <div class="item" style="grid-column: span 2">
+      <div class="sample pm">Live rule feed from Emerging Threats covers ~40.000 signatures, updated daily via the ids-update service.</div>
+      <div class="tag">body muted · 14 / 400 / #94a3b8</div>
+    </div>
+    <div class="item">
+      <div class="sample cap">2025-04-22 14:23:07 UTC</div>
+      <div class="tag">caption · 12 / 400 / #64748b</div>
+    </div>
+    <div class="item">
+      <div class="sample" style="font-family:var(--cy-font-mono);font-size:13px;color:#7dd3fc">docker compose up -d</div>
+      <div class="tag">code inline · mono 13 / 400</div>
+    </div>
+  </div>
+</div>
+</body></html>

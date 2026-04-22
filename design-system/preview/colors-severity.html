@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 24px; gap: 14px; }
+  .grp { display: flex; flex-direction: column; gap: 6px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .sev-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-family: var(--cy-font-mono);
+    font-size: 12px;
+  }
+  .sev-row .label { flex: 1; font-weight: 500; color: #e2e8f0; text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; }
+  .sev-row .hex   { color: rgba(255,255,255,0.45); font-size: 10px; }
+  .sev-badge { padding: 2px 8px; border-radius: 4px; font-size: 10px; letter-spacing: 0.04em; font-weight: 500; }
+
+  .badge-critical { background: rgba(127,29,29,0.70); color: #fecaca; border: 1px solid rgba(220,38,38,0.60); }
+  .badge-high     { background: rgba(127,29,29,0.50); color: #fca5a5; border: 1px solid rgba(185,28,28,0.50); }
+  .badge-medium   { background: rgba(124,45,18,0.60); color: #fdba74; border: 1px solid rgba(194,65,12,0.50); }
+  .badge-low      { background: rgba(22,101,52,0.50); color: #86efac; border: 1px solid rgba(21,128,61,0.50); }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Severity</div>
+  <div class="row2">
+    <div class="grp">
+      <div class="sev-row" style="border-left:2px solid #ef4444;background:rgba(127,29,29,0.25)">
+        <span class="sev-badge badge-critical">critical</span>
+        <span class="label">weight 10</span>
+        <span class="hex">#ef4444</span>
+      </div>
+      <div class="sev-row" style="border-left:2px solid #dc2626;background:rgba(127,29,29,0.12)">
+        <span class="sev-badge badge-high">high</span>
+        <span class="label">weight 5</span>
+        <span class="hex">#dc2626</span>
+      </div>
+    </div>
+    <div class="grp">
+      <div class="sev-row" style="border-left:2px solid #f97316;background:rgba(124,45,18,0.15)">
+        <span class="sev-badge badge-medium">medium</span>
+        <span class="label">weight 2</span>
+        <span class="hex">#f97316</span>
+      </div>
+      <div class="sev-row" style="border-left:2px solid #16a34a;background:rgba(22,101,52,0.15)">
+        <span class="sev-badge badge-low">low</span>
+        <span class="label">weight 1</span>
+        <span class="hex">#22c55e</span>
+      </div>
+    </div>
+  </div>
+  <div class="meta" style="padding-top:4px;border-top:1px solid #172033">Threat score 0–100 · red ≥ 75 · orange ≥ 50 · yellow ≥ 25 · green &lt; 25</div>
+</div>
+</body></html>
