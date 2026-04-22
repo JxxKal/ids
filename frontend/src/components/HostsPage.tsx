@@ -160,7 +160,11 @@ export function HostsPage() {
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`btn ${filter === f ? 'btn-primary' : 'btn-ghost'}`}
+            className={`px-3 py-1 rounded text-xs font-medium font-mono border transition-colors ${
+              filter === f
+                ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/50'
+                : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
+            }`}
           >
             {{ all: 'Alle', trusted: 'Bekannt', unknown: 'Unbekannt' }[f]}
           </button>
@@ -171,15 +175,15 @@ export function HostsPage() {
       {/* Table */}
       <div className="card overflow-hidden">
         <table className="w-full text-xs">
-          <thead className="border-b border-slate-800 text-slate-500 text-left">
+          <thead className="cyjan-table-head text-left">
             <tr>
-              <th className="px-4 py-2">IP</th>
-              <th className="px-4 py-2">Anzeigename / Hostname</th>
-              <th className="px-4 py-2">Trust</th>
-              <th className="px-4 py-2">Geo / ASN</th>
-              <th className="px-4 py-2">Ping</th>
-              <th className="px-4 py-2">Zuletzt gesehen</th>
-              <th className="px-4 py-2"></th>
+              <th>IP</th>
+              <th>Anzeigename / Hostname</th>
+              <th>Trust</th>
+              <th>Geo / ASN</th>
+              <th>Ping</th>
+              <th>Zuletzt gesehen</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
