@@ -6,7 +6,11 @@
 
 @layer base {
   body {
-    @apply bg-slate-950 text-slate-200 font-mono text-sm antialiased;
+    @apply text-slate-200 font-mono text-sm antialiased;
+    background-color: #020617;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='52' viewBox='0 0 60 52'><polygon points='30,2 58,18 58,34 30,50 2,34 2,18' fill='none' stroke='%23164e63' stroke-width='0.6' stroke-opacity='0.35'/></svg>");
+    background-size: 60px 52px;
+    background-attachment: fixed;
   }
   ::-webkit-scrollbar { @apply w-1.5; }
   ::-webkit-scrollbar-track { @apply bg-slate-900; }
@@ -37,15 +41,13 @@
   font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
+/* Login-Radial-Glow – das Hex-Raster kommt jetzt global vom body */
 .hex-grid-bg {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
-  background-image:
-    radial-gradient(ellipse at center, rgba(14,165,233,0.12), transparent 60%),
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='52' viewBox='0 0 60 52'><polygon points='30,2 58,18 58,34 30,50 2,34 2,18' fill='none' stroke='%23164e63' stroke-width='0.6' stroke-opacity='0.35'/></svg>");
-  background-size: auto, 60px 52px;
+  background-image: radial-gradient(ellipse at center, rgba(14,165,233,0.12), transparent 60%);
 }
 
 .cyjan-shield-svg {
