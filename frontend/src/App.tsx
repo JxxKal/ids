@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { clearToken, fetchAlerts, fetchMe, getToken } from './api';
+import { disableDemoMode } from './demo/mode';
+import { resetStore as resetDemoStore } from './demo/store';
 import { AlertFeed } from './components/AlertFeed';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { HostsPage } from './components/HostsPage';
@@ -48,7 +50,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const handler = () => { setUser(null); clearToken(); };
+    const handler = () => { setUser(null); clearToken(); disableDemoMode(); resetDemoStore(); };
     window.addEventListener('ids:unauthorized', handler);
     return () => window.removeEventListener('ids:unauthorized', handler);
   }, []);
@@ -65,7 +67,7 @@ export default function App() {
     return <LoginPage onLogin={u => setUser(u)} />;
   }
 
-  return <Dashboard user={user} onLogout={() => { clearToken(); setUser(null); }} />;
+  return <Dashboard user={user} onLogout={() => { clearToken(); disableDemoMode(); resetDemoStore(); setUser(null); }} />;
 }
 
 function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {

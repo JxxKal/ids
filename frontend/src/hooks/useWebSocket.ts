@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getToken } from '../api';
+import { isDemoMode } from '../demo/mode';
+import { getAlerts, subscribe } from '../demo/store';
 import type { Alert, WsMessage } from '../types';
 
 const WS_BASE = import.meta.env.VITE_WS_URL
@@ -101,6 +103,14 @@ export function useWebSocket() {
   }, []);
 
   useEffect(() => {
+    if (isDemoMode()) {
+      setAlerts(getAlerts().slice(0, 50));
+      setConnected(true);
+      const unsub = subscribe(alert => {
+        setAlerts(prev => [alert, ...prev].slice(0, MAX_ALERTS));
+      });
+      return () => { unsub(); setConnected(false); };
+    }
     connect();
     return () => {
       if (timer.current) clearTimeout(timer.current);

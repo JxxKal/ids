@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { login, setToken } from '../api';
+import { disableDemoMode, enableDemoMode } from '../demo/mode';
 import type { User } from '../types';
 import { NetworkGlobe } from './NetworkGlobe';
 import { CyjanShield } from './CyjanShield';
@@ -19,10 +20,13 @@ export function LoginPage({ onLogin }: Props) {
     setError('');
     setLoading(true);
     try {
+      if (username === 'demo' && password === 'demo') enableDemoMode();
+      else disableDemoMode();
       const res = await login(username, password);
       setToken(res.access_token);
       onLogin(res.user, res.access_token);
     } catch (err: unknown) {
+      disableDemoMode();
       setError(err instanceof Error ? err.message : 'Anmeldung fehlgeschlagen');
     } finally {
       setLoading(false);
@@ -109,6 +113,20 @@ export function LoginPage({ onLogin }: Props) {
             </button>
           </form>
         </div>
+
+        {/* Demo-Hint */}
+        <button
+          type="button"
+          onClick={() => { setUsername('demo'); setPassword('demo'); setError(''); }}
+          className="mt-5 w-full cyjan-demo-hint group"
+          title="Demo-Zugangsdaten übernehmen"
+        >
+          <span className="cyjan-demo-pill">DEMO</span>
+          <span className="cyjan-demo-text">
+            Zum Ausprobieren: <code>demo</code> / <code>demo</code>
+            <span className="cyjan-demo-sub">→ klicken, um Felder zu füllen</span>
+          </span>
+        </button>
 
         <p className="text-center text-[10px] text-slate-600 mt-6 tracking-[3px] font-mono uppercase">
           Nur autorisierter Zugriff
