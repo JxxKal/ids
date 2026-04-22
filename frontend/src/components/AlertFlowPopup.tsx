@@ -234,9 +234,11 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
 
         {/* Stage */}
         <div
-          className="relative flex-1"
+          className="relative"
           style={{
             height: VB_H,
+            minHeight: VB_H,
+            flexShrink: 0,
             background:
               'radial-gradient(ellipse at center, rgba(14,165,233,0.07), transparent 70%), linear-gradient(180deg, rgba(11,18,32,0.5), rgba(2,6,23,0.7))',
             overflow: 'hidden',
