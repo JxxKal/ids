@@ -104,10 +104,10 @@ interface Props {
 const SEVERITIES = ['', 'critical', 'high', 'medium', 'low'];
 
 const ROW_SEVERITY: Record<string, string> = {
-  critical: 'border-l-2 border-l-red-500    bg-red-950/40',
-  high:     'border-l-2 border-l-red-600    bg-red-950/20',
-  medium:   'border-l-2 border-l-orange-500 bg-orange-950/20',
-  low:      'border-l-2 border-l-green-600  bg-green-950/20',
+  critical: 'cyjan-row-critical',
+  high:     'cyjan-row-high',
+  medium:   'cyjan-row-medium',
+  low:      'cyjan-row-low',
 };
 
 // ── Gruppierung ────────────────────────────────────────────────────────────────
@@ -275,9 +275,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
         {/* Gruppierungs-Toggle */}
         <button
           onClick={() => setGrouped(g => !g)}
-          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border font-mono ${
             grouped
-              ? 'bg-blue-900/60 text-blue-200 border-blue-700'
+              ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/50'
               : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
           }`}
           title="Gleiche Regel + Quell-IP zusammenfassen"
@@ -305,8 +305,8 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
         {grouped ? (
           /* ── Gruppierte Ansicht ─────────────────────────────── */
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 z-10">
-              <tr className="text-left text-slate-500">
+            <thead className="cyjan-table-head sticky top-0 z-10">
+              <tr className="text-left">
                 <th className="px-3 py-2">Letzte</th>
                 <th className="px-3 py-2">Severity</th>
                 <th className="px-3 py-2">Regel</th>
@@ -377,8 +377,8 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
         ) : (
           /* ── Einzelansicht ──────────────────────────────────── */
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-slate-900 border-b border-slate-800 z-10">
-              <tr className="text-left text-slate-500">
+            <thead className="cyjan-table-head sticky top-0 z-10">
+              <tr className="text-left">
                 <th className="px-3 py-2">Zeit</th>
                 <th className="px-3 py-2">Severity</th>
                 <th className="px-3 py-2">Regel</th>
