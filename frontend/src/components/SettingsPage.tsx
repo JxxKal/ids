@@ -223,15 +223,15 @@ function UserManagement() {
       {/* Benutzertabelle */}
       <div className="overflow-x-auto">
       <table className="w-full text-xs">
-        <thead className="border-b border-slate-800">
-          <tr className="text-left text-slate-500">
-            <th className="pb-2 pr-3">Benutzer</th>
-            <th className="pb-2 pr-3">E-Mail</th>
-            <th className="pb-2 pr-3">Rolle</th>
-            <th className="pb-2 pr-3">Quelle</th>
-            <th className="pb-2 pr-3">Letzter Login</th>
-            <th className="pb-2 pr-3">Aktiv</th>
-            <th className="pb-2"></th>
+        <thead className="cyjan-table-head">
+          <tr className="text-left">
+            <th>Benutzer</th>
+            <th>E-Mail</th>
+            <th>Rolle</th>
+            <th>Quelle</th>
+            <th>Letzter Login</th>
+            <th>Aktiv</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -589,7 +589,7 @@ function MLStatusDisplay() {
           </div>
           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
             <div
-              className="h-full bg-blue-600 rounded-full transition-all"
+              className="h-full bg-cyan-500 rounded-full transition-all"
               style={{ width: `${bootstrap.progress_pct}%` }}
             />
           </div>
@@ -666,7 +666,7 @@ function MLStatusDisplay() {
                   </div>
                   <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full ${isHigh ? 'bg-orange-600' : 'bg-blue-600'}`}
+                      className={`h-full rounded-full ${isHigh ? 'bg-orange-500' : 'bg-cyan-500'}`}
                       style={{ width: `${barW}%` }}
                     />
                   </div>
