@@ -6,10 +6,12 @@ import { HostsPage } from './components/HostsPage';
 import { LoginPage } from './components/LoginPage';
 import { NetworksPage } from './components/NetworksPage';
 import { SettingsPage } from './components/SettingsPage';
+import { SeverityBarsCard } from './components/SeverityBarsCard';
 import { Sidebar, type NavTab } from './components/Sidebar';
 import { TestsPage } from './components/TestsPage';
 import { ThreatGauge } from './components/ThreatGauge';
 import { TopBar } from './components/TopBar';
+import { TopProtocolsCard } from './components/TopProtocolsCard';
 import { useWebSocket } from './hooks/useWebSocket';
 import type { Alert, User } from './types';
 
@@ -148,10 +150,15 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
         {tab === 'dashboard' && (
           <div className="flex-1 overflow-hidden flex flex-col gap-4 p-5">
 
-            <div className="flex items-start gap-4 flex-wrap">
+            {/* KPI Row */}
+            <div className="flex items-stretch gap-4 flex-wrap">
               <ThreatGauge />
+              <SeverityBarsCard alerts={displayAlerts} showTest={showTest} />
+              <TopProtocolsCard alerts={displayAlerts} showTest={showTest} />
+            </div>
 
-              <div className="flex-1 min-w-[280px] flex items-center gap-3 flex-wrap">
+            {/* Toolbar */}
+            <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center rounded overflow-hidden border border-slate-800">
                   {TIME_WINDOWS.map(w => {
                     const isActive = timeWindow === w.id;
@@ -224,7 +231,6 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                     Snapshot · Schaltfläche erneut klicken zum Aktualisieren
                   </span>
                 )}
-              </div>
             </div>
 
             <div className="flex-1 min-h-0">
