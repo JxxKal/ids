@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 12px; background: #0b1120; }
+  .gauge-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .gauge {
+    background: #0f172a;
+    border: 1px solid #172033;
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .gauge .label { font-family: var(--cy-font-mono); font-size: 10px; color: #64748b; letter-spacing: 0.12em; text-transform: uppercase;}
+  .gauge .val { font-family: var(--cy-font-mono); font-size: 22px; font-weight: 700; }
+  .gauge .delta { font-family: var(--cy-font-mono); font-size: 10px; }
+  .gauge .bar { height: 3px; background: #1e293b; border-radius: 999px; overflow: hidden; }
+  .gauge .bar > div { height: 100%; border-radius: 999px; }
+  .delta.up { color: #86efac; }
+  .delta.down { color: #fb923c; }
+  .delta.flat { color: #64748b; }
+  .crit { color: #f87171; }
+  .warn { color: #fdba74; }
+  .ok { color: #86efac; }
+  .info { color: #7dd3fc; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Stat cards · dashboard KPIs</div>
+  <div class="gauge-row">
+    <div class="gauge">
+      <span class="label">Threat Level</span>
+      <span class="val crit">74</span>
+      <div class="bar"><div style="width:74%;background:#ef4444"></div></div>
+      <span class="delta up">▲ +18 · last 1h</span>
+    </div>
+    <div class="gauge">
+      <span class="label">Alerts / 1h</span>
+      <span class="val warn">312</span>
+      <div class="bar"><div style="width:48%;background:#f97316"></div></div>
+      <span class="delta flat">·  vs avg 280</span>
+    </div>
+    <div class="gauge">
+      <span class="label">Hosts online</span>
+      <span class="val info">87<span style="color:#475569;font-size:14px"> /  92</span></span>
+      <div class="bar"><div style="width:95%;background:#0ea5e9"></div></div>
+      <span class="delta down">▼ 5 unreachable</span>
+    </div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 10px; }
+  .shadow-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  .shadow-box {
+    aspect-ratio: 2 / 1;
+    background: #0f172a;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 12px;
+    font-family: var(--cy-font-mono);
+    font-size: 10px;
+    color: #94a3b8;
+  }
+  .s1 { border: 1px solid rgba(14,165,233,0.30); box-shadow: 0 0 20px rgba(14,165,233,0.05); }
+  .s2 { border: 1px solid rgba(14,165,233,0.60); box-shadow: 0 0 30px rgba(14,165,233,0.15); }
+  .s3 { border: 1px solid rgba(14,165,233,0.20); box-shadow: 0 0 60px rgba(14,165,233,0.12); }
+  .tag { color: #e0f2fe; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; }
+  .drop { box-shadow: 0 20px 40px -12px rgba(0,0,0,0.7); border: 1px solid #172033; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Shadows & Glow</div>
+  <div class="shadow-row">
+    <div class="shadow-box s1">
+      <span class="tag">rest</span>
+      <span>--cy-glow-border</span>
+    </div>
+    <div class="shadow-box s2">
+      <span class="tag" style="color:#bae6fd">hover</span>
+      <span>--cy-glow-border-hover</span>
+    </div>
+    <div class="shadow-box s3">
+      <span class="tag">hero halo</span>
+      <span>--cy-glow-hero</span>
+    </div>
+  </div>
+  <div class="shadow-row" style="margin-top:4px">
+    <div class="shadow-box drop">
+      <span class="tag">drop</span>
+      <span>--cy-shadow-lg</span>
+    </div>
+    <div class="shadow-box" style="background: linear-gradient(135deg,#0ea5e9,#0284c7); color:#e0f2fe; box-shadow: 0 0 30px rgba(14,165,233,0.30); border:none">
+      <span class="tag" style="color:#fff">CTA glow</span>
+      <span style="color:#bae6fd">--cy-glow-cta</span>
+    </div>
+    <div class="shadow-box" style="background:#020617;border:1px solid #0f172a;">
+      <span class="tag">dashboard</span>
+      <span>border + void · no halo</span>
+    </div>
+  </div>
+</div>
+</body></html>

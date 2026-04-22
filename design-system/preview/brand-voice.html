@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 20px 24px; gap: 12px; background: #020617; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .block {
+    background: #0f172a;
+    border: 1px solid #172033;
+    border-radius: 8px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .block h4 {
+    font-family: var(--cy-font-sans); font-size: 10px; color: #64748b;
+    letter-spacing: 0.18em; text-transform: uppercase; font-weight: 500;
+  }
+  .headline {
+    font-family: var(--cy-font-sans); font-weight: 800; font-size: 18px;
+    color: #e0f2fe; letter-spacing: -0.01em; line-height: 1.2;
+  }
+  .tone-q { font-family: var(--cy-font-sans); font-size: 11px; color: #475569; letter-spacing: 0.1em; text-transform: uppercase;}
+  .de { color: #bae6fd; }
+  .en { color: #cbd5e1; }
+  .sample { font-family: var(--cy-font-sans); font-size: 12px; line-height: 1.5; }
+  .mono { font-family: var(--cy-font-mono); font-size: 11px; color: #7dd3fc; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Voice & Language split</div>
+  <div class="row">
+    <div class="block">
+      <h4>Marketing · English</h4>
+      <div class="headline">Zero payload access. Zero blind spots.</div>
+      <div class="sample en">Rust-based sniffer captures traffic at line rate — headers only, no payload, no decryption.</div>
+      <div class="tone-q">voice: technical · declarative · no marketing fluff</div>
+    </div>
+    <div class="block">
+      <h4>Dashboard · German (domain terms English)</h4>
+      <div class="headline" style="font-size:16px">Gefilterte Alerts als CSV exportieren</div>
+      <div class="sample de">Keine <span class="mono">Alerts</span>. Tags durchsuchbar über das globale Suchfeld. Feedback: <span class="mono">True Positive</span> / <span class="mono">False Positive</span>.</div>
+      <div class="tone-q">ui: German · data nouns: English · protocols: always English</div>
+    </div>
+  </div>
+</div>
+</body></html>

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 22px 26px; gap: 10px; }
+  .spec { display: flex; align-items: baseline; gap: 14px; }
+  .spec .txt { flex: 1; color: var(--cy-fg-primary); line-height: 1.1; letter-spacing: -0.02em; font-weight: 800; }
+  .spec .meta2 { font-family: var(--cy-font-mono); font-size: 10px; color: #64748b; white-space: nowrap; }
+  .grad {
+    background: linear-gradient(135deg, #e0f2fe 0%, #7dd3fc 50%, #0ea5e9 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 0 30px rgba(14,165,233,0.40);
+  }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Display — Inter · tight tracking · gradient hero style</div>
+  <div class="spec">
+    <div class="txt grad" style="font-size:48px">Passive IDS</div>
+    <div class="meta2">72·48 / 900 / -2%</div>
+  </div>
+  <div class="spec">
+    <div class="txt" style="font-size:32px">Zero payload access.</div>
+    <div class="meta2">32 / 700</div>
+  </div>
+  <div class="spec">
+    <div class="txt" style="font-size:22px;color:#e0f2fe">Signature + ML anomaly engine</div>
+    <div class="meta2">22 / 700</div>
+  </div>
+  <div class="spec">
+    <div class="txt" style="font-size:16px;font-weight:600;color:#cbd5e1;letter-spacing:0">
+      Rust sniffer · Kafka bus · Isolation-Forest anomaly.
+    </div>
+    <div class="meta2">16 / 600</div>
+  </div>
+</div>
+</body></html>

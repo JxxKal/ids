@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>CYJAN — Login Hero Animation</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    --cy-slate-900:  #020617;
+    --cy-slate-800:  #0b1220;
+    --cy-slate-700:  #1e293b;
+    --cy-cyan-700:   #0e7490;
+    --cy-cyan-600:   #0891b2;
+    --cy-cyan-500:   #06b6d4;
+    --cy-cyan-400:   #22d3ee;
+    --cy-cyan-300:   #67e8f9;
+    --cy-cyan-200:   #a5f3fc;
+  }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--cy-slate-900);
+    color: var(--cy-cyan-200);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  /* Hex-grid background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      radial-gradient(ellipse at center, rgba(14,165,233,0.12), transparent 60%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='52' viewBox='0 0 60 52'><polygon points='30,2 58,18 58,34 30,50 2,34 2,18' fill='none' stroke='%23164e63' stroke-width='0.6' stroke-opacity='0.35'/></svg>");
+    background-size: auto, 60px 52px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .stage {
+    position: relative;
+    width: 520px; height: 520px;
+    z-index: 1;
+  }
+  .globe {
+    position: absolute; inset: 0;
+    z-index: 1;
+  }
+  .shield {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .shield svg {
+    width: 260px; height: auto;
+    filter: drop-shadow(0 0 40px rgba(34,211,238,0.35));
+    animation: breathe 6s ease-in-out infinite;
+  }
+  @keyframes breathe {
+    0%, 100% { filter: drop-shadow(0 0 28px rgba(34,211,238,0.28)); }
+    50%      { filter: drop-shadow(0 0 56px rgba(34,211,238,0.55)); }
+  }
+  .tagline {
+    position: absolute;
+    bottom: -18px; left: 0; right: 0;
+    text-align: center;
+    font-size: 10px;
+    letter-spacing: 6px;
+    color: var(--cy-cyan-400);
+    opacity: 0.8;
+    z-index: 3;
+  }
+  /* Optional download / embed helper UI */
+  .helper {
+    position: fixed; top: 20px; right: 20px;
+    z-index: 10;
+    font-size: 11px;
+    background: rgba(2,6,23,0.8);
+    border: 1px solid rgba(34,211,238,0.2);
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: var(--cy-cyan-300);
+    max-width: 260px;
+    line-height: 1.5;
+  }
+  .helper b { color: var(--cy-cyan-200); }
+  .helper code { color: var(--cy-cyan-400); }
+</style>
+</head>
+<body>
+
+<div class="helper">
+  <b>CYJAN Login Hero</b><br>
+  Kopiere <code>&lt;div class="stage"&gt;…&lt;/div&gt;</code> + den <code>&lt;style&gt;</code> + das <code>&lt;script&gt;</code> unten in deine Login-Seite. Alles self-contained, kein Build, keine Abhängigkeiten.
+</div>
+
+<div class="stage">
+  <svg class="globe" viewBox="0 0 520 520" id="globe" aria-hidden="true"></svg>
+
+  <div class="shield">
+    <!-- Pentagon shield (ohne Wordmark – der Login-Header darunter übernimmt das) -->
+    <svg viewBox="0 0 280 320" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="shieldGlow" cx="50%" cy="55%" r="55%">
+          <stop offset="0%"  stop-color="#22d3ee" stop-opacity="0.22"/>
+          <stop offset="60%" stop-color="#06b6d4" stop-opacity="0.06"/>
+          <stop offset="100%" stop-color="#061a2e" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="shieldStroke" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"  stop-color="#67e8f9"/>
+          <stop offset="100%" stop-color="#0891b2"/>
+        </linearGradient>
+      </defs>
+
+      <!-- outer halo -->
+      <path d="M140 14 L252 64 L252 186 Q252 270 140 312 Q28 270 28 186 L28 64 Z"
+            fill="url(#shieldGlow)" stroke="#06b6d4" stroke-width="1.5" opacity="0.55"/>
+
+      <!-- main shield -->
+      <path d="M140 24 L244 70 L244 184 Q244 258 140 300 Q36 258 36 184 L36 70 Z"
+            fill="#061a2e" stroke="url(#shieldStroke)" stroke-width="2.2"/>
+
+      <!-- inner shield -->
+      <path d="M140 36 L234 78 L234 182 Q234 248 140 288 Q46 248 46 182 L46 78 Z"
+            fill="none" stroke="#22d3ee" stroke-width="1" opacity="0.45"/>
+
+      <!-- inner hexagon cluster (static) -->
+      <g stroke="#22d3ee" stroke-width="0.9" fill="none" opacity="0.28">
+        <polygon points="120,122 140,110 160,122 160,146 140,158 120,146"/>
+        <polygon points="100,158 120,146 140,158 140,182 120,194 100,182"/>
+        <polygon points="140,158 160,146 180,158 180,182 160,194 140,182"/>
+        <polygon points="120,194 140,182 160,194 160,218 140,230 120,218"/>
+      </g>
+      <polygon points="140,158 160,146 180,158 180,182 160,194 140,182"
+               fill="#06b6d4" opacity="0.25"/>
+
+      <!-- central eye -->
+      <ellipse cx="140" cy="176" rx="44" ry="24" fill="none" stroke="#22d3ee" stroke-width="1.8" opacity="0.9"/>
+      <circle cx="140" cy="176" r="16" fill="none" stroke="#22d3ee" stroke-width="1.4" opacity="0.85"/>
+      <circle cx="140" cy="176" r="9"  fill="none" stroke="#67e8f9" stroke-width="1.1" opacity="0.7"/>
+      <circle cx="140" cy="176" r="4"  fill="#22d3ee"/>
+      <circle cx="140" cy="176" r="1.8" fill="#e0f9ff"/>
+
+      <!-- scan ticks -->
+      <g stroke="#22d3ee" stroke-width="1.2" opacity="0.65">
+        <line x1="70"  y1="176" x2="92"  y2="176"/>
+        <line x1="188" y1="176" x2="210" y2="176"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="tagline">PROTECT · DETECT · RESPOND</div>
+</div>
+
+<script>
+// ---- Network Globe (vanilla, no React) --------------------------------------
+(function() {
+  const svg = document.getElementById('globe');
+  const SIZE = 520;
+  const cx = SIZE/2, cy = SIZE/2;
+  const R  = SIZE/2 - 60;
+
+  // Hosts around the OT network — denser mesh for login hero
+  const HOSTS = [
+    { id:'plc-01', lat: 52, lon:  13, kind:'plc',   label:'PLC·01' },
+    { id:'hmi-02', lat: 48, lon:   9, kind:'hmi',   label:'HMI·02' },
+    { id:'scada',  lat: 40, lon:  -3, kind:'scada', label:'SCADA'  },
+    { id:'rtu-07', lat: 18, lon: -74, kind:'rtu',   label:'RTU·07' },
+    { id:'eng-11', lat: 30, lon: 139, kind:'eng',   label:'ENG·11' },
+    { id:'plc-12', lat:  1, lon: 103, kind:'plc',   label:'PLC·12' },
+    { id:'rtu-19', lat:-23, lon: -46, kind:'rtu',   label:'RTU·19' },
+    { id:'hmi-22', lat:-33, lon: 151, kind:'hmi',   label:'HMI·22' },
+    { id:'ot-gw',  lat: 55, lon: -37, kind:'gw',    label:'OT·gw'  },
+    { id:'plc-31', lat: 60, lon:  25, kind:'plc',   label:'PLC·31' },
+    { id:'rtu-33', lat: 44, lon:  37, kind:'rtu',   label:'RTU·33' },
+    { id:'eng-41', lat: 22, lon:  78, kind:'eng',   label:'ENG·41' },
+    { id:'hmi-52', lat:-12, lon:  28, kind:'hmi',   label:'HMI·52' },
+    { id:'plc-63', lat:-34, lon: -64, kind:'plc',   label:'PLC·63' },
+    { id:'rtu-71', lat: 37, lon:-122, kind:'rtu',   label:'RTU·71' },
+    { id:'scada2', lat:  6, lon:  -2, kind:'scada', label:'SCADA·2'},
+    { id:'gw-edge',lat: 64, lon: -21, kind:'gw',    label:'GW·edge'},
+    { id:'eng-82', lat: 41, lon: 116, kind:'eng',   label:'ENG·82' },
+    { id:'hmi-91', lat:-27, lon: 133, kind:'hmi',   label:'HMI·91' },
+    { id:'plc-14', lat: 15, lon:  44, kind:'plc',   label:'PLC·14' },
+  ];
+
+  const kindColor = {
+    plc:'#38bdf8', hmi:'#7dd3fc', scada:'#0ea5e9',
+    rtu:'#38bdf8', eng:'#7dd3fc', gw:'#94a3b8',
+  };
+  const protoColor = { TCP:'#38bdf8', UDP:'#fb923c', ICMP:'#a78bfa' };
+  const PROTOS = ['TCP','TCP','TCP','UDP','UDP','ICMP'];
+
+  // state
+  let rotation = 0;
+  let frame = 0;
+  let conns = [];
+  let pulses = [];
+  let lastConnSpawn = 0;
+
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs) => {
+    const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  };
+
+  // Static defs + background layers
+  svg.innerHTML = `
+    <defs>
+      <radialGradient id="globeFill" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"  stop-color="rgba(14,165,233,0.08)"/>
+        <stop offset="70%" stop-color="rgba(14,165,233,0.02)"/>
+        <stop offset="100%" stop-color="rgba(2,6,23,0)"/>
+      </radialGradient>
+      <radialGradient id="globeGlow" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"  stop-color="rgba(14,165,233,0)"/>
+        <stop offset="85%" stop-color="rgba(14,165,233,0.10)"/>
+        <stop offset="100%" stop-color="rgba(14,165,233,0)"/>
+      </radialGradient>
+    </defs>
+    <circle cx="${cx}" cy="${cy}" r="${R+34}" fill="url(#globeGlow)"/>
+    <circle cx="${cx}" cy="${cy}" r="${R}" fill="url(#globeFill)" stroke="rgba(14,165,233,0.3)" stroke-width="1"/>
+    <g id="lats"></g>
+    <g id="mers"></g>
+    <g id="pulses"></g>
+    <g id="conns"></g>
+    <g id="hosts"></g>
+  `;
+
+  const gLats   = svg.querySelector('#lats');
+  const gMers   = svg.querySelector('#mers');
+  const gPulses = svg.querySelector('#pulses');
+  const gConns  = svg.querySelector('#conns');
+  const gHosts  = svg.querySelector('#hosts');
+
+  // Latitude rings (static)
+  [-60,-30,0,30,60].forEach(lat => {
+    const latRad = lat * Math.PI/180;
+    const ry = Math.abs(R * Math.cos(latRad)) * 0.2;
+    const rx = R * Math.cos(latRad);
+    const yOff = -R * Math.sin(latRad);
+    gLats.appendChild(el('ellipse', {
+      cx, cy: cy + yOff, rx, ry,
+      fill: 'none', stroke: 'rgba(56,189,248,0.18)', 'stroke-width': '0.6',
+    }));
+  });
+
+  const project = (lat, lon) => {
+    const rotLon = lon + rotation;
+    const latR = lat * Math.PI/180;
+    const lonR = rotLon * Math.PI/180;
+    return {
+      x: Math.cos(latR) * Math.sin(lonR),
+      y: -Math.sin(latR),
+      z: Math.cos(latR) * Math.cos(lonR),
+    };
+  };
+
+  function renderMeridians() {
+    gMers.innerHTML = '';
+    for (let lon=0; lon<180; lon+=30) {
+      const rotLon = (lon + rotation) % 180;
+      const rad = rotLon * Math.PI/180;
+      const rx = Math.abs(R * Math.sin(rad));
+      gMers.appendChild(el('ellipse', {
+        cx, cy, rx, ry: R,
+        fill: 'none',
+        stroke: 'rgba(56,189,248,0.12)',
+        'stroke-width': '0.5',
+      }));
+    }
+  }
+
+  function renderPulses() {
+    gPulses.innerHTML = '';
+    const now = performance.now();
+    pulses = pulses.filter(p => now - p.born < 2000);
+    pulses.forEach(p => {
+      const age = (now - p.born) / 2000;
+      gPulses.appendChild(el('circle', {
+        cx, cy, r: R * age,
+        fill: 'none',
+        stroke: 'rgba(34,211,238,0.25)',
+        'stroke-width': 1.5 * (1 - age),
+        opacity: 1 - age,
+      }));
+    });
+  }
+
+  function renderConns() {
+    gConns.innerHTML = '';
+    const now = performance.now();
+    conns = conns.filter(c => now - c.born < c.ttl);
+
+    conns.forEach(c => {
+      const pa = project(c.a.lat, c.a.lon);
+      const pb = project(c.b.lat, c.b.lon);
+      if (pa.z < -0.3 && pb.z < -0.3) return;
+
+      const ax = cx + pa.x * R, ay = cy + pa.y * R;
+      const bx = cx + pb.x * R, by = cy + pb.y * R;
+      const mx = (ax+bx)/2, my = (ay+by)/2;
+      const dx = bx-ax, dy = by-ay;
+      const dist = Math.hypot(dx, dy) || 1;
+      const lift = Math.min(dist * 0.3, 70);
+      const cpX = mx + (-dy/dist) * lift * 0.5;
+      const cpY = my + ( dx/dist) * lift * 0.5 - lift * 0.3;
+
+      const age = (now - c.born) / c.ttl;
+      const fade = age < 0.2 ? age/0.2 : age > 0.8 ? (1-age)/0.2 : 1;
+      const stroke = c.threat ? '#ef4444' : protoColor[c.proto];
+
+      const g = el('g', { opacity: fade });
+      g.appendChild(el('path', {
+        d: `M ${ax} ${ay} Q ${cpX} ${cpY} ${bx} ${by}`,
+        fill: 'none', stroke,
+        'stroke-opacity': c.threat ? 0.9 : 0.55,
+        'stroke-width': c.threat ? 1.8 : 0.9,
+        'stroke-dasharray': c.threat ? '4 3' : 'none',
+      }));
+      // travelling packet
+      const t = (age * 2) % 1;
+      const px = (1-t)*(1-t)*ax + 2*(1-t)*t*cpX + t*t*bx;
+      const py = (1-t)*(1-t)*ay + 2*(1-t)*t*cpY + t*t*by;
+      const dot = el('circle', {
+        cx: px, cy: py, r: c.threat ? 3 : 2, fill: stroke,
+      });
+      dot.setAttribute('style', `filter: drop-shadow(0 0 6px ${stroke})`);
+      g.appendChild(dot);
+      gConns.appendChild(g);
+    });
+  }
+
+  function renderHosts() {
+    gHosts.innerHTML = '';
+    HOSTS.forEach(h => {
+      const p = project(h.lat, h.lon);
+      if (p.z < -0.3) return;
+      const x = cx + p.x * R, y = cy + p.y * R;
+      const opacity = 0.4 + Math.max(0, p.z) * 0.6;
+      const color = kindColor[h.kind] || '#94a3b8';
+      const r = 3;
+      const g = el('g', { opacity });
+      const dot = el('circle', {
+        cx: x, cy: y, r, fill: color,
+      });
+      dot.setAttribute('style', `filter: drop-shadow(0 0 ${r*2}px ${color})`);
+      g.appendChild(dot);
+      if (p.z > 0.7) {
+        g.appendChild(el('text', {
+          x: x + 8, y: y + 3,
+          fill: '#7dd3fc',
+          'font-family': 'JetBrains Mono, monospace',
+          'font-size': '9',
+          opacity: p.z,
+        })).textContent = h.label;
+      }
+      gHosts.appendChild(g);
+    });
+  }
+
+  function spawnConnection() {
+    const a = HOSTS[Math.floor(Math.random()*HOSTS.length)];
+    let b = HOSTS[Math.floor(Math.random()*HOSTS.length)];
+    while (b.id === a.id) b = HOSTS[Math.floor(Math.random()*HOSTS.length)];
+    conns.push({
+      a, b,
+      proto: PROTOS[Math.floor(Math.random()*PROTOS.length)],
+      threat: Math.random() > 0.9,
+      born: performance.now(),
+      ttl: 2400 + Math.random() * 2400,
+    });
+  }
+
+  function tick(now) {
+    frame++;
+    rotation = (rotation + 0.15) % 360;
+
+    if (now - lastConnSpawn > 180) {
+      lastConnSpawn = now;
+      // keep a dense mesh alive — up to ~18 concurrent connections
+      const target = 18;
+      const deficit = target - conns.length;
+      if (deficit > 0) {
+        const spawnN = Math.min(deficit, 3);
+        for (let i = 0; i < spawnN; i++) spawnConnection();
+      }
+      if (Math.random() > 0.55) pulses.push({ born: now });
+    }
+
+    renderMeridians();
+    renderPulses();
+    renderConns();
+    renderHosts();
+
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+
+</body>
+</html>

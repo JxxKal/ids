@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 24px; gap: 18px; }
+  .swatch-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  .sw {
+    aspect-ratio: 1 / 1;
+    border-radius: 8px;
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    padding: 8px;
+    font-family: var(--cy-font-mono);
+    font-size: 9px;
+    color: rgba(255,255,255,0.55);
+    letter-spacing: 0.04em;
+  }
+  .sw .hex { position: absolute; top: 6px; left: 8px; font-size: 10px; color: rgba(255,255,255,0.85); font-weight: 500; }
+  .sw.dark .hex, .sw.dark { color: rgba(255,255,255,0.55); }
+  .sw.dark .hex { color: rgba(255,255,255,0.9); }
+  .sw.dark { color: rgba(255,255,255,0.45); }
+  .brand-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .sw-lg {
+    aspect-ratio: 2.4 / 1;
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    font-family: var(--cy-font-mono);
+  }
+  .sw-lg .name { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+  .sw-lg .hex  { font-size: 10px; opacity: 0.7; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div>
+    <div class="label-eyebrow">Brand</div>
+    <div class="brand-row" style="margin-top:8px">
+      <div class="sw-lg" style="background:#06b6d4;color:#041418"><span class="name">Cyan 500</span><span class="hex">#06b6d4</span></div>
+      <div class="sw-lg" style="background:#0ea5e9;color:#041418"><span class="name">Sky 500 ★</span><span class="hex">#0ea5e9</span></div>
+      <div class="sw-lg" style="background:#38bdf8;color:#041418"><span class="name">Sky 400</span><span class="hex">#38bdf8</span></div>
+      <div class="sw-lg" style="background:#7dd3fc;color:#041418"><span class="name">Sky 300</span><span class="hex">#7dd3fc</span></div>
+    </div>
+  </div>
+  <div>
+    <div class="label-eyebrow">Full scale — sky</div>
+    <div class="swatch-row" style="margin-top:8px">
+      <div class="sw" style="background:#e0f2fe;color:#0c4a6e"><span class="hex">100</span>e0f2fe</div>
+      <div class="sw" style="background:#bae6fd;color:#0c4a6e"><span class="hex">200</span>bae6fd</div>
+      <div class="sw" style="background:#7dd3fc;color:#0c4a6e"><span class="hex">300</span>7dd3fc</div>
+      <div class="sw dark" style="background:#38bdf8"><span class="hex">400</span>38bdf8</div>
+      <div class="sw dark" style="background:#0ea5e9"><span class="hex">500</span>0ea5e9</div>
+      <div class="sw dark" style="background:#0284c7"><span class="hex">600</span>0284c7</div>
+    </div>
+  </div>
+</div>
+</body></html>

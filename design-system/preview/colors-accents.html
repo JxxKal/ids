@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><link rel="stylesheet" href="_base.css">
+<style>
+  .card-frame { padding: 24px; gap: 14px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .block {
+    padding: 14px 16px;
+    border-radius: 8px;
+    border: 1px solid #172033;
+    background: #0f172a;
+    font-family: var(--cy-font-mono);
+    font-size: 12px;
+  }
+  .block .title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.16em; margin-bottom: 8px; }
+  .block .hex { display: block; color: rgba(255,255,255,0.55); font-size: 10px; margin-top: 2px; }
+  .chip-ot { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-family: var(--cy-font-mono); border:1px solid rgba(249,115,22,0.4); background: rgba(249,115,22,0.15); color:#fb923c; letter-spacing: 0.04em; }
+  .chip-irma { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-family: var(--cy-font-mono); border:1px solid rgba(139,92,246,0.4); background: rgba(139,92,246,0.25); color:#c4b5fd; letter-spacing: 0.04em; }
+  .chip-tcp { color:#38bdf8; }
+  .chip-udp { color:#fb923c; }
+  .chip-icmp{ color:#a78bfa; }
+</style>
+</head><body>
+<div class="card-frame">
+  <div class="label-eyebrow">Accent colors</div>
+  <div class="row2">
+    <div class="block" style="border-color: rgba(249,115,22,0.3)">
+      <div class="title" style="color:#fb923c">OT / ICS</div>
+      <span class="chip-ot">Modbus TCP</span>
+      <span class="chip-ot" style="margin-left:4px">DNP3</span>
+      <span class="chip-ot" style="margin-left:4px">S7</span>
+      <span class="hex">#f97316 · orange-500 — ONLY for OT protocol tags & medium severity</span>
+    </div>
+    <div class="block" style="border-color: rgba(139,92,246,0.3)">
+      <div class="title" style="color:#a78bfa">External / IRMA</div>
+      <span class="chip-irma">IRMA</span>
+      <span class="chip-irma" style="margin-left:4px">source=external</span>
+      <span class="hex">#8b5cf6 · violet-500 — ONLY for external-bridge alerts</span>
+    </div>
+  </div>
+  <div class="block" style="margin-top:2px">
+    <div class="title" style="color:#94a3b8">Protocol accents · connection graph</div>
+    <div style="display:flex;gap:18px;font-size:13px;letter-spacing:0.04em">
+      <span class="chip-tcp">● TCP  #38bdf8</span>
+      <span class="chip-udp">● UDP  #fb923c</span>
+      <span class="chip-icmp">● ICMP #a78bfa</span>
+    </div>
+  </div>
+</div>
+</body></html>
