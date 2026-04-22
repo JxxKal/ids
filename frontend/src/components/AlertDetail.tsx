@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { pcapUrl, setFeedback } from '../api';
 import type { Alert } from '../types';
-import { ConnectionGraph } from './ConnectionGraph';
+import { AlertFlowPopup } from './AlertFlowPopup';
 import { SeverityBadge } from './SeverityBadge';
 import { TrustBadge } from './TrustBadge';
 
@@ -167,7 +167,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
         {/* Actions */}
         <div className="flex items-center gap-2 px-5 py-4 border-t border-slate-800 flex-wrap">
           {showGraph && (
-            <ConnectionGraph alert={alert} onClose={() => setShowGraph(false)} />
+            <AlertFlowPopup alert={alert} onClose={() => setShowGraph(false)} />
           )}
           {alert.src_ip && alert.dst_ip && (
             <button

@@ -123,6 +123,11 @@
   50%      { opacity: 0.4; }
 }
 
+@keyframes cyjan-flow-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(1.3); }
+}
+
 .cyjan-sidebar {
   width: 210px;
   flex-shrink: 0;
