@@ -1,0 +1,992 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>CYJAN Sentry Mode — Broschüre</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cy-slate-950:#020617; --cy-slate-900:#0b1220; --cy-slate-850:#0f1a2d;
+    --cy-slate-800:#1e293b; --cy-slate-700:#334155; --cy-slate-600:#475569;
+    --cy-slate-500:#64748b; --cy-slate-400:#94a3b8; --cy-slate-300:#cbd5e1;
+    --cy-slate-200:#e2e8f0; --cy-slate-100:#f1f5f9;
+    --cy-cyan-700:#0e7490; --cy-cyan-600:#0891b2; --cy-cyan-500:#06b6d4;
+    --cy-cyan-400:#22d3ee; --cy-cyan-300:#67e8f9; --cy-cyan-200:#a5f3fc;
+    --cy-ot:#fb923c;
+    --cy-critical:#ef4444; --cy-high:#f97316; --cy-medium:#eab308;
+    --cy-low:#22c55e;
+    --font-sans:'Inter',system-ui,-apple-system,sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: #0a0f1a;
+    font-family: var(--font-sans);
+    color: var(--cy-slate-200);
+    padding: 28px 0;
+  }
+
+  /* ========= PAGE (A4) ========= */
+  .page {
+    width: 210mm; height: 297mm;
+    margin: 0 auto 24px;
+    background: var(--cy-slate-950);
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(34,211,238,0.06);
+    color: var(--cy-slate-200);
+  }
+  /* global hex-grid watermark */
+  .page::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='52' viewBox='0 0 60 52'><polygon points='30,2 58,18 58,34 30,50 2,34 2,18' fill='none' stroke='%23164e63' stroke-width='0.7' stroke-opacity='0.35'/></svg>");
+    opacity: 0.32;
+    pointer-events: none;
+  }
+  .page > * { position: relative; z-index: 1; }
+
+  /* ========= HEADER BAR (top of every content page) ========= */
+  .page-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10mm 16mm 6mm;
+    border-bottom: 1px solid rgba(34,211,238,0.18);
+  }
+  .page-head .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    letter-spacing: 3px; color: var(--cy-cyan-300); text-transform: uppercase;
+  }
+  .page-head .brand svg { width: 24px; height: 28px; }
+  .page-head .section {
+    font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: 2px; color: var(--cy-slate-500); text-transform: uppercase;
+  }
+  .page-head .section b { color: var(--cy-cyan-400); font-weight: 600; }
+
+  .page-foot {
+    position: absolute; left: 16mm; right: 16mm; bottom: 10mm;
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: 1.5px; color: var(--cy-slate-500);
+    padding-top: 8px;
+    border-top: 1px solid rgba(148,163,184,0.1);
+  }
+  .page-foot .right { color: var(--cy-cyan-400); }
+
+  /* ========= PAGE 1: COVER ========= */
+  .cover {
+    padding: 0;
+  }
+  .cover::before { opacity: 0.25; }
+  .cover-inner {
+    padding: 22mm 16mm 20mm;
+    height: 100%;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  .cover .corner-tl {
+    position: absolute; top: 14mm; left: 14mm;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 3px;
+    color: var(--cy-cyan-300); text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .cover .corner-tr {
+    position: absolute; top: 14mm; right: 14mm;
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 2.5px;
+    color: var(--cy-slate-500); text-transform: uppercase;
+  }
+  .cover-globe {
+    position: absolute;
+    top: 32mm; left: 50%;
+    transform: translateX(-50%);
+    width: 120mm; height: 120mm;
+    opacity: 0.55;
+    filter: blur(0.2px);
+  }
+  .cover-logo {
+    position: absolute;
+    top: 50mm; left: 50%;
+    transform: translateX(-50%);
+    width: 84mm;
+    filter: drop-shadow(0 0 30px rgba(34,211,238,0.45));
+  }
+  .cover-title-block {
+    position: absolute;
+    bottom: 42mm; left: 16mm; right: 16mm;
+    text-align: left;
+  }
+  .cover-eyebrow {
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 4px; color: var(--cy-cyan-400);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .cover-eyebrow::before, .cover-eyebrow::after {
+    content: ''; height: 1px; background: rgba(34,211,238,0.4);
+    flex: 0 0 24px;
+  }
+  .cover-eyebrow::after { flex: 1; }
+  .cover-title {
+    font-family: var(--font-sans);
+    font-size: 42pt;
+    line-height: 1.02;
+    font-weight: 900;
+    letter-spacing: -1.5px;
+    color: var(--cy-slate-100);
+    margin: 0 0 14px 0;
+  }
+  .cover-title .cyan {
+    background: linear-gradient(135deg, #a5f3fc 0%, #22d3ee 45%, #0891b2 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .cover-sub {
+    font-family: var(--font-sans); font-size: 13pt; line-height: 1.4;
+    color: var(--cy-slate-300); font-weight: 500;
+    max-width: 140mm;
+    margin-bottom: 18px;
+  }
+  .cover-claim {
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--cy-cyan-300);
+    letter-spacing: 3px; text-transform: uppercase;
+    display: flex; gap: 14px; align-items: center;
+  }
+  .cover-claim span { color: var(--cy-cyan-400); font-weight: 600; }
+  .cover-claim .dot {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--cy-cyan-400);
+  }
+  .cover-bottom-strip {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 14mm;
+    background: linear-gradient(90deg, var(--cy-cyan-700) 0%, var(--cy-cyan-500) 50%, transparent 100%);
+    opacity: 0.16;
+  }
+  .cover-bottom-strip::after {
+    content: '';
+    position: absolute; left: 0; right: 0; top: 0;
+    height: 1px;
+    background: linear-gradient(90deg, var(--cy-cyan-400), transparent);
+  }
+  .cover-bottom-label {
+    position: absolute;
+    bottom: 16mm; right: 16mm;
+    font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: 3px; color: var(--cy-cyan-300);
+    text-transform: uppercase;
+  }
+
+  /* ========= CONTENT PAGE ========= */
+  .page-body {
+    padding: 6mm 16mm 16mm;
+  }
+  .eyebrow {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: 3px; color: var(--cy-cyan-400);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .eyebrow::before {
+    content: ''; width: 16px; height: 1px; background: var(--cy-cyan-500);
+  }
+  h1.page-title {
+    font-size: 20pt; line-height: 1.12; font-weight: 800;
+    letter-spacing: -0.4px;
+    color: var(--cy-slate-100);
+    margin: 0 0 14px 0;
+  }
+  h1.page-title .cyan { color: var(--cy-cyan-300); }
+  .intro-para {
+    font-size: 10.5pt; line-height: 1.5;
+    color: var(--cy-slate-300);
+    max-width: 170mm; margin-bottom: 6mm;
+  }
+
+  /* Feature grid */
+  .features-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5mm 6mm;
+    margin-bottom: 5mm;
+  }
+  .feat {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 4px 0;
+    font-size: 9pt; line-height: 1.3;
+    color: var(--cy-slate-200);
+    border-bottom: 1px solid rgba(148,163,184,0.08);
+  }
+  .feat-check {
+    flex: 0 0 14px; width: 14px; height: 14px; margin-top: 2px;
+    border: 1px solid var(--cy-cyan-500);
+    border-radius: 2px;
+    position: relative;
+    background: rgba(34,211,238,0.08);
+  }
+  .feat-check::after {
+    content: ''; position: absolute; left: 3px; top: 0px;
+    width: 6px; height: 10px;
+    border-right: 1.6px solid var(--cy-cyan-300);
+    border-bottom: 1.6px solid var(--cy-cyan-300);
+    transform: rotate(45deg);
+  }
+
+  /* Core functions — 3 columns with heading bar */
+  .section-head {
+    display: flex; align-items: baseline; gap: 12px;
+    margin: 3mm 0 2.5mm;
+    padding-bottom: 5px;
+    border-bottom: 1px solid rgba(34,211,238,0.2);
+  }
+  .section-head .num {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 2px;
+    color: var(--cy-cyan-500);
+    padding: 2px 6px; border: 1px solid var(--cy-cyan-600);
+    border-radius: 2px;
+  }
+  .section-head h2 {
+    margin: 0; font-size: 13pt; font-weight: 700;
+    color: var(--cy-slate-100);
+    letter-spacing: -0.2px;
+  }
+
+  .core-grid {
+    display: grid; grid-template-columns: 1fr 1fr 1fr;
+    gap: 4mm;
+  }
+  .core-card {
+    padding: 4mm;
+    border: 1px solid rgba(34,211,238,0.18);
+    border-top: 2px solid var(--cy-cyan-500);
+    background: linear-gradient(180deg, rgba(15,26,45,0.75), rgba(11,18,32,0.5));
+    border-radius: 2px;
+    display: flex; flex-direction: column;
+  }
+  .core-card h3 {
+    font-size: 10.5pt; font-weight: 700; margin: 0 0 2mm;
+    color: var(--cy-cyan-300);
+    letter-spacing: -0.1px;
+  }
+  .core-card .cat {
+    font-family: var(--font-mono); font-size: 8px;
+    letter-spacing: 2.5px; color: var(--cy-slate-500);
+    text-transform: uppercase;
+    margin-bottom: 1.5mm;
+  }
+  .core-card ul {
+    margin: 0; padding: 0; list-style: none;
+  }
+  .core-card li {
+    font-size: 8.5pt; line-height: 1.4;
+    color: var(--cy-slate-300);
+    padding: 4px 0 4px 12px;
+    position: relative;
+    border-top: 1px solid rgba(148,163,184,0.08);
+  }
+  .core-card li:first-child { border-top: none; padding-top: 0; }
+  .core-card li::before {
+    content: ''; position: absolute; left: 2px; top: 11px;
+    width: 6px; height: 1px;
+    background: var(--cy-cyan-500);
+  }
+  .core-card li:first-child::before { top: 6px; }
+
+  /* Deployment sectors */
+  .sectors-strip {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    margin-top: 3mm;
+    border: 1px solid rgba(34,211,238,0.18);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .sector {
+    padding: 3mm 3mm;
+    text-align: center;
+    border-right: 1px solid rgba(34,211,238,0.14);
+    background: rgba(15,26,45,0.5);
+  }
+  .sector:last-child { border-right: none; }
+  .sector .icon {
+    display: block; margin: 0 auto 1.5mm;
+    width: 24px; height: 24px; color: var(--cy-cyan-400);
+  }
+  .sector .name {
+    font-family: var(--font-mono); font-size: 9pt;
+    color: var(--cy-slate-100);
+    letter-spacing: 0.3px;
+    font-weight: 600;
+  }
+
+  /* ========= SPECS TABLE (page 3) ========= */
+  .specs-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 4mm;
+    font-size: 9pt;
+  }
+  .specs-table tr {
+    border-bottom: 1px solid rgba(148,163,184,0.1);
+  }
+  .specs-table tr:nth-child(even) {
+    background: rgba(15,26,45,0.3);
+  }
+  .specs-table th {
+    text-align: left;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 8.5pt; letter-spacing: 1.5px;
+    font-weight: 600;
+    color: var(--cy-cyan-300);
+    text-transform: uppercase;
+    width: 60mm;
+    border-right: 1px solid rgba(34,211,238,0.15);
+    vertical-align: top;
+  }
+  .specs-table td {
+    padding: 8px 10px;
+    color: var(--cy-slate-200);
+    font-family: var(--font-mono);
+    font-size: 8.5pt;
+    line-height: 1.5;
+  }
+  .specs-table td .muted { color: var(--cy-slate-400); }
+
+  /* Diagram for page 3 */
+  .spec-diagram {
+    margin-top: 5mm;
+    padding: 6mm;
+    border: 1px solid rgba(34,211,238,0.16);
+    background: linear-gradient(180deg, rgba(15,26,45,0.6), rgba(11,18,32,0.3));
+    border-radius: 2px;
+    display: grid;
+    grid-template-columns: 46mm 1fr;
+    gap: 6mm;
+    align-items: center;
+  }
+  .spec-diagram svg { width: 100%; height: auto; }
+  .spec-diagram .callouts {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2mm 4mm;
+    font-family: var(--font-mono); font-size: 8pt;
+  }
+  .callout { color: var(--cy-slate-300); }
+  .callout b { color: var(--cy-cyan-300); font-weight: 600; display: block; }
+
+  /* ========= PAGE 4: ORDER ========= */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8mm;
+    margin-top: 5mm;
+  }
+  .list-plain {
+    list-style: none; margin: 0; padding: 0;
+  }
+  .list-plain li {
+    font-size: 9.5pt; line-height: 1.5;
+    color: var(--cy-slate-200);
+    padding: 6px 0 6px 16px;
+    position: relative;
+    border-bottom: 1px solid rgba(148,163,184,0.08);
+  }
+  .list-plain li::before {
+    content: '▸';
+    position: absolute; left: 0; top: 6px;
+    color: var(--cy-cyan-400);
+    font-size: 11pt;
+  }
+  .list-plain li b { color: var(--cy-slate-100); font-weight: 600; }
+
+  .sku-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 3mm;
+    margin-top: 2mm;
+  }
+  .sku {
+    display: grid;
+    grid-template-columns: 50mm 1fr auto;
+    gap: 6mm;
+    align-items: center;
+    padding: 5mm 6mm;
+    border: 1px solid rgba(34,211,238,0.22);
+    border-left: 3px solid var(--cy-cyan-500);
+    background: linear-gradient(90deg, rgba(14,165,233,0.06), rgba(15,26,45,0.4));
+    border-radius: 2px;
+  }
+  .sku .code {
+    font-family: var(--font-mono); font-weight: 700;
+    font-size: 12pt; color: var(--cy-slate-100);
+    letter-spacing: 0.5px;
+  }
+  .sku .desc {
+    font-size: 9.5pt; color: var(--cy-slate-300);
+  }
+  .sku .scale {
+    font-family: var(--font-mono); font-size: 11pt;
+    color: var(--cy-cyan-300); font-weight: 600;
+    white-space: nowrap;
+  }
+  .note {
+    margin-top: 4mm;
+    padding: 4mm 5mm;
+    font-size: 9pt; color: var(--cy-slate-400);
+    border-left: 2px solid var(--cy-cyan-600);
+    background: rgba(14,165,233,0.04);
+    font-style: italic;
+  }
+
+  /* Contact footer block on last page */
+  .contact-block {
+    margin-top: auto;
+    padding-top: 6mm;
+    border-top: 1px solid rgba(34,211,238,0.2);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 8mm;
+  }
+  .contact-info .head {
+    font-family: var(--font-mono); font-size: 9px;
+    letter-spacing: 3px; color: var(--cy-cyan-400);
+    text-transform: uppercase;
+    margin-bottom: 3mm;
+  }
+  .contact-info .co {
+    font-size: 11pt; font-weight: 700; color: var(--cy-slate-100);
+    margin-bottom: 1mm;
+  }
+  .contact-info .addr {
+    font-size: 9.5pt; color: var(--cy-slate-300);
+    font-family: var(--font-mono);
+    line-height: 1.55;
+  }
+  .contact-info a { color: var(--cy-cyan-300); text-decoration: none; }
+  .contact-mark {
+    width: 34mm; opacity: 0.9;
+    filter: drop-shadow(0 0 18px rgba(34,211,238,0.3));
+  }
+
+  /* ========= PRINT ========= */
+  @media print {
+    body { background: #000; padding: 0; }
+    .page {
+      margin: 0;
+      box-shadow: none;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+    @page { size: A4; margin: 0; }
+    .print-hint { display: none !important; }
+  }
+
+  .print-hint {
+    position: fixed; top: 16px; right: 16px; z-index: 99;
+    background: rgba(11,18,32,0.9);
+    border: 1px solid rgba(34,211,238,0.3);
+    padding: 8px 14px;
+    font-family: var(--font-mono); font-size: 10px;
+    color: var(--cy-cyan-300);
+    border-radius: 4px;
+  }
+  .print-hint button {
+    margin-left: 10px;
+    background: var(--cy-cyan-600);
+    border: none; color: white; padding: 4px 10px;
+    font-family: var(--font-mono); font-size: 10px;
+    border-radius: 3px; cursor: pointer;
+    font-weight: 600;
+  }
+  .print-hint button:hover { background: var(--cy-cyan-500); }
+</style>
+</head>
+<body>
+
+<div class="print-hint">
+  Bildschirm-Vorschau — <button onclick="window.print()">Als PDF drucken</button>
+</div>
+
+<!-- ============================ PAGE 1 · COVER ============================ -->
+<div class="page cover">
+  <div class="cover-inner">
+    <div class="corner-tl">
+      ◉ CYJAN · IDS · SENTRY MODE
+    </div>
+    <div class="corner-tr">
+      FOR OT NETWORKS · 2025
+    </div>
+
+    <!-- Background globe -->
+    <svg class="cover-globe" viewBox="0 0 400 400" aria-hidden="true">
+      <defs>
+        <radialGradient id="globeBg" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="rgba(14,165,233,0.16)"/>
+          <stop offset="70%" stop-color="rgba(14,165,233,0.04)"/>
+          <stop offset="100%" stop-color="rgba(2,6,23,0)"/>
+        </radialGradient>
+      </defs>
+      <circle cx="200" cy="200" r="165" fill="url(#globeBg)" stroke="rgba(34,211,238,0.35)" stroke-width="1"/>
+      <!-- latitudes -->
+      <g fill="none" stroke="rgba(56,189,248,0.22)" stroke-width="0.7">
+        <ellipse cx="200" cy="200" rx="165" ry="25"/>
+        <ellipse cx="200" cy="200" rx="155" ry="55"/>
+        <ellipse cx="200" cy="200" rx="140" ry="90"/>
+        <ellipse cx="200" cy="200" rx="120" ry="130"/>
+      </g>
+      <g fill="none" stroke="rgba(56,189,248,0.16)" stroke-width="0.55">
+        <ellipse cx="200" cy="200" rx="30" ry="165"/>
+        <ellipse cx="200" cy="200" rx="70" ry="165"/>
+        <ellipse cx="200" cy="200" rx="110" ry="165"/>
+        <ellipse cx="200" cy="200" rx="150" ry="165"/>
+      </g>
+      <!-- hosts and arcs -->
+      <g>
+        <circle cx="120" cy="155" r="3" fill="#38bdf8" opacity="0.85"/>
+        <circle cx="270" cy="130" r="3" fill="#7dd3fc" opacity="0.8"/>
+        <circle cx="310" cy="240" r="3" fill="#38bdf8" opacity="0.75"/>
+        <circle cx="160" cy="290" r="3" fill="#0ea5e9" opacity="0.8"/>
+        <circle cx="90"  cy="220" r="3" fill="#38bdf8" opacity="0.65"/>
+        <circle cx="230" cy="205" r="4" fill="#22d3ee" opacity="1"/>
+        <!-- arcs -->
+        <path d="M120 155 Q 190 100 270 130" fill="none" stroke="#38bdf8" stroke-opacity="0.65" stroke-width="0.9"/>
+        <path d="M270 130 Q 320 185 310 240" fill="none" stroke="#38bdf8" stroke-opacity="0.55" stroke-width="0.9"/>
+        <path d="M310 240 Q 230 310 160 290" fill="none" stroke="#38bdf8" stroke-opacity="0.6"  stroke-width="0.9"/>
+        <path d="M160 290 Q 95 265 90 220"   fill="none" stroke="#fb923c" stroke-opacity="0.55" stroke-width="0.9"/>
+        <path d="M90 220  Q 110 180 120 155" fill="none" stroke="#a78bfa" stroke-opacity="0.5"  stroke-width="0.9"/>
+        <path d="M230 205 Q 260 175 270 130" fill="none" stroke="#ef4444" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-width="1.2"/>
+        <path d="M230 205 Q 180 240 160 290" fill="none" stroke="#22d3ee" stroke-opacity="0.75" stroke-width="0.9"/>
+      </g>
+    </svg>
+
+    <!-- Pentagon shield logo (inline) -->
+    <svg class="cover-logo" viewBox="0 0 280 320" xmlns="http://www.w3.org/2000/svg" aria-label="CYJAN Shield">
+      <defs>
+        <radialGradient id="coverShieldGlow" cx="50%" cy="55%" r="55%">
+          <stop offset="0%"  stop-color="#22d3ee" stop-opacity="0.30"/>
+          <stop offset="60%" stop-color="#06b6d4" stop-opacity="0.08"/>
+          <stop offset="100%" stop-color="#061a2e" stop-opacity="0"/>
+        </radialGradient>
+        <linearGradient id="coverShieldStroke" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"  stop-color="#67e8f9"/>
+          <stop offset="100%" stop-color="#0891b2"/>
+        </linearGradient>
+      </defs>
+      <path d="M140 14 L252 64 L252 186 Q252 270 140 312 Q28 270 28 186 L28 64 Z"
+            fill="url(#coverShieldGlow)" stroke="#06b6d4" stroke-width="1.5" opacity="0.55"/>
+      <path d="M140 24 L244 70 L244 184 Q244 258 140 300 Q36 258 36 184 L36 70 Z"
+            fill="#061a2e" stroke="url(#coverShieldStroke)" stroke-width="2.2"/>
+      <path d="M140 36 L234 78 L234 182 Q234 248 140 288 Q46 248 46 182 L46 78 Z"
+            fill="none" stroke="#22d3ee" stroke-width="1" opacity="0.45"/>
+      <g stroke="#22d3ee" stroke-width="0.9" fill="none" opacity="0.28">
+        <polygon points="120,122 140,110 160,122 160,146 140,158 120,146"/>
+        <polygon points="100,158 120,146 140,158 140,182 120,194 100,182"/>
+        <polygon points="140,158 160,146 180,158 180,182 160,194 140,182"/>
+        <polygon points="120,194 140,182 160,194 160,218 140,230 120,218"/>
+      </g>
+      <polygon points="140,158 160,146 180,158 180,182 160,194 140,182"
+               fill="#06b6d4" opacity="0.25"/>
+      <ellipse cx="140" cy="176" rx="44" ry="24" fill="none" stroke="#22d3ee" stroke-width="1.8" opacity="0.9"/>
+      <circle cx="140" cy="176" r="16" fill="none" stroke="#22d3ee" stroke-width="1.4" opacity="0.85"/>
+      <circle cx="140" cy="176" r="9"  fill="none" stroke="#67e8f9" stroke-width="1.1" opacity="0.7"/>
+      <circle cx="140" cy="176" r="4"  fill="#22d3ee"/>
+      <circle cx="140" cy="176" r="1.8" fill="#e0f9ff"/>
+      <g stroke="#22d3ee" stroke-width="1.2" opacity="0.65">
+        <line x1="70"  y1="176" x2="92"  y2="176"/>
+        <line x1="188" y1="176" x2="210" y2="176"/>
+      </g>
+    </svg>
+
+    <div class="cover-title-block">
+      <div class="cover-eyebrow">CYJAN<span style="letter-spacing:0">®</span> SENTRY MODE</div>
+      <h1 class="cover-title">
+        OT-Netzwerkschutz<br>
+        der <span class="cyan">nächsten<br>Generation.</span>
+      </h1>
+      <p class="cover-sub">
+        Passives Intrusion&nbsp;Detection · Anomalie&shy;erkennung in Echtzeit · OT/ICS-Protokollanalyse —
+        entwickelt für KRITIS, Produktionsanlagen und kritische Versorgungsnetze.
+      </p>
+      <div class="cover-claim">
+        <span>PROTECT</span><span class="dot"></span>
+        <span>DETECT</span><span class="dot"></span>
+        <span>RESPOND</span>
+      </div>
+    </div>
+
+    <div class="cover-bottom-strip"></div>
+    <div class="cover-bottom-label">PRODUKT&shy;BROSCHÜRE · DE · 2025</div>
+  </div>
+</div>
+
+<!-- ============================ PAGE 2 · OVERVIEW ============================ -->
+<div class="page">
+  <div class="page-head">
+    <div class="brand">
+      <svg viewBox="0 0 280 320">
+        <path d="M140 24 L244 70 L244 184 Q244 258 140 300 Q36 258 36 184 L36 70 Z"
+              fill="#061a2e" stroke="#22d3ee" stroke-width="6"/>
+        <circle cx="140" cy="170" r="38" fill="none" stroke="#22d3ee" stroke-width="8"/>
+        <circle cx="140" cy="170" r="12" fill="#22d3ee"/>
+      </svg>
+      CYJAN · SENTRY MODE
+    </div>
+    <div class="section">SEITE 02 · <b>ÜBERSICHT & FEATURES</b></div>
+  </div>
+
+  <div class="page-body">
+    <div class="eyebrow">01 · Passives Netzwerkmonitoring</div>
+    <h1 class="page-title">
+      Angriffs&shy;erkennung für industrielle Steuerungs&shy;netze
+      — <span class="cyan">vollständig passiv.</span>
+    </h1>
+    <p class="intro-para">
+      CYJAN Sentry Mode ist ein hochspezialisiertes Intrusion-Detection-System für
+      OT/ICS-Umgebungen. Das System arbeitet vollständig passiv — ohne Eingriff in
+      laufende Prozesse — und erkennt Bedrohungen, Anomalien und unautorisierte
+      Zugriffe in Echtzeit. Entwickelt für KRITIS-relevante Infrastrukturen,
+      Produktionsanlagen und kritische Versorgungsnetze.
+    </p>
+
+    <div class="section-head">
+      <span class="num">FEAT</span>
+      <h2>Integrierte Funktionen & Features</h2>
+    </div>
+
+    <div class="features-grid">
+      <div class="feat"><span class="feat-check"></span>Passives, nicht-invasives Netzwerkmonitoring</div>
+      <div class="feat"><span class="feat-check"></span>Echtzeit-Erkennung von Eindringversuchen</div>
+      <div class="feat"><span class="feat-check"></span>Mehrstufige kognitive Anomalieerkennung</div>
+      <div class="feat"><span class="feat-check"></span>OT/ICS-Protokollanalyse (PROFINET, Modbus, S7)</div>
+      <div class="feat"><span class="feat-check"></span>Asset Discovery & Inventarisierung</div>
+      <div class="feat"><span class="feat-check"></span>Verhaltensbasierte Baseline-Analyse</div>
+      <div class="feat"><span class="feat-check"></span>Integration: SIEM / SOC / MSSP</div>
+      <div class="feat"><span class="feat-check"></span>Deep Packet Inspection für OT-Protokolle</div>
+      <div class="feat"><span class="feat-check"></span>Erkennung von Zero-Day-Angriffsmustern</div>
+      <div class="feat"><span class="feat-check"></span>Gehärtetes Linux OS — manipulationssicher</div>
+      <div class="feat"><span class="feat-check"></span>Bis zu 1 Gbps Datendurchsatz (Peak)</div>
+      <div class="feat"><span class="feat-check"></span>2× Mirror-/SPAN-Port Unterstützung</div>
+      <div class="feat"><span class="feat-check"></span>Verschlüsselte Kommunikation (SNMPv3, TLS)</div>
+      <div class="feat"><span class="feat-check"></span>KRITIS-konformes Alarmmanagement</div>
+    </div>
+
+    <div class="section-head">
+      <span class="num">CORE</span>
+      <h2>CYJAN Sentry Mode — Kernfunktionen</h2>
+    </div>
+
+    <div class="core-grid">
+      <div class="core-card">
+        <div class="cat">MODULE · 01</div>
+        <h3>Threat Intelligence Engine</h3>
+        <ul>
+          <li>Kontinuierliche Signatur&shy;aktualisierung gegen bekannte ICS/SCADA-Angriffsvektoren</li>
+          <li>Korrelation von Netzwerk&shy;ereignissen über mehrere Segmente und Zeitzonen</li>
+          <li>Erkennung von Lateral Movement, Credential Harvesting und C2-Kommunikation</li>
+        </ul>
+      </div>
+      <div class="core-card">
+        <div class="cat">MODULE · 02</div>
+        <h3>OT-Protokoll&shy;analyse</h3>
+        <ul>
+          <li>Native Unterstützung: EtherCAT, BACnet, PROFINET, Modbus TCP, S7Comm, DNP3</li>
+          <li>Erkennung illegitimer Kommandos und Wertänderungen in Steuerprotokollen</li>
+          <li>Sitzungs&shy;rekonstruktion und forensische PCAP-Aufzeichnung</li>
+        </ul>
+      </div>
+      <div class="core-card">
+        <div class="cat">MODULE · 03</div>
+        <h3>Management &amp; Analyse-Konsole (MAK)</h3>
+        <ul>
+          <li>Grafische Netzwerk&shy;topologie mit Echtzeit-Bedrohungs&shy;visualisierung</li>
+          <li>Risikoklassifizierung nach CVSS und IEC 62443</li>
+          <li>Alarm&shy;ausgabe per SMTP, SFTP, REST, Syslog, OPC UA DA, Relais</li>
+          <li>Automatisierte Audit&shy;reports für BSI-Grundschutz, NIS2, ISO 27001</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section-head" style="margin-top:4mm;">
+      <span class="num">DEPL</span>
+      <h2>Einsatzbereiche</h2>
+    </div>
+
+    <div class="sectors-strip">
+      <div class="sector">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13 2 L4 14 L12 14 L11 22 L20 10 L12 10 Z"/>
+        </svg>
+        <div class="name">Energie & Versorgung</div>
+      </div>
+      <div class="sector">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 21 L3 10 L10 10 L10 7 L14 7 L14 13 L21 13 L21 21 Z"/>
+          <path d="M7 21 L7 17"/><path d="M17 21 L17 17"/>
+        </svg>
+        <div class="name">Produktion & Fertigung</div>
+      </div>
+      <div class="sector">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2 C8 9 5 13 5 17 a7 7 0 0 0 14 0 C19 13 16 9 12 2 Z"/>
+        </svg>
+        <div class="name">Wasser & Abwasser</div>
+      </div>
+      <div class="sector">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="15" height="10" rx="1"/>
+          <path d="M18 10 L22 10 L22 16 L18 16"/>
+          <circle cx="7"  cy="18" r="2"/>
+          <circle cx="18" cy="18" r="2"/>
+        </svg>
+        <div class="name">Transport & Logistik</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page-foot">
+    <div>CYJAN® SENTRY MODE · PRODUKTBROSCHÜRE</div>
+    <div class="right">02 / 04</div>
+  </div>
+</div>
+
+<!-- ============================ PAGE 3 · SPECS ============================ -->
+<div class="page">
+  <div class="page-head">
+    <div class="brand">
+      <svg viewBox="0 0 280 320">
+        <path d="M140 24 L244 70 L244 184 Q244 258 140 300 Q36 258 36 184 L36 70 Z"
+              fill="#061a2e" stroke="#22d3ee" stroke-width="6"/>
+        <circle cx="140" cy="170" r="38" fill="none" stroke="#22d3ee" stroke-width="8"/>
+        <circle cx="140" cy="170" r="12" fill="#22d3ee"/>
+      </svg>
+      CYJAN · SENTRY MODE
+    </div>
+    <div class="section">SEITE 03 · <b>TECHNISCHE DATEN</b></div>
+  </div>
+
+  <div class="page-body">
+    <div class="eyebrow">02 · Spezifikationen</div>
+    <h1 class="page-title">
+      Industrie-Appliance<br>
+      für <span class="cyan">24/7-Betrieb</span> in rauen Umgebungen.
+    </h1>
+
+    <div class="spec-diagram">
+      <svg viewBox="0 0 460 200" aria-label="Appliance schematic">
+        <!-- chassis -->
+        <rect x="20" y="40" width="420" height="120" rx="4"
+              fill="#0f1a2d" stroke="#22d3ee" stroke-width="1.5"/>
+        <!-- front panel details -->
+        <rect x="28"  y="50" width="40" height="100" rx="2" fill="#020617" stroke="rgba(148,163,184,0.25)"/>
+        <circle cx="48" cy="70"  r="3" fill="#22c55e"/>
+        <circle cx="48" cy="85"  r="3" fill="#22d3ee"/>
+        <circle cx="48" cy="100" r="3" fill="#eab308"/>
+        <!-- ethernet ports -->
+        <g transform="translate(90, 85)">
+          <rect x="0"  y="0" width="22" height="26" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <rect x="28" y="0" width="22" height="26" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <rect x="56" y="0" width="22" height="26" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <rect x="84" y="0" width="22" height="26" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <text x="53" y="46" fill="#64748b" font-size="9" font-family="JetBrains Mono" text-anchor="middle">4× 1GbE</text>
+        </g>
+        <!-- SFP -->
+        <g transform="translate(220, 88)">
+          <rect x="0"  y="0" width="32" height="22" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <rect x="38" y="0" width="32" height="22" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <text x="35" y="42" fill="#64748b" font-size="9" font-family="JetBrains Mono" text-anchor="middle">2× SFP</text>
+        </g>
+        <!-- USB / HDMI / Serial -->
+        <g transform="translate(310, 85)">
+          <rect x="0"  y="0"  width="18" height="7" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <rect x="0"  y="10" width="18" height="7" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <rect x="24" y="0"  width="26" height="16" rx="1" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <rect x="56" y="0"  width="22" height="16" rx="2" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <rect x="82" y="0"  width="22" height="16" rx="2" fill="#020617" stroke="#0891b2" stroke-width="1"/>
+          <text x="52" y="38" fill="#64748b" font-size="9" font-family="JetBrains Mono" text-anchor="middle">USB · HDMI · Serial</text>
+        </g>
+        <!-- top label -->
+        <text x="230" y="28" fill="#22d3ee" font-size="10" font-family="JetBrains Mono" text-anchor="middle" letter-spacing="3">
+          CYJAN SENTRY · 1HE
+        </text>
+        <!-- bottom scale -->
+        <text x="230" y="178" fill="#64748b" font-size="8" font-family="JetBrains Mono" text-anchor="middle" letter-spacing="2">
+          445 × 44 × 280 mm · 3,2 kg · lüfterlos
+        </text>
+      </svg>
+
+      <div class="callouts">
+        <div class="callout"><b>DURCHSATZ</b>1 Gbps Peak / Port</div>
+        <div class="callout"><b>PORTS</b>4× RJ45 · 2× SFP</div>
+        <div class="callout"><b>TEMP</b>−20 … +70 °C</div>
+        <div class="callout"><b>SCHUTZART</b>IP20 (IP40/65 opt.)</div>
+        <div class="callout"><b>LEISTUNG</b>max. 45 W</div>
+        <div class="callout"><b>SPANNUNG</b>12–48 V DC · 100–240 V AC</div>
+      </div>
+    </div>
+
+    <table class="specs-table">
+      <tr>
+        <th>Formfaktor</th>
+        <td>Industrie-Appliance · lüfterlos · 19″ Rack / DIN-Hutschiene</td>
+      </tr>
+      <tr>
+        <th>Maße &amp; Gewicht</th>
+        <td>445 × 44 × 280 mm (1 HE) · 3,2 kg</td>
+      </tr>
+      <tr>
+        <th>Spannungsversorgung</th>
+        <td>DC 12 V–48 V / AC 100–240 V <span class="muted">(redundant optional)</span></td>
+      </tr>
+      <tr>
+        <th>Leistungsaufnahme</th>
+        <td>max. 45 W</td>
+      </tr>
+      <tr>
+        <th>Schutzart</th>
+        <td>IP20 <span class="muted">(IP40 / IP65 auf Anfrage)</span></td>
+      </tr>
+      <tr>
+        <th>Temperatur</th>
+        <td>Betrieb −20 … +70 °C · Lagerung −20 … +70 °C</td>
+      </tr>
+      <tr>
+        <th>Luftfeuchtigkeit</th>
+        <td>10–90 % rel. LF, nicht kondensierend</td>
+      </tr>
+      <tr>
+        <th>Ethernet-Ports</th>
+        <td>4× 1 GbE RJ45 <span class="muted">(1× Management · 3× Monitor/SPAN)</span></td>
+      </tr>
+      <tr>
+        <th>Weitere Anschlüsse</th>
+        <td>2× SFP · 2× USB 3.0 · 1× HDMI · 2× seriell</td>
+      </tr>
+      <tr>
+        <th>Max. Durchsatz</th>
+        <td>1 Gbps pro Port (Peak)</td>
+      </tr>
+      <tr>
+        <th>Alarmierung</th>
+        <td>SMTP · SFTP · REST-API · Syslog · OPC UA DA · Relais <span class="muted">(opt.)</span></td>
+      </tr>
+      <tr>
+        <th>Export-Formate</th>
+        <td>PCAP · CSV · XLSX · PDF · ODT · XML · CRYPTED</td>
+      </tr>
+      <tr>
+        <th>Kommunikation</th>
+        <td>HTTPS · SFTP · SSH · SNMPv3 · NTP · IRMA® Guard-kompatibel</td>
+      </tr>
+      <tr>
+        <th>Analysierte Protokolle</th>
+        <td>EtherCAT · BACnet · PROFINET · Modbus TCP · S7Comm · DNP3 · IEC 104 <span class="muted">(vollständige Liste auf Anfrage)</span></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="page-foot">
+    <div>CYJAN® SENTRY MODE · PRODUKTBROSCHÜRE</div>
+    <div class="right">03 / 04</div>
+  </div>
+</div>
+
+<!-- ============================ PAGE 4 · ORDER ============================ -->
+<div class="page" style="display:flex; flex-direction:column;">
+  <div class="page-head">
+    <div class="brand">
+      <svg viewBox="0 0 280 320">
+        <path d="M140 24 L244 70 L244 184 Q244 258 140 300 Q36 258 36 184 L36 70 Z"
+              fill="#061a2e" stroke="#22d3ee" stroke-width="6"/>
+        <circle cx="140" cy="170" r="38" fill="none" stroke="#22d3ee" stroke-width="8"/>
+        <circle cx="140" cy="170" r="12" fill="#22d3ee"/>
+      </svg>
+      CYJAN · SENTRY MODE
+    </div>
+    <div class="section">SEITE 04 · <b>LIEFERUMFANG & BESTELLUNG</b></div>
+  </div>
+
+  <div class="page-body" style="flex:1; display:flex; flex-direction:column;">
+    <div class="eyebrow">03 · Verfügbarkeit</div>
+    <h1 class="page-title">
+      Lieferumfang<br>&amp; <span class="cyan">Bestell&shy;nummern.</span>
+    </h1>
+
+    <div class="two-col">
+      <div>
+        <div class="section-head" style="margin-top:0;">
+          <span class="num">SHIP</span>
+          <h2>Lieferumfang</h2>
+        </div>
+        <ul class="list-plain">
+          <li><b>CYJAN Sentry Appliance</b> inkl. Rack-Montagekit / Hutschienenadapter</li>
+          <li><b>Netzkabel EU</b>, 4× Cat6 RJ45 Patchkabel (1,5 m), Kurzanleitung</li>
+          <li><b>Optionen:</b> Potentialfreie Kontakte (4× 30 V / 2 A), LTE-Modul, redundantes Netzteil</li>
+        </ul>
+      </div>
+
+      <div>
+        <div class="section-head" style="margin-top:0;">
+          <span class="num">SKU</span>
+          <h2>Bestellnummern</h2>
+        </div>
+        <div class="sku-grid">
+          <div class="sku">
+            <div class="code">CYJAN-SM-250</div>
+            <div class="desc">Standard-Appliance, kleine bis mittlere OT-Netze</div>
+            <div class="scale">bis 250 Assets</div>
+          </div>
+          <div class="sku">
+            <div class="code">CYJAN-SM-500</div>
+            <div class="desc">Gehobene Performance, mittlere Produktionsumgebungen</div>
+            <div class="scale">bis 500 Assets</div>
+          </div>
+          <div class="sku">
+            <div class="code">CYJAN-SM-1000</div>
+            <div class="desc">Enterprise-Appliance, KRITIS- und Mehrstandortbetrieb</div>
+            <div class="scale">bis 1 000 Assets</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      Weitere Varianten für Sonderumgebungen (Ex-Schutz, maritim, vibrations&shy;fest) sind auf Anfrage verfügbar.
+      Für projektspezifische Konfigurationen und Integrations&shy;anfragen wenden Sie sich an unser Vertriebsteam.
+    </div>
+
+    <div class="contact-block">
+      <div class="contact-info">
+        <div class="head">◉ KONTAKT · VERTRIEB</div>
+        <div class="co">CYJAN Security Systems GmbH</div>
+        <div class="addr">
+          Musterstraße 1 · DE-28203 Bremen<br>
+          <a href="mailto:protect@cyjan.io">protect@cyjan.io</a> ·
+          <a href="https://www.cyjan.io">www.cyjan.io</a>
+        </div>
+      </div>
+
+      <svg class="contact-mark" viewBox="0 0 280 320" aria-hidden="true">
+        <path d="M140 24 L244 70 L244 184 Q244 258 140 300 Q36 258 36 184 L36 70 Z"
+              fill="#061a2e" stroke="#22d3ee" stroke-width="2.5"/>
+        <ellipse cx="140" cy="176" rx="44" ry="24" fill="none" stroke="#22d3ee" stroke-width="1.8"/>
+        <circle cx="140" cy="176" r="16" fill="none" stroke="#22d3ee" stroke-width="1.4"/>
+        <circle cx="140" cy="176" r="4"  fill="#22d3ee"/>
+      </svg>
+    </div>
+  </div>
+
+  <div class="page-foot">
+    <div>CYJAN® SENTRY MODE · protect@cyjan.io · www.cyjan.io</div>
+    <div class="right">04 / 04</div>
+  </div>
+</div>
+
+</body>
+</html>
