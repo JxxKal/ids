@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Activity, Database, FileText, KeyRound, ListTree, Lock, Sliders, Sparkles, Users,
+} from 'lucide-react';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
   fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
@@ -9,6 +12,7 @@ import {
 import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
 import type { MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
+import { FuerThorsten } from './FuerThorsten';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1413,38 +1417,46 @@ function SyslogSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog' | 'thorsten';
 
-interface NavItem { id: SectionId; label: string }
+interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
+
+const ICON_PROPS = { size: 14, strokeWidth: 1.8 } as const;
 
 const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Benutzer & Zugang',
     items: [
-      { id: 'users', label: 'Benutzerverwaltung' },
-      { id: 'saml',  label: 'SAML / SSO' },
+      { id: 'users', label: 'Benutzerverwaltung', icon: <Users     {...ICON_PROPS} /> },
+      { id: 'saml',  label: 'SAML / SSO',         icon: <KeyRound  {...ICON_PROPS} /> },
     ],
   },
   {
     label: 'KI/ML-Engine',
     items: [
-      { id: 'ml-status', label: 'Status & Lernphase' },
-      { id: 'ml-config', label: 'Filter-Konfiguration' },
+      { id: 'ml-status', label: 'Status & Lernphase',     icon: <Activity {...ICON_PROPS} /> },
+      { id: 'ml-config', label: 'Filter-Konfiguration',   icon: <Sliders  {...ICON_PROPS} /> },
     ],
   },
   {
     label: 'Regelwerk',
     items: [
-      { id: 'rules-sources', label: 'Rule-Quellen' },
-      { id: 'rules-list',    label: 'Aktive Regeln' },
+      { id: 'rules-sources', label: 'Rule-Quellen',  icon: <Database {...ICON_PROPS} /> },
+      { id: 'rules-list',    label: 'Aktive Regeln', icon: <ListTree {...ICON_PROPS} /> },
     ],
   },
   {
     label: 'System',
     items: [
-      { id: 'ssl',    label: 'SSL-Zertifikat' },
-      { id: 'syslog', label: 'Syslog / SIEM' },
+      { id: 'ssl',    label: 'SSL-Zertifikat', icon: <Lock     {...ICON_PROPS} /> },
+      { id: 'syslog', label: 'Syslog / SIEM',  icon: <FileText {...ICON_PROPS} /> },
+    ],
+  },
+  {
+    label: 'Extra',
+    items: [
+      { id: 'thorsten', label: 'Für Thorsten', icon: <Sparkles {...ICON_PROPS} /> },
     ],
   },
 ];
@@ -1452,26 +1464,24 @@ const NAV_GROUPS: NavGroup[] = [
 export function SettingsPage() {
   const [active, setActive] = useState<SectionId>('users');
 
+  const isThorsten = active === 'thorsten';
+
   return (
     <div className="flex h-full overflow-hidden">
 
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-      <nav className="w-44 border-r border-slate-800 overflow-y-auto flex-shrink-0 py-3">
+      {/* ── Submenu (Stil wie Hauptmenü) ─────────────────────────────────── */}
+      <nav className="cyjan-settings-nav">
         {NAV_GROUPS.map(group => (
-          <div key={group.label} className="mb-4">
-            <div className="px-3 mb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600 select-none">
-              {group.label}
-            </div>
+          <div key={group.label} className="cyjan-settings-nav-group">
+            <div className="cyjan-settings-nav-grouplabel">{group.label}</div>
             {group.items.map(item => (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => setActive(item.id)}
-                className={`w-full text-left px-3 py-1.5 text-xs transition-colors border-r-2 ${
-                  active === item.id
-                    ? 'text-cyan-300 bg-cyan-950/40 border-cyan-500'
-                    : 'text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-800/40'
-                }`}
+                className={`cyjan-sidebar-item ${active === item.id ? 'is-active' : ''}`}
               >
+                <span className="cyjan-sidebar-icon">{item.icon}</span>
                 {item.label}
               </button>
             ))}
@@ -1481,6 +1491,9 @@ export function SettingsPage() {
 
       {/* ── Content ──────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
+        {isThorsten ? (
+          <FuerThorsten />
+        ) : (
         <div className="max-w-4xl mx-auto py-6 px-6">
           <div className="card p-5">
             {active === 'users'         && <UserManagement />}
@@ -1493,6 +1506,7 @@ export function SettingsPage() {
             {active === 'syslog'        && <SyslogSettings />}
           </div>
         </div>
+        )}
       </div>
 
     </div>
