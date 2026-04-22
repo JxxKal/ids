@@ -3,7 +3,7 @@ import { getToken } from '../api';
 import type { Alert, WsMessage } from '../types';
 
 const WS_BASE = import.meta.env.VITE_WS_URL
-  ?? `ws://${window.location.host}`;
+  ?? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
 
 const RECONNECT_DELAY_MS = 3000;
 const MAX_ALERTS = 500;
