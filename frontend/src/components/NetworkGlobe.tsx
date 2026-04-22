@@ -122,12 +122,11 @@ export function NetworkGlobe({ size = 520 }: Props) {
       }
     };
 
-    const renderPulses = () => {
+    const renderPulses = (now: number) => {
       gPulses.innerHTML = '';
-      const now = performance.now();
       pulses = pulses.filter(p => now - p.born < 2000);
       pulses.forEach(p => {
-        const age = (now - p.born) / 2000;
+        const age = Math.max(0, Math.min(1, (now - p.born) / 2000));
         gPulses.appendChild(el('circle', {
           cx, cy, r: R * age,
           fill: 'none', stroke: 'rgba(34,211,238,0.25)',
@@ -136,9 +135,8 @@ export function NetworkGlobe({ size = 520 }: Props) {
       });
     };
 
-    const renderConns = () => {
+    const renderConns = (now: number) => {
       gConns.innerHTML = '';
-      const now = performance.now();
       conns = conns.filter(c => now - c.born < c.ttl);
       conns.forEach(c => {
         const pa = project(c.a.lat, c.a.lon);
@@ -152,7 +150,7 @@ export function NetworkGlobe({ size = 520 }: Props) {
         const lift = Math.min(dist * 0.3, 70);
         const cpX = mx + (-dy / dist) * lift * 0.5;
         const cpY = my + (dx / dist) * lift * 0.5 - lift * 0.3;
-        const age = (now - c.born) / c.ttl;
+        const age = Math.max(0, Math.min(1, (now - c.born) / c.ttl));
         const fade = age < 0.2 ? age / 0.2 : age > 0.8 ? (1 - age) / 0.2 : 1;
         const stroke = c.threat ? '#ef4444' : PROTO_COLOR[c.proto];
         const g = el('g', { opacity: fade });
@@ -227,8 +225,8 @@ export function NetworkGlobe({ size = 520 }: Props) {
         if (Math.random() > 0.55) pulses.push({ born: now });
       }
       renderMeridians();
-      renderPulses();
-      renderConns();
+      renderPulses(now);
+      renderConns(now);
       renderHosts();
       rafId = requestAnimationFrame(tick);
     };
