@@ -270,3 +270,79 @@
   color: #e0f2fe;
   background: rgba(14, 165, 233, 0.10);
 }
+
+/* ============================================================
+   Alert-Table — Severity-Rows + Badges
+   ============================================================ */
+
+.cyjan-table-head {
+  background: #0b1120;
+  border-bottom: 1px solid #172033;
+}
+.cyjan-table-head th {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: #475569;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 500;
+  padding: 8px 12px !important;
+}
+
+.cyjan-row-critical {
+  border-left: 3px solid #ef4444 !important;
+  background: rgba(127, 29, 29, 0.15);
+}
+.cyjan-row-high {
+  border-left: 3px solid #dc2626 !important;
+  background: rgba(127, 29, 29, 0.08);
+}
+.cyjan-row-medium {
+  border-left: 3px solid #f97316 !important;
+  background: transparent;
+}
+.cyjan-row-low {
+  border-left: 3px solid #22c55e !important;
+  background: transparent;
+}
+
+.cyjan-row-critical:hover,
+.cyjan-row-high:hover,
+.cyjan-row-medium:hover,
+.cyjan-row-low:hover {
+  background-color: rgba(14, 165, 233, 0.06);
+  filter: brightness(1.1);
+}
+
+.cyjan-sev-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 500;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.cyjan-sev-critical {
+  background: rgba(127, 29, 29, 0.70);
+  color: #fecaca;
+  border-color: rgba(220, 38, 38, 0.60);
+}
+.cyjan-sev-high {
+  background: rgba(127, 29, 29, 0.50);
+  color: #fca5a5;
+  border-color: rgba(185, 28, 28, 0.50);
+}
+.cyjan-sev-medium {
+  background: rgba(124, 45, 18, 0.60);
+  color: #fdba74;
+  border-color: rgba(194, 65, 12, 0.50);
+}
+.cyjan-sev-low {
+  background: rgba(22, 101, 52, 0.50);
+  color: #86efac;
+  border-color: rgba(21, 128, 61, 0.50);
+}
