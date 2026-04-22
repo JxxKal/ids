@@ -2,6 +2,36 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Development Workflow
+
+Dieses Repository (VS Code, macOS) ist die **Source of Truth** und wird auf GitHub (`JxxKal/ids`) gespiegelt.
+Der **Docker-Zielhost** ist `192.168.1.79`; Sourcen und Compose-Stack liegen dort unter `/opt/ids`.
+
+### Zyklus
+
+1. **Lokal editieren** in VS Code (`/Users/jankaluza/Desktop/ids`).
+2. **Committen & pushen** (GitHub MCP oder `git push`) — der Push ist gleichzeitig das Deployment-Signal.
+3. **Dockerhost aktualisieren** via SSH (`ssh-manager` MCP oder direktes SSH zu `192.168.1.79`):
+   ```bash
+   cd /opt/ids && git pull
+   docker compose --profile prod build <geänderter-service>   # nur die betroffenen Services
+   docker compose --profile prod up -d
+   ```
+   - Bei Frontend-Änderungen: `docker compose build frontend && docker compose up -d frontend`
+   - Bei API-Änderungen: `docker compose build api && docker compose up -d api`
+   - Bei Migrations/DB-Änderungen: ggf. `docker compose exec -T timescaledb psql -U ids -d ids -f /docker-entrypoint-initdb.d/<migration>.sql`
+4. **Validieren mit Chrome DevTools** (MCP `chrome-devtools`):
+   - UI unter `http://192.168.1.79:8001` öffnen
+   - Login: `admin` / `Abcdmin01`
+   - Auf Console-Errors, Network-Fehler und funktionale Regressionen prüfen
+   - Bei UI-Änderungen: Golden Path + Edge Cases im Browser durchspielen
+
+### Wichtig
+
+- **Niemals direkt auf dem Dockerhost editieren** — jede Änderung geht durch Git.
+- **Container-Logs bei Problemen**: `docker compose logs -f <service>` auf dem Host.
+- **ISO-Build** läuft in GitHub Actions, nicht auf dem Dockerhost (Tag-Push `v*` oder `workflow_dispatch`).
+
 ## Commands
 
 ### Running the Stack
