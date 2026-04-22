@@ -165,13 +165,13 @@ export function NetworksPage() {
       {/* Table */}
       <div className="card overflow-hidden">
         <table className="w-full text-xs">
-          <thead className="border-b border-slate-800 text-slate-500">
+          <thead className="cyjan-table-head">
             <tr className="text-left">
-              <th className="px-4 py-2">CIDR</th>
-              <th className="px-4 py-2">Name</th>
-              <th className="px-4 py-2">Beschreibung</th>
-              <th className="px-4 py-2">Farbe</th>
-              <th className="px-4 py-2"></th>
+              <th>CIDR</th>
+              <th>Name</th>
+              <th>Beschreibung</th>
+              <th>Farbe</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
