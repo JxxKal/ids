@@ -30,7 +30,7 @@ export function LoginPage({ onLogin }: Props) {
   }
 
   return (
-    <div className="login-page min-h-screen flex flex-col lg:flex-row items-center justify-center bg-[#020617] relative overflow-hidden">
+    <div className="login-page min-h-screen flex flex-col lg:flex-row items-center justify-center relative overflow-hidden">
       <div className="hex-grid-bg" aria-hidden="true" />
 
       {/* Hero */}
