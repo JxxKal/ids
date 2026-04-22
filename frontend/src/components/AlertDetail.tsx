@@ -14,12 +14,27 @@ interface Props {
 function Row({ label, value }: { label: string; value?: string | number | null }) {
   if (value == null) return null;
   return (
-    <div className="flex gap-2 py-1 border-b border-slate-800">
-      <span className="w-36 shrink-0 text-slate-500 text-xs">{label}</span>
-      <span className="text-slate-200 text-xs break-all">{String(value)}</span>
+    <div className="flex gap-3 py-1.5 border-b border-slate-800/50">
+      <span className="w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
+      <span className="text-slate-200 text-xs break-all font-mono">{String(value)}</span>
     </div>
   );
 }
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="pt-4 pb-2 text-[10px] text-slate-500 uppercase tracking-[0.14em] font-mono">
+      {children}
+    </div>
+  );
+}
+
+const SEV_BORDER: Record<string, string> = {
+  critical: '#ef4444',
+  high:     '#dc2626',
+  medium:   '#f97316',
+  low:      '#22c55e',
+};
 
 export function AlertDetail({ alert, onClose, onUpdate }: Props) {
   const [note, setNote]       = useState('');
@@ -46,22 +61,29 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
       onClick={onClose}
     >
       <div
-        className="card w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="cyjan-card w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl"
         onClick={e => e.stopPropagation()}
+        style={{ borderLeft: `4px solid ${SEV_BORDER[alert.severity] ?? '#0ea5e9'}` }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-3 flex-wrap">
             <SeverityBadge severity={alert.severity} />
-            <span className="font-semibold text-slate-100">{alert.rule_id}</span>
-            <span className="text-slate-500 text-xs">{alert.source}</span>
+            <span className="font-semibold text-cyan-100 font-mono">{alert.rule_id}</span>
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-mono px-2 py-0.5 rounded border border-slate-700">{alert.source}</span>
           </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-200 text-lg leading-none">×</button>
+          <button
+            onClick={onClose}
+            className="text-slate-500 hover:text-cyan-300 hover:bg-slate-800 rounded w-7 h-7 flex items-center justify-center leading-none transition-colors"
+          >
+            ×
+          </button>
         </div>
 
-        <div className="px-4 py-3 space-y-1">
-          <p className="text-slate-400 text-xs mb-3">{alert.description}</p>
+        <div className="px-5 py-4">
+          <p className="text-slate-300 text-xs mb-4 leading-relaxed">{alert.description}</p>
 
+          <SectionTitle>Alert</SectionTitle>
           <Row label="Alert ID"    value={alert.alert_id} />
           <Row label="Timestamp"   value={new Date(alert.ts).toLocaleString()} />
           <Row label="Score"       value={alert.score.toFixed(3)} />
@@ -72,7 +94,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
 
           {enr && (
             <>
-              <div className="pt-2 pb-1 text-xs text-slate-500 uppercase tracking-wider">Enrichment</div>
+              <SectionTitle>Enrichment</SectionTitle>
               <div className="flex gap-4 py-1 border-b border-slate-800">
                 <div className="flex flex-col gap-1 flex-1">
                   <span className="text-xs text-slate-500">Quelle</span>
@@ -103,11 +125,14 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           )}
 
           {alert.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 pt-2">
-              {alert.tags.map(t => (
-                <span key={t} className="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded text-xs">{t}</span>
-              ))}
-            </div>
+            <>
+              <SectionTitle>Tags</SectionTitle>
+              <div className="flex flex-wrap gap-1.5">
+                {alert.tags.map(t => (
+                  <span key={t} className="bg-orange-900/30 text-orange-300 border border-orange-700/40 px-2 py-0.5 rounded-full text-[10px] font-mono uppercase tracking-wider">{t}</span>
+                ))}
+              </div>
+            </>
           )}
         </div>
 
@@ -140,14 +165,14 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
         )}
 
         {/* Actions */}
-        <div className="flex items-center gap-2 px-4 py-3 border-t border-slate-800 mt-3">
+        <div className="flex items-center gap-2 px-5 py-4 border-t border-slate-800 flex-wrap">
           {showGraph && (
             <ConnectionGraph alert={alert} onClose={() => setShowGraph(false)} />
           )}
           {alert.src_ip && alert.dst_ip && (
             <button
               onClick={() => setShowGraph(true)}
-              className="btn-primary flex items-center gap-1.5"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-cyan-500/15 text-cyan-200 border border-cyan-500/50 hover:bg-cyan-500/25 transition-colors"
               title="Alle Verbindungen zwischen Quelle und Ziel im ±5-min-Fenster"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -161,29 +186,41 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
             </button>
           )}
           {alert.pcap_available && (
-            <a href={pcapUrl(alert.alert_id)} download className="btn-primary">
-              PCAP herunterladen
+            <a
+              href={pcapUrl(alert.alert_id)}
+              download
+              className="px-3 py-1.5 rounded text-xs font-mono bg-cyan-500/15 text-cyan-200 border border-cyan-500/50 hover:bg-cyan-500/25 transition-colors"
+            >
+              ↓ PCAP
             </a>
           )}
 
           {!alert.feedback ? (
             <>
               <input
-                className="input flex-1 text-xs"
+                className="cyjan-input flex-1 text-xs min-w-[180px]"
                 placeholder="Notiz (optional)"
                 value={note}
                 onChange={e => setNote(e.target.value)}
               />
-              <button onClick={() => giveFeedback('tp')} disabled={loading} className="btn-danger">
+              <button
+                onClick={() => giveFeedback('tp')}
+                disabled={loading}
+                className="px-3 py-1.5 rounded text-xs font-mono bg-red-900/40 text-red-200 border border-red-700/50 hover:bg-red-900/60 disabled:opacity-50 transition-colors"
+              >
                 ⚠ True Positive
               </button>
-              <button onClick={() => giveFeedback('fp')} disabled={loading} className="btn-success">
+              <button
+                onClick={() => giveFeedback('fp')}
+                disabled={loading}
+                className="px-3 py-1.5 rounded text-xs font-mono bg-green-900/40 text-green-200 border border-green-700/50 hover:bg-green-900/60 disabled:opacity-50 transition-colors"
+              >
                 ✓ False Positive
               </button>
             </>
           ) : (
-            <span className="text-xs text-slate-600 italic">
-              Feedback wurde gesetzt – Buttons deaktiviert.
+            <span className="text-xs text-slate-600 italic font-mono">
+              Feedback gesetzt – Buttons deaktiviert.
             </span>
           )}
         </div>
