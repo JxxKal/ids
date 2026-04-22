@@ -1,4 +1,6 @@
 import type { Alert, Host, KnownNetwork, MLConfig, MLStatus, RuleListResponse, RuleSource, SamlConfig, TestRun, ThreatLevel, UpdateStatus, User } from './types';
+import * as demo from './demo/api';
+import { isDemoMode } from './demo/mode';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 
@@ -50,6 +52,9 @@ export interface LoginResponse {
 }
 
 export async function login(username: string, password: string): Promise<LoginResponse> {
+  if (username === 'demo' && password === 'demo') {
+    return { ...demo.login(), token_type: 'bearer' };
+  }
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -63,6 +68,7 @@ export async function login(username: string, password: string): Promise<LoginRe
 }
 
 export async function fetchMe(): Promise<User> {
+  if (isDemoMode()) return demo.fetchMe();
   return req('/api/auth/me');
 }
 
@@ -84,6 +90,7 @@ export async function fetchAlerts(filters: AlertFilters = {}): Promise<{
   alerts: Alert[];
   total: number;
 }> {
+  if (isDemoMode()) return demo.fetchAlerts(filters);
   const params = new URLSearchParams();
   if (filters.severity)              params.set('severity', filters.severity);
   if (filters.source)                params.set('source',   filters.source);
@@ -103,6 +110,7 @@ export async function setFeedback(
   feedback: 'fp' | 'tp',
   note?: string,
 ): Promise<Alert> {
+  if (isDemoMode()) return demo.setFeedback(alertId, feedback, note);
   return req(`/api/alerts/${alertId}/feedback`, {
     method: 'PATCH',
     body: JSON.stringify({ feedback, note }),
@@ -135,12 +143,14 @@ export function alertsExportUrl(params: {
 // ── Threat Level ──────────────────────────────────────────────────────────────
 
 export async function fetchThreatLevel(): Promise<ThreatLevel> {
+  if (isDemoMode()) return demo.fetchThreatLevel();
   return req('/api/stats/threat-level');
 }
 
 // ── Networks ──────────────────────────────────────────────────────────────────
 
 export async function fetchNetworks(): Promise<KnownNetwork[]> {
+  if (isDemoMode()) return demo.fetchNetworks();
   return req('/api/networks');
 }
 
@@ -164,6 +174,7 @@ export async function deleteNetwork(id: string): Promise<void> {
 // ── Hosts ─────────────────────────────────────────────────────────────────────
 
 export async function fetchHosts(params: { trusted?: boolean; search?: string } = {}): Promise<Host[]> {
+  if (isDemoMode()) return demo.fetchHosts(params);
   const p = new URLSearchParams();
   if (params.trusted !== undefined) p.set('trusted', String(params.trusted));
   if (params.search)                p.set('search',  params.search);
@@ -246,6 +257,7 @@ export async function runTest(scenarioId: string): Promise<TestRun> {
 }
 
 export async function fetchTestRuns(): Promise<TestRun[]> {
+  if (isDemoMode()) return demo.fetchTestRuns();
   return req('/api/tests/runs');
 }
 
@@ -260,6 +272,7 @@ export async function deleteAllTestRuns(): Promise<void> {
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 export async function fetchUsers(): Promise<User[]> {
+  if (isDemoMode()) return demo.fetchUsers();
   return req('/api/users');
 }
 
@@ -294,10 +307,12 @@ export async function generateApiToken(userId: string): Promise<{ token: string;
 // ── ML / KI-Engine ───────────────────────────────────────────────────────────
 
 export async function fetchMLStatus(): Promise<MLStatus> {
+  if (isDemoMode()) return demo.fetchMLStatus() as unknown as MLStatus;
   return req('/api/ml/status');
 }
 
 export async function fetchMLConfig(): Promise<MLConfig> {
+  if (isDemoMode()) return demo.fetchMLConfig() as unknown as MLConfig;
   return req('/api/ml/config');
 }
 
@@ -337,6 +352,7 @@ export async function fetchConnectionGraph(
   centerTs: number,   // Unix seconds
   windowMin = 5,
 ): Promise<ConnectionGraphData> {
+  if (isDemoMode()) return demo.fetchConnectionGraph(srcIp, dstIp);
   const p = new URLSearchParams({
     src_ip:     srcIp,
     dst_ip:     dstIp,
@@ -349,6 +365,7 @@ export async function fetchConnectionGraph(
 // ── Rules Engine ─────────────────────────────────────────────────────────────
 
 export async function fetchRuleSources(): Promise<RuleSource[]> {
+  if (isDemoMode()) return demo.fetchRuleSources();
   return req('/api/rules/sources');
 }
 
@@ -365,6 +382,7 @@ export async function deleteRuleSource(id: string): Promise<void> {
 }
 
 export async function fetchRules(params: { search?: string; limit?: number; offset?: number } = {}): Promise<RuleListResponse> {
+  if (isDemoMode()) return { rules: [], total: 0 } as unknown as RuleListResponse;
   const p = new URLSearchParams();
   if (params.search) p.set('search', params.search);
   if (params.limit  !== undefined) p.set('limit',  String(params.limit));
@@ -377,12 +395,14 @@ export async function triggerRuleUpdate(): Promise<UpdateStatus> {
 }
 
 export async function fetchRuleUpdateStatus(): Promise<UpdateStatus> {
+  if (isDemoMode()) return demo.fetchRuleUpdateStatus() as unknown as UpdateStatus;
   return req('/api/rules/update/status');
 }
 
 // ── SAML Config ───────────────────────────────────────────────────────────────
 
 export async function fetchSamlConfig(): Promise<SamlConfig> {
+  if (isDemoMode()) return demo.fetchSamlConfig() as SamlConfig;
   const r = await req<{ key: string; value: SamlConfig }>('/api/config/saml');
   return r.value;
 }
@@ -418,6 +438,7 @@ export interface SslAcmeConfig {
 }
 
 export async function fetchSslStatus(): Promise<SslStatus> {
+  if (isDemoMode()) return demo.fetchSslStatus() as unknown as SslStatus;
   return req('/api/ssl/status');
 }
 
@@ -463,6 +484,7 @@ export interface SyslogTestRequest {
 }
 
 export async function fetchSyslogConfig(): Promise<SyslogConfig> {
+  if (isDemoMode()) return demo.fetchSyslogConfig() as unknown as SyslogConfig;
   return req('/api/syslog/config');
 }
 
