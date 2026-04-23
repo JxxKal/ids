@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { clearToken, fetchAlerts, fetchMe, getToken } from './api';
+import { clearToken, fetchAlerts, fetchMe, getToken, setToken } from './api';
 import { disableDemoMode } from './demo/mode';
 import { resetStore as resetDemoStore } from './demo/store';
 import { AlertFeed } from './components/AlertFeed';
@@ -41,7 +41,14 @@ export default function App() {
   const [authChk, setAuthChk] = useState(true);
 
   useEffect(() => {
-    const token = getToken();
+    // SAML-Callback: /?saml_token=JWT nach ACS-Redirect
+    const params = new URLSearchParams(window.location.search);
+    const samlToken = params.get('saml_token');
+    if (samlToken) {
+      setToken(samlToken);
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    const token = samlToken || getToken();
     if (!token) { setAuthChk(false); return; }
     fetchMe()
       .then(u => setUser(u))

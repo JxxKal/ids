@@ -53,6 +53,7 @@ from routers.alerts import make_pcap_endpoint, set_feedback_producer
 from routers.syslog_fwd import router as syslog_router
 from routers.syslog_fwd import syslog_forwarder_loop
 from routers.itop import router as itop_router
+from routers.saml import router as saml_router
 from routers.tests import make_run_endpoint
 from ws.manager import AlertStreamer, ConnectionManager
 
@@ -143,6 +144,7 @@ _auth = [Depends(get_current_user)]
 
 # Auth-Router ohne Schutz (Login ist öffentlich)
 app.include_router(auth_router.router)
+app.include_router(saml_router)   # public – kein JWT-Gate
 
 # Alle anderen Routen erfordern gültiges JWT
 app.include_router(alerts_router.router,   dependencies=_auth)

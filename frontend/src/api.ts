@@ -401,10 +401,31 @@ export async function fetchRuleUpdateStatus(): Promise<UpdateStatus> {
 
 // ── SAML Config ───────────────────────────────────────────────────────────────
 
+const SAML_DEFAULTS: SamlConfig = {
+  enabled: false,
+  idp_entity_id: '', idp_sso_url: '', idp_slo_url: '', idp_x509_cert: '',
+  sp_entity_id: '', acs_url: '', slo_url: '',
+  attribute_username: 'uid', attribute_email: 'email',
+  attribute_display_name: 'displayName', default_role: 'viewer',
+};
+
 export async function fetchSamlConfig(): Promise<SamlConfig> {
-  if (isDemoMode()) return demo.fetchSamlConfig() as SamlConfig;
-  const r = await req<{ key: string; value: SamlConfig }>('/api/config/saml');
-  return r.value;
+  if (isDemoMode()) return { ...SAML_DEFAULTS };
+  try {
+    const r = await req<{ key: string; value: SamlConfig }>('/api/config/saml');
+    return { ...SAML_DEFAULTS, ...r.value };
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) return { ...SAML_DEFAULTS };
+    throw e;
+  }
+}
+
+export async function fetchSamlEnabled(): Promise<{ enabled: boolean; login_url: string }> {
+  try {
+    const r = await fetch('/api/auth/saml/enabled');
+    if (!r.ok) return { enabled: false, login_url: '' };
+    return r.json();
+  } catch { return { enabled: false, login_url: '' }; }
 }
 
 // ── IRMA Config ───────────────────────────────────────────────────────────────

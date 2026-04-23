@@ -142,9 +142,16 @@ export interface ItopSyncState {
 
 export interface SamlConfig {
   enabled:              boolean;
-  idp_metadata_url:     string;
+  // IdP-Felder (via XML-Import oder manuell befüllt)
+  idp_entity_id:        string;
+  idp_sso_url:          string;
+  idp_slo_url:          string;
+  idp_x509_cert:        string;
+  // SP-Felder
   sp_entity_id:         string;
   acs_url:              string;
+  slo_url:              string;
+  // Attribut-Mapping
   attribute_username:   string;
   attribute_email:      string;
   attribute_display_name: string;
