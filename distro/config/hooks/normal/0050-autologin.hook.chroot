@@ -17,4 +17,8 @@ if ! id ids &>/dev/null; then
   echo "ids:ids" | chpasswd
 fi
 
+# live-config überschreibt zur Laufzeit autologin.conf mit dem Default-User "user".
+# Da wir ids als Login-User nutzen, deaktivieren wir die live-config Autologin-Komponente.
+find /lib/live/config/ -name "*autologin*" -exec chmod -x {} \; 2>/dev/null || true
+
 echo "[cyjan] Autologin konfiguriert."
