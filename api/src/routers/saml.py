@@ -90,25 +90,40 @@ def _build_saml_settings(cfg: dict) -> dict:
     }
 
 
-def _prepare_request(request: Request, form_data: dict | None = None) -> dict:
-    """Baut das request_data-Dict für python3-saml aus dem FastAPI-Request."""
-    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
-    host   = request.headers.get("x-forwarded-host",
-              request.headers.get("host", "localhost"))
-    # Host kann host:port enthalten – trennen
-    if ":" in host:
-        http_host, port = host.rsplit(":", 1)
+def _prepare_request(
+    request: Request,
+    form_data: dict | None = None,
+    acs_url: str | None = None,
+) -> dict:
+    """Baut das request_data-Dict für python3-saml aus dem FastAPI-Request.
+
+    acs_url: wenn gesetzt, wird Schema/Host/Port daraus übernommen statt aus
+    den Request-Headern. Das verhindert Validierungsfehler bei Port-Mapping
+    (z.B. nginx :8001 → :8000) oder fehlendem X-Forwarded-Proto.
+    """
+    if acs_url:
+        from urllib.parse import urlparse
+        parsed = urlparse(acs_url)
+        scheme    = parsed.scheme or "http"
+        http_host = parsed.hostname or "localhost"
+        port      = str(parsed.port) if parsed.port else ("443" if scheme == "https" else "80")
     else:
-        http_host = host
-        port = "443" if scheme == "https" else "80"
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host   = request.headers.get("x-forwarded-host",
+                  request.headers.get("host", "localhost"))
+        if ":" in host:
+            http_host, port = host.rsplit(":", 1)
+        else:
+            http_host = host
+            port = "443" if scheme == "https" else "80"
 
     return {
-        "https":       "on" if scheme == "https" else "off",
-        "http_host":   http_host,
-        "script_name": str(request.url.path),
-        "server_port": port,
-        "get_data":    dict(request.query_params),
-        "post_data":   form_data or {},
+        "https":        "on" if scheme == "https" else "off",
+        "http_host":    http_host,
+        "script_name":  str(request.url.path),
+        "server_port":  port,
+        "get_data":     dict(request.query_params),
+        "post_data":    form_data or {},
         "query_string": str(request.url.query),
     }
 
@@ -178,7 +193,7 @@ async def saml_login(
 
     cfg      = await _get_saml_cfg(pool)
     settings = _build_saml_settings(cfg)
-    req_data = _prepare_request(request)
+    req_data = _prepare_request(request, acs_url=cfg.get("acs_url"))
 
     auth         = OneLogin_Saml2_Auth(req_data, old_settings=settings)
     redirect_url = auth.login(return_to="/")
@@ -199,7 +214,7 @@ async def saml_acs(
     form_data = dict(await request.form())
     cfg       = await _get_saml_cfg(pool)
     settings  = _build_saml_settings(cfg)
-    req_data  = _prepare_request(request, form_data)
+    req_data  = _prepare_request(request, form_data, acs_url=cfg.get("acs_url"))
 
     auth = OneLogin_Saml2_Auth(req_data, old_settings=settings)
     auth.process_response()
@@ -288,7 +303,7 @@ async def saml_sls(
 
     cfg      = await _get_saml_cfg(pool)
     settings = _build_saml_settings(cfg)
-    req_data = _prepare_request(request, form_data)
+    req_data = _prepare_request(request, form_data, acs_url=cfg.get("slo_url") or cfg.get("acs_url"))
 
     auth = OneLogin_Saml2_Auth(req_data, old_settings=settings)
     # keep_local_session=True – wir verwalten keine Server-Sessions (nur JWTs)
