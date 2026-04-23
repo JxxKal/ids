@@ -228,8 +228,9 @@ export interface UpdateStatus {
 }
 
 export interface SystemUpdateStatus {
-  phase: 'idle' | 'extracting' | 'building' | 'done' | 'error';
+  phase: 'idle' | 'extracting' | 'loading' | 'building' | 'restarting' | 'done' | 'error';
   log: string[];
+  progress: number;
   started_at: string | null;
   finished_at: string | null;
   version?: string;
