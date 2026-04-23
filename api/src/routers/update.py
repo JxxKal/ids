@@ -1,4 +1,4 @@
-"""Offline-Update: ZIP-Upload → Extraktion → docker compose up --build."""
+"""Offline-Update: ZIP-Upload → Extraktion → docker compose build + up."""
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 
 router = APIRouter(prefix="/api/system", tags=["update"])
 
@@ -73,7 +73,25 @@ def _extract(zip_bytes: bytes, dest: Path) -> int:
         tmp_path.unlink(missing_ok=True)
 
 
-async def _run_update(zip_bytes: bytes) -> None:
+async def _run_subprocess(cmd: list[str]) -> None:
+    """Führt einen Subprocess aus und schreibt stdout/stderr ins Log."""
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        cwd=str(IDS_DIR),
+    )
+    assert proc.stdout is not None
+    async for raw in proc.stdout:
+        line = raw.decode(errors="replace").rstrip()
+        if line:
+            _log(line)
+    rc = await proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"Befehl '{cmd[0]} …' beendet mit Code {rc}")
+
+
+async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
     _state.update({
         "phase": "extracting",
         "log": [],
@@ -91,26 +109,21 @@ async def _run_update(zip_bytes: bytes) -> None:
         _log(f"Compose-Profil: {profile}")
 
         _state["phase"] = "building"
-        _log("Starte: docker compose up -d --build ...")
 
-        proc = await asyncio.create_subprocess_exec(
-            "docker", "compose",
-            "--project-directory", str(IDS_DIR),
-            "--profile", profile,
-            "up", "-d", "--build",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            cwd=str(IDS_DIR),
-        )
-        assert proc.stdout is not None
-        async for raw in proc.stdout:
-            line = raw.decode(errors="replace").rstrip()
-            if line:
-                _log(line)
+        base_args = ["docker", "compose", "--project-directory", str(IDS_DIR), "--profile", profile]
 
-        rc = await proc.wait()
-        if rc != 0:
-            raise RuntimeError(f"docker compose exited with code {rc}")
+        # Build: ohne --pull → gecachte Base-Images (offline-sicher)
+        # Mit --pull → Docker Hub + apt-get (erfordert Internet)
+        build_cmd = base_args + ["build"]
+        if pull_images:
+            build_cmd.append("--pull")
+            _log("Starte: docker compose build --pull (mit Basis-Image-Update) ...")
+        else:
+            _log("Starte: docker compose build (ohne Basis-Image-Update, offline-sicher) ...")
+        await _run_subprocess(build_cmd)
+
+        _log("Starte: docker compose up -d ...")
+        await _run_subprocess(base_args + ["up", "-d"])
 
         _state["phase"] = "done"
         _log("Update erfolgreich abgeschlossen.")
@@ -126,13 +139,14 @@ async def _run_update(zip_bytes: bytes) -> None:
 async def start_update(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="GitHub-Repository-ZIP"),
+    pull_images: bool = Form(False, description="Basis-Images von Docker Hub pullen (benötigt Internet)"),
 ) -> dict:
     if _state["phase"] not in ("idle", "done", "error"):
         raise HTTPException(409, "Ein Update läuft bereits")
     if not (file.filename or "").endswith(".zip"):
         raise HTTPException(400, "Nur ZIP-Dateien erlaubt")
     zip_bytes = await file.read()
-    background_tasks.add_task(_run_update, zip_bytes)
+    background_tasks.add_task(_run_update, zip_bytes, pull_images)
     return {"status": "started"}
 
 

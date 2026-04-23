@@ -1555,10 +1555,11 @@ const PHASE_COLOR: Record<SystemUpdateStatus['phase'], string> = {
 };
 
 function SystemUpdate() {
-  const [file,      setFile]      = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error,     setError]     = useState<string | null>(null);
-  const [status,    setStatus]    = useState<SystemUpdateStatus>({
+  const [file,        setFile]        = useState<File | null>(null);
+  const [pullImages,  setPullImages]  = useState(false);
+  const [uploading,   setUploading]   = useState(false);
+  const [error,       setError]       = useState<string | null>(null);
+  const [status,      setStatus]      = useState<SystemUpdateStatus>({
     phase: 'idle', log: [], started_at: null, finished_at: null,
   });
   const logRef = useRef<HTMLDivElement>(null);
@@ -1588,7 +1589,7 @@ function SystemUpdate() {
     setError(null);
     setUploading(true);
     try {
-      await startSystemUpdate(file);
+      await startSystemUpdate(file, pullImages);
       setStatus(s => ({ ...s, phase: 'extracting', log: [], started_at: new Date().toISOString() }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1650,6 +1651,20 @@ function SystemUpdate() {
           {uploading ? 'Wird hochgeladen …' : 'Update starten'}
         </button>
       </div>
+
+      <label className="mt-3 flex items-center gap-2 cursor-pointer w-fit">
+        <input
+          type="checkbox"
+          checked={pullImages}
+          disabled={isRunning || uploading}
+          onChange={e => setPullImages(e.target.checked)}
+          className="accent-cyan-500"
+        />
+        <span className="text-sm text-slate-400">
+          Basis-Images aktualisieren
+          <span className="ml-1 text-slate-600 text-xs">(benötigt Internetzugang)</span>
+        </span>
+      </label>
 
       {error && (
         <p className="mt-3 text-sm text-red-400">{error}</p>

@@ -524,10 +524,11 @@ export async function testSyslog(body: SyslogTestRequest): Promise<{ status: str
 
 // ── System-Update ─────────────────────────────────────────────────────────────
 
-export async function startSystemUpdate(file: File): Promise<{ status: string }> {
+export async function startSystemUpdate(file: File, pullImages: boolean): Promise<{ status: string }> {
   const token = getToken();
   const fd = new FormData();
   fd.append('file', file);
+  fd.append('pull_images', String(pullImages));
   const res = await fetch(`${BASE}/api/system/update`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
