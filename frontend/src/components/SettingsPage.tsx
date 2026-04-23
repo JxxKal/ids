@@ -491,8 +491,8 @@ function SamlSettings() {
           <p className="text-xs text-slate-400 font-medium mb-2">Identity Provider (IdP)</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {inp('Entity-ID des IdP',   'idp_entity_id', 'http://10.180.18.66/saml-idp/…')}
-            {inp('SSO-URL (HTTP-Redirect)', 'idp_sso_url', 'https://…/login/')}
-            {inp('SLO-URL (Logout)',    'idp_slo_url',  'https://…/logout/')}
+            {inp('SSO-URL (HTTP-Redirect)', 'idp_sso_url', 'http://10.180.18.66/…/login/')}
+            {inp('SLO-URL (Logout)',    'idp_slo_url',  'http://10.180.18.66/…/logout/')}
           </div>
           <div className="mt-3 flex flex-col gap-1">
             <div className="flex items-center justify-between">
@@ -517,9 +517,22 @@ function SamlSettings() {
         <div>
           <p className="text-xs text-slate-400 font-medium mb-2">Service Provider (SP) – diese Werte beim FortiAuthenticator eintragen</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {inp('SP Entity-ID',   'sp_entity_id',  'https://192.168.1.230')}
-            {inp('ACS-URL (Login)', 'acs_url',       'https://192.168.1.230/api/auth/saml/acs')}
-            {inp('SLS-URL (Logout)', 'slo_url',      'https://192.168.1.230/api/auth/saml/sls')}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-slate-400">SP Entity-ID</label>
+              <input className="input text-xs font-mono" type="text" placeholder="http://192.168.1.230"
+                value={cfg.sp_entity_id}
+                onChange={e => {
+                  const base = e.target.value.replace(/\/$/, '');
+                  setCfg(c => ({
+                    ...c,
+                    sp_entity_id: e.target.value,
+                    acs_url: base ? `${base}/api/auth/saml/acs` : c.acs_url,
+                    slo_url: base ? `${base}/api/auth/saml/sls` : c.slo_url,
+                  }));
+                }} />
+            </div>
+            {inp('ACS-URL (Login)',  'acs_url',  'http://192.168.1.230/api/auth/saml/acs')}
+            {inp('SLS-URL (Logout)', 'slo_url',  'http://192.168.1.230/api/auth/saml/sls')}
           </div>
 
           {/* SP-Info-Box mit Copy-Buttons */}
