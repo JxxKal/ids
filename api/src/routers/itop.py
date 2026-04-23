@@ -30,6 +30,9 @@ _CI_CLASSES = ["Server", "NetworkDevice", "PC", "ApplicationServer"]
 # TeemIP verwendet IPv4Subnet, ältere/andere Instanzen ggf. NetworkSubnet oder Subnet.
 _SUBNET_CLASSES = ["IPv4Subnet", "NetworkSubnet", "Subnet"]
 
+# usage_name-Werte die übersprungen werden (Netzadresse, Gateway, Broadcast)
+_SKIP_USAGES = {"network ip", "gateway", "broadcast", "broadcast ip", "router", "network address"}
+
 _state: dict[str, Any] = {
     "phase": "idle",   # idle | running | done | error
     "log":   [],
@@ -179,7 +182,62 @@ async def _sync(pool: asyncpg.Pool) -> None:
 
             _log(f"  Netzwerke: {nets_ok} upserted, {nets_err} Fehler.")
 
-            # ── CI-Klassen → host_info ────────────────────────────────────────
+            # ── IPv4Address → host_info (Hostnamen) ───────────────────────────
+            _log("Lade IPv4Address (Hostnamen) ...")
+            addr_oql = (
+                f"SELECT IPv4Address WHERE status = 'assigned' AND org_name = '{org}'"
+                if org else
+                "SELECT IPv4Address WHERE status = 'assigned'"
+            )
+            try:
+                addresses = await _core_get(
+                    client, base_url, user, pwd,
+                    "IPv4Address", "ip,short_name,fqdn,domain_name,usage_name", addr_oql,
+                )
+                _log(f"  {len(addresses)} zugewiesene IP-Adressen gefunden.")
+                addrs_ok = addrs_skip = 0
+                async with pool.acquire() as conn:
+                    for addr in addresses:
+                        usage = (addr.get("usage_name") or "").strip().lower()
+                        if usage in _SKIP_USAGES:
+                            addrs_skip += 1
+                            continue
+                        ip = (addr.get("ip") or "").strip()
+                        if not ip or ip == "0.0.0.0":
+                            addrs_skip += 1
+                            continue
+                        short_name = (addr.get("short_name") or "").strip() or None
+                        fqdn_val   = (addr.get("fqdn")       or "").strip() or None
+                        display_name = short_name or fqdn_val
+                        try:
+                            await conn.execute(
+                                """
+                                INSERT INTO host_info
+                                  (ip, display_name, trusted, trust_source, updated_at)
+                                VALUES ($1::inet, $2, true, 'cmdb', now())
+                                ON CONFLICT (ip) DO UPDATE SET
+                                  display_name = COALESCE(
+                                    EXCLUDED.display_name,
+                                    host_info.display_name
+                                  ),
+                                  trusted      = true,
+                                  trust_source = CASE
+                                    WHEN host_info.trust_source = 'manual' THEN 'manual'
+                                    ELSE 'cmdb'
+                                  END,
+                                  updated_at   = now()
+                                """,
+                                ip, display_name,
+                            )
+                            addrs_ok += 1
+                        except Exception as exc:
+                            _log(f"  IPv4Address {ip}: {exc}")
+                hosts_ok += addrs_ok
+                _log(f"  IPv4Address: {addrs_ok} upserted, {addrs_skip} übersprungen (Network/Gateway/Broadcast).")
+            except Exception as exc:
+                _log(f"  IPv4Address: {exc} – übersprungen.")
+
+            # ── CI-Klassen → host_info (CI-Namen überschreiben DNS-Namen) ─────
             for cls in _CI_CLASSES:
                 _log(f"Lade {cls} ...")
                 oql = f"SELECT {cls} WHERE org_name = '{org}'" if org else None
