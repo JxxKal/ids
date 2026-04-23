@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { login, setToken } from '../api';
+import { useEffect, useState } from 'react';
+import { fetchSamlEnabled, login, setToken } from '../api';
 import { disableDemoMode, enableDemoMode } from '../demo/mode';
 import type { User } from '../types';
 import { NetworkGlobe } from './NetworkGlobe';
@@ -10,10 +10,15 @@ interface Props {
 }
 
 export function LoginPage({ onLogin }: Props) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error,    setError]    = useState('');
-  const [loading,  setLoading]  = useState(false);
+  const [username,    setUsername]    = useState('');
+  const [password,    setPassword]    = useState('');
+  const [error,       setError]       = useState('');
+  const [loading,     setLoading]     = useState(false);
+  const [samlEnabled, setSamlEnabled] = useState(false);
+
+  useEffect(() => {
+    fetchSamlEnabled().then(r => setSamlEnabled(r.enabled)).catch(() => {});
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -112,6 +117,25 @@ export function LoginPage({ onLogin }: Props) {
               {loading ? 'ANMELDEN…' : 'ANMELDEN'}
             </button>
           </form>
+
+          {samlEnabled && (
+            <>
+              <div className="flex items-center gap-2 mt-4">
+                <div className="flex-1 h-px bg-slate-700/60" />
+                <span className="text-[10px] text-slate-600 font-mono tracking-widest">ODER</span>
+                <div className="flex-1 h-px bg-slate-700/60" />
+              </div>
+              <a
+                href="/api/auth/saml/login"
+                className="mt-3 flex items-center justify-center gap-2 w-full px-4 py-2 rounded
+                           border border-purple-700/60 bg-purple-950/30 text-purple-300
+                           hover:bg-purple-900/40 hover:border-purple-600 transition-colors
+                           text-sm font-medium tracking-wide"
+              >
+                MIT SSO ANMELDEN
+              </a>
+            </>
+          )}
         </div>
 
         {/* Demo-Hint */}

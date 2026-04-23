@@ -350,108 +350,236 @@ function UserManagement() {
 
 // ── SamlSettings ──────────────────────────────────────────────────────────────
 
+/** Parst eine IdP-Metadata-XML und gibt die relevanten Felder zurück. */
+function parseIdpMetadataXml(xml: string): Partial<SamlConfig> {
+  try {
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    if (doc.querySelector('parsererror')) throw new Error('Ungültiges XML');
+
+    const ns = 'urn:oasis:names:tc:SAML:2.0:metadata';
+    const entityId = doc.documentElement.getAttribute('entityID') ?? '';
+
+    const ssoServices = Array.from(doc.getElementsByTagNameNS(ns, 'SingleSignOnService'));
+    const sloServices = Array.from(doc.getElementsByTagNameNS(ns, 'SingleLogoutService'));
+
+    const ssoRedirect = ssoServices.find(e => e.getAttribute('Binding')?.endsWith('HTTP-Redirect'))?.getAttribute('Location')
+      ?? ssoServices[0]?.getAttribute('Location') ?? '';
+
+    const sloPost = sloServices.find(e => e.getAttribute('Binding')?.endsWith('HTTP-POST'))?.getAttribute('Location')
+      ?? sloServices[0]?.getAttribute('Location') ?? '';
+
+    // X509Certificate aus Signing KeyDescriptor
+    const keyDescs = Array.from(doc.getElementsByTagNameNS(ns, 'KeyDescriptor'));
+    const signingKey = keyDescs.find(k => !k.getAttribute('use') || k.getAttribute('use') === 'signing') ?? keyDescs[0];
+    const cert = signingKey?.getElementsByTagNameNS('http://www.w3.org/2000/09/xmldsig#', 'X509Certificate')[0]?.textContent?.replace(/\s/g, '') ?? '';
+
+    return { idp_entity_id: entityId, idp_sso_url: ssoRedirect, idp_slo_url: sloPost, idp_x509_cert: cert };
+  } catch (e) {
+    throw new Error(`XML-Parse-Fehler: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button type="button"
+      className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-500 hover:text-slate-300 transition-colors"
+      onClick={() => { navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 2000); }}>
+      {done ? 'Kopiert' : 'Kopieren'}
+    </button>
+  );
+}
+
 const SAML_DEFAULTS: SamlConfig = {
   enabled: false,
-  idp_metadata_url: '',
-  sp_entity_id: 'https://ids.local',
-  acs_url: 'https://ids.local/api/auth/saml/acs',
-  attribute_username: 'uid',
-  attribute_email: 'email',
-  attribute_display_name: 'displayName',
-  default_role: 'viewer',
+  idp_entity_id: '', idp_sso_url: '', idp_slo_url: '', idp_x509_cert: '',
+  sp_entity_id: '', acs_url: '', slo_url: '',
+  attribute_username: 'uid', attribute_email: 'email',
+  attribute_display_name: 'displayName', default_role: 'viewer',
 };
 
 function SamlSettings() {
-  const [cfg,     setCfg]     = useState<SamlConfig>(SAML_DEFAULTS);
-  const [loading, setLoading] = useState(true);
-  const [saving,  setSaving]  = useState(false);
-  const [saved,   setSaved]   = useState(false);
-  const [error,   setError]   = useState('');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [cfg,       setCfg]       = useState<SamlConfig>(SAML_DEFAULTS);
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [msg,       setMsg]       = useState<{ type: 'ok'|'err'; text: string }|null>(null);
+  const [xmlInput,  setXmlInput]  = useState('');
+  const [xmlError,  setXmlError]  = useState('');
+  const [showCert,  setShowCert]  = useState(false);
 
   useEffect(() => {
     fetchSamlConfig()
       .then(setCfg)
-      .catch(() => { /* kein SAML-Eintrag → Defaults behalten */ })
+      .catch(() => {})
       .finally(() => setLoading(false));
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, []);
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true); setError(''); setSaved(false);
+  function flash(type: 'ok'|'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  function handleImportXml() {
+    setXmlError('');
     try {
-      await saveSamlConfig(cfg);
-      setSaved(true);
-      timerRef.current = setTimeout(() => setSaved(false), 3000);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Fehler beim Speichern');
-    } finally {
-      setSaving(false);
+      const parsed = parseIdpMetadataXml(xmlInput);
+      setCfg(c => ({ ...c, ...parsed }));
+      setXmlInput('');
+      flash('ok', 'IdP-Metadaten importiert ✓');
+    } catch (e: unknown) {
+      setXmlError(e instanceof Error ? e.message : 'Parse-Fehler');
     }
   }
 
-  const field = (id: string, label: string, key: keyof SamlConfig, type = 'text', placeholder = '') => (
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try { await saveSamlConfig(cfg); flash('ok', 'Gespeichert ✓'); }
+    catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Fehler'); }
+    finally { setSaving(false); }
+  }
+
+  const inp = (label: string, key: keyof SamlConfig, placeholder = '', type = 'text') => (
     <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-xs text-slate-400">{label}</label>
-      <input
-        id={id} name={id} type={type} className="input text-xs" placeholder={placeholder}
+      <label className="text-xs text-slate-400">{label}</label>
+      <input className="input text-xs font-mono" type={type} placeholder={placeholder}
         value={String(cfg[key] ?? '')}
-        onChange={e => setCfg(c => ({ ...c, [key]: e.target.value }))}
-      />
+        onChange={e => setCfg(c => ({ ...c, [key]: e.target.value }))} />
     </div>
   );
 
   if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
 
   return (
-    <form onSubmit={handleSave} className="space-y-4">
+    <form onSubmit={handleSave} className="space-y-5">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">SAML / SSO</h2>
-        <label htmlFor="saml-enabled" className="flex items-center gap-2 cursor-pointer select-none text-xs">
-          <input
-            id="saml-enabled" name="saml-enabled" type="checkbox"
-            className="accent-purple-500"
+        <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
+          <input type="checkbox" className="accent-purple-500"
             checked={cfg.enabled}
-            onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))}
-          />
+            onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
           <span className={cfg.enabled ? 'text-purple-300 font-medium' : 'text-slate-500'}>
             SAML aktiviert
           </span>
         </label>
       </div>
 
+      {/* ── IdP-Metadaten XML importieren ────────────────────────────────────── */}
+      <div className="rounded border border-slate-700/60 bg-slate-900/50 p-3 space-y-2">
+        <p className="text-xs font-medium text-slate-300">IdP-Metadaten importieren</p>
+        <p className="text-[11px] text-slate-500">
+          XML aus dem FortiAuthenticator herunterladen und hier einfügen — füllt die IdP-Felder automatisch.
+        </p>
+        <textarea
+          className="input text-[11px] font-mono w-full h-24 resize-none"
+          placeholder={'<?xml version="1.0"?>\n<md:EntityDescriptor …'}
+          value={xmlInput}
+          onChange={e => { setXmlInput(e.target.value); setXmlError(''); }}
+        />
+        {xmlError && <p className="text-[11px] text-red-400">{xmlError}</p>}
+        <button type="button" className="btn-ghost text-xs"
+          disabled={!xmlInput.trim()}
+          onClick={handleImportXml}>
+          XML parsen &amp; Felder befüllen
+        </button>
+      </div>
+
       <div className={`space-y-4 ${!cfg.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {field('saml-idp-url',    'IdP Metadata-URL',   'idp_metadata_url', 'url', 'https://idp.example.com/metadata')}
-          {field('saml-entity-id',  'SP Entity-ID',       'sp_entity_id',     'url', 'https://ids.local')}
-          {field('saml-acs-url',    'ACS-URL',            'acs_url',          'url', 'https://ids.local/api/auth/saml/acs')}
+
+        {/* ── IdP-Felder ───────────────────────────────────────────────────── */}
+        <div>
+          <p className="text-xs text-slate-400 font-medium mb-2">Identity Provider (IdP)</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {inp('Entity-ID des IdP',   'idp_entity_id', 'http://10.180.18.66/saml-idp/…')}
+            {inp('SSO-URL (HTTP-Redirect)', 'idp_sso_url', 'https://…/login/')}
+            {inp('SLO-URL (Logout)',    'idp_slo_url',  'https://…/logout/')}
+          </div>
+          <div className="mt-3 flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-slate-400">X.509-Zertifikat des IdP (Base64, ohne PEM-Header)</label>
+              <button type="button" className="text-[10px] text-slate-500 hover:text-slate-300"
+                onClick={() => setShowCert(v => !v)}>
+                {showCert ? 'Verbergen' : 'Zeigen'}
+              </button>
+            </div>
+            {showCert
+              ? <textarea className="input text-[11px] font-mono w-full h-20 resize-none"
+                  value={cfg.idp_x509_cert}
+                  onChange={e => setCfg(c => ({ ...c, idp_x509_cert: e.target.value }))} />
+              : <p className="text-[11px] text-slate-600 font-mono truncate">
+                  {cfg.idp_x509_cert ? `${cfg.idp_x509_cert.slice(0, 60)}…` : '(nicht gesetzt)'}
+                </p>
+            }
+          </div>
         </div>
 
+        {/* ── SP-Felder ────────────────────────────────────────────────────── */}
         <div>
-          <p className="text-xs text-slate-500 mb-2">Attribut-Mapping (SAML-Assertion → Benutzerfeld)</p>
+          <p className="text-xs text-slate-400 font-medium mb-2">Service Provider (SP) – diese Werte beim FortiAuthenticator eintragen</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {inp('SP Entity-ID',   'sp_entity_id',  'https://192.168.1.230')}
+            {inp('ACS-URL (Login)', 'acs_url',       'https://192.168.1.230/api/auth/saml/acs')}
+            {inp('SLS-URL (Logout)', 'slo_url',      'https://192.168.1.230/api/auth/saml/sls')}
+          </div>
+
+          {/* SP-Info-Box mit Copy-Buttons */}
+          {cfg.sp_entity_id && (
+            <div className="mt-3 rounded border border-slate-700/40 bg-slate-900/60 divide-y divide-slate-800 text-[11px] font-mono">
+              {[
+                ['SP Entity-ID',    cfg.sp_entity_id],
+                ['ACS-URL (Login)', cfg.acs_url],
+                ['SLS-URL (Logout)', cfg.slo_url],
+              ].map(([label, val]) => (
+                <div key={label} className="flex items-center justify-between px-3 py-1.5 gap-2">
+                  <span className="text-slate-500 shrink-0 w-32">{label}</span>
+                  <span className="text-slate-300 truncate flex-1">{val || '–'}</span>
+                  {val && <CopyButton value={val} />}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* SP Metadata XML herunterladen */}
+          {cfg.sp_entity_id && cfg.enabled && (
+            <a
+              href="/api/auth/saml/metadata"
+              download="sp-metadata.xml"
+              className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 border border-slate-700 rounded px-2.5 py-1 transition-colors"
+            >
+              ↓ SP-Metadata XML herunterladen
+            </a>
+          )}
+        </div>
+
+        {/* ── Attribut-Mapping ─────────────────────────────────────────────── */}
+        <div>
+          <p className="text-xs text-slate-500 mb-2">
+            Attribut-Mapping — SAML-Assertion-Attributname, der den jeweiligen Wert liefert.
+            FortiAuthenticator sendet je nach Konfiguration z.B. <span className="font-mono text-slate-400">username</span> oder <span className="font-mono text-slate-400">uid</span>.
+          </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {field('saml-attr-user',  'Benutzername',   'attribute_username',     'text', 'uid')}
-            {field('saml-attr-email', 'E-Mail',         'attribute_email',        'text', 'email')}
-            {field('saml-attr-name',  'Anzeigename',    'attribute_display_name', 'text', 'displayName')}
+            {inp('Benutzername-Attribut',  'attribute_username',     'uid')}
+            {inp('E-Mail-Attribut',        'attribute_email',        'email')}
+            {inp('Anzeigename-Attribut',   'attribute_display_name', 'displayName')}
           </div>
         </div>
 
         <div className="flex flex-col gap-1 max-w-xs">
-          <label htmlFor="saml-role" className="text-xs text-slate-400">Standard-Rolle für neue SAML-User</label>
-          <select id="saml-role" name="saml-role" className="input text-xs"
+          <label className="text-xs text-slate-400">Standard-Rolle für neue SAML-User</label>
+          <select className="input text-xs"
             value={cfg.default_role}
-            onChange={e => setCfg(c => ({ ...c, default_role: e.target.value as 'admin' | 'viewer' }))}>
+            onChange={e => setCfg(c => ({ ...c, default_role: e.target.value as 'admin'|'viewer' }))}>
             <option value="viewer">Viewer</option>
             <option value="admin">Admin</option>
           </select>
         </div>
       </div>
 
-      {error  && <p className="text-red-400 text-xs">{error}</p>}
-      {saved  && <p className="text-green-400 text-xs">Gespeichert ✓</p>}
-
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between pt-1">
+        <div>
+          {msg?.type === 'ok'  && <span className="text-xs text-green-400">{msg.text}</span>}
+          {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
+        </div>
         <button type="submit" className="btn-primary text-xs" disabled={saving}>
           {saving ? 'Speichern…' : 'SAML-Konfiguration speichern'}
         </button>
