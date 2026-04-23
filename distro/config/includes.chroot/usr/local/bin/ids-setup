@@ -106,14 +106,49 @@ fi
 
 # ── Schritt 3: Management-Interface ──────────────────────────────────────────
 
-# Verfügbare Interfaces ermitteln
-IFACES=$(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$' | \
-  while read -r IF; do echo "$IF" "$(ip -4 addr show "$IF" 2>/dev/null | \
-    awk '/inet /{print $2}' | head -1 || echo 'keine IP')"; done)
+# Interface-Liste aufbauen (Name + aktuelle IP als Beschreibung)
+IFACE_MENU=()
+while read -r IF; do
+  IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2}' | head -1)
+  IFACE_MENU+=("$IF" "${IP4:-keine IP}")
+done < <(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$')
 
-MGMT_IP=$(input "Management-IP" \
-  "IP-Adresse für das Web-Interface und die API:\n(0.0.0.0 = alle Interfaces)\n\nVerfügbare Interfaces:\n${IFACES}" \
-  "0.0.0.0") || MGMT_IP="0.0.0.0"
+MGMT_IFACE=$(whiptail --title "$TITLE" --menu \
+  "Management-Interface auswählen:\n(Über dieses Interface ist das Web-Interface erreichbar)" \
+  $H $W 6 "${IFACE_MENU[@]}" 3>&1 1>&2 2>&3) || MGMT_IFACE="${IFACE_MENU[0]}"
+
+# Aktuelle IP des gewählten Interfaces (DHCP oder statisch)
+MGMT_IP=$(ip -4 addr show "$MGMT_IFACE" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
+MGMT_IP="${MGMT_IP:-0.0.0.0}"
+
+# Optional: statische IP konfigurieren
+if yesno "Das Interface '$MGMT_IFACE' hat aktuell die IP: ${MGMT_IP}\n\nMöchten Sie stattdessen eine feste (statische) IP konfigurieren?"; then
+  STATIC_IP=$(input "Statische IP" \
+    "Statische IP-Adresse (CIDR-Notation):\n(Beispiel: 192.168.1.100/24)" \
+    "${MGMT_IP}/24") || STATIC_IP=""
+
+  STATIC_GW=$(input "Gateway" \
+    "Standard-Gateway:" \
+    "$(ip route show default 2>/dev/null | awk '/default/{print $3}' | head -1)") || STATIC_GW=""
+
+  if [ -n "$STATIC_IP" ]; then
+    # /etc/network/interfaces schreiben
+    cat >> /etc/network/interfaces <<EOF
+
+auto ${MGMT_IFACE}
+iface ${MGMT_IFACE} inet static
+  address ${STATIC_IP}
+  gateway ${STATIC_GW}
+EOF
+    # Sofort anwenden
+    ip addr flush dev "$MGMT_IFACE" 2>/dev/null || true
+    ip addr add "$STATIC_IP" dev "$MGMT_IFACE" 2>/dev/null || true
+    [ -n "$STATIC_GW" ] && ip route replace default via "$STATIC_GW" 2>/dev/null || true
+
+    MGMT_IP=$(echo "$STATIC_IP" | cut -d/ -f1)
+    msg "Statische IP ${MGMT_IP} auf ${MGMT_IFACE} konfiguriert."
+  fi
+fi
 
 API_PORT=$(input "API-Port" \
   "Port für die REST-API und das Web-Interface:" \
@@ -218,7 +253,8 @@ MINIO_ACCESS_KEY=${MINIO_ACCESS}
 MINIO_SECRET_KEY=${MINIO_SECRET}
 
 # ── Netzwerk ──────────────────────────────────────────────────────────────────
-MIRROR_IFACE=${MIRROR_IFACE:-eth1}
+MGMT_INTERFACE=${MGMT_IFACE}
+MIRROR_INTERFACE=${MIRROR_IFACE:-eth1}
 
 # ── IRMA-Integration ──────────────────────────────────────────────────────────
 IRMA_BASE_URL=${IRMA_BASE_URL}
