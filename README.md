@@ -196,6 +196,8 @@ git push origin v1.0.0
 
 Manueller Build: Actions → „Build Cyjan IDS ISO" → **Run workflow**
 
+> **Hinweis Offline-Update:** Release-ZIPs von GitHub enthalten vorgebaute Docker-Images (`images.tar.gz`). Nur diese ZIPs funktionieren auf Air-Gap-Systemen ohne Docker-Hub-Zugriff. Source-ZIPs (GitHub → Code → Download ZIP) enthalten keine Images.
+
 ### Lokal bauen (Debian/Ubuntu)
 
 ```bash
@@ -217,7 +219,7 @@ Bei **bestehendem Volume** neue Migrationen manuell ausführen:
 
 ```bash
 docker compose exec -T timescaledb psql -U ids -d ids \
-  -f /docker-entrypoint-initdb.d/005_api_role.sql
+  -f /docker-entrypoint-initdb.d/008_itop_cmdb.sql
 ```
 
 | Migration | Inhalt |
@@ -229,6 +231,7 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 | `005_api_role.sql` | `api`-Rolle in users-Tabellen CHECK-Constraint |
 | `006_suricata_source.sql` | `suricata` als gültige Alert-Quelle |
 | `007_external_source.sql` | `external` als gültige Alert-Quelle (IRMA-Bridge) |
+| `008_itop_cmdb.sql` | `cmdb` als gültige Trust-Quelle (iTop-Integration) |
 
 ---
 
@@ -277,6 +280,7 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 - **Threat-Level Gauge** – 0–100 (grün → rot), Gewichtung nach Severity
 - **Tags** – Suricata/Signatur-Tags je Alert (OT/ICS-Tags orange hervorgehoben)
 - **IRMA-Badge** – violettes „IRMA"-Label bei Alarmen aus der IRMA-Bridge
+- **IRMA ASSET-Filter** – Toggle-Schalter „∅ ASSET" blendet IRMA-Alarme mit `rule_id=ASSET::*` aus (bei Alarmstürmen durch Asset-Warnungen)
 - **Enrichment** – Hostname, Netzwerk-Badge, Trust-Status, GeoIP, ASN
 - **FP/TP-Badge** – grün (False Positive) / rot (True Positive) direkt in der Zeile
 - **PCAP-Button** – grau (nicht verfügbar) / blau (Download bereit), mit Tooltip
@@ -297,6 +301,7 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 
 - Bekannte Netzwerke (CIDR + Name + Beschreibung + Farbe) anlegen und löschen
 - **CSV-Import** – Bulk-Import aus Datei
+- **iTop-Import** – Netzwerke aus CMDB synchronisieren (grün markiert)
 - **Beispiel-CSV** – Download-Button (authentifizierter Fetch)
 
 ### Hosts
@@ -304,6 +309,7 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 - Host-Verzeichnis mit Trust-Status, Hostname, ASN, GeoIP, Last-Seen
 - Manuell anlegen, Display-Namen und Trust-Flag bearbeiten, löschen
 - **CSV-Import** – `Hostname;IP` oder `IP;Hostname`, Semikolon oder Komma
+- **iTop-Import** – Hosts aus CMDB (CI-Namen + Management-IPs, grüner „iTop/CMDB"-Badge)
 - **Beispiel-CSV** – Download-Button (authentifizierter Fetch)
 
 ### Tests
@@ -330,7 +336,17 @@ Für API-User wird kein Passwort benötigt – nach dem Anlegen wird ein langleb
 
 #### SAML / SSO
 
-IdP-Metadata-URL, SP Entity-ID, ACS-URL, Attribut-Mapping, Standard-Rolle.
+SAML 2.0 Single Sign-On, getestet mit FortiAuthenticator als IdP.
+
+- **IdP-Metadaten XML-Import** – XML aus dem IdP einfügen, füllt Entity-ID, SSO-URL, SLO-URL und X.509-Zertifikat automatisch
+- **SP Entity-ID** – bei Eingabe werden ACS-URL und SLS-URL automatisch abgeleitet
+- **SP Metadata XML** – Download-Button für den IdP-Import (nur wenn aktiviert)
+- **Attribut-Mapping** – konfigurierbare SAML-Attributnamen für Benutzername, E-Mail, Anzeigename
+- **Standard-Rolle** – Rolle für neu angelegte SAML-Benutzer (viewer / admin)
+- SAML-Benutzer werden bei Login automatisch angelegt bzw. aktualisiert
+- Konflikt mit lokalem Benutzer gleichen Namens wird abgewiesen
+
+**Flow:** Browser → `/api/auth/saml/login` → IdP → POST `/api/auth/saml/acs` → JWT → `/?saml_token=JWT` → React
 
 #### ML-Status
 
@@ -359,6 +375,57 @@ Vorkonfigurierte OT/ICS-Quellen (deaktiviert, bei Bedarf aktivieren):
 #### Regelübersicht
 
 Alle aktiven Regeln, Suche, Pagination, Aktion-Badges.
+
+#### SSL / TLS-Zertifikat
+
+- **Server-Hostname** – setzt nginx `server_name` (wird beim nächsten Container-Neustart aktiv)
+- **PEM-Upload** – Zertifikat + privater Schlüssel + optionale CA-Chain
+- **PFX / PKCS#12-Import** – Windows-CA-Export direkt importieren, Passwort für privaten Schlüssel optional
+- **Self-Signed generieren** – CN/Hostname, Gültigkeit, Land, Organisation
+- **ACME / Let's Encrypt** – Konfiguration speichern, Zertifikatsbezug via certbot/acme.sh
+
+nginx-Konfiguration wird beim Container-Start aus `/certs/cert.pem` + `/certs/key.pem` gelesen:
+- Zertifikat vorhanden → HTTPS auf 443, HTTP→HTTPS-Redirect auf 80
+- Kein Zertifikat → HTTP auf 80
+
+#### IRMA-Integration
+
+URL, Benutzername, Passwort, Poll-Intervall, SSL-Verifikation. Hot-Reload der Konfiguration ohne Container-Neustart.
+
+#### iTop CMDB
+
+Synchronisation mit iTop IP-Management (TeemIP-Extension):
+
+- **Verbindungstest** – prüft API-Erreichbarkeit und listet Organisationen
+- **Konfiguration** – Base-URL, Benutzer, Passwort, Organisations-Filter, SSL-Verifikation
+- **Synchronisieren** – importiert Subnets und Hosts mit Live-Log und Statistiken
+
+**Was synchronisiert wird:**
+
+| iTop-Klasse | Ziel | Felder |
+|---|---|---|
+| `IPv4Subnet` | `known_networks` | CIDR, Name, Kommentar → grüne Farbe |
+| `IPv4Address` (status=assigned) | `host_info` | IP, short_name/FQDN als Hostname |
+| `Server`, `NetworkDevice`, `PC`, `ApplicationServer` | `host_info` | CI-Name, Management-IP |
+
+- Network IP, Gateway und Broadcast werden automatisch übersprungen (`usage_name`)
+- CI-Namen überschreiben DNS-Hostnamen (höhere Priorität)
+- Manuell gesetzte Trust-Quellen (`manual`) werden nicht überschrieben
+- CMDB-Assets erhalten das Badge **✓ iTop/CMDB** und grüne Netzwerkfarbe
+
+#### System-Update
+
+Offline-Update via ZIP-Upload direkt aus dem Dashboard:
+
+1. Release-ZIP von GitHub herunterladen (enthält `images.tar.gz`)
+2. In Settings → System-Update hochladen
+3. Fortschrittsbalken (0–100%) und Live-Log verfolgen
+4. Nach ~20 Sekunden Seite neu laden
+
+**Ablauf:**
+- ZIP wird entpackt (`.env` und `.git` bleiben erhalten)
+- `docker load` lädt vorgebaute Images
+- Unabhängiger Runner-Container startet `docker compose up -d` (überlebt api-Neustart)
 
 ---
 
@@ -438,6 +505,11 @@ Die API stellt eine vollständige interaktive Dokumentation bereit:
 |---|---|---|
 | POST | `/api/auth/login` | Login, gibt JWT zurück (kein Auth erforderlich) |
 | GET | `/api/auth/me` | Eingeloggter Benutzer |
+| GET | `/api/auth/saml/enabled` | SAML aktiviert? (öffentlich) |
+| GET | `/api/auth/saml/login` | SP-initiierter SAML-Login → Redirect zum IdP |
+| POST | `/api/auth/saml/acs` | Assertion Consumer Service (IdP POST) |
+| GET | `/api/auth/saml/metadata` | SP-Metadata XML für IdP-Import |
+| GET/POST | `/api/auth/saml/sls` | Single Logout Service |
 
 ### Alerts
 
@@ -510,6 +582,26 @@ Die API stellt eine vollständige interaktive Dokumentation bereit:
 | DELETE | `/api/users/{id}` | Benutzer löschen (letzter Admin geschützt) |
 | POST | `/api/users/{id}/token` | 365-Tage-JWT für API-User generieren |
 
+### SSL / TLS
+
+| Method | Path | Beschreibung |
+|---|---|---|
+| GET | `/api/ssl/status` | Zertifikat-Status (Aussteller, Ablauf, Domains, Hostname) |
+| POST | `/api/ssl/upload` | PEM-Zertifikat + Schlüssel + optionale CA-Chain hochladen |
+| POST | `/api/ssl/upload-pfx` | PFX/PKCS#12-Datei mit Passwort importieren |
+| POST | `/api/ssl/self-signed` | Self-Signed Zertifikat generieren |
+| POST | `/api/ssl/acme` | ACME-Konfiguration speichern |
+| GET | `/api/ssl/hostname` | Konfigurierten nginx-Hostnamen lesen |
+| POST | `/api/ssl/hostname` | nginx `server_name` setzen |
+
+### iTop CMDB
+
+| Method | Path | Beschreibung |
+|---|---|---|
+| POST | `/api/itop/sync` | Synchronisation starten (Background-Task) |
+| GET | `/api/itop/sync/status` | Sync-Status + Live-Log + Statistiken |
+| POST | `/api/itop/test` | Verbindungstest (listet Organisationen) |
+
 ### System
 
 | Method | Path | Beschreibung |
@@ -519,6 +611,9 @@ Die API stellt eine vollständige interaktive Dokumentation bereit:
 | PATCH | `/api/config/{key}` | Config-Key aktualisieren |
 | POST | `/api/tests/run` | Test-Szenario auslösen |
 | GET | `/api/tests/runs` | Test-Run-Protokoll |
+| POST | `/api/system/update` | Offline-Update via ZIP starten |
+| GET | `/api/system/update/status` | Update-Status + Fortschritt (0–100%) |
+| GET | `/api/system/version` | Installierte Version |
 | GET | `/health` | Health-Check (kein Auth) |
 
 ### WebSocket
@@ -569,13 +664,14 @@ Score wird auf 0–100 normiert (Cap bei 200 Rohpunkten).
 
 ## Host-Trust-System
 
-| Trust-Quelle | Beschreibung |
-|---|---|
-| `dns` | Hostname automatisch per Reverse-DNS aufgelöst |
-| `csv` | Import über CSV-Datei |
-| `manual` | Direkt im Dashboard oder via API angelegt |
+| Trust-Quelle | Badge | Beschreibung |
+|---|---|---|
+| `dns` | ✓ DNS | Hostname automatisch per Reverse-DNS aufgelöst |
+| `csv` | ✓ CSV | Import über CSV-Datei |
+| `manual` | ✓ Manuell | Direkt im Dashboard oder via API angelegt |
+| `cmdb` | ✓ iTop/CMDB | Import über iTop CMDB-Synchronisation |
 
-Trust wird nie herabgestuft – manuell gesetztes `trusted=true` bleibt auch bei fehlendem DNS-Lookup erhalten.
+Trust wird nie herabgestuft – manuell gesetztes `trusted=true` bleibt auch bei erneutem CMDB-Sync erhalten.
 
 **UNKNOWN_HOST-Alert:** Der Enrichment-Service erzeugt automatisch einen Alert (`UNKNOWN_HOST_001`, Severity `low`) wenn ein privater IP-Host auftaucht, der nicht als trusted hinterlegt ist. Deduplication: max. 1 Alert pro IP pro Stunde.
 
@@ -624,7 +720,7 @@ cidr;name;description;color
 | `alerts` | Hypertable | Alarme mit Enrichment, Feedback, Tags, PCAP-Referenz |
 | `host_info` | Tabelle | Enrichment-Cache pro IP (Hostname, Trust, GeoIP, ASN) |
 | `known_networks` | Tabelle (GiST) | Bekannte Netzwerke – CIDR-Containment via `>>` Operator |
-| `system_config` | Tabelle | Betriebskonfiguration (key/value JSONB) |
+| `system_config` | Tabelle | Betriebskonfiguration (key/value JSONB) – SAML, IRMA, iTop, Syslog |
 | `training_samples` | Tabelle | Gelabelte Flows für ML-Retrain |
 | `test_runs` | Hypertable | Ergebnis-Protokoll der Dashboard-Tests |
 | `users` | Tabelle | Lokale und SAML-synchronisierte Benutzer (Rollen: admin, viewer, api) |
@@ -748,7 +844,7 @@ PCAP-Dateien sind im nativen libpcap-Format (`LINKTYPE_ETHERNET`). Sie enthalten
     "dst_hostname":    "cloudflare.com",
     "src_network":     { "cidr": "192.168.1.0/24", "name": "Office LAN", "color": "#4CAF50" },
     "src_trusted":     true,
-    "src_trust_source": "manual",
+    "src_trust_source": "cmdb",
     "dst_asn":         { "number": 13335, "org": "Cloudflare" },
     "dst_geo":         { "country": "US", "city": "San Jose" }
   },
