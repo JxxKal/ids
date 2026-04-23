@@ -407,6 +407,32 @@ export async function fetchSamlConfig(): Promise<SamlConfig> {
   return r.value;
 }
 
+// ── IRMA Config ───────────────────────────────────────────────────────────────
+
+export async function fetchIrmaConfig(): Promise<import('./types').IrmaConfig> {
+  if (isDemoMode()) return {
+    enabled: false, base_url: 'https://10.133.168.115/rest',
+    user: 'demo-irma', password: '', poll_interval: 30, ssl_verify: false,
+  };
+  try {
+    const r = await req<{ key: string; value: import('./types').IrmaConfig }>('/api/config/irma');
+    return r.value;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) {
+      return { enabled: false, base_url: 'https://10.133.168.115/rest', user: '', password: '', poll_interval: 30, ssl_verify: false };
+    }
+    throw e;
+  }
+}
+
+export async function saveIrmaConfig(value: import('./types').IrmaConfig): Promise<void> {
+  if (isDemoMode()) return;
+  await req('/api/config/irma', {
+    method: 'PATCH',
+    body: JSON.stringify({ value }),
+  });
+}
+
 export async function saveSamlConfig(value: SamlConfig): Promise<void> {
   await req('/api/config/saml', { method: 'PATCH', body: JSON.stringify({ value }) });
 }

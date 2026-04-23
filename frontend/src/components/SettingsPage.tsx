@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, Database, FileText, KeyRound, ListTree, Lock, Sliders, Sparkles, Users,
+  Activity, Database, FileText, KeyRound, ListTree, Lock, Plug, Sliders, Sparkles, Users,
 } from 'lucide-react';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
-  fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
+  fetchIrmaConfig, fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
   fetchSamlConfig, fetchSslStatus, fetchSyslogConfig, fetchUsers, generateApiToken, patchRuleSource,
-  saveMLConfig, saveSamlConfig, saveSyslogConfig, testSyslog, triggerMLRetrain, triggerRuleUpdate,
-  updateUser, uploadSslCert,
+  saveIrmaConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig, testSyslog, triggerMLRetrain,
+  triggerRuleUpdate, updateUser, uploadSslCert,
 } from '../api';
 import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
-import type { MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
+import type { IrmaConfig, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
 
@@ -1415,9 +1415,131 @@ function SyslogSettings() {
   );
 }
 
+// ── IrmaSettings ──────────────────────────────────────────────────────────────
+
+const IRMA_DEFAULT: IrmaConfig = {
+  enabled: false,
+  base_url: 'https://10.133.168.115/rest',
+  user: '',
+  password: '',
+  poll_interval: 30,
+  ssl_verify: false,
+};
+
+function IrmaSettings() {
+  const [cfg,    setCfg]    = useState<IrmaConfig>(IRMA_DEFAULT);
+  const [saving, setSaving] = useState(false);
+  const [msg,    setMsg]    = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [showPw, setShowPw] = useState(false);
+
+  useEffect(() => {
+    fetchIrmaConfig().then(setCfg).catch(() => {});
+  }, []);
+
+  function flash(type: 'ok' | 'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try { await saveIrmaConfig(cfg); flash('ok', 'Gespeichert ✓ – IRMA-Bridge lädt die Änderungen automatisch beim nächsten Poll.'); }
+    catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Fehler'); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">IRMA-Integration</h2>
+        <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
+          <input type="checkbox" className="accent-cyan-500"
+            checked={cfg.enabled}
+            onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
+          <span className={cfg.enabled ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
+            Aktiv
+          </span>
+        </label>
+      </div>
+
+      <p className="text-xs text-slate-500">
+        Pollt die REST-API einer IRMA-IDS-Appliance und importiert deren Alarme als <span className="text-violet-300 font-mono">external</span>-Quelle in das Cyjan-Dashboard. Änderungen an Credentials greifen automatisch beim nächsten Poll-Cycle – kein Neustart nötig.
+      </p>
+
+      <div className={`space-y-4 ${!cfg.enabled ? 'opacity-50' : ''}`}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
+          <div className="flex flex-col gap-1 sm:col-span-3">
+            <label className="text-slate-400">IRMA-Basis-URL</label>
+            <input className="input font-mono"
+              placeholder="https://10.133.168.115/rest"
+              value={cfg.base_url}
+              onChange={e => setCfg(c => ({ ...c, base_url: e.target.value }))} />
+            <span className="text-[10px] text-slate-600">Volle URL inkl. Schema und /rest-Pfad.</span>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Benutzer *</label>
+            <input className="input font-mono" autoComplete="off"
+              value={cfg.user}
+              onChange={e => setCfg(c => ({ ...c, user: e.target.value }))} />
+          </div>
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <label className="text-slate-400">Passwort *</label>
+            <div className="flex gap-2">
+              <input
+                className="input font-mono flex-1"
+                type={showPw ? 'text' : 'password'}
+                autoComplete="new-password"
+                placeholder={cfg.password ? '••••••••' : 'leer'}
+                value={cfg.password}
+                onChange={e => setCfg(c => ({ ...c, password: e.target.value }))}
+              />
+              <button type="button"
+                onClick={() => setShowPw(v => !v)}
+                className="btn-ghost text-xs">
+                {showPw ? 'Verbergen' : 'Zeigen'}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Poll-Intervall (Sek.)</label>
+            <input className="input" type="number" min={10} max={600}
+              value={cfg.poll_interval}
+              onChange={e => setCfg(c => ({ ...c, poll_interval: parseInt(e.target.value) || 30 }))} />
+          </div>
+          <div className="flex items-end gap-2 sm:col-span-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-xs pb-2">
+              <input type="checkbox" className="accent-cyan-500"
+                checked={cfg.ssl_verify}
+                onChange={e => setCfg(c => ({ ...c, ssl_verify: e.target.checked }))} />
+              <span className={cfg.ssl_verify ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
+                SSL-Zertifikat prüfen
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-1">
+        <div>
+          {msg?.type === 'ok'  && <span className="text-xs text-green-400">{msg.text}</span>}
+          {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
+        </div>
+        <div className="flex gap-2">
+          <button type="submit" className="btn-primary text-xs" disabled={saving}>
+            {saving ? 'Speichern…' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog' | 'thorsten';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog' | 'irma' | 'thorsten';
 
 interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
@@ -1451,6 +1573,12 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'ssl',    label: 'SSL-Zertifikat', icon: <Lock     {...ICON_PROPS} /> },
       { id: 'syslog', label: 'Syslog / SIEM',  icon: <FileText {...ICON_PROPS} /> },
+    ],
+  },
+  {
+    label: 'Integrationen',
+    items: [
+      { id: 'irma', label: 'IRMA', icon: <Plug {...ICON_PROPS} /> },
     ],
   },
   {
@@ -1504,6 +1632,7 @@ export function SettingsPage() {
             {active === 'rules-list'    && <RulesList />}
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}
+            {active === 'irma'          && <IrmaSettings />}
           </div>
         </div>
         )}
