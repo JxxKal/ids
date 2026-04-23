@@ -437,6 +437,40 @@ export async function saveSamlConfig(value: SamlConfig): Promise<void> {
   await req('/api/config/saml', { method: 'PATCH', body: JSON.stringify({ value }) });
 }
 
+// ── iTop CMDB ─────────────────────────────────────────────────────────────────
+
+const ITOP_DEFAULT: import('./types').ItopConfig = {
+  enabled: false, base_url: '', user: '', password: '', org_filter: '', ssl_verify: false,
+};
+
+export async function fetchItopConfig(): Promise<import('./types').ItopConfig> {
+  if (isDemoMode()) return { ...ITOP_DEFAULT };
+  try {
+    const r = await req<{ key: string; value: import('./types').ItopConfig }>('/api/config/itop');
+    return r.value;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) return { ...ITOP_DEFAULT };
+    throw e;
+  }
+}
+
+export async function saveItopConfig(value: import('./types').ItopConfig): Promise<void> {
+  if (isDemoMode()) return;
+  await req('/api/config/itop', { method: 'PATCH', body: JSON.stringify({ value }) });
+}
+
+export async function testItopConnection(): Promise<{ ok: boolean; organisations: string[] }> {
+  return req('/api/itop/test', { method: 'POST' });
+}
+
+export async function triggerItopSync(): Promise<void> {
+  await req('/api/itop/sync', { method: 'POST' });
+}
+
+export async function getItopSyncStatus(): Promise<import('./types').ItopSyncState> {
+  return req('/api/itop/sync/status');
+}
+
 // ── SSL / TLS ─────────────────────────────────────────────────────────────────
 
 export interface SslStatus {

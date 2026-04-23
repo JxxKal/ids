@@ -52,6 +52,7 @@ from routers import users as users_router
 from routers.alerts import make_pcap_endpoint, set_feedback_producer
 from routers.syslog_fwd import router as syslog_router
 from routers.syslog_fwd import syslog_forwarder_loop
+from routers.itop import router as itop_router
 from routers.tests import make_run_endpoint
 from ws.manager import AlertStreamer, ConnectionManager
 
@@ -156,6 +157,7 @@ app.include_router(users_router.router,    dependencies=_auth)
 app.include_router(ssl_router.router,      dependencies=_auth)
 app.include_router(syslog_router,          dependencies=_auth)
 app.include_router(update_router.router,   dependencies=_auth)
+app.include_router(itop_router,            dependencies=_auth)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
