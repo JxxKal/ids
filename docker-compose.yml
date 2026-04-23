@@ -437,10 +437,11 @@ services:
       TEST_MODE: "true"
 
   # ────────────────────────────────────────────────────────────────────────────
-  # TRAFFIC GENERATOR  (startet mit prod UND test Profil)
+  # TRAFFIC GENERATOR  (nur test-Profil)
   #
   # Injiziert synthetische Flows direkt ins Kafka-Topic 'flows' –
   # kein Packet-Capture oder Raw-Socket nötig.
+  # Im prod-Profil läuft er NICHT – dort kommt Traffic nur vom echten Sniffer.
   # ────────────────────────────────────────────────────────────────────────────
 
   traffic-generator:
@@ -448,7 +449,7 @@ services:
     container_name: ids-traffic-generator
     restart: unless-stopped
     networks: [ids-net]
-    profiles: [prod, test]
+    profiles: [test]
     depends_on:
       kafka:
         condition: service_healthy
