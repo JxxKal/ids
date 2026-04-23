@@ -24,7 +24,7 @@ from database import get_pool
 
 router = APIRouter(prefix="/api/itop", tags=["itop"])
 
-_CI_CLASSES = ["Server", "NetworkDevice", "PC", "ApplicationServer"]
+_CI_CLASSES = ["Server", "NetworkDevice", "PC"]
 
 # iTop-Klassennamen für Subnets variieren je nach installierten Extensions.
 # TeemIP verwendet IPv4Subnet, ältere/andere Instanzen ggf. NetworkSubnet oder Subnet.
@@ -186,9 +186,8 @@ async def _sync(pool: asyncpg.Pool) -> None:
             # ── IPv4Address → host_info (Hostnamen) ───────────────────────────
             _log("Lade IPv4Address (Hostnamen) ...")
             addr_oql = (
-                f"SELECT IPv4Address WHERE status = 'assigned' AND org_name = '{org}'"
-                if org else
-                "SELECT IPv4Address WHERE status = 'assigned'"
+                f"SELECT IPv4Address WHERE org_name = '{org}'"
+                if org else None
             )
             try:
                 addresses = await _core_get(
@@ -244,7 +243,7 @@ async def _sync(pool: asyncpg.Pool) -> None:
                 oql = f"SELECT {cls} WHERE org_name = '{org}'" if org else None
                 try:
                     cis = await _core_get(client, base_url, user, pwd,
-                                          cls, "name,managementip,description", oql)
+                                          cls, "name,managementip_id_friendlyname,description", oql)
                 except Exception as exc:
                     _log(f"  {cls}: {exc} – übersprungen.")
                     continue
@@ -254,10 +253,7 @@ async def _sync(pool: asyncpg.Pool) -> None:
                     for ci in cis:
                         # TeemIP speichert Management-IP als IPv4Address-Objekt;
                         # die aufgelöste IP steht in managementip_id_friendlyname
-                        ip_raw = (
-                            ci.get("managementip_id_friendlyname") or
-                            ci.get("managementip") or ""
-                        ).strip()
+                        ip_raw = (ci.get("managementip_id_friendlyname") or "").strip()
                         name = (ci.get("name") or "").strip() or None
                         if not ip_raw or ip_raw in ("0.0.0.0", "::/0", ""):
                             continue
