@@ -279,3 +279,36 @@ async def get_update_status() -> dict:
 @router.get("/version", summary="Installierte Version")
 async def get_version() -> dict:
     return {"version": _read_version()}
+
+
+def _spawn_compose_restart_runner(ids_dir: Path, profile: str) -> None:
+    compose_cmd = (
+        f"docker compose --project-directory {ids_dir} --profile {profile} restart"
+    )
+    subprocess.Popen(
+        [
+            "docker", "run", "--rm",
+            "-v", "/var/run/docker.sock:/var/run/docker.sock",
+            "-v", f"{ids_dir}:{ids_dir}",
+            "-w", str(ids_dir),
+            "-e", "COMPOSE_PROJECT_NAME=ids",
+            "--name", "ids-restart-runner",
+            "ids-api:latest",
+            "sh", "-c", f"sleep 3 && {compose_cmd}",
+        ],
+        start_new_session=True,
+        close_fds=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ},
+    )
+
+
+@router.post("/restart", summary="Stack-Neustart")
+async def restart_stack() -> dict:
+    if _state["phase"] not in ("idle", "done", "error"):
+        raise HTTPException(409, "Ein Update läuft bereits – bitte warten.")
+    profile_file = Path("/etc/cyjan/profile")
+    profile = profile_file.read_text().strip() if profile_file.exists() else "prod"
+    _spawn_compose_restart_runner(IDS_DIR, profile)
+    return {"status": "started"}

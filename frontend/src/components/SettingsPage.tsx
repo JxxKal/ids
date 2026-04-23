@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, Database, FileText, KeyRound, ListTree, Lock, Plug, Sliders, Sparkles, Upload, Users,
+  Activity, Database, FileText, KeyRound, ListTree, Lock, Plug, RotateCcw, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
@@ -8,7 +8,7 @@ import {
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
   fetchSystemUpdateStatus, fetchUsers, generateApiToken, getItopSyncStatus, patchRuleSource,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
-  startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
+  restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
   triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname,
 } from '../api';
 import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
@@ -2009,7 +2009,8 @@ function SystemUpdate() {
   const [status,      setStatus]      = useState<SystemUpdateStatus>({
     phase: 'idle', log: [], progress: 0, started_at: null, finished_at: null,
   });
-  const [restarting,  setRestarting]  = useState(false);
+  const [restarting,      setRestarting]      = useState(false);
+  const [confirmRestart,  setConfirmRestart]  = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
   const isRunning = ['extracting', 'loading', 'building', 'restarting'].includes(status.phase);
@@ -2058,6 +2059,17 @@ function SystemUpdate() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleRestart() {
+    setConfirmRestart(false);
+    setError(null);
+    try {
+      await restartStack();
+      setRestarting(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -2132,6 +2144,49 @@ function SystemUpdate() {
       {error && (
         <p className="mt-3 text-sm text-red-400">{error}</p>
       )}
+
+      {/* Stack-Neustart */}
+      <div className="mt-6 pt-5 border-t border-slate-700/60">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <p className="text-sm font-medium text-slate-200">Stack neu starten</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Startet alle Services neu (~20 Sek. Unterbrechung). Konfiguration und Daten bleiben erhalten.
+            </p>
+          </div>
+          {confirmRestart ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-amber-300">Wirklich neu starten?</span>
+              <button
+                type="button"
+                onClick={handleRestart}
+                className="px-3 py-1 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white transition-colors"
+              >
+                Ja, neu starten
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmRestart(false)}
+                className="px-3 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+              >
+                Abbrechen
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmRestart(true)}
+              disabled={isRunning || restarting}
+              className="flex items-center gap-2 px-3 py-1.5 rounded text-sm font-medium
+                         border border-slate-600 bg-slate-800 hover:bg-slate-700 text-slate-300
+                         disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <RotateCcw size={14} />
+              Neu starten
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Restarting-Banner */}
       {restarting && (
