@@ -185,7 +185,7 @@ async def _sync(pool: asyncpg.Pool) -> None:
                 oql = f"SELECT {cls} WHERE org_name = '{org}'" if org else None
                 try:
                     cis = await _core_get(client, base_url, user, pwd,
-                                          cls, "name,managementip", oql)
+                                          cls, "name,managementip,description", oql)
                 except Exception as exc:
                     _log(f"  {cls}: {exc} – übersprungen.")
                     continue
@@ -193,11 +193,15 @@ async def _sync(pool: asyncpg.Pool) -> None:
                 _log(f"  {len(cis)} Objekte gefunden.")
                 async with pool.acquire() as conn:
                     for ci in cis:
-                        ip_raw = (ci.get("managementip") or "").strip()
-                        name   = (ci.get("name") or "").strip() or None
-                        if not ip_raw or ip_raw in ("0.0.0.0", "::/0"):
+                        # TeemIP speichert Management-IP als IPv4Address-Objekt;
+                        # die aufgelöste IP steht in managementip_id_friendlyname
+                        ip_raw = (
+                            ci.get("managementip_id_friendlyname") or
+                            ci.get("managementip") or ""
+                        ).strip()
+                        name = (ci.get("name") or "").strip() or None
+                        if not ip_raw or ip_raw in ("0.0.0.0", "::/0", ""):
                             continue
-                        # iTop liefert manchmal "192.168.1.1" direkt
                         ip = ip_raw.split("/")[0]
                         try:
                             await conn.execute(
