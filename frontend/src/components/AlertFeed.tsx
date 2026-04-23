@@ -194,16 +194,18 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
 // ── Komponente ─────────────────────────────────────────────────────────────────
 
 export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
-  const [selected,  setSelected]  = useState<Alert | null>(null);
-  const [severityF, setSeverityF] = useState('');
-  const [sourceF,   setSourceF]   = useState('');
-  const [feedbackF, setFeedbackF] = useState('');
-  const [search,    setSearch]    = useState('');
-  const [grouped,   setGrouped]   = useState(true);
+  const [selected,          setSelected]          = useState<Alert | null>(null);
+  const [severityF,         setSeverityF]         = useState('');
+  const [sourceF,           setSourceF]           = useState('');
+  const [feedbackF,         setFeedbackF]         = useState('');
+  const [search,            setSearch]            = useState('');
+  const [grouped,           setGrouped]           = useState(true);
+  const [suppressIrmaAsset, setSuppressIrmaAsset] = useState(false);
 
   const filtered = alerts.filter(a => {
     if (!showTest && a.is_test) return false;
     if (mlOnly && a.source !== 'ml') return false;
+    if (suppressIrmaAsset && a.source === 'external' && a.rule_id?.startsWith('ASSET::')) return false;
     if (severityF && a.severity !== severityF) return false;
     if (sourceF   && a.source   !== sourceF)   return false;
     if (feedbackF === 'none' && a.feedback)     return false;
@@ -283,6 +285,19 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           title="Gleiche Regel + Quell-IP zusammenfassen"
         >
           {grouped ? '⊞ Gruppiert' : '≡ Einzeln'}
+        </button>
+
+        {/* IRMA Asset-Warnungen unterdrücken */}
+        <button
+          onClick={() => setSuppressIrmaAsset(s => !s)}
+          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+            suppressIrmaAsset
+              ? 'bg-violet-500/15 text-violet-200 border-violet-500/50'
+              : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
+          }`}
+          title="IRMA-Alarme mit Regel ASSET::* ausblenden"
+        >
+          {suppressIrmaAsset ? '∅ ASSET' : 'ASSET'}
         </button>
 
         {/* CSV-Export */}
