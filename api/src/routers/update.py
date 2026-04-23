@@ -1,9 +1,13 @@
-"""Offline-Update: ZIP-Upload → Extraktion → docker load (images.tar.gz) oder build.
+"""Offline-Update: ZIP-Upload → Extraktion → docker load → compose up.
 
-Fix: docker compose up -d läuft im ids-api-Container. Wenn Compose ids-api
-rekonstruiert, killt es sich selbst. Lösung: erst alle anderen Custom-Services
-neu starten (--no-deps), dann api per fire-and-forget Popen restarten – der
-Docker-Daemon hat die Anfrage schon, bevor er uns per SIGTERM beendet.
+Kernproblem: docker compose up -d läuft im ids-api-Container. Wenn Compose
+ids-api rekonstruiert, killt es sich selbst.
+
+Lösung: Nach docker load einen UNABHÄNGIGEN Einweg-Container starten, der
+docker compose up -d ausführt. Dieser Container heißt NICHT ids-api und wird
+daher NICHT gekillt, wenn Compose ids-api neustartet. Funktioniert auch wenn
+das geladene Image alten Code enthält – der Runner-Container ist ein anderes
+Objekt als der ids-api-Service-Container.
 """
 from __future__ import annotations
 
@@ -28,14 +32,6 @@ _PROTECT      = {".env", ".git"}
 _IMAGE_FILES  = {"images.tar.gz", "images.tar"}
 _VERSION_FILE = IDS_DIR / "VERSION"
 
-# Custom-Services ohne api – diese werden in einem ersten Pass neu gestartet,
-# ohne dass der api-Container (= wir selbst) dabei gekillt wird.
-_NON_API_SERVICES = [
-    "frontend", "flow-aggregator", "signature-engine", "ml-engine",
-    "alert-manager", "enrichment-service", "pcap-store",
-    "training-loop", "sniffer", "irma-bridge",
-]
-
 
 def _read_version() -> str:
     try:
@@ -45,9 +41,9 @@ def _read_version() -> str:
 
 
 _state: dict[str, Any] = {
-    "phase":       "idle",   # idle | extracting | loading | building | done | error
+    "phase":       "idle",
     "log":         [],
-    "progress":    0,        # 0-100
+    "progress":    0,
     "started_at":  None,
     "finished_at": None,
 }
@@ -64,7 +60,6 @@ def _log(msg: str) -> None:
 
 
 def _extract(zip_bytes: bytes, dest: Path) -> tuple[int, str | None]:
-    """Entpackt ZIP nach dest. Überspringt .env, .git und images.tar[.gz]."""
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
         tmp.write(zip_bytes)
         tmp_path = Path(tmp.name)
@@ -100,7 +95,6 @@ def _extract(zip_bytes: bytes, dest: Path) -> tuple[int, str | None]:
 
 
 def _unpack_images_to_temp(zip_bytes: bytes, member: str) -> Path:
-    """Schreibt images.tar[.gz] aus der ZIP in eine Temp-Datei."""
     suffix = ".tar.gz" if member.endswith(".gz") else ".tar"
     tmp = Path(tempfile.mktemp(suffix=suffix))
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
@@ -131,16 +125,31 @@ async def _run_subprocess(
         raise RuntimeError(f"'{' '.join(cmd[:3])} …' beendet mit Code {rc}")
 
 
-def _fire_and_forget_restart(base_args: list[str]) -> None:
-    """Startet 'docker compose restart api' als unabhängigen Prozess.
+def _spawn_compose_up_runner(ids_dir: Path, profile: str) -> None:
+    """Startet docker compose up -d in einem UNABHÄNGIGEN Einweg-Container.
 
-    Der Docker-Daemon empfängt die Anfrage und führt den Neustart durch,
-    auch wenn dieser Container (ids-api) anschließend per SIGTERM/SIGKILL
-    gestoppt wird. start_new_session=True schützt den Subprocess vor
-    versehentlichem SIGHUP beim Parent-Tod.
+    Der Container wird via `docker run` gestartet und ist NICHT der
+    ids-api-Service-Container. Wenn Compose den ids-api-Service neu startet,
+    ist dieser Runner-Container davon unberührt und läuft bis zum Ende.
+
+    Verwendet ids-api:latest als Basis-Image (hat docker-compose-plugin).
+    sleep 5 gibt dem aktuellen API-Container Zeit, den "done"-Status zu schreiben
+    bevor compose up startet.
     """
+    compose_cmd = (
+        f"docker compose --project-directory {ids_dir} --profile {profile} up -d"
+    )
     subprocess.Popen(
-        base_args + ["restart", "api"],
+        [
+            "docker", "run", "--rm",
+            "-v", "/var/run/docker.sock:/var/run/docker.sock",
+            "-v", f"{ids_dir}:{ids_dir}",
+            "-w", str(ids_dir),
+            "-e", "COMPOSE_PROJECT_NAME=ids",
+            "--name", "ids-update-runner",
+            "ids-api:latest",
+            "sh", "-c", f"sleep 5 && {compose_cmd}",
+        ],
         start_new_session=True,
         close_fds=True,
         stdout=subprocess.DEVNULL,
@@ -195,14 +204,6 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
             _log("Images geladen.")
             _state["progress"] = 80
 
-            # ── 3A. Alle Services außer api neu starten (80-95%) ─────────────
-            _state["phase"] = "restarting"
-            _log("Starte Services neu (außer API) ...")
-            await _run_subprocess(
-                base_args + ["up", "-d", "--no-deps"] + _NON_API_SERVICES
-            )
-            _state["progress"] = 95
-
         else:
             # ── 2B. Aus Quellcode bauen (10-80%) ─────────────────────────────
             _state["phase"] = "building"
@@ -216,29 +217,26 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
             await _run_subprocess(build_cmd)
             _state["progress"] = 80
 
-            # ── 3B. Alle Services außer api neu starten (80-95%) ─────────────
-            _state["phase"] = "restarting"
-            _log("Starte Services neu (außer API) ...")
-            await _run_subprocess(
-                base_args + ["up", "-d", "--no-deps"] + _NON_API_SERVICES
-            )
-            _state["progress"] = 95
+        # ── 3. Unabhängigen Runner-Container starten (80-100%) ────────────────
+        _state["phase"]       = "restarting"
+        _state["progress"]    = 85
+        _log("Starte unabhängigen Update-Runner-Container ...")
+        _log("Alle Services werden neu gestartet – API-Verbindung kurz unterbrochen (~20 Sek.).")
 
-        # ── 4. API per fire-and-forget neu starten (95-100%) ──────────────────
-        _log("Starte API-Container neu – Verbindung kurz unterbrochen (~10 Sek.) ...")
+        # Status jetzt setzen BEVOR der Runner startet und uns killt
         _state["phase"]       = "done"
         _state["progress"]    = 100
         _state["finished_at"] = datetime.now(timezone.utc).isoformat()
-        _log("Update erfolgreich. Seite nach ~15 Sekunden neu laden.")
+        _log("Update abgeschlossen. Seite nach ~20 Sekunden neu laden.")
 
-        _fire_and_forget_restart(base_args)
-        return  # finally setzt finished_at nicht nochmal (schon gesetzt)
+        _spawn_compose_up_runner(IDS_DIR, profile)
+        return  # finally setzt finished_at nicht nochmal
 
     except Exception as exc:  # noqa: BLE001
         _state["phase"] = "error"
         _log(f"FEHLER: {exc}")
     finally:
-        if not _state["finished_at"]:
+        if not _state.get("finished_at"):
             _state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
