@@ -215,6 +215,7 @@ export interface SystemUpdateStatus {
   log: string[];
   started_at: string | null;
   finished_at: string | null;
+  version?: string;
 }
 
 export type WsMessage =

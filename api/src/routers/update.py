@@ -13,8 +13,16 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 
 router = APIRouter(prefix="/api/system", tags=["update"])
 
-IDS_DIR = Path("/opt/ids")
-_PROTECT = {".env", ".git"}
+IDS_DIR   = Path("/opt/ids")
+_PROTECT  = {".env", ".git"}
+_VERSION_FILE = IDS_DIR / "VERSION"
+
+
+def _read_version() -> str:
+    try:
+        return _VERSION_FILE.read_text().strip()
+    except OSError:
+        return "unbekannt"
 
 _state: dict[str, Any] = {
     "phase": "idle",   # idle | extracting | building | done | error
@@ -130,4 +138,9 @@ async def start_update(
 
 @router.get("/update/status", summary="Update-Status abfragen")
 async def get_update_status() -> dict:
-    return dict(_state)
+    return {**_state, "version": _read_version()}
+
+
+@router.get("/version", summary="Installierte Version")
+async def get_version() -> dict:
+    return {"version": _read_version()}
