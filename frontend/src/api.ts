@@ -573,6 +573,6 @@ export async function startSystemUpdate(file: File, pullImages: boolean): Promis
 }
 
 export async function fetchSystemUpdateStatus(): Promise<SystemUpdateStatus> {
-  if (isDemoMode()) return { phase: 'idle', log: [], started_at: null, finished_at: null };
+  if (isDemoMode()) return { phase: 'idle', log: [], progress: 0, started_at: null, finished_at: null };
   return req<SystemUpdateStatus>('/api/system/update/status');
 }

@@ -1757,14 +1757,18 @@ function IrmaSettings() {
 const PHASE_LABEL: Record<SystemUpdateStatus['phase'], string> = {
   idle:       'Bereit',
   extracting: 'Entpacke ZIP …',
-  building:   'Baue Docker-Images …',
+  loading:    'Lade Images …',
+  building:   'Baue Images …',
+  restarting: 'Starte Services neu …',
   done:       'Abgeschlossen',
   error:      'Fehler',
 };
 const PHASE_COLOR: Record<SystemUpdateStatus['phase'], string> = {
   idle:       'text-slate-400',
   extracting: 'text-cyan-400',
+  loading:    'text-cyan-400',
   building:   'text-amber-400',
+  restarting: 'text-amber-400',
   done:       'text-green-400',
   error:      'text-red-400',
 };
@@ -1775,17 +1779,19 @@ function SystemUpdate() {
   const [uploading,   setUploading]   = useState(false);
   const [error,       setError]       = useState<string | null>(null);
   const [status,      setStatus]      = useState<SystemUpdateStatus>({
-    phase: 'idle', log: [], started_at: null, finished_at: null,
+    phase: 'idle', log: [], progress: 0, started_at: null, finished_at: null,
   });
+  const [restarting,  setRestarting]  = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
 
-  const isRunning = status.phase === 'extracting' || status.phase === 'building';
+  const isRunning = ['extracting', 'loading', 'building', 'restarting'].includes(status.phase);
 
-  // Initialen Status laden + während Update alle 2s pollen
+  // Initialen Status laden
   useEffect(() => {
     fetchSystemUpdateStatus().then(setStatus).catch(() => {});
   }, []);
 
+  // Während Update läuft: alle 2s pollen
   useEffect(() => {
     if (!isRunning) return;
     const t = setInterval(() => {
@@ -1793,6 +1799,19 @@ function SystemUpdate() {
     }, 2000);
     return () => clearInterval(t);
   }, [isRunning]);
+
+  // Nach "done": API-Neustart abwarten – pollen bis API wieder antwortet
+  useEffect(() => {
+    if (status.phase !== 'done') return;
+    setRestarting(true);
+    const t = setInterval(() => {
+      fetchSystemUpdateStatus()
+        .then(s => { setStatus(s); setRestarting(false); clearInterval(t); })
+        .catch(() => { /* API noch nicht bereit */ });
+    }, 3000);
+    return () => clearInterval(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.phase]);
 
   // Log automatisch nach unten scrollen
   useEffect(() => {
@@ -1803,9 +1822,10 @@ function SystemUpdate() {
     if (!file) return;
     setError(null);
     setUploading(true);
+    setRestarting(false);
     try {
       await startSystemUpdate(file, pullImages);
-      setStatus(s => ({ ...s, phase: 'extracting', log: [], started_at: new Date().toISOString() }));
+      setStatus(s => ({ ...s, phase: 'extracting', log: [], progress: 0, started_at: new Date().toISOString() }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1885,15 +1905,44 @@ function SystemUpdate() {
         <p className="mt-3 text-sm text-red-400">{error}</p>
       )}
 
-      <div className="mt-4 flex items-center gap-2">
-        <span className={`text-sm font-medium ${PHASE_COLOR[status.phase]}`}>
-          ● {PHASE_LABEL[status.phase]}
-        </span>
-        {status.started_at && (
-          <span className="text-xs text-slate-500">
-            {new Date(status.started_at).toLocaleTimeString()}
-            {status.finished_at && ` – ${new Date(status.finished_at).toLocaleTimeString()}`}
+      {/* Restarting-Banner */}
+      {restarting && (
+        <div className="mt-4 flex items-center gap-2 rounded border border-amber-700/40 bg-amber-950/30 px-3 py-2">
+          <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+          <span className="text-xs text-amber-300">
+            API-Container wird neu gestartet — bitte warten (~15 Sek.) …
           </span>
+        </div>
+      )}
+
+      {/* Status + Progressbar */}
+      <div className="mt-4 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className={`text-sm font-medium ${PHASE_COLOR[status.phase]}`}>
+            ● {PHASE_LABEL[status.phase]}
+          </span>
+          {status.started_at && (
+            <span className="text-xs text-slate-500">
+              {new Date(status.started_at).toLocaleTimeString()}
+              {status.finished_at && ` – ${new Date(status.finished_at).toLocaleTimeString()}`}
+            </span>
+          )}
+        </div>
+
+        {/* Progressbar – nur wenn etwas läuft oder gerade fertig */}
+        {(isRunning || restarting || (status.phase === 'done' && status.progress > 0)) && (
+          <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${
+                status.phase === 'error'
+                  ? 'bg-red-500'
+                  : status.phase === 'done'
+                  ? 'bg-green-500'
+                  : 'bg-cyan-500'
+              } ${restarting ? 'animate-pulse' : ''}`}
+              style={{ width: `${restarting ? 100 : (status.progress ?? 0)}%` }}
+            />
+          </div>
         )}
       </div>
 
