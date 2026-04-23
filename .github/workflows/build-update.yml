@@ -37,6 +37,7 @@ jobs:
         env:
           COMPOSE_PROJECT_NAME: ids
           POSTGRES_PASSWORD: build-placeholder
+          MIRROR_IFACE: eth1
         run: |
           docker compose --profile prod build \
             --build-arg BUILDKIT_INLINE_CACHE=1
