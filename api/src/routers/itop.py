@@ -26,6 +26,10 @@ router = APIRouter(prefix="/api/itop", tags=["itop"])
 
 _CI_CLASSES = ["Server", "NetworkDevice", "PC", "ApplicationServer"]
 
+# iTop-Klassennamen für Subnets variieren je nach installierten Extensions.
+# TeemIP verwendet IPv4Subnet, ältere/andere Instanzen ggf. NetworkSubnet oder Subnet.
+_SUBNET_CLASSES = ["IPv4Subnet", "NetworkSubnet", "Subnet"]
+
 _state: dict[str, Any] = {
     "phase": "idle",   # idle | running | done | error
     "log":   [],
@@ -117,12 +121,29 @@ async def _sync(pool: asyncpg.Pool) -> None:
         async with _build_client(cfg) as client:
             # ── Subnets → known_networks ──────────────────────────────────────
             _log("Lade Subnets ...")
-            subnet_oql = f"SELECT Subnet WHERE org_name = '{org}'" if org else None
-            subnets = await _core_get(client, base_url, user, pwd,
-                                      "Subnet", "name,ip,mask,description", subnet_oql)
-            _log(f"  {len(subnets)} Subnets gefunden.")
+            subnets: list[dict] = []
+            subnet_cls_used = None
+            for subnet_cls in _SUBNET_CLASSES:
+                try:
+                    subnet_oql = (
+                        f"SELECT {subnet_cls} WHERE org_name = '{org}'" if org else None
+                    )
+                    subnets = await _core_get(
+                        client, base_url, user, pwd,
+                        subnet_cls, "name,ip,mask,description", subnet_oql,
+                    )
+                    subnet_cls_used = subnet_cls
+                    _log(f"  Klasse '{subnet_cls}' gefunden – {len(subnets)} Subnets.")
+                    break
+                except RuntimeError as exc:
+                    if "not a valid class" in str(exc).lower() or "is not a valid class" in str(exc):
+                        _log(f"  Klasse '{subnet_cls}' nicht vorhanden – versuche nächste …")
+                        continue
+                    raise
+            if subnet_cls_used is None:
+                _log("  Keine bekannte Subnet-Klasse gefunden – Netzwerk-Import übersprungen.")
 
-            async with pool.acquire() as conn:
+            async with pool.acquire() as conn:  # noqa: SIM117
                 for s in subnets:
                     ip   = (s.get("ip")   or "").strip()
                     mask = (s.get("mask") or "").strip()
