@@ -1,0 +1,113 @@
+name: Build Cyjan IDS Update-Paket
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Als GitHub Release veröffentlichen?'
+        type: boolean
+        default: false
+
+jobs:
+  build-update:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    timeout-minutes: 90
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Docker Buildx einrichten
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker Layer Cache wiederherstellen
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Docker-Images bauen (prod-Profil)
+        env:
+          COMPOSE_PROJECT_NAME: ids
+          POSTGRES_PASSWORD: build-placeholder
+        run: |
+          docker compose --profile prod build \
+            --build-arg BUILDKIT_INLINE_CACHE=1
+
+      - name: Images exportieren
+        env:
+          COMPOSE_PROJECT_NAME: ids
+        run: |
+          # Alle Custom-Services des prod-Profils (haben build: in compose)
+          CUSTOM_SERVICES="api frontend flow-aggregator signature-engine \
+            ml-engine alert-manager enrichment-service pcap-store \
+            training-loop sniffer irma-bridge"
+
+          IMAGES=""
+          for svc in $CUSTOM_SERVICES; do
+            img="ids-${svc}"
+            if docker image inspect "$img" &>/dev/null; then
+              IMAGES="$IMAGES $img"
+              echo "✓ $img ($(docker image inspect $img --format '{{.Size}}' | numfmt --to=iec))"
+            else
+              echo "⚠ $img nicht gefunden – übersprungen"
+            fi
+          done
+
+          echo "Speichere: $IMAGES"
+          docker save $IMAGES | gzip > images.tar.gz
+          echo "images.tar.gz: $(du -sh images.tar.gz | cut -f1)"
+
+      - name: Update-Paket zusammenstellen
+        run: |
+          VERSION=$(cat VERSION)
+          PKG="cyjan-ids-update-${VERSION}"
+          mkdir -p "$PKG"
+
+          # Laufzeitdateien (kein Quellcode nötig, Images sind vorgebaut)
+          cp docker-compose.yml "$PKG/"
+          cp VERSION             "$PKG/"
+          cp .env.example        "$PKG/"
+          cp -r infra/           "$PKG/infra/"
+
+          # Vorgebaute Images
+          mv images.tar.gz "$PKG/"
+
+          # Kurze Installationsnotiz
+          cat > "$PKG/UPDATE.md" << 'EOF'
+          # Cyjan IDS Update-Paket
+
+          Dieses ZIP enthält vorgebaute Docker-Images (images.tar.gz) und wird
+          direkt über Einstellungen → System-Update importiert.
+
+          Beim Import werden:
+          - images.tar.gz via `docker load` geladen (kein Build, kein Internet)
+          - docker-compose.yml und infra/ aktualisiert
+          - Container mit `docker compose up -d` neu gestartet
+          - .env, .git und Datenbank bleiben unverändert
+          EOF
+
+          zip -r "${PKG}.zip" "$PKG/"
+          echo "Paketgröße: $(du -sh ${PKG}.zip | cut -f1)"
+          echo "PKG_ZIP=${PKG}.zip" >> "$GITHUB_ENV"
+
+      - name: Als Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-package
+          path: "*.zip"
+          retention-days: 30
+
+      - name: GitHub Release erweitern (bei Tag-Push)
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PKG_ZIP }}
+          fail_on_unmatched_files: true

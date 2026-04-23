@@ -21,6 +21,8 @@ server {
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_ciphers         HIGH:!aNULL:!MD5;
 
+    client_max_body_size 2g;
+
     root /usr/share/nginx/html;
     index index.html;
     resolver 127.0.0.11 valid=10s ipv6=off;
@@ -54,6 +56,8 @@ else
   cat > "$CONF" <<EOF
 server {
     listen 80;
+    client_max_body_size 2g;
+
     root /usr/share/nginx/html;
     index index.html;
     resolver 127.0.0.11 valid=10s ipv6=off;

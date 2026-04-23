@@ -1,7 +1,8 @@
-"""Offline-Update: ZIP-Upload → Extraktion → docker compose build + up."""
+"""Offline-Update: ZIP-Upload → Extraktion → docker load (images.tar.gz) oder build."""
 from __future__ import annotations
 
 import asyncio
+import io
 import shutil
 import tempfile
 import zipfile
@@ -13,8 +14,9 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 
 router = APIRouter(prefix="/api/system", tags=["update"])
 
-IDS_DIR   = Path("/opt/ids")
-_PROTECT  = {".env", ".git"}
+IDS_DIR       = Path("/opt/ids")
+_PROTECT      = {".env", ".git"}
+_IMAGE_FILES  = {"images.tar.gz", "images.tar"}
 _VERSION_FILE = IDS_DIR / "VERSION"
 
 
@@ -23,6 +25,7 @@ def _read_version() -> str:
         return _VERSION_FILE.read_text().strip()
     except OSError:
         return "unbekannt"
+
 
 _state: dict[str, Any] = {
     "phase": "idle",   # idle | extracting | building | done | error
@@ -42,10 +45,13 @@ def _log(msg: str) -> None:
         _state["log"] = _state["log"][-200:]
 
 
-def _extract(zip_bytes: bytes, dest: Path) -> int:
+def _extract(zip_bytes: bytes, dest: Path) -> tuple[int, str | None]:
+    """Entpackt ZIP nach dest. Überspringt .env, .git und images.tar[.gz].
+    Gibt (Dateianzahl, Member-Name der Image-Datei oder None) zurück."""
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
         tmp.write(zip_bytes)
         tmp_path = Path(tmp.name)
+    images_entry: str | None = None
     try:
         with zipfile.ZipFile(tmp_path, "r") as zf:
             members = zf.namelist()
@@ -58,7 +64,12 @@ def _extract(zip_bytes: bytes, dest: Path) -> int:
                 rel = member.removeprefix(prefix)
                 if not rel:
                     continue
-                if rel.split("/")[0] in _PROTECT:
+                parts = rel.split("/")
+                if parts[0] in _PROTECT:
+                    continue
+                # Image-Tar merken, aber nicht auf Disk entpacken
+                if parts[-1] in _IMAGE_FILES:
+                    images_entry = member
                     continue
                 target = dest / rel
                 if member.endswith("/"):
@@ -68,13 +79,22 @@ def _extract(zip_bytes: bytes, dest: Path) -> int:
                     with zf.open(member) as src, open(target, "wb") as dst:
                         shutil.copyfileobj(src, dst)
                     count += 1
-        return count
+        return count, images_entry
     finally:
         tmp_path.unlink(missing_ok=True)
 
 
+def _unpack_images_to_temp(zip_bytes: bytes, member: str) -> Path:
+    """Schreibt images.tar[.gz] aus der ZIP in eine Temp-Datei. Caller muss unlink."""
+    suffix = ".tar.gz" if member.endswith(".gz") else ".tar"
+    tmp = Path(tempfile.mktemp(suffix=suffix))
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        with zf.open(member) as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    return tmp
+
+
 async def _run_subprocess(cmd: list[str]) -> None:
-    """Führt einen Subprocess aus und schreibt stdout/stderr ins Log."""
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -88,7 +108,7 @@ async def _run_subprocess(cmd: list[str]) -> None:
             _log(line)
     rc = await proc.wait()
     if rc != 0:
-        raise RuntimeError(f"Befehl '{cmd[0]} …' beendet mit Code {rc}")
+        raise RuntimeError(f"'{' '.join(cmd[:3])} …' beendet mit Code {rc}")
 
 
 async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
@@ -100,30 +120,42 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
     })
     try:
         _log(f"Entpacke ZIP ({len(zip_bytes) // 1024} KB) nach {IDS_DIR} ...")
-        count = await asyncio.to_thread(_extract, zip_bytes, IDS_DIR)
+        count, images_entry = await asyncio.to_thread(_extract, zip_bytes, IDS_DIR)
         _log(f"{count} Dateien entpackt. .env und .git bleiben erhalten.")
 
-        # Compose-Profil aus /etc/cyjan/profile lesen (gesetzt von ids-setup)
         profile_file = Path("/etc/cyjan/profile")
         profile = profile_file.read_text().strip() if profile_file.exists() else "prod"
         _log(f"Compose-Profil: {profile}")
 
         _state["phase"] = "building"
+        base_args = [
+            "docker", "compose",
+            "--project-directory", str(IDS_DIR),
+            "--profile", profile,
+        ]
 
-        base_args = ["docker", "compose", "--project-directory", str(IDS_DIR), "--profile", profile]
-
-        # Build: ohne --pull → gecachte Base-Images (offline-sicher)
-        # Mit --pull → Docker Hub + apt-get (erfordert Internet)
-        build_cmd = base_args + ["build"]
-        if pull_images:
-            build_cmd.append("--pull")
-            _log("Starte: docker compose build --pull (mit Basis-Image-Update) ...")
+        if images_entry:
+            # ── Pfad A: vorgebaute Images laden (kein apt/pip/npm, kein Internet) ──
+            img_name = images_entry.split("/")[-1]
+            _log(f"Vorgebaute Images gefunden ({img_name}) – lade via docker load ...")
+            tmp_img = await asyncio.to_thread(_unpack_images_to_temp, zip_bytes, images_entry)
+            try:
+                await _run_subprocess(["docker", "load", "-i", str(tmp_img)])
+            finally:
+                await asyncio.to_thread(tmp_img.unlink, True)
+            _log("Images geladen. Starte Container neu ...")
+            await _run_subprocess(base_args + ["up", "-d"])
         else:
-            _log("Starte: docker compose build (ohne Basis-Image-Update, offline-sicher) ...")
-        await _run_subprocess(build_cmd)
-
-        _log("Starte: docker compose up -d ...")
-        await _run_subprocess(base_args + ["up", "-d"])
+            # ── Pfad B: aus Quellcode bauen (Fallback / Quell-ZIP) ──
+            build_cmd = base_args + ["build"]
+            if pull_images:
+                build_cmd.append("--pull")
+                _log("Starte: docker compose build --pull (mit Basis-Image-Update) ...")
+            else:
+                _log("Starte: docker compose build (offline-sicher, kein --pull) ...")
+            await _run_subprocess(build_cmd)
+            _log("Starte: docker compose up -d ...")
+            await _run_subprocess(base_args + ["up", "-d"])
 
         _state["phase"] = "done"
         _log("Update erfolgreich abgeschlossen.")
@@ -138,8 +170,8 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
 @router.post("/update", summary="Offline-Update via ZIP")
 async def start_update(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(..., description="GitHub-Repository-ZIP"),
-    pull_images: bool = Form(False, description="Basis-Images von Docker Hub pullen (benötigt Internet)"),
+    file: UploadFile = File(..., description="Update-ZIP (mit images.tar.gz) oder Quell-ZIP"),
+    pull_images: bool = Form(False, description="Basis-Images pullen – nur für Quell-ZIP mit Internet"),
 ) -> dict:
     if _state["phase"] not in ("idle", "done", "error"):
         raise HTTPException(409, "Ein Update läuft bereits")
