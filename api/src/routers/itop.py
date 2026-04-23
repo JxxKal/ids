@@ -130,7 +130,7 @@ async def _sync(pool: asyncpg.Pool) -> None:
                     )
                     subnets = await _core_get(
                         client, base_url, user, pwd,
-                        subnet_cls, "name,ip,mask,description", subnet_oql,
+                        subnet_cls, "name,ip,mask,comment,block_name", subnet_oql,
                     )
                     subnet_cls_used = subnet_cls
                     _log(f"  Klasse '{subnet_cls}' gefunden – {len(subnets)} Subnets.")
@@ -147,8 +147,9 @@ async def _sync(pool: asyncpg.Pool) -> None:
                 for s in subnets:
                     ip   = (s.get("ip")   or "").strip()
                     mask = (s.get("mask") or "").strip()
-                    name = (s.get("name") or ip or "unbekannt").strip()
-                    desc = (s.get("description") or "").strip() or None
+                    # name kann leer sein → block_name als Fallback, dann IP
+                    name = (s.get("name") or s.get("block_name") or ip or "unbekannt").strip()
+                    desc = (s.get("comment") or "").strip() or None
 
                     if not ip or not mask:
                         nets_err += 1
