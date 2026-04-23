@@ -4,13 +4,15 @@ import {
 } from 'lucide-react';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
-  fetchIrmaConfig, fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
-  fetchSamlConfig, fetchSslStatus, fetchSyslogConfig, fetchSystemUpdateStatus, fetchUsers,
-  generateApiToken, patchRuleSource, saveIrmaConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
-  startSystemUpdate, testSyslog, triggerMLRetrain, triggerRuleUpdate, updateUser, uploadSslCert,
+  fetchIrmaConfig, fetchItopConfig, fetchMLConfig, fetchMLStatus, fetchRuleSources,
+  fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
+  fetchSystemUpdateStatus, fetchUsers, generateApiToken, getItopSyncStatus, patchRuleSource,
+  saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
+  startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
+  triggerRuleUpdate, updateUser, uploadSslCert,
 } from '../api';
 import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
-import type { IrmaConfig, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
+import type { IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
 
@@ -1415,6 +1417,219 @@ function SyslogSettings() {
   );
 }
 
+// ── ItopSettings ──────────────────────────────────────────────────────────────
+
+const ITOP_DEFAULT: ItopConfig = {
+  enabled: false, base_url: '', user: '', password: '', org_filter: '', ssl_verify: false,
+};
+
+function ItopSettings() {
+  const [cfg,     setCfg]     = useState<ItopConfig>(ITOP_DEFAULT);
+  const [saving,  setSaving]  = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [msg,     setMsg]     = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [sync,    setSync]    = useState<ItopSyncState | null>(null);
+  const [showPw,  setShowPw]  = useState(false);
+  const pollRef               = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    fetchItopConfig().then(setCfg).catch(() => {});
+    getItopSyncStatus().then(setSync).catch(() => {});
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  function flash(type: 'ok' | 'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  function startPolling() {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      const s = await getItopSyncStatus().catch(() => null);
+      if (s) {
+        setSync(s);
+        if (s.phase !== 'running') {
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+          setSyncing(false);
+        }
+      }
+    }, 1500);
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try { await saveItopConfig(cfg); flash('ok', 'Gespeichert ✓'); }
+    catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Fehler'); }
+    finally { setSaving(false); }
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    try {
+      const r = await testItopConnection();
+      flash('ok', `Verbunden ✓  –  Organisationen: ${r.organisations.join(', ') || '(keine)'}`);
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Verbindung fehlgeschlagen');
+    } finally { setTesting(false); }
+  }
+
+  async function handleSync() {
+    setSyncing(true);
+    setSync(null);
+    try {
+      await triggerItopSync();
+      startPolling();
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Fehler beim Starten');
+      setSyncing(false);
+    }
+  }
+
+  const phaseColor: Record<string, string> = {
+    running: 'text-cyan-400',
+    done:    'text-green-400',
+    error:   'text-red-400',
+    idle:    'text-slate-500',
+  };
+
+  return (
+    <form onSubmit={handleSave} className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">iTop CMDB-Integration</h2>
+        <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
+          <input type="checkbox" className="accent-cyan-500"
+            checked={cfg.enabled}
+            onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
+          <span className={cfg.enabled ? 'text-cyan-300 font-medium' : 'text-slate-500'}>Aktiv</span>
+        </label>
+      </div>
+
+      <p className="text-xs text-slate-500">
+        Importiert Subnets in <span className="text-slate-300 font-mono">Bekannte Netzwerke</span> und
+        Server/Geräte in <span className="text-slate-300 font-mono">Hosts</span> aus einer iTop-Instanz.
+        Hosts erhalten <span className="text-slate-300 font-mono">trust_source = cmdb</span>.
+      </p>
+
+      <div className={`space-y-4 ${!cfg.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
+
+          <div className="flex flex-col gap-1 sm:col-span-3">
+            <label className="text-slate-400">iTop-URL</label>
+            <input className="input font-mono"
+              placeholder="https://itop.firma.de"
+              value={cfg.base_url}
+              onChange={e => setCfg(c => ({ ...c, base_url: e.target.value }))} />
+            <span className="text-[10px] text-slate-600">
+              Basis-URL der iTop-Instanz (ohne /webservices/rest.php).
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Benutzer *</label>
+            <input className="input font-mono" autoComplete="off"
+              value={cfg.user}
+              onChange={e => setCfg(c => ({ ...c, user: e.target.value }))} />
+          </div>
+
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <label className="text-slate-400">Passwort *</label>
+            <div className="flex gap-2">
+              <input className="input font-mono flex-1"
+                type={showPw ? 'text' : 'password'}
+                autoComplete="new-password"
+                placeholder={cfg.password ? '••••••••' : 'leer'}
+                value={cfg.password}
+                onChange={e => setCfg(c => ({ ...c, password: e.target.value }))} />
+              <button type="button" className="btn-ghost text-xs"
+                onClick={() => setShowPw(v => !v)}>
+                {showPw ? 'Verbergen' : 'Zeigen'}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <label className="text-slate-400">Organisations-Filter</label>
+            <input className="input font-mono"
+              placeholder="z.B. My Company (leer = alle)"
+              value={cfg.org_filter}
+              onChange={e => setCfg(c => ({ ...c, org_filter: e.target.value }))} />
+            <span className="text-[10px] text-slate-600">
+              Exakter iTop-Organisationsname – filtert Subnets und CIs auf eine Org.
+            </span>
+          </div>
+
+          <div className="flex items-end gap-2 pb-1">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
+              <input type="checkbox" className="accent-cyan-500"
+                checked={cfg.ssl_verify}
+                onChange={e => setCfg(c => ({ ...c, ssl_verify: e.target.checked }))} />
+              <span className={cfg.ssl_verify ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
+                SSL prüfen
+              </span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-1 flex-wrap gap-2">
+        <div className="flex gap-2">
+          <button type="button" className="btn-ghost text-xs"
+            disabled={testing || !cfg.enabled}
+            onClick={handleTest}>
+            {testing ? 'Teste…' : 'Verbindung testen'}
+          </button>
+          <button type="button" className="btn-ghost text-xs"
+            disabled={syncing || !cfg.enabled}
+            onClick={handleSync}>
+            {syncing ? 'Synchronisiert…' : 'Jetzt synchronisieren'}
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
+          {msg?.type === 'ok'  && <span className="text-xs text-green-400">{msg.text}</span>}
+          {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
+          <button type="submit" className="btn-primary text-xs" disabled={saving}>
+            {saving ? 'Speichern…' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+
+      {/* Sync-Status */}
+      {sync && sync.phase !== 'idle' && (
+        <div className="mt-2 rounded border border-slate-700 bg-slate-900/60 p-3 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className={`font-mono font-medium ${phaseColor[sync.phase] ?? 'text-slate-400'}`}>
+              {sync.phase === 'running' ? 'Läuft…' : sync.phase === 'done' ? 'Fertig' : sync.phase === 'error' ? 'Fehler' : sync.phase}
+            </span>
+            {sync.finished_at && (
+              <span className="text-slate-600">{new Date(sync.finished_at).toLocaleTimeString()}</span>
+            )}
+          </div>
+
+          {sync.phase === 'done' && sync.stats && (
+            <div className="flex gap-4 text-xs text-slate-400">
+              <span>Netzwerke: <span className="text-slate-200">{sync.stats.networks_upserted ?? 0}</span></span>
+              <span>Hosts: <span className="text-slate-200">{sync.stats.hosts_upserted ?? 0}</span></span>
+              {(sync.stats.networks_errors ?? 0) + (sync.stats.hosts_errors ?? 0) > 0 && (
+                <span className="text-amber-400">
+                  Fehler: {(sync.stats.networks_errors ?? 0) + (sync.stats.hosts_errors ?? 0)}
+                </span>
+              )}
+            </div>
+          )}
+
+          <pre className="text-[10px] font-mono text-slate-400 max-h-48 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+            {sync.log.join('\n')}
+          </pre>
+        </div>
+      )}
+    </form>
+  );
+}
+
 // ── IrmaSettings ──────────────────────────────────────────────────────────────
 
 const IRMA_DEFAULT: IrmaConfig = {
@@ -1707,7 +1922,7 @@ function SystemUpdate() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog' | 'irma' | 'update' | 'thorsten';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'thorsten';
 
 interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
@@ -1747,7 +1962,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Integrationen',
     items: [
-      { id: 'irma', label: 'IRMA', icon: <Plug {...ICON_PROPS} /> },
+      { id: 'irma', label: 'IRMA',      icon: <Plug     {...ICON_PROPS} /> },
+      { id: 'itop', label: 'iTop CMDB', icon: <Database {...ICON_PROPS} /> },
     ],
   },
   {
@@ -1802,6 +2018,7 @@ export function SettingsPage() {
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}
             {active === 'irma'          && <IrmaSettings />}
+            {active === 'itop'          && <ItopSettings />}
             {active === 'update'        && <SystemUpdate />}
           </div>
         </div>

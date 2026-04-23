@@ -123,6 +123,23 @@ export interface IrmaConfig {
   ssl_verify:    boolean;
 }
 
+export interface ItopConfig {
+  enabled:    boolean;
+  base_url:   string;
+  user:       string;
+  password:   string;
+  org_filter: string;
+  ssl_verify: boolean;
+}
+
+export interface ItopSyncState {
+  phase:       'idle' | 'running' | 'done' | 'error';
+  log:         string[];
+  stats:       { networks_upserted?: number; networks_errors?: number; hosts_upserted?: number; hosts_errors?: number };
+  started_at:  string | null;
+  finished_at: string | null;
+}
+
 export interface SamlConfig {
   enabled:              boolean;
   idp_metadata_url:     string;
