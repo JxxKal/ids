@@ -1599,12 +1599,30 @@ function SystemUpdate() {
 
   return (
     <div>
-      <h2 className="text-base font-semibold text-slate-100 mb-1">System-Update</h2>
-      <p className="text-sm text-slate-400 mb-5">
-        Laden Sie die aktuelle Version als ZIP von GitHub herunter und importieren Sie sie hier.
-        Konfiguration (<code className="text-xs bg-slate-800 px-1 rounded">.env</code>),
-        Zertifikate und Datenbank bleiben erhalten.
-      </p>
+      <div className="flex items-start justify-between mb-5">
+        <div>
+          <h2 className="text-base font-semibold text-slate-100 mb-1">System-Update</h2>
+          <p className="text-sm text-slate-400">
+            Laden Sie die aktuelle Version als ZIP von GitHub herunter und importieren Sie sie hier.
+            Konfiguration (<code className="text-xs bg-slate-800 px-1 rounded">.env</code>),
+            Zertifikate und Datenbank bleiben erhalten.
+          </p>
+        </div>
+        {status.version && (
+          <a
+            href="https://github.com/JxxKal/ids/releases"
+            target="_blank"
+            rel="noreferrer"
+            className="ml-6 shrink-0 flex flex-col items-end gap-0.5 group"
+            title="GitHub Releases öffnen"
+          >
+            <span className="text-[10px] uppercase tracking-wide text-slate-500">Installierte Version</span>
+            <span className="text-sm font-mono font-semibold text-cyan-400 group-hover:text-cyan-300 transition-colors">
+              {status.version}
+            </span>
+          </a>
+        )}
+      </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 cursor-pointer">
