@@ -616,3 +616,8 @@ export async function fetchSystemUpdateStatus(): Promise<SystemUpdateStatus> {
   if (isDemoMode()) return { phase: 'idle', log: [], progress: 0, started_at: null, finished_at: null };
   return req<SystemUpdateStatus>('/api/system/update/status');
 }
+
+export async function restartStack(): Promise<{ status: string }> {
+  if (isDemoMode()) return { status: 'started' };
+  return req('/api/system/restart', { method: 'POST' });
+}
