@@ -46,6 +46,7 @@ from routers import ml as ml_router
 from routers import rules as rules_router
 from routers import ssl as ssl_router
 from routers import system as system_router
+from routers import update as update_router
 from routers import tests as tests_router
 from routers import users as users_router
 from routers.alerts import make_pcap_endpoint, set_feedback_producer
@@ -154,6 +155,7 @@ app.include_router(tests_router.router,    dependencies=_auth)
 app.include_router(users_router.router,    dependencies=_auth)
 app.include_router(ssl_router.router,      dependencies=_auth)
 app.include_router(syslog_router,          dependencies=_auth)
+app.include_router(update_router.router,   dependencies=_auth)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────

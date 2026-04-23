@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, Database, FileText, KeyRound, ListTree, Lock, Plug, Sliders, Sparkles, Users,
+  Activity, Database, FileText, KeyRound, ListTree, Lock, Plug, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
   fetchIrmaConfig, fetchMLConfig, fetchMLStatus, fetchRuleSources, fetchRuleUpdateStatus, fetchRules,
-  fetchSamlConfig, fetchSslStatus, fetchSyslogConfig, fetchUsers, generateApiToken, patchRuleSource,
-  saveIrmaConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig, testSyslog, triggerMLRetrain,
-  triggerRuleUpdate, updateUser, uploadSslCert,
+  fetchSamlConfig, fetchSslStatus, fetchSyslogConfig, fetchSystemUpdateStatus, fetchUsers,
+  generateApiToken, patchRuleSource, saveIrmaConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
+  startSystemUpdate, testSyslog, triggerMLRetrain, triggerRuleUpdate, updateUser, uploadSslCert,
 } from '../api';
 import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
-import type { IrmaConfig, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, UpdateStatus, User } from '../types';
+import type { IrmaConfig, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
 
@@ -1537,9 +1537,144 @@ function IrmaSettings() {
   );
 }
 
+// ── SystemUpdate ──────────────────────────────────────────────────────────────
+
+const PHASE_LABEL: Record<SystemUpdateStatus['phase'], string> = {
+  idle:       'Bereit',
+  extracting: 'Entpacke ZIP …',
+  building:   'Baue Docker-Images …',
+  done:       'Abgeschlossen',
+  error:      'Fehler',
+};
+const PHASE_COLOR: Record<SystemUpdateStatus['phase'], string> = {
+  idle:       'text-slate-400',
+  extracting: 'text-cyan-400',
+  building:   'text-amber-400',
+  done:       'text-green-400',
+  error:      'text-red-400',
+};
+
+function SystemUpdate() {
+  const [file,      setFile]      = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
+  const [status,    setStatus]    = useState<SystemUpdateStatus>({
+    phase: 'idle', log: [], started_at: null, finished_at: null,
+  });
+  const logRef = useRef<HTMLDivElement>(null);
+
+  const isRunning = status.phase === 'extracting' || status.phase === 'building';
+
+  // Initialen Status laden + während Update alle 2s pollen
+  useEffect(() => {
+    fetchSystemUpdateStatus().then(setStatus).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const t = setInterval(() => {
+      fetchSystemUpdateStatus().then(setStatus).catch(() => {});
+    }, 2000);
+    return () => clearInterval(t);
+  }, [isRunning]);
+
+  // Log automatisch nach unten scrollen
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [status.log.length]);
+
+  async function handleStart() {
+    if (!file) return;
+    setError(null);
+    setUploading(true);
+    try {
+      await startSystemUpdate(file);
+      setStatus(s => ({ ...s, phase: 'extracting', log: [], started_at: new Date().toISOString() }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-base font-semibold text-slate-100 mb-1">System-Update</h2>
+      <p className="text-sm text-slate-400 mb-5">
+        Laden Sie die aktuelle Version als ZIP von GitHub herunter und importieren Sie sie hier.
+        Konfiguration (<code className="text-xs bg-slate-800 px-1 rounded">.env</code>),
+        Zertifikate und Datenbank bleiben erhalten.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="file"
+            accept=".zip"
+            className="hidden"
+            disabled={isRunning || uploading}
+            onChange={e => { setFile(e.target.files?.[0] ?? null); setError(null); }}
+          />
+          <span className="btn text-sm px-3 py-1.5 border border-slate-600 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">
+            {file ? file.name : 'ZIP auswählen …'}
+          </span>
+        </label>
+
+        <button
+          type="button"
+          onClick={handleStart}
+          disabled={!file || isRunning || uploading}
+          className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium
+                     bg-cyan-700 hover:bg-cyan-600 text-white
+                     disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          <Upload size={14} />
+          {uploading ? 'Wird hochgeladen …' : 'Update starten'}
+        </button>
+      </div>
+
+      {error && (
+        <p className="mt-3 text-sm text-red-400">{error}</p>
+      )}
+
+      <div className="mt-4 flex items-center gap-2">
+        <span className={`text-sm font-medium ${PHASE_COLOR[status.phase]}`}>
+          ● {PHASE_LABEL[status.phase]}
+        </span>
+        {status.started_at && (
+          <span className="text-xs text-slate-500">
+            {new Date(status.started_at).toLocaleTimeString()}
+            {status.finished_at && ` – ${new Date(status.finished_at).toLocaleTimeString()}`}
+          </span>
+        )}
+      </div>
+
+      {status.log.length > 0 && (
+        <div
+          ref={logRef}
+          className="mt-3 bg-slate-950 rounded border border-slate-700/60 p-3 h-64 overflow-y-auto font-mono text-xs leading-relaxed"
+        >
+          {status.log.map((line, i) => (
+            <div
+              key={i}
+              className={
+                line.includes('FEHLER') ? 'text-red-400' :
+                line.includes('erfolgreich') ? 'text-green-400' :
+                'text-slate-300'
+              }
+            >
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog' | 'irma' | 'thorsten';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog' | 'irma' | 'update' | 'thorsten';
 
 interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
@@ -1573,6 +1708,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'ssl',    label: 'SSL-Zertifikat', icon: <Lock     {...ICON_PROPS} /> },
       { id: 'syslog', label: 'Syslog / SIEM',  icon: <FileText {...ICON_PROPS} /> },
+      { id: 'update', label: 'System-Update',  icon: <Upload   {...ICON_PROPS} /> },
     ],
   },
   {
@@ -1633,6 +1769,7 @@ export function SettingsPage() {
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}
             {active === 'irma'          && <IrmaSettings />}
+            {active === 'update'        && <SystemUpdate />}
           </div>
         </div>
         )}

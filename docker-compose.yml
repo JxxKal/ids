@@ -319,6 +319,8 @@ services:
       - snort-rules:/rules
       - ml-models:/models
       - ids-certs:/certs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/ids:/opt/ids
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
 

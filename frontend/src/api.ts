@@ -1,4 +1,4 @@
-import type { Alert, Host, KnownNetwork, MLConfig, MLStatus, RuleListResponse, RuleSource, SamlConfig, TestRun, ThreatLevel, UpdateStatus, User } from './types';
+import type { Alert, Host, KnownNetwork, MLConfig, MLStatus, RuleListResponse, RuleSource, SamlConfig, SystemUpdateStatus, TestRun, ThreatLevel, UpdateStatus, User } from './types';
 import * as demo from './demo/api';
 import { isDemoMode } from './demo/mode';
 
@@ -520,4 +520,24 @@ export async function saveSyslogConfig(cfg: SyslogConfig): Promise<SyslogConfig>
 
 export async function testSyslog(body: SyslogTestRequest): Promise<{ status: string; message: string }> {
   return req('/api/syslog/test', { method: 'POST', body: JSON.stringify(body) });
+}
+
+// ── System-Update ─────────────────────────────────────────────────────────────
+
+export async function startSystemUpdate(file: File): Promise<{ status: string }> {
+  const token = getToken();
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${BASE}/api/system/update`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`${res.status}: ${t}`); }
+  return res.json();
+}
+
+export async function fetchSystemUpdateStatus(): Promise<SystemUpdateStatus> {
+  if (isDemoMode()) return { phase: 'idle', log: [], started_at: null, finished_at: null };
+  return req<SystemUpdateStatus>('/api/system/update/status');
 }

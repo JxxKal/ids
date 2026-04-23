@@ -1,0 +1,133 @@
+"""Offline-Update: ZIP-Upload → Extraktion → docker compose up --build."""
+from __future__ import annotations
+
+import asyncio
+import shutil
+import tempfile
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+
+router = APIRouter(prefix="/api/system", tags=["update"])
+
+IDS_DIR = Path("/opt/ids")
+_PROTECT = {".env", ".git"}
+
+_state: dict[str, Any] = {
+    "phase": "idle",   # idle | extracting | building | done | error
+    "log": [],
+    "started_at": None,
+    "finished_at": None,
+}
+
+
+def _ts() -> str:
+    return datetime.now(timezone.utc).strftime("%H:%M:%S")
+
+
+def _log(msg: str) -> None:
+    _state["log"].append(f"[{_ts()}] {msg}")
+    if len(_state["log"]) > 500:
+        _state["log"] = _state["log"][-200:]
+
+
+def _extract(zip_bytes: bytes, dest: Path) -> int:
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        tmp.write(zip_bytes)
+        tmp_path = Path(tmp.name)
+    try:
+        with zipfile.ZipFile(tmp_path, "r") as zf:
+            members = zf.namelist()
+            if not members:
+                raise ValueError("ZIP ist leer")
+            # GitHub-ZIP hat Top-Level-Dir z.B. ids-main/
+            prefix = members[0].split("/")[0] + "/"
+            count = 0
+            for member in members:
+                rel = member.removeprefix(prefix)
+                if not rel:
+                    continue
+                if rel.split("/")[0] in _PROTECT:
+                    continue
+                target = dest / rel
+                if member.endswith("/"):
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(member) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    count += 1
+        return count
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+async def _run_update(zip_bytes: bytes) -> None:
+    _state.update({
+        "phase": "extracting",
+        "log": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+    })
+    try:
+        _log(f"Entpacke ZIP ({len(zip_bytes) // 1024} KB) nach {IDS_DIR} ...")
+        count = await asyncio.to_thread(_extract, zip_bytes, IDS_DIR)
+        _log(f"{count} Dateien entpackt. .env und .git bleiben erhalten.")
+
+        # Compose-Profil aus /etc/cyjan/profile lesen (gesetzt von ids-setup)
+        profile_file = Path("/etc/cyjan/profile")
+        profile = profile_file.read_text().strip() if profile_file.exists() else "prod"
+        _log(f"Compose-Profil: {profile}")
+
+        _state["phase"] = "building"
+        _log("Starte: docker compose up -d --build ...")
+
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "compose",
+            "--project-directory", str(IDS_DIR),
+            "--profile", profile,
+            "up", "-d", "--build",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=str(IDS_DIR),
+        )
+        assert proc.stdout is not None
+        async for raw in proc.stdout:
+            line = raw.decode(errors="replace").rstrip()
+            if line:
+                _log(line)
+
+        rc = await proc.wait()
+        if rc != 0:
+            raise RuntimeError(f"docker compose exited with code {rc}")
+
+        _state["phase"] = "done"
+        _log("Update erfolgreich abgeschlossen.")
+
+    except Exception as exc:  # noqa: BLE001
+        _state["phase"] = "error"
+        _log(f"FEHLER: {exc}")
+    finally:
+        _state["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@router.post("/update", summary="Offline-Update via ZIP")
+async def start_update(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="GitHub-Repository-ZIP"),
+) -> dict:
+    if _state["phase"] not in ("idle", "done", "error"):
+        raise HTTPException(409, "Ein Update läuft bereits")
+    if not (file.filename or "").endswith(".zip"):
+        raise HTTPException(400, "Nur ZIP-Dateien erlaubt")
+    zip_bytes = await file.read()
+    background_tasks.add_task(_run_update, zip_bytes)
+    return {"status": "started"}
+
+
+@router.get("/update/status", summary="Update-Status abfragen")
+async def get_update_status() -> dict:
+    return dict(_state)

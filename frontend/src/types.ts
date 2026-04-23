@@ -210,6 +210,13 @@ export interface UpdateStatus {
   last_updated: number | null;
 }
 
+export interface SystemUpdateStatus {
+  phase: 'idle' | 'extracting' | 'building' | 'done' | 'error';
+  log: string[];
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export type WsMessage =
   | { type: 'initial';          data: Alert[] }
   | { type: 'alert';            data: Alert }
