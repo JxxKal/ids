@@ -212,9 +212,25 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
                 build_cmd.append("--pull")
                 _log("Starte: docker compose build --pull ...")
             else:
-                _log("Starte: docker compose build (offline) ...")
+                _log("ZIP enthält keine vorgebauten Images – baue aus Quellcode.")
+                _log("HINWEIS: Erfordert Zugriff auf Docker Hub (python:3.12-slim, rust:1.85-slim …).")
+                _log("         Für Offline-Betrieb bitte Release-ZIP von GitHub verwenden (enthält images.tar.gz).")
             _state["progress"] = 15
-            await _run_subprocess(build_cmd)
+            network_error = [False]
+            def _check_network(line: str) -> None:
+                if "registry-1.docker.io" in line or "deadline exceeded" in line or "dial tcp" in line:
+                    network_error[0] = True
+
+            try:
+                await _run_subprocess(build_cmd, _check_network)
+            except RuntimeError as build_exc:
+                if network_error[0]:
+                    raise RuntimeError(
+                        "Docker Hub nicht erreichbar – Build abgebrochen. "
+                        "Bitte Release-ZIP von GitHub verwenden: das enthält images.tar.gz "
+                        "und funktioniert ohne Internet-Zugang."
+                    ) from build_exc
+                raise
             _state["progress"] = 80
 
         # ── 3. Unabhängigen Runner-Container starten (80-100%) ────────────────
