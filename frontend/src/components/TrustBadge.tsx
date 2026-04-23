@@ -2,6 +2,7 @@ const SOURCE_LABEL: Record<string, string> = {
   dns:    'DNS',
   csv:    'CSV',
   manual: 'Manuell',
+  cmdb:   'iTop/CMDB',
 };
 
 interface Props {

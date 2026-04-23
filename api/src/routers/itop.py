@@ -166,11 +166,12 @@ async def _sync(pool: asyncpg.Pool) -> None:
                     try:
                         await conn.execute(
                             """
-                            INSERT INTO known_networks (cidr, name, description)
-                            VALUES ($1::cidr, $2, $3)
+                            INSERT INTO known_networks (cidr, name, description, color)
+                            VALUES ($1::cidr, $2, $3, '#22c55e')
                             ON CONFLICT (cidr) DO UPDATE SET
                               name        = EXCLUDED.name,
                               description = COALESCE(EXCLUDED.description, known_networks.description),
+                              color       = '#22c55e',
                               updated_at  = now()
                             """,
                             cidr, name, desc,
