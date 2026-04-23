@@ -1,21 +1,34 @@
 #!/bin/sh
-# Generiert nginx.conf basierend auf vorhandenen TLS-Zertifikaten
+# Generiert nginx.conf basierend auf vorhandenen TLS-Zertifikaten und Hostname
 set -e
 
 CERT=/certs/cert.pem
 KEY=/certs/key.pem
+HOSTNAME_FILE=/certs/.hostname
 CONF=/etc/nginx/conf.d/default.conf
+
+# Optionaler Hostname – wenn gesetzt, wird server_name gesetzt; sonst catch-all (_)
+SERVER_NAME="_"
+if [ -f "$HOSTNAME_FILE" ]; then
+  HN=$(cat "$HOSTNAME_FILE" | tr -d '[:space:]')
+  if [ -n "$HN" ]; then
+    SERVER_NAME="$HN"
+    echo "[nginx] Hostname: $SERVER_NAME"
+  fi
+fi
 
 if [ -f "$CERT" ] && [ -f "$KEY" ]; then
   echo "[nginx] TLS-Zertifikat gefunden – starte auf Port 443 (HTTP→HTTPS-Redirect)"
   cat > "$CONF" <<EOF
 server {
     listen 80;
+    server_name $SERVER_NAME;
     return 301 https://\$host\$request_uri;
 }
 
 server {
     listen 443 ssl;
+    server_name $SERVER_NAME;
     ssl_certificate     $CERT;
     ssl_certificate_key $KEY;
     ssl_protocols       TLSv1.2 TLSv1.3;
@@ -56,6 +69,7 @@ else
   cat > "$CONF" <<EOF
 server {
     listen 80;
+    server_name $SERVER_NAME;
     client_max_body_size 2g;
 
     root /usr/share/nginx/html;

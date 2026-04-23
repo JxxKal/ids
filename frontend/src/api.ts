@@ -503,6 +503,7 @@ export interface SslStatus {
   domains?: string[];
   acme_email?: string;
   acme_ca?: string;
+  hostname?: string;
 }
 
 export interface SslSelfSignedRequest {
@@ -544,6 +545,24 @@ export async function uploadSslCert(cert: File, key: File, ca?: File): Promise<S
   });
   if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`${res.status}: ${t}`); }
   return res.json();
+}
+
+export async function uploadSslPfx(pfx: File, password: string): Promise<SslStatus> {
+  const token = getToken();
+  const fd = new FormData();
+  fd.append('pfx', pfx);
+  fd.append('password', password);
+  const res = await fetch(`${BASE}/api/ssl/upload-pfx`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`${res.status}: ${t}`); }
+  return res.json();
+}
+
+export async function setSslHostname(hostname: string): Promise<{ hostname: string }> {
+  return req('/api/ssl/hostname', { method: 'POST', body: JSON.stringify({ hostname }) });
 }
 
 // ── Syslog ────────────────────────────────────────────────────────────────────

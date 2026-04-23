@@ -6,14 +6,15 @@ import ipaddress
 import os
 import subprocess
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Form, HTTPException, UploadFile, File
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/ssl", tags=["ssl"])
 
-CERT_DIR = os.getenv("CERT_DIR", "/certs")
-CERT_FILE = os.path.join(CERT_DIR, "cert.pem")
-KEY_FILE  = os.path.join(CERT_DIR, "key.pem")
+CERT_DIR      = os.getenv("CERT_DIR", "/certs")
+CERT_FILE     = os.path.join(CERT_DIR, "cert.pem")
+KEY_FILE      = os.path.join(CERT_DIR, "key.pem")
+HOSTNAME_FILE = os.path.join(CERT_DIR, ".hostname")
 
 
 class SslStatusResponse(BaseModel):
@@ -23,6 +24,7 @@ class SslStatusResponse(BaseModel):
     issuer:    str | None = None
     not_after: str | None = None
     domains:   list[str] | None = None
+    hostname:  str | None = None
 
 
 class SelfSignedRequest(BaseModel):
@@ -59,10 +61,12 @@ def _cert_info() -> SslStatusResponse:
         # Mode aus gespeichertem Flag lesen
         mode_file = os.path.join(CERT_DIR, ".mode")
         mode = open(mode_file).read().strip() if os.path.exists(mode_file) else "upload"
+        hostname = open(HOSTNAME_FILE).read().strip() if os.path.exists(HOSTNAME_FILE) else None
         return SslStatusResponse(
             mode=mode, active=True,
             subject=subject, issuer=issuer,
             not_after=not_after, domains=domains or None,
+            hostname=hostname or None,
         )
     except Exception:
         return SslStatusResponse(mode="upload", active=True)
@@ -93,6 +97,64 @@ async def ssl_upload(
     with open(os.path.join(CERT_DIR, ".mode"), "w") as f:
         f.write("upload")
     return _cert_info()
+
+
+@router.post("/upload-pfx", response_model=SslStatusResponse)
+async def ssl_upload_pfx(
+    pfx:      UploadFile = File(...),
+    password: str        = Form(""),
+) -> SslStatusResponse:
+    """Importiert ein PFX/PKCS#12-Zertifikat (z.B. von Windows CA). Extrahiert Zertifikat und privaten Schlüssel."""
+    os.makedirs(CERT_DIR, exist_ok=True)
+    pfx_data = await pfx.read()
+    try:
+        from cryptography.hazmat.primitives.serialization.pkcs12 import load_key_and_certificates
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, NoEncryption, PrivateFormat,
+        )
+        pwd_bytes = password.encode() if password else None
+        private_key, cert, additional_certs = load_key_and_certificates(pfx_data, pwd_bytes)
+    except Exception as e:
+        raise HTTPException(400, f"PFX konnte nicht geladen werden: {e}")
+
+    if not cert or not private_key:
+        raise HTTPException(400, "PFX enthält kein Zertifikat oder keinen privaten Schlüssel.")
+
+    from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
+
+    cert_pem = cert.public_bytes(Encoding.PEM)
+    if additional_certs:
+        for ca_cert in additional_certs:
+            cert_pem += ca_cert.public_bytes(Encoding.PEM)
+
+    key_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption())
+
+    with open(CERT_FILE, "wb") as f:
+        f.write(cert_pem)
+    with open(KEY_FILE, "wb") as f:
+        f.write(key_pem)
+    with open(os.path.join(CERT_DIR, ".mode"), "w") as f:
+        f.write("upload")
+    return _cert_info()
+
+
+class HostnameRequest(BaseModel):
+    hostname: str
+
+
+@router.get("/hostname", summary="Konfigurierten Hostnamen lesen")
+async def get_hostname() -> dict:
+    hostname = open(HOSTNAME_FILE).read().strip() if os.path.exists(HOSTNAME_FILE) else ""
+    return {"hostname": hostname}
+
+
+@router.post("/hostname", summary="Hostnamen für nginx server_name setzen")
+async def set_hostname(body: HostnameRequest) -> dict:
+    os.makedirs(CERT_DIR, exist_ok=True)
+    hostname = body.hostname.strip()
+    with open(HOSTNAME_FILE, "w") as f:
+        f.write(hostname)
+    return {"hostname": hostname}
 
 
 @router.post("/self-signed", response_model=SslStatusResponse)

@@ -9,7 +9,7 @@ import {
   fetchSystemUpdateStatus, fetchUsers, generateApiToken, getItopSyncStatus, patchRuleSource,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
   startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
-  triggerRuleUpdate, updateUser, uploadSslCert,
+  triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname,
 } from '../api';
 import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
 import type { IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
@@ -1199,6 +1199,7 @@ function RulesList() {
 // ── SslSettings ───────────────────────────────────────────────────────────────
 
 type SslMode = 'upload' | 'self-signed' | 'acme';
+type UploadFormat = 'pem' | 'pfx';
 
 function SslStatusBadge({ status }: { status: SslStatus }) {
   if (!status.active || status.mode === 'none')
@@ -1224,9 +1225,16 @@ function SslSettings() {
   const [msg,     setMsg]     = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   // Upload state
+  const [uploadFormat, setUploadFormat] = useState<UploadFormat>('pem');
   const [certFile, setCertFile] = useState<File | null>(null);
   const [keyFile,  setKeyFile]  = useState<File | null>(null);
   const [caFile,   setCaFile]   = useState<File | null>(null);
+  const [pfxFile,  setPfxFile]  = useState<File | null>(null);
+  const [pfxPassword, setPfxPassword] = useState('');
+
+  // Hostname state
+  const [hostname,     setHostname]     = useState('');
+  const [hostnameSaving, setHostnameSaving] = useState(false);
 
   // Self-signed state
   const [ss, setSs] = useState<SslSelfSignedRequest>({ common_name: '', days: 365, country: 'DE', org: '' });
@@ -1241,7 +1249,11 @@ function SslSettings() {
 
   useEffect(() => {
     fetchSslStatus()
-      .then(s => { setStatus(s); if (s.mode !== 'none') setMode(s.mode as SslMode); })
+      .then(s => {
+        setStatus(s);
+        if (s.mode !== 'none') setMode(s.mode as SslMode);
+        if (s.hostname) setHostname(s.hostname);
+      })
       .catch(() => setStatus({ mode: 'none', active: false }));
   }, []);
 
@@ -1250,13 +1262,30 @@ function SslSettings() {
     setTimeout(() => setMsg(null), 4000);
   }
 
+  async function handleSaveHostname() {
+    setHostnameSaving(true);
+    try {
+      await setSslHostname(hostname);
+      flash('ok', 'Hostname gespeichert – nginx beim nächsten Neustart aktiv ✓');
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Fehler');
+    } finally {
+      setHostnameSaving(false);
+    }
+  }
+
   async function handleApply() {
     setSaving(true);
     try {
       let s: SslStatus;
       if (mode === 'upload') {
-        if (!certFile || !keyFile) { flash('err', 'Zertifikat und Schlüssel sind erforderlich'); setSaving(false); return; }
-        s = await uploadSslCert(certFile, keyFile, caFile ?? undefined);
+        if (uploadFormat === 'pfx') {
+          if (!pfxFile) { flash('err', 'PFX-Datei ist erforderlich'); setSaving(false); return; }
+          s = await uploadSslPfx(pfxFile, pfxPassword);
+        } else {
+          if (!certFile || !keyFile) { flash('err', 'Zertifikat und Schlüssel sind erforderlich'); setSaving(false); return; }
+          s = await uploadSslCert(certFile, keyFile, caFile ?? undefined);
+        }
       } else if (mode === 'self-signed') {
         if (!ss.common_name) { flash('err', 'Common Name ist erforderlich'); setSaving(false); return; }
         s = await applySslSelfSigned(ss);
@@ -1284,6 +1313,28 @@ function SslSettings() {
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">SSL / TLS-Zertifikat</h2>
         {status && <SslStatusBadge status={status} />}
+      </div>
+
+      {/* Hostname */}
+      <div className="rounded border border-slate-700/60 bg-slate-900/40 p-3 space-y-2">
+        <p className="text-xs font-medium text-slate-300">Server-Hostname</p>
+        <p className="text-[11px] text-slate-500">
+          nginx <code className="font-mono text-slate-400">server_name</code> – Hostname oder IP auf die der Webserver hört.
+          Wird beim nächsten Container-Neustart aktiv.
+        </p>
+        <div className="flex gap-2">
+          <input
+            className="input text-xs font-mono flex-1"
+            placeholder="ids.firma.de oder 192.168.1.230"
+            value={hostname}
+            onChange={e => setHostname(e.target.value)}
+          />
+          <button type="button" className="btn-ghost text-xs shrink-0"
+            disabled={hostnameSaving}
+            onClick={handleSaveHostname}>
+            {hostnameSaving ? 'Speichern…' : 'Speichern'}
+          </button>
+        </div>
       </div>
 
       {/* Aktuelles Zertifikat */}
@@ -1315,21 +1366,57 @@ function SslSettings() {
       {/* Upload */}
       {mode === 'upload' && (
         <div className="space-y-3 text-xs">
-          <p className="text-slate-500">Lade ein bestehendes PEM-Zertifikat und den zugehörigen privaten Schlüssel hoch.</p>
-          {[
-            { label: 'Zertifikat (cert.pem) *', set: setCertFile, accept: '.pem,.crt,.cer' },
-            { label: 'Privater Schlüssel (key.pem) *', set: setKeyFile, accept: '.pem,.key' },
-            { label: 'CA-Chain (optional)', set: setCaFile, accept: '.pem,.crt,.cer' },
-          ].map(({ label, set, accept }) => (
-            <div key={label} className="flex flex-col gap-1">
-              <label className="text-slate-400">{label}</label>
-              <input
-                type="file" accept={accept}
-                className="block text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer"
-                onChange={e => set(e.target.files?.[0] ?? null)}
-              />
-            </div>
-          ))}
+          {/* Format-Toggle */}
+          <div className="flex gap-1 p-0.5 bg-slate-800/60 rounded w-fit border border-slate-700/40">
+            {(['pem', 'pfx'] as UploadFormat[]).map(f => (
+              <button key={f} type="button"
+                onClick={() => setUploadFormat(f)}
+                className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                  uploadFormat === f
+                    ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/40'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}>
+                {f === 'pem' ? 'PEM-Dateien' : 'PFX / PKCS#12'}
+              </button>
+            ))}
+          </div>
+
+          {uploadFormat === 'pem' ? (
+            <>
+              <p className="text-slate-500">Lade ein bestehendes PEM-Zertifikat und den zugehörigen privaten Schlüssel hoch.</p>
+              {[
+                { label: 'Zertifikat (cert.pem) *', set: setCertFile, accept: '.pem,.crt,.cer' },
+                { label: 'Privater Schlüssel (key.pem) *', set: setKeyFile, accept: '.pem,.key' },
+                { label: 'CA-Chain (optional)', set: setCaFile, accept: '.pem,.crt,.cer' },
+              ].map(({ label, set, accept }) => (
+                <div key={label} className="flex flex-col gap-1">
+                  <label className="text-slate-400">{label}</label>
+                  <input type="file" accept={accept}
+                    className="block text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer"
+                    onChange={e => set(e.target.files?.[0] ?? null)} />
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              <p className="text-slate-500">
+                Importiert eine PFX/PKCS#12-Datei (z.B. aus Windows CA exportiert). Zertifikat und privater Schlüssel werden automatisch extrahiert.
+              </p>
+              <div className="flex flex-col gap-1">
+                <label className="text-slate-400">PFX-Datei *</label>
+                <input type="file" accept=".pfx,.p12"
+                  className="block text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer"
+                  onChange={e => setPfxFile(e.target.files?.[0] ?? null)} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-slate-400">Passwort für privaten Schlüssel</label>
+                <input className="input font-mono" type="password"
+                  placeholder="Leer lassen wenn kein Passwort gesetzt"
+                  value={pfxPassword}
+                  onChange={e => setPfxPassword(e.target.value)} />
+              </div>
+            </>
+          )}
         </div>
       )}
 
