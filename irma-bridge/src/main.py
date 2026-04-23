@@ -19,6 +19,7 @@ Umgebungsvariablen:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -26,17 +27,19 @@ import uuid
 from datetime import timezone
 from pathlib import Path
 
+import psycopg2
 import requests
 import urllib3
 from confluent_kafka import Producer
 
-# ── Konfiguration ─────────────────────────────────────────────────────────────
+# ── Konfiguration (Env = Fallback, DB überschreibt) ───────────────────────────
 
-IRMA_BASE      = os.getenv("IRMA_BASE_URL",      "https://10.133.168.115/rest").rstrip("/")
-IRMA_USER      = os.getenv("IRMA_USER",          "")
-IRMA_PASS      = os.getenv("IRMA_PASS",          "")
-POLL_INTERVAL  = int(os.getenv("IRMA_POLL_INTERVAL", "30"))
-SSL_VERIFY     = os.getenv("IRMA_SSL_VERIFY", "false").lower() == "true"
+ENV_BASE       = os.getenv("IRMA_BASE_URL",      "https://10.133.168.115/rest").rstrip("/")
+ENV_USER       = os.getenv("IRMA_USER",          "")
+ENV_PASS       = os.getenv("IRMA_PASS",          "")
+ENV_POLL       = int(os.getenv("IRMA_POLL_INTERVAL", "30"))
+ENV_SSL_VERIFY = os.getenv("IRMA_SSL_VERIFY", "false").lower() == "true"
+POSTGRES_DSN   = os.getenv("POSTGRES_DSN", "")
 KAFKA_BROKERS  = os.getenv("KAFKA_BROKERS",     "kafka:9092")
 OUTPUT_TOPIC   = "alerts-raw"
 LAST_ID_FILE   = Path("/data/irma_last_id")
@@ -51,8 +54,47 @@ logging.basicConfig(
 )
 log = logging.getLogger("irma-bridge")
 
-if not SSL_VERIFY:
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# ── Config-Loader (system_config.irma aus DB, Fallback auf env) ───────────────
+
+def load_config() -> dict:
+    """
+    Lädt die IRMA-Config aus system_config.irma. Wenn nicht gesetzt oder
+    die DB nicht erreichbar ist, fällt auf die Env-Variablen zurück.
+    Rückgabe: {enabled, base_url, user, password, poll_interval, ssl_verify}
+    """
+    cfg = {
+        "enabled":       bool(ENV_USER and ENV_PASS),
+        "base_url":      ENV_BASE,
+        "user":          ENV_USER,
+        "password":      ENV_PASS,
+        "poll_interval": ENV_POLL,
+        "ssl_verify":    ENV_SSL_VERIFY,
+    }
+    if not POSTGRES_DSN:
+        return cfg
+    try:
+        conn = psycopg2.connect(POSTGRES_DSN, connect_timeout=5)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM system_config WHERE key = 'irma'")
+                row = cur.fetchone()
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("DB-Config nicht lesbar (%s) – nutze Env-Fallback", exc)
+        return cfg
+    if not row:
+        return cfg
+    val = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    if val.get("enabled") is not None:       cfg["enabled"]       = bool(val["enabled"])
+    if val.get("base_url"):                  cfg["base_url"]      = val["base_url"].rstrip("/")
+    if val.get("user"):                      cfg["user"]          = val["user"]
+    if val.get("password"):                  cfg["password"]      = val["password"]
+    if val.get("poll_interval"):             cfg["poll_interval"] = int(val["poll_interval"])
+    if val.get("ssl_verify") is not None:    cfg["ssl_verify"]    = bool(val["ssl_verify"])
+    return cfg
 
 # ── Kafka ─────────────────────────────────────────────────────────────────────
 
@@ -68,16 +110,20 @@ producer = Producer({
 # ── IRMA Auth ─────────────────────────────────────────────────────────────────
 
 class IrmaClient:
-    def __init__(self) -> None:
-        self._session   = requests.Session()
-        self._token_ts  = 0.0
+    def __init__(self, base_url: str, user: str, password: str, ssl_verify: bool) -> None:
+        self._base       = base_url.rstrip("/")
+        self._user       = user
+        self._password   = password
+        self._ssl_verify = ssl_verify
+        self._session    = requests.Session()
+        self._token_ts   = 0.0
 
     def _login(self) -> None:
-        log.info("IRMA: Anmeldung als '%s'", IRMA_USER)
+        log.info("IRMA: Anmeldung an %s als '%s'", self._base, self._user)
         resp = self._session.post(
-            f"{IRMA_BASE}/login",
-            json={"user": IRMA_USER, "pass": IRMA_PASS},
-            verify=SSL_VERIFY,
+            f"{self._base}/login",
+            json={"user": self._user, "pass": self._password},
+            verify=self._ssl_verify,
             timeout=15,
         )
         resp.raise_for_status()
@@ -93,9 +139,9 @@ class IrmaClient:
     def get_alarms_after(self, last_id: int) -> list[dict]:
         self._ensure_token()
         resp = self._session.get(
-            f"{IRMA_BASE}/alarm",
+            f"{self._base}/alarm",
             params={"after": last_id},
-            verify=SSL_VERIFY,
+            verify=self._ssl_verify,
             timeout=20,
         )
         if resp.status_code == 401:
@@ -103,9 +149,9 @@ class IrmaClient:
             self._token_ts = 0
             self._ensure_token()
             resp = self._session.get(
-                f"{IRMA_BASE}/alarm",
+                f"{self._base}/alarm",
                 params={"after": last_id},
-                verify=SSL_VERIFY,
+                verify=self._ssl_verify,
                 timeout=20,
             )
         resp.raise_for_status()
@@ -160,19 +206,37 @@ def map_alarm(alarm: dict) -> dict:
 
 # ── Haupt-Schleife ────────────────────────────────────────────────────────────
 
+def _config_sig(cfg: dict) -> tuple:
+    """Signatur-Tuple, um Config-Änderungen zu erkennen."""
+    return (cfg["base_url"], cfg["user"], cfg["password"], cfg["ssl_verify"], cfg["enabled"])
+
+
 def run() -> None:
     import orjson
 
-    if not IRMA_USER or not IRMA_PASS:
-        log.error("IRMA_USER / IRMA_PASS nicht gesetzt – Bridge inaktiv")
-        while True:
-            time.sleep(60)
-
-    client  = IrmaClient()
+    cfg     = load_config()
+    client  = None
     last_id = load_last_id()
-    log.info("Start – letzte IRMA-ID: %d, Poll-Intervall: %ds", last_id, POLL_INTERVAL)
+    log.info("Start – letzte IRMA-ID: %d", last_id)
 
     while True:
+        # Config-Refresh: jede Iteration frisch aus DB laden, bei Änderung
+        # Client neu bauen (Token wird verworfen).
+        new_cfg = load_config()
+        if client is None or _config_sig(new_cfg) != _config_sig(cfg):
+            cfg = new_cfg
+            if cfg["enabled"] and cfg["user"] and cfg["password"]:
+                log.info("IRMA-Config (neu/geändert) aktiv: %s @ %s", cfg["user"], cfg["base_url"])
+                client = IrmaClient(cfg["base_url"], cfg["user"], cfg["password"], cfg["ssl_verify"])
+            else:
+                if client is not None:
+                    log.info("IRMA deaktiviert oder Credentials leer – Bridge idle")
+                client = None
+
+        if client is None:
+            time.sleep(max(10, cfg["poll_interval"]))
+            continue
+
         try:
             alarms = client.get_alarms_after(last_id)
             if alarms:
@@ -211,7 +275,7 @@ def run() -> None:
         except Exception as exc:
             log.exception("Unerwarteter Fehler: %s", exc)
 
-        time.sleep(POLL_INTERVAL)
+        time.sleep(cfg["poll_interval"])
 
 
 if __name__ == "__main__":

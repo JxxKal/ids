@@ -373,10 +373,13 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      timescaledb:
+        condition: service_healthy
     volumes:
       - irma-data:/data
     environment:
       KAFKA_BROKERS:       kafka:9092
+      POSTGRES_DSN:        postgresql://ids:${POSTGRES_PASSWORD}@timescaledb:5432/ids
       IRMA_BASE_URL:       ${IRMA_BASE_URL:-https://10.133.168.115/rest}
       IRMA_USER:           ${IRMA_USER:-}
       IRMA_PASS:           ${IRMA_PASS:-}

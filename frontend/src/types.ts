@@ -114,6 +114,15 @@ export interface User {
   last_login?:  string;
 }
 
+export interface IrmaConfig {
+  enabled:       boolean;
+  base_url:      string;
+  user:          string;
+  password:      string;
+  poll_interval: number;
+  ssl_verify:    boolean;
+}
+
 export interface SamlConfig {
   enabled:              boolean;
   idp_metadata_url:     string;
