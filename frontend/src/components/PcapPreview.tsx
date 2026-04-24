@@ -372,8 +372,8 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="relative bg-slate-900 border border-slate-700 rounded-lg shadow-2xl flex flex-col"
-        style={{width:'92vw', maxWidth:'1320px', height:'82vh'}}
+        className="relative bg-slate-900 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden"
+        style={{width:'92vw', maxWidth:'1320px', height:'82dvh', maxHeight:'calc(100dvh - 32px)'}}
         onClick={e=>e.stopPropagation()}
       >
         {/* Header */}
@@ -429,7 +429,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
           ) : (
             <>
               {/* Packet list — virtual scroll */}
-              <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0" onScroll={handleScroll}>
+              <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 overscroll-contain" onScroll={handleScroll}>
                 <table className="w-full border-collapse text-xs font-mono">
                   <thead className="sticky top-0 bg-slate-900/95 backdrop-blur-sm z-10">
                     <tr className="text-left text-slate-500 border-b border-slate-700 text-[11px]">
