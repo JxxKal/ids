@@ -41,6 +41,24 @@ def _ip_addr_via_docker() -> list[dict] | None:
     return None
 
 
+_VIRTUAL_PREFIXES = (
+    "lo", "docker", "br-", "veth", "virbr", "tun", "tap",
+    "dummy", "ovs", "cali", "flannel", "cilium", "cni", "lxc",
+)
+
+
+def _is_physical(name: str) -> bool:
+    """True wenn das Interface ein physisches (oder konfiguriertes VM-)Interface ist.
+
+    Primär: /host/sys/class/net/<name>/device-Symlink existiert → echte NIC.
+    Fallback: Namens-Präfix-Filter schließt bekannte virtuelle Interfaces aus.
+    """
+    device_link = _SYS_NET / name / "device"
+    if _SYS_NET.is_dir():
+        return device_link.exists()
+    return not any(name.startswith(p) for p in _VIRTUAL_PREFIXES)
+
+
 def _ip_addr_via_sysfs() -> list[dict]:
     """Fallback: nur Name + operstate aus /host/sys/class/net."""
     result = []
@@ -67,7 +85,7 @@ async def get_interfaces() -> list[dict]:
     result = []
     for iface in raw:
         name = iface.get("ifname", "")
-        if name in ("lo",):
+        if not _is_physical(name):
             continue
         role = None
         if mirror_iface and name == mirror_iface:
