@@ -297,6 +297,8 @@ function hexLine(arr: Uint8Array, maxBytes=128): string {
 
 const PROTO_CLS: Record<string,string> = { TCP:'text-blue-300', UDP:'text-green-300', ICMP:'text-yellow-300', ICMPv6:'text-yellow-400', ARP:'text-purple-300' };
 
+const MAX_VISIBLE = 2000;
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PcapPreview({ alertId, filename, onClose }: { alertId:string; filename?:string; onClose:()=>void }) {
@@ -406,6 +408,12 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
             <>
               {/* Packet list */}
               <div className="flex-1 overflow-y-auto min-h-0">
+                {filtered.length > MAX_VISIBLE && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-950/80 border-b border-amber-800/50 text-[11px] text-amber-300 font-mono">
+                    <span>⚠</span>
+                    <span>Zeige erste {MAX_VISIBLE.toLocaleString()} von {filtered.length.toLocaleString()} Paketen — Filter verwenden um einzugrenzen</span>
+                  </div>
+                )}
                 <table className="w-full border-collapse text-xs font-mono">
                   <thead className="sticky top-0 bg-slate-900/95 backdrop-blur-sm z-10">
                     <tr className="text-left text-slate-500 border-b border-slate-700 text-[11px]">
@@ -421,7 +429,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
                   <tbody>
                     {filtered.length===0 ? (
                       <tr><td colSpan={7} className="text-center text-slate-600 py-10">Kein Paket entspricht dem Filter</td></tr>
-                    ) : filtered.map(pkt=>(
+                    ) : filtered.slice(0, MAX_VISIBLE).map(pkt=>(
                       <tr
                         key={pkt.num}
                         onClick={()=>setSelected(pkt.num===selected?null:pkt.num)}
