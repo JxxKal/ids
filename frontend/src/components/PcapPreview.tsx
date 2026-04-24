@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { getToken, pcapUrl } from '../api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -276,7 +276,7 @@ function evalFilter(n: FNode, p: PcapPacket): boolean {
   if (field==='tcp.flags.fin') return cmpV((p.tcpFlags>>0)&1);
   if (field==='tcp.flags.rst') return cmpV((p.tcpFlags>>2)&1);
   if (field==='tcp.flags.ack') return cmpV((p.tcpFlags>>4)&1);
-  return true; // unknown field → pass
+  return true;
 }
 
 function applyFilter(pkts: PcapPacket[], s: string): PcapPacket[] {
@@ -297,7 +297,8 @@ function hexLine(arr: Uint8Array, maxBytes=128): string {
 
 const PROTO_CLS: Record<string,string> = { TCP:'text-blue-300', UDP:'text-green-300', ICMP:'text-yellow-300', ICMPv6:'text-yellow-400', ARP:'text-purple-300' };
 
-const MAX_VISIBLE = 2000;
+const ROW_H = 22;   // px — must match the rendered row height
+const OVERSCAN = 30;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -310,6 +311,10 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
   const [filterErr, setFilterErr] = useState(false);
   const [selected, setSelected]   = useState<number|null>(null);
   const [dl, setDl]               = useState(false);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewH, setViewH]         = useState(500);
 
   const fn = filename ?? `alert-${alertId.slice(0,8)}.pcap`;
 
@@ -329,10 +334,27 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
     return ()=>{ alive=false; };
   }, [alertId]);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setViewH(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  }, []);
+
   const filtered = useMemo(()=>{
     try { const r=applyFilter(packets,filter); setFilterErr(false); return r; }
     catch { setFilterErr(true); return packets; }
   }, [packets, filter]);
+
+  const visStart = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
+  const visEnd   = Math.min(filtered.length, Math.ceil((scrollTop + viewH) / ROW_H) + OVERSCAN);
+  const topPad   = visStart * ROW_H;
+  const botPad   = Math.max(0, (filtered.length - visEnd) * ROW_H);
 
   const selPkt = selected!==null ? filtered.find(p=>p.num===selected)??null : null;
 
@@ -406,14 +428,8 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
             <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">Keine Pakete im PCAP</div>
           ) : (
             <>
-              {/* Packet list */}
-              <div className="flex-1 overflow-y-auto min-h-0">
-                {filtered.length > MAX_VISIBLE && (
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-950/80 border-b border-amber-800/50 text-[11px] text-amber-300 font-mono">
-                    <span>⚠</span>
-                    <span>Zeige erste {MAX_VISIBLE.toLocaleString()} von {filtered.length.toLocaleString()} Paketen — Filter verwenden um einzugrenzen</span>
-                  </div>
-                )}
+              {/* Packet list — virtual scroll */}
+              <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0" onScroll={handleScroll}>
                 <table className="w-full border-collapse text-xs font-mono">
                   <thead className="sticky top-0 bg-slate-900/95 backdrop-blur-sm z-10">
                     <tr className="text-left text-slate-500 border-b border-slate-700 text-[11px]">
@@ -429,23 +445,30 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
                   <tbody>
                     {filtered.length===0 ? (
                       <tr><td colSpan={7} className="text-center text-slate-600 py-10">Kein Paket entspricht dem Filter</td></tr>
-                    ) : filtered.slice(0, MAX_VISIBLE).map(pkt=>(
-                      <tr
-                        key={pkt.num}
-                        onClick={()=>setSelected(pkt.num===selected?null:pkt.num)}
-                        className={`border-b border-slate-800/50 cursor-pointer transition-colors ${
-                          pkt.num===selected ? 'bg-cyan-900/25 border-cyan-800/40' : 'hover:bg-slate-800/60'
-                        }`}
-                      >
-                        <td className="px-2 py-0.5 text-slate-600">{pkt.num}</td>
-                        <td className="px-2 py-0.5 text-slate-400 tabular-nums">{base?deltaTs(pkt,base):'0.000000'}</td>
-                        <td className="px-2 py-0.5 text-slate-300 whitespace-nowrap">{pkt.srcIp}{pkt.srcPort!==null?`:${pkt.srcPort}`:''}</td>
-                        <td className="px-2 py-0.5 text-slate-300 whitespace-nowrap">{pkt.dstIp}{pkt.dstPort!==null?`:${pkt.dstPort}`:''}</td>
-                        <td className={`px-2 py-0.5 font-semibold ${PROTO_CLS[pkt.proto]??'text-slate-400'}`}>{pkt.proto}</td>
-                        <td className="px-2 py-0.5 text-slate-500 tabular-nums">{pkt.origLen}</td>
-                        <td className="px-2 py-0.5 text-slate-400 truncate max-w-xs">{pkt.info}</td>
-                      </tr>
-                    ))}
+                    ) : (
+                      <>
+                        {topPad > 0 && <tr style={{height: topPad}}><td colSpan={7}/></tr>}
+                        {filtered.slice(visStart, visEnd).map(pkt=>(
+                          <tr
+                            key={pkt.num}
+                            style={{height: ROW_H}}
+                            onClick={()=>setSelected(pkt.num===selected?null:pkt.num)}
+                            className={`border-b border-slate-800/50 cursor-pointer transition-colors ${
+                              pkt.num===selected ? 'bg-cyan-900/25 border-cyan-800/40' : 'hover:bg-slate-800/60'
+                            }`}
+                          >
+                            <td className="px-2 py-0.5 text-slate-600">{pkt.num}</td>
+                            <td className="px-2 py-0.5 text-slate-400 tabular-nums">{base?deltaTs(pkt,base):'0.000000'}</td>
+                            <td className="px-2 py-0.5 text-slate-300 whitespace-nowrap">{pkt.srcIp}{pkt.srcPort!==null?`:${pkt.srcPort}`:''}</td>
+                            <td className="px-2 py-0.5 text-slate-300 whitespace-nowrap">{pkt.dstIp}{pkt.dstPort!==null?`:${pkt.dstPort}`:''}</td>
+                            <td className={`px-2 py-0.5 font-semibold ${PROTO_CLS[pkt.proto]??'text-slate-400'}`}>{pkt.proto}</td>
+                            <td className="px-2 py-0.5 text-slate-500 tabular-nums">{pkt.origLen}</td>
+                            <td className="px-2 py-0.5 text-slate-400 truncate max-w-xs">{pkt.info}</td>
+                          </tr>
+                        ))}
+                        {botPad > 0 && <tr style={{height: botPad}}><td colSpan={7}/></tr>}
+                      </>
+                    )}
                   </tbody>
                 </table>
               </div>
