@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { getToken, pcapUrl } from '../api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -369,7 +370,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
 
   const base = filtered[0]??null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div
         className="relative bg-slate-900 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden"
@@ -498,6 +499,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
