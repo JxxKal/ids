@@ -36,6 +36,7 @@ from minio import Minio
 
 from config import Config
 from database import close_pool, get_pool, init_pool
+import migrate
 from deps import get_current_user
 from routers import alerts as alerts_router
 from routers import auth as auth_router
@@ -169,6 +170,7 @@ async def startup() -> None:
     global streamer
     await init_pool(cfg.postgres_dsn)
     log.info("DB pool initialised")
+    await migrate.run(get_pool())
 
     # WebSocket-Broadcast-Task
     asyncio.create_task(_broadcast_loop())
