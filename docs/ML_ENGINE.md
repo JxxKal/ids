@@ -278,7 +278,10 @@ WHERE feedback = 'fp'
 - `host(inet)` statt `::text` (ohne `/32`-Suffix), damit DB-Keys mit den
   Kafka-Alert-IPs matchen.
 
-**Effekt:** **Permanent**, bis der User TP markiert oder den Alert löscht.
+**Effekt:** Suppression bleibt bis zum TP-Override aktiv — **aber** bei
+Baseline-Spike (z ≥ Z_THRESHOLD) wird sie automatisch aufgehoben. Eine
+früher als FP markierte Verbindung kann später zum Angriffspfad werden
+(C2, Exfil) — ein plötzlicher Anstieg muss der Analyst dann sehen.
 
 ### Layer 2 — ML-Adaptive (Tag: `ml-suppressed`)
 
@@ -330,8 +333,30 @@ else:                          # Spike!
 | Schutzmaßnahme        | Wirkung                                                                           |
 |-----------------------|-----------------------------------------------------------------------------------|
 | **TP-Feedback**       | Entfernt Muster beim nächsten Cache-Refresh komplett aus der Lernliste.          |
-| **Spike-Durchbruch**  | z ≥ 2 → Alert kommt durch. Bei ruhigem Baseline (80/h) genügen 110/h um zu feuern.|
-| **Manual FP Vorrang** | Layer 1 dominiert Layer 2 — ein FP-Markierung bleibt, auch wenn das Muster später ruhig wird.|
+| **Spike-Durchbruch**  | z ≥ 2 → Alert kommt durch. **Gilt für beide Layer**: auch manuelle FPs werden bei plötzlichem Anstieg wieder sichtbar.|
+| **Manual FP Priorität**| Wenn kein Spike: Layer 1 dominiert Layer 2. Ein FP-Markierung bleibt im ruhigen Betrieb wirksam.|
+
+### Classify-Logik (im Code)
+
+```python
+def classify(rule_id, src_ip, dst_ip):
+    key = session_key(rule_id, src_ip, dst_ip)
+    stat = self._stats.get(key)   # Baseline für ALLE Muster
+
+    # 1. Spike-Durchbruch – gilt für Layer 1 UND Layer 2
+    if stat and stat.z_score >= Z_THRESHOLD:
+        return None                # Alert durchlassen
+
+    # 2. Manual FP
+    if key in self._manual:
+        return "manual"             # Tag auto-suppressed
+
+    # 3. ML-Learned
+    if stat:                       # z < threshold bereits geprüft
+        return "learned"            # Tag ml-suppressed
+
+    return None
+```
 
 ### Gilt für **alle Severities**
 

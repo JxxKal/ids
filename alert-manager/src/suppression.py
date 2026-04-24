@@ -5,22 +5,29 @@ Zwei Schichten:
 
 Layer 1 — MANUAL (Tag 'auto-suppressed'):
   User hat einen Alert mit feedback='fp' markiert. Alle passenden Tupel
-  (rule_id, ip_pair) werden permanent herabgestuft bis TP-Override.
+  (rule_id, ip_pair) werden permanent herabgestuft.
 
 Layer 2 — ML-ADAPTIVE (Tag 'ml-suppressed'):
   Für jedes (rule_id, ip_pair) wird eine Baseline aus den letzten
   LEARN_WINDOW_D Tagen gelernt (Mittelwert + Standardabweichung der
   Alerts/Stunde). Suppression greift NUR wenn die aktuelle Stunde
-  statistisch unauffällig ist (z-Score < Z_THRESHOLD). Ein Spike
-  durchbricht die Suppression automatisch — das Muster bleibt gelernt,
-  aber der Burst wird wieder sichtbar weil er eben NICHT normal ist.
+  statistisch unauffällig ist (z-Score < Z_THRESHOLD).
+
+Spike-Durchbruch für BEIDE Schichten:
+  Wenn genug Baseline-Daten vorhanden sind und die aktuelle Rate
+  signifikant über dem Durchschnitt liegt (z >= Z_THRESHOLD), wird
+  die Suppression AUFGEHOBEN — auch für manuell als FP markierte
+  Verbindungen. Begründung: eine früher als gutartig eingestufte
+  Verbindung kann später zum Angriffspfad werden (C2, Exfil).
+  Ein plötzlicher Anstieg ist genau das Signal das der Analyst
+  dann sehen MUSS.
 
 Sicherheit:
-  - Ein TP-Feedback entfernt das Muster permanent aus der Lernliste
-  - Spikes (z-Score >= Z_THRESHOLD) durchbrechen die Suppression — ein
-    plötzlicher Anstieg wird IMMER durchgelassen, auch wenn das Muster
-    zuvor als gelernt klassifiziert war
-  - Manuelle FP-Regeln haben Vorrang vor ML-Adaptive
+  - TP-Feedback entfernt das Muster komplett aus der Baseline-Lernung
+  - Spike-Durchbruch gilt nur wenn Baseline genug Daten hat
+    (>= MIN_HOURS_WITH_DATA), sonst greift die normale Suppression
+  - Manuelle FP-Regeln haben weiterhin Vorrang über ML-Learning
+    (sie werden sichtbar als Layer 1 klassifiziert)
 
 Refresh alle REFRESH_INTERVAL_S Sekunden aus der DB.
 """
@@ -64,7 +71,9 @@ class SuppressionCache:
         self._dsn = postgres_dsn
         self._conn: psycopg2.extensions.connection | None = None
         self._manual:  set[tuple[str, str, str]] = set()
-        self._learned: dict[tuple[str, str, str], LearnedStat] = {}
+        # _stats enthält Baselines für ALLE Muster mit genug Daten
+        # (inkl. manual FPs, exkl. TP-markierter Muster).
+        self._stats:   dict[tuple[str, str, str], LearnedStat] = {}
         self._last_refresh = 0.0
 
     def _connect(self) -> None:
@@ -93,7 +102,10 @@ class SuppressionCache:
             """)
             manual = {(r[0], r[1], r[2]) for r in cur.fetchall()}
 
-            # Layer 2: ML-Adaptive Baseline + aktuelle Rate + z-Score
+            # Baseline + aktuelle Rate + z-Score für ALLE Muster
+            # (ohne TP-Markierung). Das umfasst sowohl manuell als FP markierte
+            # Verbindungen als auch rein aus dem Traffic gelernte Muster —
+            # damit der Spike-Durchbruch auch für manual FPs greift.
             cur.execute("""
                 WITH hourly AS (
                     SELECT
@@ -161,12 +173,10 @@ class SuppressionCache:
                 WHERE tp.rule_id IS NULL
             """, (LEARN_WINDOW_D, MIN_HOURS_WITH_DATA))
 
-            learned: dict[tuple[str, str, str], LearnedStat] = {}
+            stats: dict[tuple[str, str, str], LearnedStat] = {}
             for row in cur.fetchall():
                 key = (row[0], row[1], row[2])
-                if key in manual:
-                    continue  # manuelle FP hat Vorrang
-                learned[key] = LearnedStat(
+                stats[key] = LearnedStat(
                     mean_h  = float(row[3]),
                     std_h   = float(row[4]),
                     hours   = int(row[5]),
@@ -174,18 +184,26 @@ class SuppressionCache:
                     z_score = float(row[7]),
                 )
 
-            self._manual  = manual
-            self._learned = learned
+            self._manual = manual
+            self._stats  = stats
             self._last_refresh = time.monotonic()
 
-            active = sum(1 for s in learned.values() if s.z_score < Z_THRESHOLD)
-            spikes = len(learned) - active
+            # Statistik fürs Log
+            manual_with_stats = sum(1 for k in manual if k in stats)
+            manual_spikes     = sum(
+                1 for k in manual
+                if k in stats and stats[k].z_score >= Z_THRESHOLD
+            )
+            learned_only = {k: s for k, s in stats.items() if k not in manual}
+            learned_active = sum(1 for s in learned_only.values() if s.z_score < Z_THRESHOLD)
+            learned_spikes = len(learned_only) - learned_active
+
             log.info(
-                "Suppression cache: %d manuell (fp) + %d ML-gelernt "
-                "[%d aktiv suppressed, %d spike-through] "
+                "Suppression cache: %d manual FPs (%d mit Baseline, %d aktuell Spike) + "
+                "%d ML-Learned [%d aktiv suppressed, %d Spike-Durchbruch] "
                 "(window=%dd min_hours=%d z=%.1f)",
-                len(self._manual), len(self._learned),
-                active, spikes,
+                len(manual), manual_with_stats, manual_spikes,
+                len(learned_only), learned_active, learned_spikes,
                 LEARN_WINDOW_D, MIN_HOURS_WITH_DATA, Z_THRESHOLD,
             )
         except Exception as exc:
@@ -199,19 +217,37 @@ class SuppressionCache:
     def classify(self, rule_id: str | None, src_ip: str | None, dst_ip: str | None) -> str | None:
         """Gibt 'manual', 'learned' oder None zurück.
 
-        - 'manual': User hat FP markiert → immer suppressen.
-        - 'learned': ML-Baseline vorhanden UND aktuelle Stunde statistisch
-          unauffällig (z < Z_THRESHOLD) → suppressen.
-        - None: entweder unbekanntes Muster ODER gelerntes Muster mit Spike
-          (z ≥ Z_THRESHOLD) → NICHT suppressen, durchlassen."""
+        Logik (in dieser Reihenfolge geprüft):
+
+        1. Spike-Durchbruch: Wenn eine belastbare Baseline existiert
+           (stat vorhanden) und die aktuelle Rate signifikant über dem
+           Mittelwert liegt (z >= Z_THRESHOLD) → None (Alert durchlassen).
+           Dies gilt AUCH für manuell als FP markierte Muster — eine
+           früher unauffällige Verbindung kann später auffällig werden,
+           und dann muss der Analyst sie sehen.
+
+        2. Manual FP: In _manual eingetragen → 'manual' (immer suppressen
+           wenn kein Spike, auch ohne Baseline).
+
+        3. ML-Learned: Baseline vorhanden und unauffällig → 'learned'.
+
+        4. Keine Regel greift → None.
+        """
         if not rule_id or not src_ip or not dst_ip:
             return None
         key = _session_key(rule_id, src_ip, dst_ip)
+        stat = self._stats.get(key)
+
+        # Spike-Durchbruch – gilt für Layer 1 UND Layer 2
+        if stat is not None and stat.z_score >= Z_THRESHOLD:
+            return None
+
         if key in self._manual:
             return "manual"
-        stat = self._learned.get(key)
-        if stat is not None and stat.z_score < Z_THRESHOLD:
+
+        if stat is not None:  # z < Z_THRESHOLD bereits oben gecheckt
             return "learned"
+
         return None
 
     def should_suppress(self, rule_id: str | None, src_ip: str | None, dst_ip: str | None) -> bool:

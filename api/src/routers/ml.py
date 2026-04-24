@@ -434,14 +434,16 @@ async def get_learned_patterns(
                     ELSE 0.0
                 END AS z_score,
                 ts.first_seen,
-                ts.last_seen
+                ts.last_seen,
+                (m.rule_id IS NOT NULL) AS is_manual
             FROM baseline b
             LEFT JOIN recent    r  ON r.rule_id  = b.rule_id AND r.ip_a  = b.ip_a AND r.ip_b  = b.ip_b
             LEFT JOIN tp_pat    tp ON tp.rule_id = b.rule_id AND tp.ip_a = b.ip_a AND tp.ip_b = b.ip_b
             LEFT JOIN manual_fp m  ON m.rule_id  = b.rule_id AND m.ip_a  = b.ip_a AND m.ip_b  = b.ip_b
             LEFT JOIN ts_bounds ts ON ts.rule_id = b.rule_id AND ts.ip_a = b.ip_a AND ts.ip_b = b.ip_b
             WHERE tp.rule_id IS NULL
-              AND m.rule_id  IS NULL
+              -- manual FPs werden MIT zurückgegeben, damit Spike-Durchbrüche
+              -- auch bei manuell markierten Verbindungen sichtbar werden.
             ORDER BY b.mean_h DESC, b.total_baseline DESC
             LIMIT 500
             """,
@@ -459,6 +461,7 @@ async def get_learned_patterns(
                 "rule_id":         r["rule_id"],
                 "src_ip":          r["ip_a"],
                 "dst_ip":          r["ip_b"],
+                "source":          "manual" if r["is_manual"] else "learned",
                 "mean_h":          round(float(r["mean_h"]), 2),
                 "std_h":           round(float(r["std_h"]),  2),
                 "hours_with_data": r["hours_with_data"],
