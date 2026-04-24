@@ -9,5 +9,5 @@ lb config noauto \
   --bootloaders          "syslinux,grub-efi" \
   --debian-installer     none \
   --memtest              none \
-  --bootappend-live      "boot=live components nomodeset fbcon=rotate:2 live-config.nocomponents=keyboard-configuration" \
+  --bootappend-live      "boot=live components quiet vt.global_cursor_default=0 live-config.nocomponents=keyboard-configuration" \
   "${@}"
