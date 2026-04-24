@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Repository auschecken
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Tags holen damit git describe die richtige Version findet
 
       - name: System-Abhängigkeiten installieren
         shell: bash

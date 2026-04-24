@@ -4,8 +4,16 @@ set -euo pipefail
 
 echo "[cyjan] Konfiguriere Autologin für User 'ids' auf tty1..."
 
+# Wichtig: live-config generiert zur Laufzeit eine eigene autologin.conf
+# in /run/systemd/generator/getty@tty1.service.d/live-config_autologin.conf
+# mit '--autologin user'. Da systemd Drop-Ins ALPHABETISCH lädt, würde
+# 'autologin.conf' VOR 'live-config_autologin.conf' kommen, der live-config
+# Override gewinnt → User 'user' existiert nicht → getty failed loop.
+# Lösung: Datei zz-cyjan-autologin.conf nennen (lädt nach live-config).
 mkdir -p /etc/systemd/system/getty@tty1.service.d
-cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf <<'EOF'
+# Alte Datei vorsichtshalber entfernen (Migration)
+rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+cat > /etc/systemd/system/getty@tty1.service.d/zz-cyjan-autologin.conf <<'EOF'
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin ids --noclear %I linux
