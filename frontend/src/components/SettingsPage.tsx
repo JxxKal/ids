@@ -840,43 +840,66 @@ function MLStatusDisplay() {
 
 function MLLearnedPatterns() {
   const [patterns, setPatterns] = useState<LearnedPattern[] | null>(null);
-  const [cfg,      setCfg]      = useState<{ window_days: number; min_count: number; min_days: number } | null>(null);
+  const [cfg,      setCfg]      = useState<{ window_days: number; min_hours: number; z_threshold: number } | null>(null);
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState('');
 
   useEffect(() => {
-    fetchLearnedPatterns()
-      .then(r => { setPatterns(r.patterns); setCfg(r.config); })
-      .catch(() => setError('Daten konnten nicht geladen werden'))
-      .finally(() => setLoading(false));
+    let alive = true;
+    const load = () => fetchLearnedPatterns()
+      .then(r => { if (alive) { setPatterns(r.patterns); setCfg(r.config); setLoading(false); } })
+      .catch(() => { if (alive) { setError('Daten konnten nicht geladen werden'); setLoading(false); } });
+    load();
+    const t = setInterval(load, 30_000);
+    return () => { alive = false; clearInterval(t); };
   }, []);
 
   if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
   if (error)   return <p className="text-red-400 text-sm">{error}</p>;
 
+  const activeCount = patterns?.filter(p => p.suppressed).length ?? 0;
+  const spikeCount  = patterns?.filter(p => !p.suppressed).length ?? 0;
+
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-sm font-semibold text-slate-200">Auto-gelernte Suppression-Muster</h2>
+        <h2 className="text-sm font-semibold text-slate-200">Adaptive ML-Suppression</h2>
         <p className="text-xs text-slate-500 mt-1">
-          Wiederkehrende Verbindungen (rule_id + Quelle + Ziel) die in den letzten{' '}
-          <span className="text-slate-300">{cfg?.window_days} Tagen</span> mindestens{' '}
-          <span className="text-slate-300">{cfg?.min_count}×</span> an{' '}
-          <span className="text-slate-300">{cfg?.min_days}+ verschiedenen Tagen</span>{' '}
-          ohne TP-Feedback auftraten. Diese werden automatisch auf severity=low
-          herabgestuft (Tag <code className="text-cyan-400">ml-suppressed</code>).
+          Pro (rule_id + Quell/Ziel-Paar) wird aus den letzten{' '}
+          <span className="text-slate-300">{cfg?.window_days} Tagen</span> eine
+          stündliche Baseline (Mittelwert + StdDev) gelernt. Suppression greift nur
+          wenn die aktuelle Rate statistisch unauffällig ist
+          (z-Score &lt; <span className="text-slate-300">{cfg?.z_threshold}</span>).
         </p>
         <p className="text-xs text-slate-600 mt-1">
-          Kritische/hohe Alerts werden NIE automatisch unterdrückt. Ein einziges
-          TP-Feedback auf dem Muster entfernt es wieder aus der Lernliste.
+          Spikes gegenüber der Baseline durchbrechen die Suppression automatisch —
+          das Muster bleibt gelernt, aber der Burst wird wieder sichtbar weil
+          er eben NICHT mehr normal ist. Kritische/hohe Alerts gehen nie in
+          die Baseline ein, ein TP-Feedback entfernt das Muster komplett.
         </p>
       </div>
 
+      {/* Summary */}
+      {patterns && patterns.length > 0 && (
+        <div className="flex gap-3 text-xs">
+          <div className="flex-1 rounded-lg border border-green-800/40 bg-green-950/20 px-3 py-2">
+            <div className="text-green-400 text-[11px] uppercase tracking-wider font-mono">Aktiv suppressed</div>
+            <div className="text-green-300 text-lg font-semibold tabular-nums">{activeCount}</div>
+            <div className="text-slate-600 text-[10px]">unauffällige Muster unterdrückt</div>
+          </div>
+          <div className="flex-1 rounded-lg border border-amber-800/40 bg-amber-950/20 px-3 py-2">
+            <div className="text-amber-400 text-[11px] uppercase tracking-wider font-mono">Spike-Durchbruch</div>
+            <div className="text-amber-300 text-lg font-semibold tabular-nums">{spikeCount}</div>
+            <div className="text-slate-600 text-[10px]">aktuell über Baseline, werden gezeigt</div>
+          </div>
+        </div>
+      )}
+
       {!patterns || patterns.length === 0 ? (
         <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 px-4 py-6 text-center">
-          <p className="text-slate-500 text-sm">Noch keine Muster gelernt</p>
+          <p className="text-slate-500 text-sm">Noch keine Baselines gelernt</p>
           <p className="text-slate-600 text-xs mt-1">
-            Erscheinen automatisch sobald die Schwellwerte erreicht sind
+            Erscheinen automatisch nach mindestens {cfg?.min_hours} h Datenpunkten pro Muster
           </p>
         </div>
       ) : (
@@ -884,37 +907,62 @@ function MLLearnedPatterns() {
           <table className="w-full text-xs">
             <thead className="bg-slate-800/50">
               <tr className="text-left text-[11px] text-slate-500">
+                <th className="px-3 py-2">Status</th>
                 <th className="px-3 py-2">Regel</th>
                 <th className="px-3 py-2">Quelle → Ziel</th>
-                <th className="px-3 py-2 text-right">Treffer</th>
-                <th className="px-3 py-2 text-right">Tage</th>
-                <th className="px-3 py-2">Zuletzt</th>
+                <th className="px-3 py-2 text-right" title="Baseline: mittlere Alerts/Stunde ± StdDev">Baseline /h</th>
+                <th className="px-3 py-2 text-right" title="Stunden in denen das Muster bisher auftrat">Daten</th>
+                <th className="px-3 py-2 text-right" title="Alerts in der letzten Stunde">Aktuell /h</th>
+                <th className="px-3 py-2 text-right" title="Statistische Abweichung: (aktuell - mittelwert) / stddev">z-Score</th>
               </tr>
             </thead>
             <tbody>
-              {patterns.map(p => (
-                <tr key={`${p.rule_id}|${p.src_ip}|${p.dst_ip}`}
-                    className="border-t border-slate-800 hover:bg-slate-800/30">
-                  <td className="px-3 py-2 text-cyan-300 font-mono">{p.rule_id}</td>
-                  <td className="px-3 py-2 font-mono text-slate-300">
-                    <span>{p.src_ip}</span>
-                    <span className="text-slate-600 mx-1">→</span>
-                    <span>{p.dst_ip}</span>
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-300">{p.total}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{p.days_seen}</td>
-                  <td className="px-3 py-2 text-slate-500">
-                    {p.last_seen ? new Date(p.last_seen).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '–'}
-                  </td>
-                </tr>
-              ))}
+              {patterns.map(p => {
+                const zClass = p.z_score >= 3 ? 'text-red-400'
+                             : p.z_score >= 2 ? 'text-amber-400'
+                             : p.z_score >= 1 ? 'text-slate-300'
+                             : 'text-green-400';
+                return (
+                  <tr key={`${p.rule_id}|${p.src_ip}|${p.dst_ip}`}
+                      className="border-t border-slate-800 hover:bg-slate-800/30">
+                    <td className="px-3 py-2">
+                      {p.suppressed ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-green-950/60 text-green-300 border border-green-800/50 font-mono">
+                          ✓ suppressed
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/50 font-mono">
+                          ⚠ spike
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-cyan-300 font-mono">{p.rule_id}</td>
+                    <td className="px-3 py-2 font-mono text-slate-300">
+                      <span>{p.src_ip}</span>
+                      <span className="text-slate-600 mx-1">↔</span>
+                      <span>{p.dst_ip}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-300 font-mono">
+                      {p.mean_h.toFixed(1)}
+                      <span className="text-slate-600"> ± {p.std_h.toFixed(1)}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-500">{p.hours_with_data} h</td>
+                    <td className={`px-3 py-2 text-right tabular-nums font-mono ${p.recent_1h > p.mean_h + 2*p.std_h ? 'text-amber-300' : 'text-slate-300'}`}>
+                      {p.recent_1h}
+                    </td>
+                    <td className={`px-3 py-2 text-right tabular-nums font-mono font-semibold ${zClass}`}>
+                      {p.z_score >= 99 ? '∞' : p.z_score.toFixed(2)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
       <p className="text-[10px] text-slate-700 font-mono">
-        Refresh im Alert-Manager: alle 60 s · Thresholds via ENV konfigurierbar
-        (SUPPRESSION_LEARN_WINDOW_D, SUPPRESSION_MIN_COUNT, SUPPRESSION_MIN_DAYS)
+        Alert-Manager-Refresh: 60 s · UI-Refresh: 30 s · ENV:
+        SUPPRESSION_LEARN_WINDOW_D, SUPPRESSION_MIN_HOURS, SUPPRESSION_Z_THRESHOLD
       </p>
     </div>
   );

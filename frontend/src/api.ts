@@ -679,26 +679,41 @@ export async function fetchSystemStats(): Promise<SystemStats> {
 }
 
 export interface LearnedPattern {
-  rule_id:    string;
-  src_ip:     string;
-  dst_ip:     string;
-  total:      number;
-  days_seen:  number;
-  first_seen: string | null;
-  last_seen:  string | null;
+  rule_id:         string;
+  src_ip:          string;
+  dst_ip:          string;
+  mean_h:          number;   // Baseline: mittlere Alerts pro Stunde
+  std_h:           number;   // Baseline: Standardabweichung
+  hours_with_data: number;   // Datenpunkte in der Baseline
+  total_baseline:  number;   // Summe der Baseline-Alerts
+  recent_1h:       number;   // Aktuelle Rate (letzte Stunde)
+  z_score:         number;   // (recent - mean) / std
+  suppressed:      boolean;  // z_score < threshold
+  first_seen:      string | null;
+  last_seen:       string | null;
 }
 
 export interface LearnedPatternsResponse {
-  config: { window_days: number; min_count: number; min_days: number };
+  config: { window_days: number; min_hours: number; z_threshold: number };
   patterns: LearnedPattern[];
 }
 
 export async function fetchLearnedPatterns(): Promise<LearnedPatternsResponse> {
   if (isDemoMode()) return {
-    config: { window_days: 7, min_count: 20, min_days: 3 },
+    config: { window_days: 14, min_hours: 24, z_threshold: 2.0 },
     patterns: [
-      { rule_id: 'DOS_UDP_001', src_ip: '10.0.0.12', dst_ip: '192.168.2.50', total: 142, days_seen: 5, first_seen: new Date(Date.now() - 5*86400000).toISOString(), last_seen: new Date().toISOString() },
-      { rule_id: 'ANOMALY_HOST_001', src_ip: '10.0.0.55', dst_ip: '192.168.1.1', total: 48, days_seen: 4, first_seen: new Date(Date.now() - 4*86400000).toISOString(), last_seen: new Date().toISOString() },
+      { rule_id: 'DOS_UDP_001', src_ip: '10.0.0.12', dst_ip: '192.168.2.50',
+        mean_h: 8.4, std_h: 2.1, hours_with_data: 96, total_baseline: 806,
+        recent_1h: 9, z_score: 0.29, suppressed: true,
+        first_seen: new Date(Date.now() - 5*86400000).toISOString(), last_seen: new Date().toISOString() },
+      { rule_id: 'ANOMALY_HOST_001', src_ip: '10.0.0.55', dst_ip: '192.168.1.1',
+        mean_h: 3.2, std_h: 1.8, hours_with_data: 72, total_baseline: 230,
+        recent_1h: 18, z_score: 8.22, suppressed: false,
+        first_seen: new Date(Date.now() - 4*86400000).toISOString(), last_seen: new Date().toISOString() },
+      { rule_id: 'DNS_QUERY_001', src_ip: '10.0.1.10', dst_ip: '8.8.8.8',
+        mean_h: 24.0, std_h: 6.5, hours_with_data: 180, total_baseline: 4320,
+        recent_1h: 26, z_score: 0.31, suppressed: true,
+        first_seen: new Date(Date.now() - 8*86400000).toISOString(), last_seen: new Date().toISOString() },
     ],
   };
   return req('/api/ml/learned-patterns');

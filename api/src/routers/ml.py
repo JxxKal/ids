@@ -325,103 +325,152 @@ async def trigger_retrain() -> RetrainStatus:
     return RetrainStatus(triggered=True, triggered_at=now)
 
 
-# ── ML-gelernte Auto-Suppression-Muster ──────────────────────────────────────
+# ── ML-Adaptive Auto-Suppression-Muster ──────────────────────────────────────
 
 @router.get("/learned-patterns")
 async def get_learned_patterns(
     pool: asyncpg.Pool = Depends(get_pool),
 ) -> dict:
-    """Liefert Muster (rule_id, src_ip, dst_ip) die der Alert-Manager
-    automatisch heruntergestuft hat, weil sie wiederkehrend + ohne
-    TP-Feedback sind.
+    """Liefert Muster (rule_id, src_ip, dst_ip) mit gelernter Baseline
+    (mean/std Alerts/Stunde), aktueller Rate und z-Score.
 
-    Werte passen zu den Env-Thresholds im alert-manager:
-      SUPPRESSION_LEARN_WINDOW_D (default 7)
-      SUPPRESSION_MIN_COUNT      (default 20)
-      SUPPRESSION_MIN_DAYS       (default 3)
+    Suppression greift beim Alert-Manager nur wenn z_score < threshold.
+    Spikes (z >= threshold) durchbrechen die Suppression automatisch.
+
+    ENV-Konfiguration (muss mit alert-manager übereinstimmen):
+      SUPPRESSION_LEARN_WINDOW_D  (default 14)
+      SUPPRESSION_MIN_HOURS       (default 24)
+      SUPPRESSION_Z_THRESHOLD     (default 2.0)
     """
-    window_d  = int(os.environ.get("SUPPRESSION_LEARN_WINDOW_D", "7"))
-    min_count = int(os.environ.get("SUPPRESSION_MIN_COUNT",      "20"))
-    min_days  = int(os.environ.get("SUPPRESSION_MIN_DAYS",       "3"))
+    window_d    = int(os.environ.get("SUPPRESSION_LEARN_WINDOW_D", "14"))
+    min_hours   = int(os.environ.get("SUPPRESSION_MIN_HOURS",      "24"))
+    z_threshold = float(os.environ.get("SUPPRESSION_Z_THRESHOLD",  "2.0"))
 
     async with pool.acquire() as conn:
-        # Gelernt: bidirektional normiert via LEAST/GREATEST, damit Request
-        # und Response derselben Session als ein Muster zählen.
-        # Manuelle FPs werden über CTE vorab aufgelöst und per LEFT JOIN
-        # ausgeschlossen (NOT EXISTS im HAVING würde ungroupte Spalten
-        # referenzieren und PostgreSQL-GroupingError werfen).
-        learned = await conn.fetch(
+        # Adaptive Baseline: per (rule_id, ip_pair) werden Mittelwert und
+        # StdDev der stündlichen Alert-Zahlen über LEARN_WINDOW_D Tagen
+        # berechnet. Kombiniert mit der aktuellen Stunde → z-Score.
+        rows = await conn.fetch(
             """
-            WITH manual_fp AS (
-                SELECT DISTINCT
-                    rule_id,
-                    LEAST(src_ip, dst_ip)    AS ip_a,
-                    GREATEST(src_ip, dst_ip) AS ip_b
-                FROM alerts
-                WHERE feedback = 'fp'
-                  AND rule_id IS NOT NULL
-                  AND src_ip  IS NOT NULL
-                  AND dst_ip  IS NOT NULL
-            ),
-            agg AS (
+            WITH hourly AS (
                 SELECT
                     rule_id,
                     LEAST(src_ip, dst_ip)    AS ip_a,
                     GREATEST(src_ip, dst_ip) AS ip_b,
-                    COUNT(*)                                          AS total,
-                    COUNT(DISTINCT DATE(ts))                          AS days_seen,
-                    MIN(ts)                                           AS first_seen,
-                    MAX(ts)                                           AS last_seen,
-                    COUNT(*) FILTER (WHERE feedback = 'tp')           AS tp_count,
-                    COUNT(*) FILTER (WHERE severity IN ('critical','high')) AS high_count
+                    date_trunc('hour', ts)   AS hour_bucket,
+                    COUNT(*)                 AS cnt
                 FROM alerts
                 WHERE ts > NOW() - ($1::int * INTERVAL '1 day')
+                  AND ts < date_trunc('hour', NOW())
                   AND is_test = false
                   AND rule_id IS NOT NULL
                   AND src_ip  IS NOT NULL
                   AND dst_ip  IS NOT NULL
-                GROUP BY rule_id, LEAST(src_ip, dst_ip), GREATEST(src_ip, dst_ip)
+                  AND severity NOT IN ('critical','high')
+                GROUP BY 1, 2, 3, 4
+            ),
+            baseline AS (
+                SELECT
+                    rule_id, ip_a, ip_b,
+                    AVG(cnt)::float                 AS mean_h,
+                    COALESCE(STDDEV(cnt), 0)::float AS std_h,
+                    COUNT(*)::int                   AS hours_with_data,
+                    SUM(cnt)::int                   AS total_baseline
+                FROM hourly
+                GROUP BY rule_id, ip_a, ip_b
+                HAVING COUNT(*) >= $2::int
+            ),
+            recent AS (
+                SELECT
+                    rule_id,
+                    LEAST(src_ip, dst_ip)    AS ip_a,
+                    GREATEST(src_ip, dst_ip) AS ip_b,
+                    COUNT(*)::int            AS cnt_1h
+                FROM alerts
+                WHERE ts > NOW() - INTERVAL '1 hour'
+                  AND is_test = false
+                  AND severity NOT IN ('critical','high')
+                GROUP BY 1, 2, 3
+            ),
+            tp_pat AS (
+                SELECT DISTINCT
+                    rule_id,
+                    LEAST(src_ip, dst_ip)    AS ip_a,
+                    GREATEST(src_ip, dst_ip) AS ip_b
+                FROM alerts WHERE feedback = 'tp'
+            ),
+            manual_fp AS (
+                SELECT DISTINCT
+                    rule_id,
+                    LEAST(src_ip, dst_ip)    AS ip_a,
+                    GREATEST(src_ip, dst_ip) AS ip_b
+                FROM alerts WHERE feedback = 'fp'
+            ),
+            ts_bounds AS (
+                SELECT
+                    rule_id,
+                    LEAST(src_ip, dst_ip)    AS ip_a,
+                    GREATEST(src_ip, dst_ip) AS ip_b,
+                    MIN(ts)                  AS first_seen,
+                    MAX(ts)                  AS last_seen
+                FROM alerts
+                WHERE ts > NOW() - ($1::int * INTERVAL '1 day')
+                  AND rule_id IS NOT NULL
+                  AND src_ip  IS NOT NULL
+                  AND dst_ip  IS NOT NULL
+                GROUP BY 1, 2, 3
             )
             SELECT
-                agg.rule_id,
-                agg.ip_a::text       AS ip_a,
-                agg.ip_b::text       AS ip_b,
-                agg.total,
-                agg.days_seen,
-                agg.first_seen,
-                agg.last_seen
-            FROM agg
-            LEFT JOIN manual_fp
-              ON manual_fp.rule_id = agg.rule_id
-             AND manual_fp.ip_a   = agg.ip_a
-             AND manual_fp.ip_b   = agg.ip_b
-            WHERE agg.total      >= $2
-              AND agg.days_seen  >= $3
-              AND agg.tp_count    = 0
-              AND agg.high_count  = 0
-              AND manual_fp.rule_id IS NULL
-            ORDER BY agg.total DESC, agg.last_seen DESC
+                b.rule_id,
+                b.ip_a::text AS ip_a,
+                b.ip_b::text AS ip_b,
+                b.mean_h,
+                b.std_h,
+                b.hours_with_data,
+                b.total_baseline,
+                COALESCE(r.cnt_1h, 0) AS recent_1h,
+                CASE
+                    WHEN b.std_h > 0
+                      THEN (COALESCE(r.cnt_1h, 0) - b.mean_h) / b.std_h
+                    WHEN COALESCE(r.cnt_1h, 0) > b.mean_h THEN 99.0
+                    ELSE 0.0
+                END AS z_score,
+                ts.first_seen,
+                ts.last_seen
+            FROM baseline b
+            LEFT JOIN recent    r  ON r.rule_id  = b.rule_id AND r.ip_a  = b.ip_a AND r.ip_b  = b.ip_b
+            LEFT JOIN tp_pat    tp ON tp.rule_id = b.rule_id AND tp.ip_a = b.ip_a AND tp.ip_b = b.ip_b
+            LEFT JOIN manual_fp m  ON m.rule_id  = b.rule_id AND m.ip_a  = b.ip_a AND m.ip_b  = b.ip_b
+            LEFT JOIN ts_bounds ts ON ts.rule_id = b.rule_id AND ts.ip_a = b.ip_a AND ts.ip_b = b.ip_b
+            WHERE tp.rule_id IS NULL
+              AND m.rule_id  IS NULL
+            ORDER BY b.mean_h DESC, b.total_baseline DESC
             LIMIT 500
             """,
-            window_d, min_count, min_days,
+            window_d, min_hours,
         )
 
     return {
         "config": {
-            "window_days": window_d,
-            "min_count":   min_count,
-            "min_days":    min_days,
+            "window_days":  window_d,
+            "min_hours":    min_hours,
+            "z_threshold":  z_threshold,
         },
         "patterns": [
             {
-                "rule_id":    r["rule_id"],
-                "src_ip":     r["ip_a"],
-                "dst_ip":     r["ip_b"],
-                "total":      r["total"],
-                "days_seen":  r["days_seen"],
-                "first_seen": r["first_seen"].isoformat() if r["first_seen"] else None,
-                "last_seen":  r["last_seen"].isoformat()  if r["last_seen"]  else None,
+                "rule_id":         r["rule_id"],
+                "src_ip":          r["ip_a"],
+                "dst_ip":          r["ip_b"],
+                "mean_h":          round(float(r["mean_h"]), 2),
+                "std_h":           round(float(r["std_h"]),  2),
+                "hours_with_data": r["hours_with_data"],
+                "total_baseline":  r["total_baseline"],
+                "recent_1h":       r["recent_1h"],
+                "z_score":         round(float(r["z_score"]), 2),
+                "suppressed":      float(r["z_score"]) < z_threshold,
+                "first_seen":      r["first_seen"].isoformat() if r["first_seen"] else None,
+                "last_seen":       r["last_seen"].isoformat()  if r["last_seen"]  else None,
             }
-            for r in learned
+            for r in rows
         ],
     }

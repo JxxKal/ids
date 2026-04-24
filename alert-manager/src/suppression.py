@@ -1,23 +1,33 @@
 """
-Suppression-Cache: unterdrückt bekannte FP-Kombinationen (rule_id + src_ip + dst_ip).
+Adaptive ML-basierte Suppression.
 
-Zwei Layer:
-  1. MANUAL (auto-suppressed):  User hat einen Alert mit feedback='fp' markiert
-                                → alle exakt gleichen Tupel werden herabgestuft.
-  2. ML-LEARNED (ml-suppressed): Tupel tritt ≥ MIN_COUNT-mal über ≥ MIN_DAYS
-                                 verteilt in den letzten LEARN_WINDOW_D Tagen auf,
-                                 ohne je als TP markiert worden zu sein, und die
-                                 Severity ist nicht critical/high. → als gelerntes
-                                 Normalmuster herabgestuft.
+Zwei Schichten:
 
-Ein TP-Feedback auf einem passenden Tupel entfernt es automatisch aus der
-ML-Learned-Menge beim nächsten Refresh (Override durch User).
+Layer 1 — MANUAL (Tag 'auto-suppressed'):
+  User hat einen Alert mit feedback='fp' markiert. Alle passenden Tupel
+  (rule_id, ip_pair) werden permanent herabgestuft bis TP-Override.
+
+Layer 2 — ML-ADAPTIVE (Tag 'ml-suppressed'):
+  Für jedes (rule_id, ip_pair) wird eine Baseline aus den letzten
+  LEARN_WINDOW_D Tagen gelernt (Mittelwert + Standardabweichung der
+  Alerts/Stunde). Suppression greift NUR wenn die aktuelle Stunde
+  statistisch unauffällig ist (z-Score < Z_THRESHOLD). Ein Spike
+  durchbricht die Suppression automatisch — das Muster bleibt gelernt,
+  aber der Burst wird wieder sichtbar weil er eben NICHT normal ist.
+
+Sicherheit:
+  - Critical/high Severity geht nie in die Baseline ein
+  - Ein TP-Feedback entfernt das Muster aus der Lernliste
+  - Manuelle FP-Regeln haben Vorrang vor ML-Adaptive
+
+Refresh alle REFRESH_INTERVAL_S Sekunden aus der DB.
 """
 from __future__ import annotations
 
 import logging
 import os
 import time
+from dataclasses import dataclass
 
 import psycopg2
 
@@ -25,15 +35,23 @@ log = logging.getLogger(__name__)
 
 REFRESH_INTERVAL_S = 60.0
 
-# ── ML-Learning Thresholds (per ENV konfigurierbar) ──────────────────────────
-LEARN_WINDOW_D = int(os.environ.get("SUPPRESSION_LEARN_WINDOW_D", "7"))
-MIN_COUNT      = int(os.environ.get("SUPPRESSION_MIN_COUNT",      "20"))
-MIN_DAYS       = int(os.environ.get("SUPPRESSION_MIN_DAYS",       "3"))
+# ── Adaptive Thresholds (ENV-konfigurierbar) ─────────────────────────────────
+LEARN_WINDOW_D      = int(os.environ.get("SUPPRESSION_LEARN_WINDOW_D", "14"))
+MIN_HOURS_WITH_DATA = int(os.environ.get("SUPPRESSION_MIN_HOURS",      "24"))
+Z_THRESHOLD         = float(os.environ.get("SUPPRESSION_Z_THRESHOLD",  "2.0"))
+
+
+@dataclass
+class LearnedStat:
+    mean_h:  float   # Baseline: mittlere Alerts pro Stunde
+    std_h:   float   # Baseline: Standardabweichung
+    hours:   int     # Stunden mit Daten in der Baseline
+    recent:  int     # Alerts in der letzten Stunde
+    z_score: float   # (recent - mean) / max(std, 1)
 
 
 def _session_key(rule_id: str, ip_a: str, ip_b: str) -> tuple[str, str, str]:
-    """Normalisiert IP-Paar so, dass beide Richtungen denselben Key liefern.
-    (rule_id, Client→Server) und (rule_id, Server→Client) matchen dieselbe Session."""
+    """Bidirektionale Normalisierung des IP-Paars."""
     if ip_a <= ip_b:
         return (rule_id, ip_a, ip_b)
     return (rule_id, ip_b, ip_a)
@@ -44,7 +62,7 @@ class SuppressionCache:
         self._dsn = postgres_dsn
         self._conn: psycopg2.extensions.connection | None = None
         self._manual:  set[tuple[str, str, str]] = set()
-        self._learned: set[tuple[str, str, str]] = set()
+        self._learned: dict[tuple[str, str, str], LearnedStat] = {}
         self._last_refresh = 0.0
 
     def _connect(self) -> None:
@@ -57,7 +75,7 @@ class SuppressionCache:
             self._connect()
             cur = self._conn.cursor()  # type: ignore[union-attr]
 
-            # Layer 1: Manuell markierte FPs — bidirektional normiert
+            # Layer 1: Manuell markierte FPs (bidirektional)
             cur.execute("""
                 SELECT DISTINCT
                     rule_id,
@@ -71,40 +89,102 @@ class SuppressionCache:
             """)
             manual = {(r[0], r[1], r[2]) for r in cur.fetchall()}
 
-            # Layer 2: ML-gelernte Muster — auch bidirektional
-            #   - ≥ MIN_COUNT Treffer in LEARN_WINDOW_D Tagen (Request+Response zählen zusammen)
-            #   - auf ≥ MIN_DAYS verschiedenen Tagen gesehen
-            #   - KEIN einziger TP-Feedback in dem Fenster (Sicherheit)
-            #   - severity nie critical/high (Sicherheit)
+            # Layer 2: ML-Adaptive Baseline + aktuelle Rate + z-Score
             cur.execute("""
+                WITH hourly AS (
+                    SELECT
+                        rule_id,
+                        LEAST(src_ip, dst_ip)    AS ip_a,
+                        GREATEST(src_ip, dst_ip) AS ip_b,
+                        date_trunc('hour', ts)   AS hour_bucket,
+                        COUNT(*)                 AS cnt
+                    FROM alerts
+                    WHERE ts > NOW() - (%s * INTERVAL '1 day')
+                      AND ts < date_trunc('hour', NOW())
+                      AND is_test = false
+                      AND rule_id IS NOT NULL
+                      AND src_ip  IS NOT NULL
+                      AND dst_ip  IS NOT NULL
+                      AND severity NOT IN ('critical','high')
+                    GROUP BY 1, 2, 3, 4
+                ),
+                baseline AS (
+                    SELECT
+                        rule_id, ip_a, ip_b,
+                        AVG(cnt)::float                 AS mean_h,
+                        COALESCE(STDDEV(cnt), 0)::float AS std_h,
+                        COUNT(*)::int                   AS hours_with_data
+                    FROM hourly
+                    GROUP BY rule_id, ip_a, ip_b
+                    HAVING COUNT(*) >= %s
+                ),
+                recent AS (
+                    SELECT
+                        rule_id,
+                        LEAST(src_ip, dst_ip)    AS ip_a,
+                        GREATEST(src_ip, dst_ip) AS ip_b,
+                        COUNT(*)::int            AS cnt_1h
+                    FROM alerts
+                    WHERE ts > NOW() - INTERVAL '1 hour'
+                      AND is_test = false
+                      AND severity NOT IN ('critical','high')
+                    GROUP BY 1, 2, 3
+                ),
+                tp_pat AS (
+                    SELECT DISTINCT
+                        rule_id,
+                        LEAST(src_ip, dst_ip)    AS ip_a,
+                        GREATEST(src_ip, dst_ip) AS ip_b
+                    FROM alerts
+                    WHERE feedback = 'tp'
+                )
                 SELECT
-                    rule_id,
-                    LEAST(src_ip, dst_ip)::text    AS ip_a,
-                    GREATEST(src_ip, dst_ip)::text AS ip_b
-                FROM alerts
-                WHERE ts > NOW() - (%s || ' days')::interval
-                  AND is_test = false
-                  AND rule_id IS NOT NULL
-                  AND src_ip  IS NOT NULL
-                  AND dst_ip  IS NOT NULL
-                GROUP BY rule_id, LEAST(src_ip, dst_ip), GREATEST(src_ip, dst_ip)
-                HAVING COUNT(*)                                       >= %s
-                   AND COUNT(DISTINCT DATE(ts))                       >= %s
-                   AND COUNT(*) FILTER (WHERE feedback = 'tp')         = 0
-                   AND COUNT(*) FILTER (WHERE severity IN ('critical','high')) = 0
-            """, (LEARN_WINDOW_D, MIN_COUNT, MIN_DAYS))
-            learned = {(r[0], r[1], r[2]) for r in cur.fetchall()}
+                    b.rule_id,
+                    b.ip_a::text,
+                    b.ip_b::text,
+                    b.mean_h,
+                    b.std_h,
+                    b.hours_with_data,
+                    COALESCE(r.cnt_1h, 0) AS recent,
+                    CASE
+                        WHEN b.std_h > 0
+                          THEN (COALESCE(r.cnt_1h, 0) - b.mean_h) / b.std_h
+                        WHEN COALESCE(r.cnt_1h, 0) > b.mean_h
+                          THEN 99.0
+                        ELSE 0.0
+                    END AS z_score
+                FROM baseline b
+                LEFT JOIN recent  r  ON r.rule_id  = b.rule_id AND r.ip_a  = b.ip_a AND r.ip_b  = b.ip_b
+                LEFT JOIN tp_pat  tp ON tp.rule_id = b.rule_id AND tp.ip_a = b.ip_a AND tp.ip_b = b.ip_b
+                WHERE tp.rule_id IS NULL
+            """, (LEARN_WINDOW_D, MIN_HOURS_WITH_DATA))
 
-            # Manuelle Regeln haben Vorrang vor gelernten (gleiche Semantik)
-            learned -= manual
+            learned: dict[tuple[str, str, str], LearnedStat] = {}
+            for row in cur.fetchall():
+                key = (row[0], row[1], row[2])
+                if key in manual:
+                    continue  # manuelle FP hat Vorrang
+                learned[key] = LearnedStat(
+                    mean_h  = float(row[3]),
+                    std_h   = float(row[4]),
+                    hours   = int(row[5]),
+                    recent  = int(row[6]),
+                    z_score = float(row[7]),
+                )
 
             self._manual  = manual
             self._learned = learned
             self._last_refresh = time.monotonic()
+
+            active = sum(1 for s in learned.values() if s.z_score < Z_THRESHOLD)
+            spikes = len(learned) - active
             log.info(
-                "Suppression cache: %d manuell (fp) + %d ML-gelernt (window=%dd count>=%d days>=%d, bidirektional)",
+                "Suppression cache: %d manuell (fp) + %d ML-gelernt "
+                "[%d aktiv suppressed, %d spike-through] "
+                "(window=%dd min_hours=%d z=%.1f)",
                 len(self._manual), len(self._learned),
-                LEARN_WINDOW_D, MIN_COUNT, MIN_DAYS,
+                active, spikes,
+                LEARN_WINDOW_D, MIN_HOURS_WITH_DATA, Z_THRESHOLD,
             )
         except Exception as exc:
             log.warning("Suppression-Cache-Refresh fehlgeschlagen: %s", exc)
@@ -115,18 +195,23 @@ class SuppressionCache:
             self.refresh()
 
     def classify(self, rule_id: str | None, src_ip: str | None, dst_ip: str | None) -> str | None:
-        """Gibt 'manual', 'learned' oder None zurück. Bidirektional: Request und
-        Response matchen denselben gespeicherten Key."""
+        """Gibt 'manual', 'learned' oder None zurück.
+
+        - 'manual': User hat FP markiert → immer suppressen.
+        - 'learned': ML-Baseline vorhanden UND aktuelle Stunde statistisch
+          unauffällig (z < Z_THRESHOLD) → suppressen.
+        - None: entweder unbekanntes Muster ODER gelerntes Muster mit Spike
+          (z ≥ Z_THRESHOLD) → NICHT suppressen, durchlassen."""
         if not rule_id or not src_ip or not dst_ip:
             return None
         key = _session_key(rule_id, src_ip, dst_ip)
         if key in self._manual:
             return "manual"
-        if key in self._learned:
+        stat = self._learned.get(key)
+        if stat is not None and stat.z_score < Z_THRESHOLD:
             return "learned"
         return None
 
-    # Backwards-compatibility (bestehender main.py Code)
     def should_suppress(self, rule_id: str | None, src_ip: str | None, dst_ip: str | None) -> bool:
         return self.classify(rule_id, src_ip, dst_ip) is not None
 
