@@ -24,71 +24,63 @@ SYSLINUX_SPLASH="../config/bootloaders/syslinux/splash.png"
 GRUB_SPLASH="../config/bootloaders/grub-efi/splash.png"
 
 GRUB_CONTENT='set default=0
-set timeout=30
+set timeout=5
 set timeout_style=menu
 
+# Kein Theme, kein fancy Background — minimal und funktional.
+# Sonst kollidiert das mit live-build-Theme-Resten.
+unset theme
+
+insmod part_msdos
+insmod part_gpt
+insmod iso9660
 insmod all_video
 insmod gfxterm
-insmod png
 
-if loadfont $prefix/font.pf2 ; then
-  set gfxmode=auto
-  terminal_output gfxterm
-fi
+terminal_output console
 
-if background_image $prefix/splash.png; then
-  set color_normal=white/black
-  set color_highlight=black/white
-fi
-
-set menu_color_normal=cyan/black
-set menu_color_highlight=black/cyan
-
-menuentry "Cyjan IDS \xe2\x80\x93 Starten (Live)" {
+menuentry "Cyjan IDS - Starten (Live)" {
   search --set=root --file /live/vmlinuz
-  linux  /live/vmlinuz boot=live components quiet vt.global_cursor_default=0 consoleblank=0 live-config.nocomponents=keyboard-configuration
+  linux  /live/vmlinuz boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration
   initrd /live/initrd
 }
 
-menuentry "Cyjan IDS \xe2\x80\x93 Auf Festplatte installieren" {
+menuentry "Cyjan IDS - Auf Festplatte installieren" {
   search --set=root --file /live/vmlinuz
-  linux  /live/vmlinuz boot=live components quiet vt.global_cursor_default=0 consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
+  linux  /live/vmlinuz boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
   initrd /live/initrd
 }
 
-menuentry "Cyjan IDS \xe2\x80\x93 Safe Mode (nomodeset)" {
+menuentry "Cyjan IDS - Safe Mode (nomodeset)" {
   search --set=root --file /live/vmlinuz
   linux  /live/vmlinuz boot=live components nomodeset consoleblank=0 live-config.nocomponents=keyboard-configuration 3
   initrd /live/initrd
 }
 '
 
-SYSLINUX_CONTENT='UI vesamenu.c32
-MENU BACKGROUND splash.png
-MENU TITLE Cyjan IDS
-MENU COLOR title        * #00FFFFFF *
-MENU COLOR border       * #00000000 #00000000 none
-MENU COLOR sel          * #FF000000 #FF00CCCC *
-MENU COLOR unsel        * #FFDDDDDD #00000000 *
-MENU COLOR hotkey       * #FFFFFFFF *
-MENU AUTOBOOT Starte automatisch in # Sekunden...
-TIMEOUT 300
+SYSLINUX_CONTENT='DEFAULT live
+TIMEOUT 50
 PROMPT 0
-DEFAULT live
+ONTIMEOUT live
+
+SAY Cyjan IDS Boot
+SAY ================
+SAY 1) live      - Live-Modus (Default nach 5 Sek.)
+SAY 2) install   - Auf Festplatte installieren
+SAY 3) safe      - Safe Mode (nomodeset)
+SAY
+SAY Eintrag wahlen mit Tab, booten mit Enter.
+SAY
 
 LABEL live
-  MENU LABEL Cyjan IDS - Starten (Live)
-  MENU DEFAULT
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd boot=live components quiet vt.global_cursor_default=0 consoleblank=0 live-config.nocomponents=keyboard-configuration
+  APPEND initrd=/live/initrd boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration
 
 LABEL install
-  MENU LABEL Cyjan IDS - Auf Festplatte installieren
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd boot=live components quiet vt.global_cursor_default=0 consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
+  APPEND initrd=/live/initrd boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
 
 LABEL safe
-  MENU LABEL Cyjan IDS - Safe Mode (nomodeset)
   KERNEL /live/vmlinuz
   APPEND initrd=/live/initrd boot=live components nomodeset consoleblank=0 live-config.nocomponents=keyboard-configuration 3
 '
@@ -101,11 +93,13 @@ for GRUB_DIR in \
     boot/grub/x86_64-efi; do
     [ -d "${GRUB_DIR}" ] || continue
 
-    # Konkurrierende Configs löschen (live-build-Standard-Menü)
+    # Konkurrierende Configs löschen (live-build-Standard-Menü + Theme)
     for EXTRA in theme.cfg install.cfg loopback.cfg config.cfg \
                  install_start.cfg theme install_new.cfg; do
         rm -f "${GRUB_DIR}/${EXTRA}"
     done
+    # live-theme Verzeichnis komplett weg (war Source des hängenden Menüs)
+    rm -rf "${GRUB_DIR}/live-theme" "${GRUB_DIR}/themes"
 
     # Live-build's eigene grub.cfg überschreiben
     printf '%s' "${GRUB_CONTENT}" > "${GRUB_DIR}/grub.cfg"
@@ -124,10 +118,10 @@ for SYS_DIR in \
     [ -d "${SYS_DIR}" ] || continue
 
     # Komplette Config in isolinux.cfg bzw. syslinux.cfg schreiben.
-    # Alle konkurrierenden .cfg-Files löschen, damit keine doppelten
-    # LABELs oder konkurrierende TIMEOUTs möglich sind.
+    # Alle konkurrierenden .cfg-Files + Splash-Varianten löschen.
     for EXTRA in live.cfg install.cfg stdmenu.cfg advanced.cfg menu.cfg \
-                 exithelp.cfg prompt.cfg rqtxt.cfg; do
+                 exithelp.cfg prompt.cfg rqtxt.cfg \
+                 splash800x600.png splash640x480.png splash1024x768.png; do
         rm -f "${SYS_DIR}/${EXTRA}"
     done
 
@@ -135,11 +129,13 @@ for SYS_DIR in \
     [ "${SYS_DIR}" = "syslinux" ] && MAIN_CFG="${SYS_DIR}/syslinux.cfg"
 
     printf '%s' "${SYSLINUX_CONTENT}" > "${MAIN_CFG}"
-    echo "[cyjan] Wrote ${MAIN_CFG} (self-contained)"
+    echo "[cyjan] Wrote ${MAIN_CFG} (text-mode, no vesamenu)"
 
+    # Unser splash.png KÖNNTE als Background dienen, aber wir nutzen jetzt
+    # Text-Mode ohne UI → nicht mehr relevant. Trotzdem rüberkopieren für
+    # spätere Verwendung.
     if [ -f "${SYSLINUX_SPLASH}" ]; then
         cp -f "${SYSLINUX_SPLASH}" "${SYS_DIR}/splash.png"
-        echo "[cyjan] Copied splash.png → ${SYS_DIR}/"
     fi
 done
 
