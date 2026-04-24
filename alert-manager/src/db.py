@@ -74,6 +74,7 @@ class AlertWriter:
                 a.get("severity", "low"),
                 float(a.get("score") or 0.0),
                 a.get("src_ip"),
+                a.get("src_port"),
                 a.get("dst_ip"),
                 a.get("proto"),
                 a.get("dst_port"),
@@ -88,7 +89,7 @@ class AlertWriter:
             INSERT INTO alerts (
                 alert_id, ts, flow_id, source, rule_id,
                 severity, score,
-                src_ip, dst_ip, proto, dst_port,
+                src_ip, src_port, dst_ip, proto, dst_port,
                 description, is_test, tags
             ) VALUES %s
             """,
@@ -96,7 +97,7 @@ class AlertWriter:
             template="""(
                 %s, %s::timestamptz, %s, %s, %s,
                 %s, %s,
-                %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
                 %s, %s, %s
             )""",
         )

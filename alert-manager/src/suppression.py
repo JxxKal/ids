@@ -75,12 +75,14 @@ class SuppressionCache:
             self._connect()
             cur = self._conn.cursor()  # type: ignore[union-attr]
 
-            # Layer 1: Manuell markierte FPs (bidirektional)
+            # Layer 1: Manuell markierte FPs (bidirektional).
+            # host() statt ::text — sonst hätte der String CIDR-Suffix "/32"
+            # und würde nicht mit den CIDR-losen IPs aus dem Kafka-Alert matchen.
             cur.execute("""
                 SELECT DISTINCT
                     rule_id,
-                    LEAST(src_ip, dst_ip)::text    AS ip_a,
-                    GREATEST(src_ip, dst_ip)::text AS ip_b
+                    host(LEAST(src_ip, dst_ip))    AS ip_a,
+                    host(GREATEST(src_ip, dst_ip)) AS ip_b
                 FROM alerts
                 WHERE feedback = 'fp'
                   AND rule_id IS NOT NULL
@@ -140,8 +142,8 @@ class SuppressionCache:
                 )
                 SELECT
                     b.rule_id,
-                    b.ip_a::text,
-                    b.ip_b::text,
+                    host(b.ip_a)  AS ip_a_text,
+                    host(b.ip_b)  AS ip_b_text,
                     b.mean_h,
                     b.std_h,
                     b.hours_with_data,

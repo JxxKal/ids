@@ -422,8 +422,8 @@ async def get_learned_patterns(
             )
             SELECT
                 b.rule_id,
-                b.ip_a::text AS ip_a,
-                b.ip_b::text AS ip_b,
+                host(b.ip_a)   AS ip_a,
+                host(b.ip_b)   AS ip_b,
                 b.mean_h,
                 b.std_h,
                 b.hours_with_data,
