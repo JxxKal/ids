@@ -238,6 +238,15 @@ services:
       POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
       DEDUP_WINDOW_S: ${DEDUP_WINDOW_S:-300}
       TEST_MODE: ${TEST_MODE:-false}
+      # Self-Traffic-Filter: Alerts wo die Appliance selbst src oder dst ist
+      # werden verworfen (Updates, DNS, Ping erzeugen sonst Noise).
+      # Format: kommagetrennte Liste aus IPs und/oder CIDR-Blöcken.
+      # Default: Management-IP + Docker-Bridge-Subnet + Loopback.
+      IDS_SELF_IPS: ${IDS_SELF_IPS:-${MANAGEMENT_IP:-127.0.0.1},172.28.0.0/16,127.0.0.0/8}
+      # Adaptive Suppression Thresholds (siehe docs/ML_ENGINE.md §7)
+      SUPPRESSION_LEARN_WINDOW_D: ${SUPPRESSION_LEARN_WINDOW_D:-14}
+      SUPPRESSION_MIN_HOURS:      ${SUPPRESSION_MIN_HOURS:-24}
+      SUPPRESSION_Z_THRESHOLD:    ${SUPPRESSION_Z_THRESHOLD:-2.0}
 
   enrichment-service:
     build: ./enrichment-service

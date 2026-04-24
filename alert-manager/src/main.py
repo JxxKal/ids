@@ -33,6 +33,7 @@ from config import Config
 from db import AlertWriter
 from dedup import DedupCache
 from scorer import enrich_score
+from self_filter import SelfFilter
 from suppression import SuppressionCache
 
 logging.basicConfig(
@@ -73,9 +74,10 @@ def _delivery_cb(err, msg):
 
 
 def run(cfg: Config) -> None:
-    dedup       = DedupCache(window_s=cfg.dedup_window_s)
-    writer      = AlertWriter(cfg.postgres_dsn)
-    suppression = SuppressionCache(cfg.postgres_dsn)
+    dedup        = DedupCache(window_s=cfg.dedup_window_s)
+    writer       = AlertWriter(cfg.postgres_dsn)
+    suppression  = SuppressionCache(cfg.postgres_dsn)
+    self_filter  = SelfFilter()
     suppression.refresh()  # initiales Laden
 
     consumer = _make_consumer(cfg.kafka_brokers)
@@ -91,6 +93,7 @@ def run(cfg: Config) -> None:
 
     running = True
     total_in       = 0
+    total_self     = 0
     total_deduped  = 0
     total_out      = 0
     last_flush_log = time.monotonic()
@@ -112,8 +115,8 @@ def run(cfg: Config) -> None:
             if now_mono - last_flush_log > 60:
                 writer.flush()
                 log.info(
-                    "Stats | in=%d deduped=%d out=%d",
-                    total_in, total_deduped, total_out,
+                    "Stats | in=%d self=%d deduped=%d out=%d",
+                    total_in, total_self, total_deduped, total_out,
                 )
                 last_flush_log = now_mono
 
@@ -152,6 +155,15 @@ def run(cfg: Config) -> None:
                 continue
 
             total_in += 1
+
+            # 0. Self-Filter: Alerts wo die Appliance selbst src oder dst ist
+            #    → verwerfen (kein Security-Event, nur Noise von Updates/DNS/Ping).
+            #    Test-Alerts werden davon NICHT gefiltert.
+            if not alert.get("is_test") and self_filter.should_drop(
+                alert.get("src_ip"), alert.get("dst_ip"),
+            ):
+                total_self += 1
+                continue
 
             # 1. Deduplication (Test-Alerts immer durchlassen)
             if not alert.get("is_test") and dedup.is_duplicate(alert):
@@ -216,8 +228,8 @@ def run(cfg: Config) -> None:
 
     finally:
         log.info(
-            "Shutting down | in=%d deduped=%d out=%d",
-            total_in, total_deduped, total_out,
+            "Shutting down | in=%d self=%d deduped=%d out=%d",
+            total_in, total_self, total_deduped, total_out,
         )
         writer.close()
         suppression.close()
