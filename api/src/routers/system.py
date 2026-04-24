@@ -50,12 +50,20 @@ _VIRTUAL_PREFIXES = (
 def _is_physical(name: str) -> bool:
     """True wenn das Interface ein physisches (oder konfiguriertes VM-)Interface ist.
 
-    Primär: /host/sys/class/net/<name>/device-Symlink existiert → echte NIC.
-    Fallback: Namens-Präfix-Filter schließt bekannte virtuelle Interfaces aus.
+    Auf Bare-Metal: sysfs-Symlink zeigt auf /devices/pci.../usb.../platform...
+    → kein "virtual" im Pfad → echte NIC.
+    Auf VMs: alle Links zeigen auf /devices/virtual/net/... → Namens-Präfix-Filter
+    entscheidet (eth0/ens3 wird angezeigt, docker0/veth* nicht).
     """
-    device_link = _SYS_NET / name / "device"
-    if _SYS_NET.is_dir():
-        return device_link.exists()
+    iface_link = _SYS_NET / name
+    if iface_link.is_symlink():
+        try:
+            target = os.readlink(str(iface_link))
+            if "/devices/virtual/" not in target:
+                return True  # physische PCI/USB-NIC
+        except OSError:
+            pass
+    # VM oder kein sysfs: Name-basierter Filter
     return not any(name.startswith(p) for p in _VIRTUAL_PREFIXES)
 
 
