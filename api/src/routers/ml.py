@@ -375,7 +375,7 @@ async def get_learned_patterns(
                     COUNT(*) FILTER (WHERE feedback = 'tp')           AS tp_count,
                     COUNT(*) FILTER (WHERE severity IN ('critical','high')) AS high_count
                 FROM alerts
-                WHERE ts > NOW() - ($1 || ' days')::interval
+                WHERE ts > NOW() - ($1::int * INTERVAL '1 day')
                   AND is_test = false
                   AND rule_id IS NOT NULL
                   AND src_ip  IS NOT NULL
