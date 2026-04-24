@@ -26,11 +26,10 @@ router = APIRouter(prefix="/api/itop", tags=["itop"])
 
 # Maps CI class → output_fields for core/get.
 # Server and NetworkDevice have TeemIP's managementip_id_friendlyname (FK → IPv4Address).
-# PC uses plain-text managementip.
+# PC is excluded – no standardized management IP field in iTop/TeemIP for PCs.
 _CI_CLASSES: dict[str, str] = {
     "Server":        "name,managementip_id_friendlyname,description",
     "NetworkDevice": "name,managementip_id_friendlyname,description",
-    "PC":            "name,managementip,description",
 }
 
 # iTop-Klassennamen für Subnets variieren je nach installierten Extensions.
