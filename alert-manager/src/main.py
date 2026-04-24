@@ -33,6 +33,7 @@ from config import Config
 from db import AlertWriter
 from dedup import DedupCache
 from scorer import enrich_score
+from suppression import SuppressionCache
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,8 +72,10 @@ def _delivery_cb(err, msg):
 
 
 def run(cfg: Config) -> None:
-    dedup  = DedupCache(window_s=cfg.dedup_window_s)
-    writer = AlertWriter(cfg.postgres_dsn)
+    dedup       = DedupCache(window_s=cfg.dedup_window_s)
+    writer      = AlertWriter(cfg.postgres_dsn)
+    suppression = SuppressionCache(cfg.postgres_dsn)
+    suppression.refresh()  # initiales Laden
 
     consumer = _make_consumer(cfg.kafka_brokers)
     producer  = _make_producer(cfg.kafka_brokers)
@@ -140,6 +143,20 @@ def run(cfg: Config) -> None:
             # 2. Score-Normierung
             enrich_score(alert)
 
+            # 2b. FP-Suppression: bekannte (rule_id, src_ip)-Paare → low
+            suppression.maybe_refresh()
+            if suppression.should_suppress(alert.get("rule_id"), alert.get("src_ip")):
+                if alert.get("severity") != "low":
+                    log.info(
+                        "FP-Suppression: %s %s → low",
+                        alert.get("rule_id"), alert.get("src_ip"),
+                    )
+                    alert["severity"] = "low"
+                    tags = list(alert.get("tags") or [])
+                    if "auto-suppressed" not in tags:
+                        tags.append("auto-suppressed")
+                    alert["tags"] = tags
+
             # ts auf ISO-String normieren (Signature-Engine liefert Unix-Float)
             ts_raw = alert.get("ts") or time.time()
             if isinstance(ts_raw, (int, float)):
@@ -181,6 +198,7 @@ def run(cfg: Config) -> None:
             total_in, total_deduped, total_out,
         )
         writer.close()
+        suppression.close()
         producer.flush(timeout=10)
         consumer.close()
 
