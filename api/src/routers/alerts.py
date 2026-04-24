@@ -222,7 +222,10 @@ async def set_feedback(
         row = await conn.fetchrow(
             """
             UPDATE alerts
-            SET feedback = $2, feedback_ts = now(), feedback_note = $3
+            SET feedback     = $2,
+                feedback_ts  = now(),
+                feedback_note = $3,
+                severity     = CASE WHEN $2 = 'fp' THEN 'info' ELSE severity END
             WHERE alert_id = $1::uuid
             RETURNING *
             """,
