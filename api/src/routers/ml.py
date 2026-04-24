@@ -366,7 +366,6 @@ async def get_learned_patterns(
                   AND rule_id IS NOT NULL
                   AND src_ip  IS NOT NULL
                   AND dst_ip  IS NOT NULL
-                  AND severity NOT IN ('critical','high')
                 GROUP BY 1, 2, 3, 4
             ),
             baseline AS (
@@ -389,7 +388,6 @@ async def get_learned_patterns(
                 FROM alerts
                 WHERE ts > NOW() - INTERVAL '1 hour'
                   AND is_test = false
-                  AND severity NOT IN ('critical','high')
                 GROUP BY 1, 2, 3
             ),
             tp_pat AS (
