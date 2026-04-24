@@ -1,14 +1,20 @@
 #!/bin/bash
-# Binary hook: Custom Cyjan IDS bootloader configs + splash.
-# live-build overwrites config/bootloaders/ files during the binary stage;
-# we re-inject configs here and explicitly copy splash.png into every target dir.
+# Binary hook: Cyjan IDS bootloader – self-contained, kein INCLUDE-Chain.
+#
+# Problem: live-build generiert mehrere .cfg-Dateien unter binary/isolinux/
+# (live.cfg, install.cfg, stdmenu.cfg, advanced.cfg, menu.cfg) mit eigenen
+# TIMEOUT/DEFAULT-Werten. Je nach Include-Reihenfolge überschreibt eine
+# davon unsere Settings → Menü nur 1-2 Sek. oder gar nicht sichtbar.
+#
+# Lösung: Komplett self-contained isolinux.cfg bzw. grub.cfg schreiben,
+# alle konkurrierenden .cfg-Files löschen, splash.png explizit verteilen.
 set -eu
 
 SYSLINUX_SPLASH="config/bootloaders/syslinux/splash.png"
 GRUB_SPLASH="config/bootloaders/grub-efi/splash.png"
 
 GRUB_CONTENT='set default=0
-set timeout=10
+set timeout=30
 set timeout_style=menu
 
 insmod all_video
@@ -55,8 +61,10 @@ MENU COLOR border       * #00000000 #00000000 none
 MENU COLOR sel          * #FF000000 #FF00CCCC *
 MENU COLOR unsel        * #FFDDDDDD #00000000 *
 MENU COLOR hotkey       * #FFFFFFFF *
-TIMEOUT 100
+MENU AUTOBOOT Starte automatisch in # Sekunden...
+TIMEOUT 300
 PROMPT 0
+DEFAULT live
 
 LABEL live
   MENU LABEL Cyjan IDS - Starten (Live)
@@ -75,35 +83,51 @@ LABEL safe
   APPEND initrd=/live/initrd boot=live components nomodeset consoleblank=0 live-config.nocomponents=keyboard-configuration 3
 '
 
-# GRUB-Configs ersetzen + splash.png in jeden GRUB-Ordner kopieren
+# ── GRUB (Legacy + EFI) ──────────────────────────────────────────────────────
 for GRUB_DIR in \
     binary/boot/grub \
     binary/EFI/boot \
     binary/boot/grub/x86_64-efi; do
-    if [ -d "${GRUB_DIR}" ]; then
-        if [ -f "${GRUB_DIR}/grub.cfg" ]; then
-            printf '%s' "${GRUB_CONTENT}" > "${GRUB_DIR}/grub.cfg"
-            echo "[cyjan] Replaced ${GRUB_DIR}/grub.cfg"
-        fi
-        if [ -f "${GRUB_SPLASH}" ]; then
-            cp -f "${GRUB_SPLASH}" "${GRUB_DIR}/splash.png"
-            echo "[cyjan] Copied splash.png → ${GRUB_DIR}/"
-        fi
+    [ -d "${GRUB_DIR}" ] || continue
+
+    # Konkurrierende Configs löschen (live-build erzeugt teilweise theme.cfg,
+    # x86_64-efi/grub.cfg, etc. die unsere Settings überschreiben könnten)
+    for EXTRA in theme.cfg install.cfg loopback.cfg; do
+        rm -f "${GRUB_DIR}/${EXTRA}"
+    done
+
+    if [ -f "${GRUB_DIR}/grub.cfg" ]; then
+        printf '%s' "${GRUB_CONTENT}" > "${GRUB_DIR}/grub.cfg"
+        echo "[cyjan] Wrote ${GRUB_DIR}/grub.cfg"
+    fi
+    if [ -f "${GRUB_SPLASH}" ]; then
+        cp -f "${GRUB_SPLASH}" "${GRUB_DIR}/splash.png"
+        echo "[cyjan] Copied splash.png → ${GRUB_DIR}/"
     fi
 done
 
-# SYSLINUX-Configs ersetzen + splash.png in isolinux/syslinux-Ordner kopieren
+# ── SYSLINUX / ISOLINUX ──────────────────────────────────────────────────────
 for SYS_DIR in \
     binary/isolinux \
     binary/syslinux; do
-    if [ -d "${SYS_DIR}" ]; then
-        if [ -f "${SYS_DIR}/menu.cfg" ]; then
-            printf '%s' "${SYSLINUX_CONTENT}" > "${SYS_DIR}/menu.cfg"
-            echo "[cyjan] Replaced ${SYS_DIR}/menu.cfg"
-        fi
-        if [ -f "${SYSLINUX_SPLASH}" ]; then
-            cp -f "${SYSLINUX_SPLASH}" "${SYS_DIR}/splash.png"
-            echo "[cyjan] Copied splash.png → ${SYS_DIR}/"
-        fi
+    [ -d "${SYS_DIR}" ] || continue
+
+    # Komplette Config in isolinux.cfg bzw. syslinux.cfg schreiben.
+    # Alle konkurrierenden .cfg-Files löschen, damit keine doppelten
+    # LABELs oder konkurrierende TIMEOUTs möglich sind.
+    for EXTRA in live.cfg install.cfg stdmenu.cfg advanced.cfg menu.cfg \
+                 exithelp.cfg prompt.cfg rqtxt.cfg; do
+        rm -f "${SYS_DIR}/${EXTRA}"
+    done
+
+    MAIN_CFG="${SYS_DIR}/isolinux.cfg"
+    [ "${SYS_DIR}" = "binary/syslinux" ] && MAIN_CFG="${SYS_DIR}/syslinux.cfg"
+
+    printf '%s' "${SYSLINUX_CONTENT}" > "${MAIN_CFG}"
+    echo "[cyjan] Wrote ${MAIN_CFG} (self-contained)"
+
+    if [ -f "${SYSLINUX_SPLASH}" ]; then
+        cp -f "${SYSLINUX_SPLASH}" "${SYS_DIR}/splash.png"
+        echo "[cyjan] Copied splash.png → ${SYS_DIR}/"
     fi
 done
