@@ -143,18 +143,22 @@ def run(cfg: Config) -> None:
             # 2. Score-Normierung
             enrich_score(alert)
 
-            # 2b. FP-Suppression: bekannte (rule_id, src_ip)-Paare → low
+            # 2b. Suppression: manuelle FP + ML-gelernte Muster → low
             suppression.maybe_refresh()
-            if suppression.should_suppress(alert.get("rule_id"), alert.get("src_ip"), alert.get("dst_ip")):
+            kind = suppression.classify(
+                alert.get("rule_id"), alert.get("src_ip"), alert.get("dst_ip"),
+            )
+            if kind is not None:
+                tag = "auto-suppressed" if kind == "manual" else "ml-suppressed"
                 if alert.get("severity") != "low":
                     log.info(
-                        "FP-Suppression: %s %s → %s → low",
-                        alert.get("rule_id"), alert.get("src_ip"), alert.get("dst_ip"),
+                        "Suppression (%s): %s %s → %s → low",
+                        kind, alert.get("rule_id"), alert.get("src_ip"), alert.get("dst_ip"),
                     )
                     alert["severity"] = "low"
                     tags = list(alert.get("tags") or [])
-                    if "auto-suppressed" not in tags:
-                        tags.append("auto-suppressed")
+                    if tag not in tags:
+                        tags.append(tag)
                     alert["tags"] = tags
 
             # ts auf ISO-String normieren (Signature-Engine liefert Unix-Float)

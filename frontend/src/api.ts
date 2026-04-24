@@ -677,3 +677,29 @@ export async function fetchSystemStats(): Promise<SystemStats> {
   };
   return req('/api/system/stats');
 }
+
+export interface LearnedPattern {
+  rule_id:    string;
+  src_ip:     string;
+  dst_ip:     string;
+  total:      number;
+  days_seen:  number;
+  first_seen: string | null;
+  last_seen:  string | null;
+}
+
+export interface LearnedPatternsResponse {
+  config: { window_days: number; min_count: number; min_days: number };
+  patterns: LearnedPattern[];
+}
+
+export async function fetchLearnedPatterns(): Promise<LearnedPatternsResponse> {
+  if (isDemoMode()) return {
+    config: { window_days: 7, min_count: 20, min_days: 3 },
+    patterns: [
+      { rule_id: 'DOS_UDP_001', src_ip: '10.0.0.12', dst_ip: '192.168.2.50', total: 142, days_seen: 5, first_seen: new Date(Date.now() - 5*86400000).toISOString(), last_seen: new Date().toISOString() },
+      { rule_id: 'ANOMALY_HOST_001', src_ip: '10.0.0.55', dst_ip: '192.168.1.1', total: 48, days_seen: 4, first_seen: new Date(Date.now() - 4*86400000).toISOString(), last_seen: new Date().toISOString() },
+    ],
+  };
+  return req('/api/ml/learned-patterns');
+}
