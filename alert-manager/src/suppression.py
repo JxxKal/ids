@@ -33,13 +33,14 @@ class SuppressionCache:
             self._connect()
             cur = self._conn.cursor()  # type: ignore[union-attr]
             cur.execute("""
-                SELECT DISTINCT rule_id, src_ip::text
+                SELECT DISTINCT rule_id, src_ip::text, dst_ip::text
                 FROM alerts
                 WHERE feedback = 'fp'
                   AND rule_id IS NOT NULL
                   AND src_ip  IS NOT NULL
+                  AND dst_ip  IS NOT NULL
             """)
-            self._rules = {(row[0], row[1]) for row in cur.fetchall()}
+            self._rules = {(row[0], row[1], row[2]) for row in cur.fetchall()}
             self._last_refresh = time.monotonic()
             log.info("Suppression cache: %d FP-Regeln geladen", len(self._rules))
         except Exception as exc:
@@ -50,10 +51,10 @@ class SuppressionCache:
         if time.monotonic() - self._last_refresh > REFRESH_INTERVAL_S:
             self.refresh()
 
-    def should_suppress(self, rule_id: str | None, src_ip: str | None) -> bool:
-        if not rule_id or not src_ip:
+    def should_suppress(self, rule_id: str | None, src_ip: str | None, dst_ip: str | None) -> bool:
+        if not rule_id or not src_ip or not dst_ip:
             return False
-        return (rule_id, src_ip) in self._rules
+        return (rule_id, src_ip, dst_ip) in self._rules
 
     def close(self) -> None:
         if self._conn and not self._conn.closed:
