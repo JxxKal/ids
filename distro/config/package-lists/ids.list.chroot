@@ -31,6 +31,9 @@ bash-completion
 locales
 console-setup
 
+# SSH-Server (für Remote-Zugriff)
+openssh-server
+
 # Disk-Installer
 parted
 rsync
