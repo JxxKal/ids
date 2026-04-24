@@ -48,12 +48,12 @@ RUN apt-get update && apt-get install -y \
     libpcap0.8 \
     libcurl4 \
     ca-certificates \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Binary aus Build-Stage kopieren
+# Binary + Entrypoint aus Build-Stage / Source kopieren
 COPY --from=builder /build/target/release/sniffer /usr/local/bin/sniffer
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Kein Root-User nötig außer für AF_PACKET (CAP_NET_RAW/CAP_NET_ADMIN werden
-# über docker-compose gesetzt, nicht über USER-Direktive)
-
-ENTRYPOINT ["sniffer"]
+ENTRYPOINT ["/entrypoint.sh"]
