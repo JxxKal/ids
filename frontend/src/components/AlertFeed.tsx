@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { Alert, Enrichment } from '../types';
 import { alertsExportUrl } from '../api';
 import { AlertDetail } from './AlertDetail';
@@ -182,27 +182,29 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
   const [grouped,           setGrouped]           = useState(true);
   const [suppressIrmaAsset, setSuppressIrmaAsset] = useState(false);
 
-  const filtered = alerts.filter(a => {
-    if (!showTest && a.is_test) return false;
-    if (mlOnly && a.source !== 'ml') return false;
-    if (suppressIrmaAsset && a.source === 'external' && a.rule_id?.startsWith('ASSET::')) return false;
-    if (severityF && a.severity !== severityF) return false;
-    if (sourceF   && a.source   !== sourceF)   return false;
-    if (feedbackF === 'none' && a.feedback)     return false;
-    if (feedbackF === 'fp'   && a.feedback !== 'fp') return false;
-    if (feedbackF === 'tp'   && a.feedback !== 'tp') return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (
-        a.src_ip?.includes(q) ||
-        a.dst_ip?.includes(q) ||
-        a.rule_id?.toLowerCase().includes(q) ||
-        a.description?.toLowerCase().includes(q) ||
-        a.tags.some(t => t.toLowerCase().includes(q))
-      );
-    }
-    return true;
-  });
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return alerts.filter(a => {
+      if (!showTest && a.is_test) return false;
+      if (mlOnly && a.source !== 'ml') return false;
+      if (suppressIrmaAsset && a.source === 'external' && a.rule_id?.startsWith('ASSET::')) return false;
+      if (severityF && a.severity !== severityF) return false;
+      if (sourceF   && a.source   !== sourceF)   return false;
+      if (feedbackF === 'none' && a.feedback)     return false;
+      if (feedbackF === 'fp'   && a.feedback !== 'fp') return false;
+      if (feedbackF === 'tp'   && a.feedback !== 'tp') return false;
+      if (q) {
+        return (
+          a.src_ip?.includes(q) ||
+          a.dst_ip?.includes(q) ||
+          a.rule_id?.toLowerCase().includes(q) ||
+          a.description?.toLowerCase().includes(q) ||
+          a.tags.some(t => t.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [alerts, showTest, mlOnly, suppressIrmaAsset, severityF, sourceF, feedbackF, search]);
 
   // Export-URL passend zu aktiven Filtern aufbauen
   const exportUrl = alertsExportUrl({
@@ -212,7 +214,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
     is_test:  showTest ? null : false,
   });
 
-  const groups  = grouped ? groupAlerts(filtered) : null;
+  const groups  = useMemo(() => grouped ? groupAlerts(filtered) : null, [grouped, filtered]);
   const rowCount = grouped ? groups!.length : filtered.length;
 
   const handleUpdate = (updated: Alert) => {
