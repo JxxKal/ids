@@ -874,9 +874,10 @@ function MLLearnedPatterns() {
         <p className="text-xs text-slate-600 mt-1">
           Spikes gegenüber der Baseline durchbrechen die Suppression automatisch —
           das Muster bleibt gelernt, aber der Burst wird wieder sichtbar weil
-          er eben NICHT mehr normal ist. Gilt für alle Severities (auch critical/high):
-          wenn ein Muster lange Zeit konstant auftritt ohne TP-Feedback, wird es
-          als normal gelernt. Ein TP-Feedback entfernt das Muster sofort.
+          er eben NICHT mehr normal ist. <strong>Auch manuelle FP-Markierungen</strong>{' '}
+          werden bei Spike aufgehoben: eine früher als FP markierte Verbindung kann
+          später zum Angriffspfad werden (C2, Exfil) — ein plötzlicher Anstieg
+          muss der Analyst dann sehen. TP-Feedback entfernt das Muster sofort.
         </p>
       </div>
 
@@ -909,6 +910,7 @@ function MLLearnedPatterns() {
             <thead className="bg-slate-800/50">
               <tr className="text-left text-[11px] text-slate-500">
                 <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2" title="manual = User hat FP markiert · learned = automatisch gelernt">Quelle</th>
                 <th className="px-3 py-2">Regel</th>
                 <th className="px-3 py-2">Quelle → Ziel</th>
                 <th className="px-3 py-2 text-right" title="Baseline: mittlere Alerts/Stunde ± StdDev">Baseline /h</th>
@@ -934,6 +936,19 @@ function MLLearnedPatterns() {
                       ) : (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-amber-950/60 text-amber-300 border border-amber-800/50 font-mono">
                           ⚠ spike
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {p.source === 'manual' ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-blue-950/60 text-blue-300 border border-blue-800/50 font-mono"
+                              title="User hat Alert dieser Verbindung als FP markiert">
+                          manual
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-slate-800/60 text-slate-400 border border-slate-700/50 font-mono"
+                              title="Aus dem Traffic-Verhalten automatisch gelernt">
+                          learned
                         </span>
                       )}
                     </td>
