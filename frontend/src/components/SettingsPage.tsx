@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, Database, FileText, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Sliders, Sparkles, Upload, Users,
+  Activity, Database, FileText, HardDrive, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
@@ -11,8 +11,12 @@ import {
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
   triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname, fetchSystemStats,
   fetchLearnedPatterns,
+  fetchDbStats, cleanupDb, vacuumDb, setRetentionPolicy, backupDbUrl, restoreDb, fetchMaintenanceAudit,
 } from '../api';
-import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern } from '../api';
+import type {
+  SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
+  DbStatsResponse, MaintenanceAuditEntry,
+} from '../api';
 import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
@@ -835,6 +839,446 @@ function MLStatusDisplay() {
         </p>
       )}
     </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DatabaseMaintenance – Übersicht / Cleanup / Vacuum / Retention / Backup / Audit
+// ══════════════════════════════════════════════════════════════════════════════
+
+function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return '–';
+  return new Date(iso).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function ActionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-4 space-y-3">
+      <h3 className="text-sm font-semibold text-slate-200">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function PasswordInput({ value, onChange, placeholder = 'Admin-Passwort bestätigen' }: {
+  value: string; onChange: (v: string) => void; placeholder?: string;
+}) {
+  return (
+    <input
+      type="password"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      autoComplete="off"
+      className="cyjan-input text-xs w-full"
+    />
+  );
+}
+
+function DatabaseMaintenance() {
+  const [stats,       setStats]       = useState<DbStatsResponse | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState('');
+  const [audit,       setAudit]       = useState<MaintenanceAuditEntry[] | null>(null);
+
+  const reload = () => {
+    fetchDbStats().then(setStats).catch(e => setError(String(e.message || e))).finally(() => setLoading(false));
+    fetchMaintenanceAudit(30).then(setAudit).catch(() => {});
+  };
+
+  useEffect(() => {
+    reload();
+    const t = setInterval(reload, 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (error)   return <p className="text-red-400 text-sm">Fehler: {error}</p>;
+  if (!stats)  return null;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-200">Datenbank-Wartung</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Destruktive Aktionen erfordern zusätzlich die Eingabe des Admin-Passworts
+          und werden im Audit-Log protokolliert.
+        </p>
+      </div>
+
+      {/* ── 1. Übersicht ─────────────────────────────────────────────────── */}
+      <ActionCard title={`DB-Größe gesamt: ${fmtSize(stats.db_size_bytes)}`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-[10px] text-slate-500 uppercase">
+              <tr className="text-left">
+                <th className="px-2 py-1.5">Tabelle</th>
+                <th className="px-2 py-1.5 text-right">Zeilen</th>
+                <th className="px-2 py-1.5 text-right">Größe</th>
+                <th className="px-2 py-1.5">Ältester</th>
+                <th className="px-2 py-1.5">Neuester</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats.tables.map(t => (
+                <tr key={t.name} className="border-t border-slate-800/50">
+                  <td className="px-2 py-1.5 font-mono text-slate-300">{t.name}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">{t.rows.toLocaleString('de-DE')}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{fmtSize(t.size_bytes)}</td>
+                  <td className="px-2 py-1.5 text-slate-600 font-mono">{fmtDate(t.oldest)}</td>
+                  <td className="px-2 py-1.5 text-slate-600 font-mono">{fmtDate(t.newest)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {stats.hypertables.length > 0 && (
+          <p className="text-[11px] text-slate-600 font-mono">
+            Hypertables: {stats.hypertables.map(h => `${h.name} (${h.chunks} Chunks, ${fmtSize(h.size_bytes)})`).join(' · ')}
+          </p>
+        )}
+      </ActionCard>
+
+      {/* ── 2. Cleanup ───────────────────────────────────────────────────── */}
+      <CleanupSection onDone={reload} />
+
+      {/* ── 3. Vacuum ────────────────────────────────────────────────────── */}
+      <VacuumSection onDone={reload} />
+
+      {/* ── 4. Retention ─────────────────────────────────────────────────── */}
+      <RetentionSection stats={stats} onDone={reload} />
+
+      {/* ── 5. Backup / Restore ──────────────────────────────────────────── */}
+      <BackupRestoreSection onDone={reload} />
+
+      {/* ── 6. Audit-Log ─────────────────────────────────────────────────── */}
+      <ActionCard title="Wartungs-Audit-Log (letzte 30)">
+        {!audit || audit.length === 0 ? (
+          <p className="text-slate-600 text-xs">Noch keine Aktionen protokolliert</p>
+        ) : (
+          <div className="overflow-x-auto max-h-64 overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead className="text-[10px] text-slate-500 uppercase sticky top-0 bg-slate-900/90">
+                <tr className="text-left">
+                  <th className="px-2 py-1.5">Zeit</th>
+                  <th className="px-2 py-1.5">User</th>
+                  <th className="px-2 py-1.5">Aktion</th>
+                  <th className="px-2 py-1.5">Status</th>
+                  <th className="px-2 py-1.5 text-right">Dauer</th>
+                </tr>
+              </thead>
+              <tbody>
+                {audit.map(a => (
+                  <tr key={a.id} className="border-t border-slate-800/50">
+                    <td className="px-2 py-1.5 font-mono text-slate-500">{fmtDate(a.ts)}</td>
+                    <td className="px-2 py-1.5 text-slate-300">{a.username}</td>
+                    <td className="px-2 py-1.5 font-mono text-cyan-300" title={JSON.stringify(a.params)}>{a.action}</td>
+                    <td className="px-2 py-1.5">
+                      {a.success ? (
+                        <span className="text-green-400">✓</span>
+                      ) : (
+                        <span className="text-red-400" title={a.error_msg || ''}>✗ {a.error_msg?.slice(0, 60)}</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{a.duration_ms} ms</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </ActionCard>
+    </div>
+  );
+}
+
+// ── Cleanup-Sektion ───────────────────────────────────────────────────────────
+
+function CleanupSection({ onDone }: { onDone: () => void }) {
+  const [target,   setTarget]   = useState<'alerts' | 'flows' | 'training_samples' | 'test_runs' | 'all'>('alerts');
+  const [days,     setDays]     = useState('30');
+  const [onlyTest, setOnlyTest] = useState(false);
+  const [password, setPassword] = useState('');
+  const [busy,     setBusy]     = useState(false);
+  const [msg,      setMsg]      = useState('');
+  const [msgType,  setMsgType]  = useState<'ok' | 'err'>('ok');
+
+  const needsConfirm = target === 'all';
+  const [confirmText, setConfirmText] = useState('');
+
+  async function run() {
+    setBusy(true); setMsg('');
+    try {
+      const body: Parameters<typeof cleanupDb>[0] = { password, target };
+      if (days && target !== 'all') body.older_than_days = parseInt(days, 10);
+      if (onlyTest && target === 'alerts') body.only_test = true;
+      const r = await cleanupDb(body);
+      setMsgType('ok');
+      setMsg(`${r.deleted.toLocaleString('de-DE')} Zeilen gelöscht (${r.duration_ms} ms)`);
+      setPassword(''); setConfirmText('');
+      onDone();
+    } catch (e) {
+      setMsgType('err');
+      setMsg(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canRun = password.length > 0 && !busy && (!needsConfirm || confirmText === 'DELETE CYJAN');
+
+  return (
+    <ActionCard title="Daten aufräumen">
+      <p className="text-xs text-slate-500">
+        Löscht Datensätze nach Kriterien. Fließt in Audit-Log.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="text-[10px] text-slate-500 uppercase">Ziel</label>
+          <select value={target} onChange={e => setTarget(e.target.value as typeof target)}
+                  className="cyjan-input text-xs block mt-1">
+            <option value="alerts">Alerts</option>
+            <option value="flows">Flows</option>
+            <option value="training_samples">Training-Samples</option>
+            <option value="test_runs">Test-Runs</option>
+            <option value="all">ALLE DATEN (Factory-Reset)</option>
+          </select>
+        </div>
+        {target !== 'all' && (
+          <div>
+            <label className="text-[10px] text-slate-500 uppercase">Älter als (Tage)</label>
+            <input type="number" value={days} onChange={e => setDays(e.target.value)}
+                   min="0" max="36500"
+                   placeholder="leer = alle"
+                   className="cyjan-input text-xs block mt-1 w-28" />
+          </div>
+        )}
+        {target === 'alerts' && (
+          <label className="flex items-center gap-1.5 text-xs text-slate-400 pb-1.5">
+            <input type="checkbox" checked={onlyTest} onChange={e => setOnlyTest(e.target.checked)}
+                   className="accent-cyan-500" />
+            nur is_test = true
+          </label>
+        )}
+      </div>
+
+      {needsConfirm && (
+        <div className="rounded border border-red-800/50 bg-red-950/30 px-3 py-2">
+          <p className="text-xs text-red-300 mb-2">
+            ⚠ Factory-Reset löscht <strong>alle</strong> Alerts, Flows, Training-Samples, Test-Runs.
+            Config und User bleiben erhalten. Zur Bestätigung "<code className="text-red-200">DELETE CYJAN</code>" eintippen:
+          </p>
+          <input type="text" value={confirmText} onChange={e => setConfirmText(e.target.value)}
+                 placeholder="DELETE CYJAN"
+                 className="cyjan-input text-xs w-48" />
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <PasswordInput value={password} onChange={setPassword} />
+        <button disabled={!canRun} onClick={run}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">
+          {busy ? '…' : 'Löschen'}
+        </button>
+      </div>
+
+      {msg && (
+        <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>
+      )}
+    </ActionCard>
+  );
+}
+
+// ── Vacuum-Sektion ────────────────────────────────────────────────────────────
+
+function VacuumSection({ onDone }: { onDone: () => void }) {
+  const [full,     setFull]     = useState(false);
+  const [password, setPassword] = useState('');
+  const [busy,     setBusy]     = useState(false);
+  const [msg,      setMsg]      = useState('');
+  const [msgType,  setMsgType]  = useState<'ok' | 'err'>('ok');
+
+  async function run() {
+    setBusy(true); setMsg('');
+    try {
+      const r = await vacuumDb({ password, full, analyze: true });
+      setMsgType('ok'); setMsg(`${r.sql} abgeschlossen (${r.duration_ms} ms)`);
+      setPassword(''); onDone();
+    } catch (e) {
+      setMsgType('err'); setMsg(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ActionCard title="VACUUM / ANALYZE">
+      <p className="text-xs text-slate-500">
+        Räumt tote Rows ab und aktualisiert Statistiken. <code>FULL</code> schreibt
+        die Tabelle komplett neu und sperrt sie dabei — nur bei Bedarf.
+      </p>
+      <label className="flex items-center gap-1.5 text-xs text-slate-400">
+        <input type="checkbox" checked={full} onChange={e => setFull(e.target.checked)}
+               className="accent-cyan-500" />
+        VACUUM FULL (sperrend!)
+      </label>
+      <div className="flex items-center gap-2">
+        <PasswordInput value={password} onChange={setPassword} />
+        <button disabled={!password || busy} onClick={run}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">
+          {busy ? '…' : 'Ausführen'}
+        </button>
+      </div>
+      {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
+    </ActionCard>
+  );
+}
+
+// ── Retention-Sektion ─────────────────────────────────────────────────────────
+
+function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: () => void }) {
+  const [selected, setSelected] = useState(stats.hypertables[0]?.name ?? '');
+  const [days,     setDays]     = useState('90');
+  const [password, setPassword] = useState('');
+  const [busy,     setBusy]     = useState(false);
+  const [msg,      setMsg]      = useState('');
+  const [msgType,  setMsgType]  = useState<'ok' | 'err'>('ok');
+
+  async function apply(removeInstead: boolean) {
+    setBusy(true); setMsg('');
+    try {
+      const r = await setRetentionPolicy({
+        password,
+        hypertable: selected,
+        days:       removeInstead ? null : parseInt(days, 10),
+      });
+      setMsgType('ok'); setMsg(r.message);
+      setPassword(''); onDone();
+    } catch (e) {
+      setMsgType('err'); setMsg(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ActionCard title="Automatische Retention (TimescaleDB)">
+      <p className="text-xs text-slate-500">
+        Alte Daten können automatisch per Hypertable-Policy gelöscht werden.
+        Aktuell aktiv: {stats.retention.length === 0 ? 'keine' : stats.retention.map(p => p.hypertable).join(', ')}.
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        <div>
+          <label className="text-[10px] text-slate-500 uppercase">Hypertable</label>
+          <select value={selected} onChange={e => setSelected(e.target.value)}
+                  className="cyjan-input text-xs block mt-1">
+            {stats.hypertables.map(h => (
+              <option key={h.name} value={h.name}>{h.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] text-slate-500 uppercase">Tage</label>
+          <input type="number" value={days} onChange={e => setDays(e.target.value)}
+                 min="1" max="36500"
+                 className="cyjan-input text-xs block mt-1 w-24" />
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <PasswordInput value={password} onChange={setPassword} />
+        <button disabled={!password || !selected || busy} onClick={() => apply(false)}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40">
+          Policy setzen
+        </button>
+        <button disabled={!password || !selected || busy} onClick={() => apply(true)}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-40">
+          Entfernen
+        </button>
+      </div>
+      {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
+    </ActionCard>
+  );
+}
+
+// ── Backup / Restore-Sektion ──────────────────────────────────────────────────
+
+function BackupRestoreSection({ onDone }: { onDone: () => void }) {
+  const [restorePw,   setRestorePw]   = useState('');
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [busy,        setBusy]        = useState(false);
+  const [msg,         setMsg]         = useState('');
+  const [msgType,     setMsgType]     = useState<'ok' | 'err'>('ok');
+
+  async function downloadBackup() {
+    const token = localStorage.getItem('ids_token');
+    const url   = backupDbUrl();
+    // fetch mit Auth und als Blob speichern
+    try {
+      const r = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const blob = await r.blob();
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      const cd = r.headers.get('content-disposition') || '';
+      const fn = /filename="([^"]+)"/.exec(cd)?.[1] ?? 'cyjan-backup.sql.gz';
+      link.download = fn;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setMsgType('ok'); setMsg(`Backup heruntergeladen: ${fn}`);
+    } catch (e) {
+      setMsgType('err'); setMsg(String((e as Error).message));
+    }
+  }
+
+  async function doRestore() {
+    if (!restoreFile) return;
+    setBusy(true); setMsg('');
+    try {
+      const r = await restoreDb(restorePw, restoreFile);
+      setMsgType('ok'); setMsg(`Restore erfolgreich (${(r.bytes/1024/1024).toFixed(1)} MB in ${r.duration_ms} ms)`);
+      setRestorePw(''); setRestoreFile(null); onDone();
+    } catch (e) {
+      setMsgType('err'); setMsg(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ActionCard title="Backup / Restore">
+      <p className="text-xs text-slate-500">
+        Komplettes <code>pg_dump</code> als gzip. Der Dump enthält Schema + Daten
+        und kann mit dem Restore-Button an gleicher Stelle wieder eingespielt werden.
+        <strong className="text-amber-300"> Restore überschreibt die laufende DB.</strong>
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button onClick={downloadBackup}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white">
+          ↓ Backup herunterladen
+        </button>
+      </div>
+      <div className="border-t border-slate-800 pt-3 space-y-2">
+        <p className="text-xs text-slate-400">Restore:</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="file" accept=".sql,.sql.gz,.gz"
+                 onChange={e => setRestoreFile(e.target.files?.[0] ?? null)}
+                 className="text-xs text-slate-400 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-slate-700 file:text-slate-200" />
+          <PasswordInput value={restorePw} onChange={setRestorePw} />
+          <button disabled={!restoreFile || !restorePw || busy} onClick={doRestore}
+                  className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40">
+            {busy ? '…' : '↑ Importieren'}
+          </button>
+        </div>
+      </div>
+      {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
+    </ActionCard>
   );
 }
 
@@ -2738,7 +3182,7 @@ function SystemHealth() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'thorsten';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
 
 interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
@@ -2771,11 +3215,12 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
-      { id: 'system-health', label: 'Systemauslastung', icon: <Activity {...ICON_PROPS} /> },
-      { id: 'interfaces',    label: 'Interfaces',        icon: <Network  {...ICON_PROPS} /> },
-      { id: 'ssl',           label: 'SSL-Zertifikat',    icon: <Lock     {...ICON_PROPS} /> },
-      { id: 'syslog',        label: 'Syslog / SIEM',     icon: <FileText {...ICON_PROPS} /> },
-      { id: 'update',        label: 'System-Update',     icon: <Upload   {...ICON_PROPS} /> },
+      { id: 'system-health',  label: 'Systemauslastung',  icon: <Activity  {...ICON_PROPS} /> },
+      { id: 'interfaces',     label: 'Interfaces',        icon: <Network   {...ICON_PROPS} /> },
+      { id: 'ssl',            label: 'SSL-Zertifikat',    icon: <Lock      {...ICON_PROPS} /> },
+      { id: 'syslog',         label: 'Syslog / SIEM',     icon: <FileText  {...ICON_PROPS} /> },
+      { id: 'update',         label: 'System-Update',     icon: <Upload    {...ICON_PROPS} /> },
+      { id: 'db-maintenance', label: 'Datenbank',         icon: <HardDrive {...ICON_PROPS} /> },
     ],
   },
   {
@@ -2835,7 +3280,8 @@ export function SettingsPage() {
             {active === 'ml-learned'    && <MLLearnedPatterns />}
             {active === 'rules-sources' && <RuleSources />}
             {active === 'rules-list'    && <RulesList />}
-            {active === 'system-health' && <SystemHealth />}
+            {active === 'system-health'  && <SystemHealth />}
+            {active === 'db-maintenance' && <DatabaseMaintenance />}
             {active === 'interfaces'    && <NetworkInterfaces />}
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}

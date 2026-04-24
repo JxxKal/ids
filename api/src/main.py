@@ -50,6 +50,7 @@ from routers import system as system_router
 from routers import update as update_router
 from routers import tests as tests_router
 from routers import users as users_router
+from routers import maintenance as maintenance_router
 from routers.alerts import make_pcap_endpoint, set_feedback_producer
 from routers.syslog_fwd import router as syslog_router
 from routers.syslog_fwd import syslog_forwarder_loop
@@ -161,6 +162,7 @@ app.include_router(ssl_router.router,      dependencies=_auth)
 app.include_router(syslog_router,          dependencies=_auth)
 app.include_router(update_router.router,   dependencies=_auth)
 app.include_router(itop_router,            dependencies=_auth)
+app.include_router(maintenance_router.router, dependencies=_auth)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────

@@ -719,3 +719,107 @@ export async function fetchLearnedPatterns(): Promise<LearnedPatternsResponse> {
   };
   return req('/api/ml/learned-patterns');
 }
+
+// ── Datenbank-Wartung ─────────────────────────────────────────────────────────
+
+export interface DbTableStat {
+  name:       string;
+  rows:       number;
+  size_bytes: number;
+  oldest:     string | null;
+  newest:     string | null;
+}
+
+export interface DbHypertable {
+  name:       string;
+  size_bytes: number;
+  chunks:     number;
+}
+
+export interface DbRetentionPolicy {
+  hypertable: string;
+  config:     Record<string, unknown>;
+}
+
+export interface DbStatsResponse {
+  db_size_bytes: number;
+  tables:        DbTableStat[];
+  hypertables:   DbHypertable[];
+  retention:     DbRetentionPolicy[];
+}
+
+export interface MaintenanceAuditEntry {
+  id:          number;
+  ts:          string;
+  username:    string;
+  action:      string;
+  params:      Record<string, unknown> | null;
+  result:      Record<string, unknown> | null;
+  success:     boolean;
+  error_msg:   string | null;
+  duration_ms: number;
+}
+
+export async function fetchDbStats(): Promise<DbStatsResponse> {
+  return req('/api/maintenance/stats');
+}
+
+export async function cleanupDb(body: {
+  password:        string;
+  target:          'alerts' | 'flows' | 'training_samples' | 'test_runs' | 'all';
+  older_than_days?: number;
+  only_test?:       boolean;
+}): Promise<{ success: boolean; deleted: number; details: Record<string, unknown>; duration_ms: number }> {
+  return req('/api/maintenance/cleanup', {
+    method: 'POST',
+    body:   JSON.stringify(body),
+  });
+}
+
+export async function vacuumDb(body: {
+  password: string;
+  full?:    boolean;
+  analyze?: boolean;
+  table?:   string;
+}): Promise<{ success: boolean; sql: string; duration_ms: number }> {
+  return req('/api/maintenance/vacuum', {
+    method: 'POST',
+    body:   JSON.stringify({ full: false, analyze: true, ...body }),
+  });
+}
+
+export async function setRetentionPolicy(body: {
+  password:   string;
+  hypertable: string;
+  days:       number | null;
+}): Promise<{ success: boolean; message: string }> {
+  return req('/api/maintenance/retention', {
+    method: 'PATCH',
+    body:   JSON.stringify(body),
+  });
+}
+
+export function backupDbUrl(): string {
+  return `${BASE}/api/maintenance/backup`;
+}
+
+export async function restoreDb(password: string, file: File): Promise<{ success: boolean; duration_ms: number; bytes: number }> {
+  const fd = new FormData();
+  fd.append('password', password);
+  fd.append('dump',     file);
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/maintenance/restore`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body:    fd,
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`${res.status}: ${txt}`);
+  }
+  return res.json();
+}
+
+export async function fetchMaintenanceAudit(limit = 100): Promise<MaintenanceAuditEntry[]> {
+  return req(`/api/maintenance/audit?limit=${limit}`);
+}
