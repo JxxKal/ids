@@ -197,6 +197,14 @@ function sessionKey(ipA?: string, ipB?: string): string {
   return a <= b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+const SEV_RANK: Record<Alert['severity'], number> = {
+  critical: 4, high: 3, medium: 2, low: 1,
+};
+
+function maxSeverity(a: Alert['severity'], b: Alert['severity']): Alert['severity'] {
+  return (SEV_RANK[b] ?? 0) > (SEV_RANK[a] ?? 0) ? b : a;
+}
+
 function groupAlerts(alerts: Alert[]): AlertGroup[] {
   const map = new Map<string, AlertGroup>();
 
@@ -205,6 +213,10 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
     const g = map.get(k);
     if (g) {
       g.count++;
+      // Gruppen-Severity = höchste Severity aller enthaltenen Alerts.
+      // Sonst würde eine Gruppe mit 1 critical + 4 low als 'low' angezeigt
+      // (weil neuester low) und der Filter 'critical' würde sie nicht finden.
+      g.severity = maxSeverity(g.severity, a.severity);
       // Richtungswechsel erkennen: wenn diese Quelle vorher das Ziel war
       if (a.src_ip && a.src_ip === g.dst_ip) g.bidirectional = true;
       if (tsMs(a.ts) > tsMs(g.last_ts)) {
