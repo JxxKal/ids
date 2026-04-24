@@ -19,13 +19,29 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 from typing import Annotated
 
 import asyncpg
+import redis as redis_lib
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 
+from config import Config
 from database import get_pool
 from models import HostCreate, HostResponse, HostUpdate
+
+log = logging.getLogger(__name__)
+_cfg = Config.from_env()
+
+
+def _invalidate_enrichment_cache(ip: str) -> None:
+    """Löscht den Enrichment-Cache-Eintrag für eine IP damit der nächste Alert
+    frische Trust/display_name-Daten aus der DB liest."""
+    try:
+        r = redis_lib.from_url(_cfg.redis_url, socket_timeout=2)
+        r.delete(f"enrichment:{ip}")
+    except Exception as exc:
+        log.debug("Cache invalidation failed for %s: %s", ip, exc)
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 
@@ -123,6 +139,7 @@ async def create_host(
             )
     except asyncpg.InvalidTextRepresentationError:
         raise HTTPException(status_code=422, detail="Invalid IP address format")
+    _invalidate_enrichment_cache(body.ip)
     return _row_to_host(row)
 
 
@@ -154,6 +171,7 @@ async def update_host(
         )
     if not row:
         raise HTTPException(status_code=404, detail="Host not found")
+    _invalidate_enrichment_cache(ip)
     return _row_to_host(row)
 
 
@@ -255,6 +273,7 @@ async def import_csv(
                     """,
                     ip_str, hostname,
                 )
+                _invalidate_enrichment_cache(ip_str)
                 imported += 1
             except Exception as exc:
                 errors.append(f"Zeile {lineno}: {exc}")
