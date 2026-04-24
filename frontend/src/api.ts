@@ -173,6 +173,22 @@ export async function deleteNetwork(id: string): Promise<void> {
 
 // ── Hosts ─────────────────────────────────────────────────────────────────────
 
+export interface UnknownHost {
+  ip: string;
+  alert_count: number;
+  last_seen: string | null;
+  first_seen: string | null;
+  top_severity: string | null;
+}
+
+export async function fetchUnknownHosts(days = 30): Promise<UnknownHost[]> {
+  if (isDemoMode()) return [
+    { ip: '10.0.0.55', alert_count: 12, last_seen: new Date().toISOString(), first_seen: new Date(Date.now() - 86400000).toISOString(), top_severity: 'medium' },
+    { ip: '192.168.5.22', alert_count: 4, last_seen: new Date().toISOString(), first_seen: new Date(Date.now() - 3600000).toISOString(), top_severity: 'high' },
+  ];
+  return req(`/api/hosts/unknown?days=${days}`);
+}
+
 export async function fetchHosts(params: { trusted?: boolean; search?: string } = {}): Promise<Host[]> {
   if (isDemoMode()) return demo.fetchHosts(params);
   const p = new URLSearchParams();
