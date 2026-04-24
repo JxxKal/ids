@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { pcapUrl, setFeedback } from '../api';
+import { setFeedback } from '../api';
 import type { Alert } from '../types';
 import { AlertFlowPopup } from './AlertFlowPopup';
+import { PcapPreview } from './PcapPreview';
 import { SeverityBadge } from './SeverityBadge';
 import { TrustBadge } from './TrustBadge';
 
@@ -37,9 +38,10 @@ const SEV_BORDER: Record<string, string> = {
 };
 
 export function AlertDetail({ alert, onClose, onUpdate }: Props) {
-  const [note, setNote]       = useState('');
-  const [loading, setLoading] = useState(false);
+  const [note, setNote]         = useState('');
+  const [loading, setLoading]   = useState(false);
   const [showGraph, setShowGraph] = useState(false);
+  const [showPcap, setShowPcap] = useState(false);
 
   const giveFeedback = async (fb: 'fp' | 'tp') => {
     setLoading(true);
@@ -186,13 +188,17 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
             </button>
           )}
           {alert.pcap_available && (
-            <a
-              href={pcapUrl(alert.alert_id)}
-              download
-              className="px-3 py-1.5 rounded text-xs font-mono bg-cyan-500/15 text-cyan-200 border border-cyan-500/50 hover:bg-cyan-500/25 transition-colors"
-            >
-              ↓ PCAP
-            </a>
+            <>
+              <button
+                onClick={() => setShowPcap(true)}
+                className="px-3 py-1.5 rounded text-xs font-mono bg-cyan-500/15 text-cyan-200 border border-cyan-500/50 hover:bg-cyan-500/25 transition-colors"
+              >
+                ⧉ PCAP Vorschau
+              </button>
+              {showPcap && (
+                <PcapPreview alertId={alert.alert_id} onClose={() => setShowPcap(false)} />
+              )}
+            </>
           )}
 
           {!alert.feedback ? (
