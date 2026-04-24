@@ -1,0 +1,32 @@
+#!/bin/bash
+# Wird von cyjan-bootstatus.service ausgeführt – schreibt direkt auf /dev/tty1
+# damit der User auf der Console garantiert sieht: VM ist up, hier die IP, hier
+# kann SSH passieren. Funktioniert auch wenn ids-banner.sh hängt oder fehlt.
+set +e
+
+VERSION="?"
+BUILD_TS="?"
+[ -f /etc/cyjan-version ] && . /etc/cyjan-version
+
+IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+SSH_STATE="$(systemctl is-active ssh 2>/dev/null || echo 'unknown')"
+
+{
+  echo
+  echo "  ╔══════════════════════════════════════════════════╗"
+  echo "  ║                  CYJAN IDS                       ║"
+  echo "  ╠══════════════════════════════════════════════════╣"
+  printf "  ║  Version:    %-36s║\n" "${VERSION}"
+  printf "  ║  Build:      %-36s║\n" "${BUILD_TS}"
+  printf "  ║  IP-Adresse: %-36s║\n" "${IP:-<keine>}"
+  printf "  ║  SSH-Status: %-36s║\n" "${SSH_STATE}"
+  echo "  ╚══════════════════════════════════════════════════╝"
+  echo
+  if [ -n "${IP}" ] && [ "${SSH_STATE}" = "active" ]; then
+    echo "  → SSH-Login möglich:  ssh ids@${IP}   (Passwort: ids)"
+  else
+    echo "  ⚠ SSH oder Netzwerk noch nicht bereit. Console-Login:"
+    echo "    User: ids   Passwort: ids   (Autologin auf TTY1)"
+  fi
+  echo
+} > /dev/tty1 2>&1
