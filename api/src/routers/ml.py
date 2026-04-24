@@ -347,36 +347,60 @@ async def get_learned_patterns(
     async with pool.acquire() as conn:
         # Gelernt: bidirektional normiert via LEAST/GREATEST, damit Request
         # und Response derselben Session als ein Muster zählen.
+        # Manuelle FPs werden über CTE vorab aufgelöst und per LEFT JOIN
+        # ausgeschlossen (NOT EXISTS im HAVING würde ungroupte Spalten
+        # referenzieren und PostgreSQL-GroupingError werfen).
         learned = await conn.fetch(
             """
+            WITH manual_fp AS (
+                SELECT DISTINCT
+                    rule_id,
+                    LEAST(src_ip, dst_ip)    AS ip_a,
+                    GREATEST(src_ip, dst_ip) AS ip_b
+                FROM alerts
+                WHERE feedback = 'fp'
+                  AND rule_id IS NOT NULL
+                  AND src_ip  IS NOT NULL
+                  AND dst_ip  IS NOT NULL
+            ),
+            agg AS (
+                SELECT
+                    rule_id,
+                    LEAST(src_ip, dst_ip)    AS ip_a,
+                    GREATEST(src_ip, dst_ip) AS ip_b,
+                    COUNT(*)                                          AS total,
+                    COUNT(DISTINCT DATE(ts))                          AS days_seen,
+                    MIN(ts)                                           AS first_seen,
+                    MAX(ts)                                           AS last_seen,
+                    COUNT(*) FILTER (WHERE feedback = 'tp')           AS tp_count,
+                    COUNT(*) FILTER (WHERE severity IN ('critical','high')) AS high_count
+                FROM alerts
+                WHERE ts > NOW() - ($1 || ' days')::interval
+                  AND is_test = false
+                  AND rule_id IS NOT NULL
+                  AND src_ip  IS NOT NULL
+                  AND dst_ip  IS NOT NULL
+                GROUP BY rule_id, LEAST(src_ip, dst_ip), GREATEST(src_ip, dst_ip)
+            )
             SELECT
-                rule_id,
-                LEAST(src_ip, dst_ip)::text     AS ip_a,
-                GREATEST(src_ip, dst_ip)::text  AS ip_b,
-                COUNT(*)                         AS total,
-                COUNT(DISTINCT DATE(ts))         AS days_seen,
-                MIN(ts)                          AS first_seen,
-                MAX(ts)                          AS last_seen
-            FROM alerts
-            WHERE ts > NOW() - ($1 || ' days')::interval
-              AND is_test = false
-              AND rule_id IS NOT NULL
-              AND src_ip  IS NOT NULL
-              AND dst_ip  IS NOT NULL
-            GROUP BY rule_id, LEAST(src_ip, dst_ip), GREATEST(src_ip, dst_ip)
-            HAVING COUNT(*)                                                 >= $2
-               AND COUNT(DISTINCT DATE(ts))                                 >= $3
-               AND COUNT(*) FILTER (WHERE feedback = 'tp')                   = 0
-               AND COUNT(*) FILTER (WHERE severity IN ('critical','high'))   = 0
-               -- nicht bereits manuell als FP markiert (bidirektional prüfen)
-               AND NOT EXISTS (
-                 SELECT 1 FROM alerts a2
-                 WHERE a2.rule_id = alerts.rule_id
-                   AND a2.feedback = 'fp'
-                   AND LEAST(a2.src_ip, a2.dst_ip)    = LEAST(alerts.src_ip, alerts.dst_ip)
-                   AND GREATEST(a2.src_ip, a2.dst_ip) = GREATEST(alerts.src_ip, alerts.dst_ip)
-               )
-            ORDER BY total DESC, last_seen DESC
+                agg.rule_id,
+                agg.ip_a::text       AS ip_a,
+                agg.ip_b::text       AS ip_b,
+                agg.total,
+                agg.days_seen,
+                agg.first_seen,
+                agg.last_seen
+            FROM agg
+            LEFT JOIN manual_fp
+              ON manual_fp.rule_id = agg.rule_id
+             AND manual_fp.ip_a   = agg.ip_a
+             AND manual_fp.ip_b   = agg.ip_b
+            WHERE agg.total      >= $2
+              AND agg.days_seen  >= $3
+              AND agg.tp_count    = 0
+              AND agg.high_count  = 0
+              AND manual_fp.rule_id IS NULL
+            ORDER BY agg.total DESC, agg.last_seen DESC
             LIMIT 500
             """,
             window_d, min_count, min_days,
