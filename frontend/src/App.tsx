@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { clearToken, fetchAlerts, fetchMe, getToken, setToken } from './api';
+import { clearToken, fetchAlerts, fetchMe, fetchSystemStats, getToken, setToken } from './api';
+import type { SystemStats } from './api';
 import { disableDemoMode } from './demo/mode';
 import { resetStore as resetDemoStore } from './demo/store';
 import { AlertFeed } from './components/AlertFeed';
@@ -91,6 +92,16 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const { alerts, connected, setAlerts } = useWebSocket();
+  const [sysStats, setSysStats] = useState<SystemStats | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const load = () => fetchSystemStats().then(d => { if (alive) setSysStats(d); }).catch(() => {});
+    load();
+    const t = setInterval(load, 15_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user]);
 
   const handleUpdate = (updated: Alert) => {
     setAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a));
@@ -200,6 +211,20 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                 <span className="text-xs text-slate-500 font-mono">
                   {isLoading ? 'Lade…' : `${alertCount} Alerts`}
                 </span>
+
+                {/* Sniffer-Health-Warnung */}
+                {sysStats && sysStats.sniffer.drop_pct !== null && sysStats.sniffer.drop_pct > 1 && (
+                  <span
+                    title={`Paketverlust am Sniffer: ${sysStats.sniffer.drop_pct.toFixed(2)} % — Details unter Einstellungen → Systemauslastung`}
+                    className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono cursor-default ${
+                      sysStats.sniffer.drop_pct > 5
+                        ? 'bg-red-900/40 text-red-300 border border-red-700/50'
+                        : 'bg-amber-900/40 text-amber-300 border border-amber-700/50'
+                    }`}
+                  >
+                    ⚠ Drops {sysStats.sniffer.drop_pct.toFixed(1)} %
+                  </span>
+                )}
 
                 <label htmlFor="ml-only-toggle" className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
                   <input

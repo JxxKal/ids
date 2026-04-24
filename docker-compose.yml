@@ -325,6 +325,7 @@ services:
       - /opt/ids:/opt/ids
       - ./infra/timescaledb/migrations:/migrations:ro
       - /sys/class/net:/host/sys/class/net:ro
+      - /proc:/host/proc:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
 
