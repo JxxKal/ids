@@ -6,7 +6,7 @@ import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
   fetchIrmaConfig, fetchItopConfig, fetchMLConfig, fetchMLStatus, fetchRuleSources,
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
-  fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource,
+  fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource, setInterfaceRole,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
   triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname,
@@ -1986,38 +1986,60 @@ function StateDot({ state }: { state: string }) {
   const up = state === 'up';
   return (
     <span
-      className={`inline-block w-2 h-2 rounded-full mr-1.5 ${up ? 'bg-green-400' : 'bg-red-500'}`}
+      className={`inline-block w-2 h-2 rounded-full mr-1.5 flex-shrink-0 ${up ? 'bg-green-400' : 'bg-red-500'}`}
       title={state}
     />
   );
 }
 
+const ROLE_LABEL: Record<NonNullable<InterfaceInfo['role']>, string> = {
+  management: 'Management',
+  sniffer:    'Sniffer / Mirror',
+};
+
+const ROLE_COLOR: Record<NonNullable<InterfaceInfo['role']>, string> = {
+  management: 'bg-blue-900/40 text-blue-300 border-blue-700/50',
+  sniffer:    'bg-purple-900/40 text-purple-300 border-purple-700/50',
+};
+
 function NetworkInterfaces() {
-  const [ifaces, setIfaces]   = useState<InterfaceInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
+  const [ifaces,    setIfaces]    = useState<InterfaceInfo[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [applying,  setApplying]  = useState<string | null>(null); // iface name being applied
+  const [confirm,   setConfirm]   = useState<{ role: 'sniffer' | 'management'; iface: string } | null>(null);
+  const [notice,    setNotice]    = useState<{ type: 'ok' | 'warn' | 'err'; msg: string } | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     setError(null);
-    try {
-      setIfaces(await getInterfaces());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
+    try { setIfaces(await getInterfaces()); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setLoading(false); }
   }
 
   useEffect(() => { load(); }, []);
 
-  const roleLabel = (r: InterfaceInfo['role']) =>
-    r === 'management' ? 'Management' : r === 'sniffer' ? 'Sniffer / Mirror' : null;
-
-  const roleColor = (r: InterfaceInfo['role']) =>
-    r === 'management' ? 'bg-blue-900/40 text-blue-300 border-blue-700/50' :
-    r === 'sniffer'    ? 'bg-purple-900/40 text-purple-300 border-purple-700/50' :
-                         'bg-slate-800/40 text-slate-400 border-slate-700/50';
+  async function applyRole(role: 'sniffer' | 'management', iface: string) {
+    setConfirm(null);
+    setApplying(iface);
+    setNotice(null);
+    try {
+      const res = await setInterfaceRole(role, iface);
+      if (role === 'sniffer') {
+        setNotice({ type: 'ok', msg: `Sniffer wird auf ${iface} umgestellt – kurze Unterbrechung (~5 s).` });
+        // Nach 6 s neu laden damit UI aktuellen Stand zeigt
+        setTimeout(() => { load(); setNotice(null); }, 6000);
+      } else {
+        setNotice({ type: 'warn', msg: res.note ?? `Management-Interface auf ${iface} gespeichert. Stack-Neustart erforderlich.` });
+        load();
+      }
+    } catch (e) {
+      setNotice({ type: 'err', msg: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setApplying(null);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -2028,28 +2050,42 @@ function NetworkInterfaces() {
         </button>
       </div>
 
+      {notice && (
+        <div className={`text-xs px-3 py-2 rounded border ${
+          notice.type === 'ok'   ? 'bg-green-950/40 border-green-700/50 text-green-300' :
+          notice.type === 'warn' ? 'bg-yellow-950/40 border-yellow-700/50 text-yellow-300' :
+                                   'bg-red-950/40 border-red-700/50 text-red-300'
+        }`}>{notice.msg}</div>
+      )}
       {error && <p className="text-xs text-red-400">{error}</p>}
-
       {!loading && ifaces.length === 0 && !error && (
-        <p className="text-xs text-slate-500">Keine Interfaces gefunden – läuft die API mit host-Mounts?</p>
+        <p className="text-xs text-slate-500">Keine Interfaces gefunden.</p>
       )}
 
       <div className="space-y-2">
         {ifaces.map(iface => (
-          <div key={iface.name} className="rounded border border-slate-700/60 bg-slate-900/50 p-3 text-xs">
-            <div className="flex items-center gap-2 mb-2">
+          <div
+            key={iface.name}
+            className={`rounded border p-3 text-xs transition-colors ${
+              iface.role ? 'border-slate-600/80 bg-slate-800/60' : 'border-slate-700/50 bg-slate-900/40'
+            }`}
+          >
+            {/* Header row */}
+            <div className="flex items-center gap-2 mb-2.5">
               <StateDot state={iface.operstate} />
-              <span className="font-mono font-semibold text-slate-100">{iface.name}</span>
-              {roleLabel(iface.role) && (
-                <span className={`px-1.5 py-0.5 rounded border text-[10px] ${roleColor(iface.role)}`}>
-                  {roleLabel(iface.role)}
+              <span className="font-mono font-semibold text-slate-100 text-sm">{iface.name}</span>
+              {iface.role && (
+                <span className={`px-1.5 py-0.5 rounded border text-[10px] ${ROLE_COLOR[iface.role]}`}>
+                  {ROLE_LABEL[iface.role]}
                 </span>
               )}
-              <span className={`ml-auto font-mono ${iface.operstate === 'up' ? 'text-green-400' : 'text-red-400'}`}>
+              <span className={`ml-auto font-mono text-[10px] ${iface.operstate === 'up' ? 'text-green-400' : 'text-red-400'}`}>
                 {iface.operstate.toUpperCase()}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-400">
+
+            {/* Info row */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-slate-400 mb-3">
               <div>
                 <span className="text-slate-500">MAC </span>
                 <span className="font-mono">{iface.mac || '—'}</span>
@@ -2060,18 +2096,65 @@ function NetworkInterfaces() {
                   ? iface.addresses.map(a => (
                       <span key={a} className="font-mono text-slate-200 mr-2">{a}</span>
                     ))
-                  : <span className="text-slate-600 italic">
+                  : <span className="italic text-slate-600">
                       {iface.role === 'sniffer' ? 'keine (erwartet)' : 'keine'}
                     </span>
                 }
               </div>
             </div>
+
+            {/* Action buttons */}
+            {confirm?.iface === iface.name ? (
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-700/50">
+                <span className="text-slate-400 flex-1">
+                  {confirm.role === 'sniffer'
+                    ? `Sniffer-Interface auf ${iface.name} setzen und Sniffer neu starten?`
+                    : `Management-Interface auf ${iface.name} setzen (Stack-Neustart nötig)?`
+                  }
+                </span>
+                <button
+                  type="button"
+                  onClick={() => applyRole(confirm.role, iface.name)}
+                  className="cyjan-btn text-xs px-3 py-1"
+                  disabled={!!applying}
+                >
+                  {applying === iface.name ? 'Lädt …' : 'Ja, setzen'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirm(null)}
+                  className="cyjan-btn-secondary text-xs px-3 py-1"
+                >
+                  Abbrechen
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2 pt-2 border-t border-slate-700/40">
+                <button
+                  type="button"
+                  disabled={iface.role === 'sniffer' || !!applying}
+                  onClick={() => setConfirm({ role: 'sniffer', iface: iface.name })}
+                  className="cyjan-btn-secondary text-[11px] px-2 py-1 disabled:opacity-40 disabled:cursor-default"
+                >
+                  Als Sniffer setzen
+                </button>
+                <button
+                  type="button"
+                  disabled={iface.role === 'management' || !!applying}
+                  onClick={() => setConfirm({ role: 'management', iface: iface.name })}
+                  className="cyjan-btn-secondary text-[11px] px-2 py-1 disabled:opacity-40 disabled:cursor-default"
+                >
+                  Als Management setzen
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
 
       <p className="text-[11px] text-slate-600">
-        Das Sniffer-Interface wird beim Stack-Start automatisch aktiviert (ip link set up).
+        Sniffer: Interface wird beim Start automatisch aktiviert (ip&nbsp;link&nbsp;set&nbsp;up).
+        Management-Interface-Änderungen erfordern einen Stack-Neustart.
       </p>
     </div>
   );

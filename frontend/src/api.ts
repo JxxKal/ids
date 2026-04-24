@@ -629,3 +629,15 @@ export async function getInterfaces(): Promise<import('./types').InterfaceInfo[]
   ];
   return req('/api/system/interfaces');
 }
+
+export async function setInterfaceRole(
+  role: 'sniffer' | 'management',
+  iface: string,
+): Promise<{ status: string; note?: string }> {
+  if (isDemoMode()) return { status: 'saved' };
+  return req('/api/system/interfaces/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role, iface }),
+  });
+}

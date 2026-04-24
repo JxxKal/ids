@@ -3,16 +3,26 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
+from typing import Literal
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from database import get_pool
 from models import ConfigResponse, ConfigUpdate, ThreatLevelResponse
 
-_SYS_NET = Path("/host/sys/class/net")
+_SYS_NET  = Path("/host/sys/class/net")
+_IDS_DIR  = Path("/opt/ids")
+_ENV_FILE = _IDS_DIR / ".env"
+
+
+class InterfaceConfigRequest(BaseModel):
+    role:  Literal["sniffer", "management"]
+    iface: str
 
 router = APIRouter(prefix="/api", tags=["system"])
 
@@ -79,6 +89,65 @@ async def get_interfaces() -> list[dict]:
             "mac":       iface.get("address", ""),
         })
     return result
+
+
+def _env_set(key: str, value: str) -> None:
+    """Setzt einen Key in /opt/ids/.env, fügt ihn an wenn nicht vorhanden."""
+    if not _ENV_FILE.exists():
+        raise FileNotFoundError(f"{_ENV_FILE} nicht gefunden")
+    text = _ENV_FILE.read_text()
+    pattern = re.compile(rf"^{re.escape(key)}\s*=.*$", re.MULTILINE)
+    replacement = f"{key}={value}"
+    if pattern.search(text):
+        text = pattern.sub(replacement, text)
+    else:
+        text = text.rstrip("\n") + f"\n{replacement}\n"
+    _ENV_FILE.write_text(text)
+
+
+def _spawn_sniffer_reconfig(ids_dir: Path, profile: str) -> None:
+    """Startet docker compose up -d sniffer in einem unabhängigen Container."""
+    compose_cmd = (
+        f"docker compose --project-directory {ids_dir} --profile {profile} up -d sniffer"
+    )
+    subprocess.Popen(
+        [
+            "docker", "run", "--rm",
+            "-v", "/var/run/docker.sock:/var/run/docker.sock",
+            "-v", f"{ids_dir}:{ids_dir}",
+            "-w", str(ids_dir),
+            "-e", "COMPOSE_PROJECT_NAME=ids",
+            "--name", "ids-sniffer-reconfig",
+            "ids-api:latest",
+            "sh", "-c", f"sleep 2 && {compose_cmd}",
+        ],
+        start_new_session=True, close_fds=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ},
+    )
+
+
+@router.post("/system/interfaces/config", summary="Sniffer-/Management-Interface setzen")
+async def set_interface_config(body: InterfaceConfigRequest) -> dict:
+    iface = body.iface.strip()
+    if not iface or "/" in iface or " " in iface:
+        raise HTTPException(400, "Ungültiger Interface-Name")
+
+    profile_file = Path("/etc/cyjan/profile")
+    profile = profile_file.read_text().strip() if profile_file.exists() else "prod"
+
+    if body.role == "sniffer":
+        _env_set("MIRROR_IFACE", iface)
+        os.environ["MIRROR_IFACE"] = iface
+        _spawn_sniffer_reconfig(_IDS_DIR, profile)
+        return {"status": "restarting", "role": "sniffer", "iface": iface}
+
+    # management: .env schreiben, kein Auto-Restart (Port-Rebind nötig)
+    _env_set("MANAGEMENT_IFACE", iface)
+    os.environ["MANAGEMENT_IFACE"] = iface
+    return {"status": "saved", "role": "management", "iface": iface,
+            "note": "Stack-Neustart erforderlich damit Port-Binding greift"}
+
 
 _THREAT_WEIGHTS = {"critical": 10, "high": 5, "medium": 2, "low": 1}
 _THREAT_WINDOW_MIN = 15
