@@ -29,13 +29,6 @@ async def run(pool: asyncpg.Pool, migrations_dir: Path = _DEFAULT_DIR) -> None:
         return
 
     async with pool.acquire() as conn:
-        table_existed = await conn.fetchval("""
-            SELECT EXISTS (
-                SELECT 1 FROM pg_tables
-                WHERE schemaname = 'public' AND tablename = 'schema_migrations'
-            )
-        """)
-
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id          TEXT        PRIMARY KEY,
@@ -45,9 +38,9 @@ async def run(pool: asyncpg.Pool, migrations_dir: Path = _DEFAULT_DIR) -> None:
 
         applied = {row["id"] for row in await conn.fetch("SELECT id FROM schema_migrations")}
 
-        if not table_existed and not applied:
-            # Existing DB upgraded from pre-migration-runner state.
-            # initdb.d already applied everything; seed the table to avoid re-running.
+        if not applied:
+            # schema_migrations is empty: either fresh install or upgrade from
+            # pre-runner state. Check whether user tables already exist to tell them apart.
             has_tables = await conn.fetchval("""
                 SELECT count(*) FROM pg_tables
                 WHERE schemaname = 'public' AND tablename != 'schema_migrations'
