@@ -1,51 +1,31 @@
 import { useState } from 'react';
 import type { Alert, Enrichment } from '../types';
-import { alertsExportUrl, getToken, pcapUrl } from '../api';
+import { alertsExportUrl } from '../api';
 import { AlertDetail } from './AlertDetail';
 import { SeverityBadge } from './SeverityBadge';
+import { PcapPreview } from './PcapPreview';
 
-// ── PCAP-Download ─────────────────────────────────────────────────────────────
+// ── PCAP-Vorschau ─────────────────────────────────────────────────────────────
 
-function PcapButton({ alertId, available, filename }: { alertId: string; available: boolean; filename?: string }) {
-  const [loading, setLoading] = useState(false);
-
-  async function handleDownload(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (loading || !available) return;
-    setLoading(true);
-    try {
-      const token = getToken();
-      const res = await fetch(pcapUrl(alertId), {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error(`${res.status}`);
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = filename ?? `alert-${alertId.slice(0, 8)}.pcap`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch {
-      /* ignore */
-    } finally {
-      setLoading(false);
-    }
-  }
+function PcapButton({ alertId, available }: { alertId: string; available: boolean }) {
+  const [show, setShow] = useState(false);
 
   return (
-    <button
-      onClick={handleDownload}
-      disabled={loading || !available}
-      title={available ? 'PCAP herunterladen' : 'Kein PCAP – Sniffer läuft nicht oder kein Paketpuffer für diesen Alert'}
-      className={`px-1.5 py-0.5 rounded text-[11px] border whitespace-nowrap transition-colors ${
-        available
-          ? 'border-blue-700/50 text-blue-400 bg-blue-950/30 hover:bg-blue-900/50 hover:text-blue-300'
-          : 'border-slate-700/30 text-slate-600 bg-transparent cursor-default'
-      } disabled:opacity-40`}
-    >
-      {loading ? '…' : '↓ pcap'}
-    </button>
+    <>
+      <button
+        onClick={e => { e.stopPropagation(); if (available) setShow(true); }}
+        disabled={!available}
+        title={available ? 'PCAP Vorschau öffnen' : 'Kein PCAP – Sniffer läuft nicht oder kein Paketpuffer für diesen Alert'}
+        className={`px-1.5 py-0.5 rounded text-[11px] border whitespace-nowrap transition-colors ${
+          available
+            ? 'border-blue-700/50 text-blue-400 bg-blue-950/30 hover:bg-blue-900/50 hover:text-blue-300'
+            : 'border-slate-700/30 text-slate-600 bg-transparent cursor-default'
+        } disabled:opacity-40`}
+      >
+        ⧉ pcap
+      </button>
+      {show && <PcapPreview alertId={alertId} onClose={() => setShow(false)} />}
+    </>
   );
 }
 
