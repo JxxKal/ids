@@ -113,6 +113,7 @@ def _make_alert(rule: Rule, flow: dict, ctx: RuleContext) -> dict:
         "tags":        rule.tags,
         "description": description,
         "src_ip":      flow.get("src_ip"),
+        "src_port":    flow.get("src_port"),
         "dst_ip":      flow.get("dst_ip"),
         "dst_port":    flow.get("dst_port"),
         "proto":       flow.get("proto"),

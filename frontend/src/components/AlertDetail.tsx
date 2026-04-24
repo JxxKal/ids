@@ -91,6 +91,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           <Row label="Score"       value={alert.score.toFixed(3)} />
           <Row label="Proto"       value={alert.proto} />
           <Row label="Src IP"      value={alert.src_ip} />
+          <Row label="Src Port"    value={alert.src_port} />
           <Row label="Dst IP"      value={alert.dst_ip} />
           <Row label="Dst Port"    value={alert.dst_port} />
 
