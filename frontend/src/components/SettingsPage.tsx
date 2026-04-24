@@ -10,8 +10,9 @@ import {
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
   triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname, fetchSystemStats,
+  fetchLearnedPatterns,
 } from '../api';
-import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats } from '../api';
+import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern } from '../api';
 import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
@@ -833,6 +834,88 @@ function MLStatusDisplay() {
           In den letzten 24 Stunden keine ML-Alerts – kein anomaler Verkehr erkannt oder ML-Filter zu lax konfiguriert.
         </p>
       )}
+    </div>
+  );
+}
+
+function MLLearnedPatterns() {
+  const [patterns, setPatterns] = useState<LearnedPattern[] | null>(null);
+  const [cfg,      setCfg]      = useState<{ window_days: number; min_count: number; min_days: number } | null>(null);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState('');
+
+  useEffect(() => {
+    fetchLearnedPatterns()
+      .then(r => { setPatterns(r.patterns); setCfg(r.config); })
+      .catch(() => setError('Daten konnten nicht geladen werden'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (error)   return <p className="text-red-400 text-sm">{error}</p>;
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-200">Auto-gelernte Suppression-Muster</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Wiederkehrende Verbindungen (rule_id + Quelle + Ziel) die in den letzten{' '}
+          <span className="text-slate-300">{cfg?.window_days} Tagen</span> mindestens{' '}
+          <span className="text-slate-300">{cfg?.min_count}×</span> an{' '}
+          <span className="text-slate-300">{cfg?.min_days}+ verschiedenen Tagen</span>{' '}
+          ohne TP-Feedback auftraten. Diese werden automatisch auf severity=low
+          herabgestuft (Tag <code className="text-cyan-400">ml-suppressed</code>).
+        </p>
+        <p className="text-xs text-slate-600 mt-1">
+          Kritische/hohe Alerts werden NIE automatisch unterdrückt. Ein einziges
+          TP-Feedback auf dem Muster entfernt es wieder aus der Lernliste.
+        </p>
+      </div>
+
+      {!patterns || patterns.length === 0 ? (
+        <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 px-4 py-6 text-center">
+          <p className="text-slate-500 text-sm">Noch keine Muster gelernt</p>
+          <p className="text-slate-600 text-xs mt-1">
+            Erscheinen automatisch sobald die Schwellwerte erreicht sind
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-slate-700/50 overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-800/50">
+              <tr className="text-left text-[11px] text-slate-500">
+                <th className="px-3 py-2">Regel</th>
+                <th className="px-3 py-2">Quelle → Ziel</th>
+                <th className="px-3 py-2 text-right">Treffer</th>
+                <th className="px-3 py-2 text-right">Tage</th>
+                <th className="px-3 py-2">Zuletzt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {patterns.map(p => (
+                <tr key={`${p.rule_id}|${p.src_ip}|${p.dst_ip}`}
+                    className="border-t border-slate-800 hover:bg-slate-800/30">
+                  <td className="px-3 py-2 text-cyan-300 font-mono">{p.rule_id}</td>
+                  <td className="px-3 py-2 font-mono text-slate-300">
+                    <span>{p.src_ip}</span>
+                    <span className="text-slate-600 mx-1">→</span>
+                    <span>{p.dst_ip}</span>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-300">{p.total}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-slate-500">{p.days_seen}</td>
+                  <td className="px-3 py-2 text-slate-500">
+                    {p.last_seen ? new Date(p.last_seen).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '–'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-[10px] text-slate-700 font-mono">
+        Refresh im Alert-Manager: alle 60 s · Thresholds via ENV konfigurierbar
+        (SUPPRESSION_LEARN_WINDOW_D, SUPPRESSION_MIN_COUNT, SUPPRESSION_MIN_DAYS)
+      </p>
     </div>
   );
 }
@@ -2591,7 +2674,7 @@ function SystemHealth() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'thorsten';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'thorsten';
 
 interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
@@ -2609,8 +2692,9 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'KI/ML-Engine',
     items: [
-      { id: 'ml-status', label: 'Status & Lernphase',     icon: <Activity {...ICON_PROPS} /> },
-      { id: 'ml-config', label: 'Filter-Konfiguration',   icon: <Sliders  {...ICON_PROPS} /> },
+      { id: 'ml-status',  label: 'Status & Lernphase',     icon: <Activity  {...ICON_PROPS} /> },
+      { id: 'ml-config',  label: 'Filter-Konfiguration',   icon: <Sliders   {...ICON_PROPS} /> },
+      { id: 'ml-learned', label: 'Gelernte Muster',        icon: <Sparkles  {...ICON_PROPS} /> },
     ],
   },
   {
@@ -2684,6 +2768,7 @@ export function SettingsPage() {
             {active === 'saml'          && <SamlSettings />}
             {active === 'ml-status'     && <MLStatusDisplay />}
             {active === 'ml-config'     && <MLFilterConfig />}
+            {active === 'ml-learned'    && <MLLearnedPatterns />}
             {active === 'rules-sources' && <RuleSources />}
             {active === 'rules-list'    && <RulesList />}
             {active === 'system-health' && <SystemHealth />}
