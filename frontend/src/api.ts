@@ -641,3 +641,23 @@ export async function setInterfaceRole(
     body: JSON.stringify({ role, iface }),
   });
 }
+
+export interface SystemStats {
+  cpu_pct:  number | null;
+  mem:      { total_mb: number; used_mb: number; pct: number | null };
+  disk:     { total_gb: number; used_gb: number; pct: number | null };
+  net:      { rx_bps: number | null; tx_bps: number | null; rx_pps: number | null; tx_pps: number | null; rx_dropped: number } | null;
+  sniffer:  { pps: number | null; drop_pct: number | null; total_captured: number; total_dropped: number; kafka_errors: number };
+  iface:    string;
+}
+
+export async function fetchSystemStats(): Promise<SystemStats> {
+  if (isDemoMode()) return {
+    cpu_pct: 23.4, iface: 'eth1',
+    mem:     { total_mb: 16384, used_mb: 6800, pct: 41.5 },
+    disk:    { total_gb: 500, used_gb: 120, pct: 24.0 },
+    net:     { rx_bps: 12500000, tx_bps: 800000, rx_pps: 1200, tx_pps: 80, rx_dropped: 0 },
+    sniffer: { pps: 1200, drop_pct: 0.0, total_captured: 5000000, total_dropped: 0, kafka_errors: 0 },
+  };
+  return req('/api/system/stats');
+}

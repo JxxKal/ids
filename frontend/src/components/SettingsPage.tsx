@@ -9,9 +9,9 @@ import {
   fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource, setInterfaceRole,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
-  triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname,
+  triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname, fetchSystemStats,
 } from '../api';
-import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
+import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats } from '../api';
 import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
@@ -2432,9 +2432,166 @@ function SystemUpdate() {
   );
 }
 
+// ── SystemHealth ──────────────────────────────────────────────────────────────
+
+function fmtBytes(bps: number | null): string {
+  if (bps === null) return '…';
+  if (bps >= 1e9) return `${(bps / 1e9).toFixed(2)} Gbps`;
+  if (bps >= 1e6) return `${(bps / 1e6).toFixed(1)} Mbps`;
+  if (bps >= 1e3) return `${(bps / 1e3).toFixed(0)} Kbps`;
+  return `${bps} bps`;
+}
+
+function GaugeBar({ pct, warn = 70, crit = 85 }: { pct: number | null; warn?: number; crit?: number }) {
+  if (pct === null) return <span className="text-slate-600 text-xs font-mono">Berechne…</span>;
+  const bar = pct >= crit ? 'bg-red-500' : pct >= warn ? 'bg-amber-500' : 'bg-green-500';
+  const txt = pct >= crit ? 'text-red-300' : pct >= warn ? 'text-amber-300' : 'text-green-300';
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+        <div className={`${bar} h-full rounded-full transition-all duration-500`} style={{ width: `${Math.min(100, pct)}%` }} />
+      </div>
+      <span className={`text-xs font-mono w-14 text-right tabular-nums ${txt}`}>{pct.toFixed(1)} %</span>
+    </div>
+  );
+}
+
+function StatRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[160px_1fr] items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
+      <span className="text-[11px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function SystemHealth() {
+  const [stats,   setStats]   = useState<SystemStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      fetchSystemStats()
+        .then(d => { if (alive) { setStats(d); setError(''); setLoading(false); } })
+        .catch(() => { if (alive) { setError('Systemdaten nicht verfügbar'); setLoading(false); } });
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+
+  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (error)   return <p className="text-red-400 text-sm">{error}</p>;
+  if (!stats)  return null;
+
+  const { cpu_pct, mem, disk, net, sniffer, iface } = stats;
+  const dropWarn = sniffer.drop_pct !== null && sniffer.drop_pct > 1;
+  const dropCrit = sniffer.drop_pct !== null && sniffer.drop_pct > 5;
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-sm font-semibold text-slate-200">Systemauslastung</h2>
+
+      {/* Warnbanner bei Paketverlusten */}
+      {dropWarn && (
+        <div className={`rounded-lg border px-4 py-3 text-xs ${
+          dropCrit
+            ? 'bg-red-950/40 border-red-700/50 text-red-300'
+            : 'bg-amber-950/40 border-amber-700/50 text-amber-300'
+        }`}>
+          <p className="font-semibold mb-0.5">
+            {dropCrit ? '⚠ Kritischer Paketverlust am Sniffer-Interface' : '⚠ Erhöhter Paketverlust am Sniffer-Interface'}
+          </p>
+          <p className="text-slate-400">
+            Drop-Rate {sniffer.drop_pct?.toFixed(2)} % — mögliche Ursachen: Mirror-Port überlastet,
+            Sniffer-CPU zu langsam oder Kafka-Backpressure. Pakete fehlen in der Analyse.
+          </p>
+        </div>
+      )}
+
+      {/* Host */}
+      <section>
+        <p className="text-[11px] text-slate-500 uppercase tracking-wider font-mono mb-3">Host</p>
+        <div className="space-y-1">
+          <StatRow label="CPU">
+            <GaugeBar pct={cpu_pct} />
+          </StatRow>
+          <StatRow label={`RAM (${mem.used_mb >= 1024 ? (mem.used_mb/1024).toFixed(1)+'GB' : mem.used_mb+'MB'} / ${mem.total_mb >= 1024 ? (mem.total_mb/1024).toFixed(0)+'GB' : mem.total_mb+'MB'})`}>
+            <GaugeBar pct={mem.pct} />
+          </StatRow>
+          <StatRow label={`Disk (${disk.used_gb} GB / ${disk.total_gb} GB)`}>
+            <GaugeBar pct={disk.pct} crit={90} />
+          </StatRow>
+        </div>
+      </section>
+
+      {/* Sniffer-Interface */}
+      <section>
+        <p className="text-[11px] text-slate-500 uppercase tracking-wider font-mono mb-3">
+          Sniffer-Interface {iface && <span className="text-cyan-600 normal-case">({iface})</span>}
+        </p>
+        {net ? (
+          <div className="space-y-1">
+            <StatRow label="RX-Rate">
+              <span className="text-slate-200 text-xs font-mono">{fmtBytes(net.rx_bps)}</span>
+            </StatRow>
+            <StatRow label="TX-Rate">
+              <span className="text-slate-200 text-xs font-mono">{fmtBytes(net.tx_bps)}</span>
+            </StatRow>
+            <StatRow label="RX Pakete/s">
+              <span className="text-slate-200 text-xs font-mono">{net.rx_pps !== null ? net.rx_pps.toLocaleString() : '…'} pps</span>
+            </StatRow>
+            <StatRow label="IF Drops kum.">
+              <span className={`text-xs font-mono ${net.rx_dropped > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
+                {net.rx_dropped.toLocaleString()}
+              </span>
+            </StatRow>
+          </div>
+        ) : (
+          <p className="text-slate-600 text-xs">Kein Sniffer-Interface konfiguriert</p>
+        )}
+      </section>
+
+      {/* Sniffer-Prozess */}
+      <section>
+        <p className="text-[11px] text-slate-500 uppercase tracking-wider font-mono mb-3">Sniffer-Prozess</p>
+        <div className="space-y-1">
+          <StatRow label="Erfasst/s">
+            <span className="text-slate-200 text-xs font-mono">{sniffer.pps !== null ? `${sniffer.pps.toFixed(0)} pps` : '…'}</span>
+          </StatRow>
+          <StatRow label="Drop-Rate">
+            <span className={`text-xs font-mono font-semibold ${
+              dropCrit ? 'text-red-300' : dropWarn ? 'text-amber-300' : 'text-green-400'
+            }`}>
+              {sniffer.drop_pct !== null ? `${sniffer.drop_pct.toFixed(2)} %` : '…'}
+            </span>
+          </StatRow>
+          <StatRow label="Gesamt erfasst">
+            <span className="text-slate-400 text-xs font-mono">{sniffer.total_captured.toLocaleString()}</span>
+          </StatRow>
+          <StatRow label="Gesamt verworfen">
+            <span className={`text-xs font-mono ${sniffer.total_dropped > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+              {sniffer.total_dropped.toLocaleString()}
+            </span>
+          </StatRow>
+          <StatRow label="Kafka-Fehler">
+            <span className={`text-xs font-mono ${sniffer.kafka_errors > 0 ? 'text-red-400' : 'text-slate-400'}`}>
+              {sniffer.kafka_errors}
+            </span>
+          </StatRow>
+        </div>
+      </section>
+
+      <p className="text-[10px] text-slate-700 font-mono">Aktualisierung alle 5 s</p>
+    </div>
+  );
+}
+
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'thorsten';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'thorsten';
 
 interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
@@ -2466,10 +2623,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
-      { id: 'interfaces', label: 'Interfaces',    icon: <Network  {...ICON_PROPS} /> },
-      { id: 'ssl',        label: 'SSL-Zertifikat', icon: <Lock     {...ICON_PROPS} /> },
-      { id: 'syslog',     label: 'Syslog / SIEM',  icon: <FileText {...ICON_PROPS} /> },
-      { id: 'update',     label: 'System-Update',  icon: <Upload   {...ICON_PROPS} /> },
+      { id: 'system-health', label: 'Systemauslastung', icon: <Activity {...ICON_PROPS} /> },
+      { id: 'interfaces',    label: 'Interfaces',        icon: <Network  {...ICON_PROPS} /> },
+      { id: 'ssl',           label: 'SSL-Zertifikat',    icon: <Lock     {...ICON_PROPS} /> },
+      { id: 'syslog',        label: 'Syslog / SIEM',     icon: <FileText {...ICON_PROPS} /> },
+      { id: 'update',        label: 'System-Update',     icon: <Upload   {...ICON_PROPS} /> },
     ],
   },
   {
@@ -2528,6 +2686,7 @@ export function SettingsPage() {
             {active === 'ml-config'     && <MLFilterConfig />}
             {active === 'rules-sources' && <RuleSources />}
             {active === 'rules-list'    && <RulesList />}
+            {active === 'system-health' && <SystemHealth />}
             {active === 'interfaces'    && <NetworkInterfaces />}
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}
