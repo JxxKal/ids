@@ -93,22 +93,68 @@ const ROW_SEVERITY: Record<string, string> = {
 // ── Gruppierung ────────────────────────────────────────────────────────────────
 
 interface AlertGroup {
-  key:          string;
-  severity:     Alert['severity'];
-  rule_id?:     string;
-  src_ip?:      string;
-  dst_ip?:      string;
-  proto?:       string;
-  description?: string;
-  tags:         string[];
-  count:        number;
-  first_ts:     string;
-  last_ts:      string;
-  latest:       Alert;
-  enrichment?:  Enrichment;
+  key:           string;
+  severity:      Alert['severity'];
+  rule_id?:      string;
+  src_ip?:       string;
+  dst_ip?:       string;
+  proto?:        string;
+  dst_port?:     number;
+  description?:  string;
+  tags:          string[];
+  count:         number;
+  first_ts:      string;
+  last_ts:       string;
+  latest:        Alert;
+  enrichment?:   Enrichment;
+  bidirectional: boolean;
 }
 
 const OT_TAGS = new Set(['scada', 'ics', 'modbus', 'dnp3', 'ethernet/ip', 'bacnet', 'ot']);
+
+// ── Application-Protocol-Ableitung aus Port + L4 ──────────────────────────────
+
+const PORT_MAP: Record<number, string> = {
+  20: 'FTP-DATA', 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP',
+  53: 'DNS', 67: 'DHCP', 68: 'DHCP', 69: 'TFTP', 80: 'HTTP',
+  88: 'Kerberos', 110: 'POP3', 123: 'NTP', 135: 'RPC', 137: 'NetBIOS',
+  138: 'NetBIOS', 139: 'SMB', 143: 'IMAP', 161: 'SNMP', 162: 'SNMP',
+  179: 'BGP', 389: 'LDAP', 443: 'HTTPS', 445: 'SMB', 465: 'SMTPS',
+  500: 'IKE', 514: 'Syslog', 587: 'SMTP', 636: 'LDAPS',
+  993: 'IMAPS', 995: 'POP3S', 1194: 'OpenVPN', 1433: 'MSSQL',
+  1521: 'Oracle', 1812: 'RADIUS', 1813: 'RADIUS', 1883: 'MQTT',
+  1900: 'SSDP', 3128: 'HTTP-Proxy', 3306: 'MySQL', 3389: 'RDP',
+  5060: 'SIP', 5061: 'SIPS', 5353: 'mDNS', 5432: 'PostgreSQL',
+  5683: 'CoAP', 5900: 'VNC', 6379: 'Redis', 8080: 'HTTP-Alt',
+  8443: 'HTTPS-Alt', 8883: 'MQTTS',
+  // ── OT/SCADA ──────────────────────────────────────────────────────────────
+  102: 'S7/ISO-TSAP',
+  502: 'Modbus',
+  789: 'Red-Lion',
+  1089: 'FF-Annunciation', 1090: 'FF-FMS', 1091: 'FF-System',
+  1962: 'PCWorX',
+  2222: 'EtherNet/IP',
+  4840: 'OPC-UA',
+  9600: 'OMRON-FINS',
+  18245: 'Siemens-GE-SRTP',
+  18246: 'Siemens-GE-SRTP',
+  20000: 'DNP3',
+  34962: 'PROFINET', 34963: 'PROFINET', 34964: 'PROFINET',
+  44818: 'EtherNet/IP',
+  47808: 'BACnet',
+};
+
+function appProto(proto: string | undefined, dstPort: number | null | undefined, srcPort: number | null | undefined): string {
+  // ICMP behält seinen Namen
+  const p = (proto ?? '').toUpperCase();
+  if (p === 'ICMP' || p === 'ICMPV6') return p;
+
+  // Well-known port lookup (dst bevorzugt, dann src)
+  if (dstPort && PORT_MAP[dstPort]) return PORT_MAP[dstPort];
+  if (srcPort && PORT_MAP[srcPort]) return PORT_MAP[srcPort];
+
+  return p || '–';
+}
 
 function FeedbackBadge({ feedback }: { feedback: 'fp' | 'tp' }) {
   return feedback === 'fp'
@@ -144,15 +190,31 @@ function fmtTime(ts: string | number): string {
   return new Date(tsMs(ts)).toLocaleTimeString();
 }
 
+/** Normalisierter Session-Key: gleiche Session in beide Richtungen → gleicher Key. */
+function sessionKey(ipA?: string, ipB?: string): string {
+  const a = ipA ?? '–';
+  const b = ipB ?? '–';
+  return a <= b ? `${a}|${b}` : `${b}|${a}`;
+}
+
 function groupAlerts(alerts: Alert[]): AlertGroup[] {
   const map = new Map<string, AlertGroup>();
 
   for (const a of alerts) {
-    const k = `${a.rule_id ?? '–'}::${a.src_ip ?? '–'}`;
+    const k = `${a.rule_id ?? '–'}::${sessionKey(a.src_ip, a.dst_ip)}`;
     const g = map.get(k);
     if (g) {
       g.count++;
-      if (tsMs(a.ts) > tsMs(g.last_ts)) { g.last_ts = a.ts; g.latest = a; g.description = a.description; }
+      // Richtungswechsel erkennen: wenn diese Quelle vorher das Ziel war
+      if (a.src_ip && a.src_ip === g.dst_ip) g.bidirectional = true;
+      if (tsMs(a.ts) > tsMs(g.last_ts)) {
+        g.last_ts = a.ts;
+        g.latest = a;
+        g.description = a.description;
+        // neueste Richtung für Anzeige übernehmen
+        g.src_ip = a.src_ip; g.dst_ip = a.dst_ip;
+        g.dst_port = a.dst_port;
+      }
       if (tsMs(a.ts) < tsMs(g.first_ts)) g.first_ts = a.ts;
       if (!g.enrichment && a.enrichment) g.enrichment = a.enrichment;
       if (a.tags?.length) g.tags = [...new Set([...g.tags, ...a.tags])];
@@ -160,10 +222,11 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
       map.set(k, {
         key: k, severity: a.severity,
         rule_id: a.rule_id, src_ip: a.src_ip, dst_ip: a.dst_ip,
-        proto: a.proto, description: a.description,
+        proto: a.proto, dst_port: a.dst_port, description: a.description,
         tags: [...(a.tags ?? [])],
         count: 1, first_ts: a.ts, last_ts: a.ts, latest: a,
         enrichment: a.enrichment ?? undefined,
+        bidirectional: false,
       });
     }
   }
@@ -307,6 +370,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                 <th className="px-3 py-2">Letzte</th>
                 <th className="px-3 py-2">Severity</th>
                 <th className="px-3 py-2">Regel</th>
+                <th className="px-3 py-2">Proto</th>
                 <th className="px-3 py-2">Beschreibung</th>
                 <th className="px-3 py-2">Tags</th>
                 <th className="px-3 py-2">Quelle</th>
@@ -317,7 +381,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             </thead>
             <tbody>
               {groups!.length === 0 && (
-                <tr><td colSpan={9} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
+                <tr><td colSpan={10} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
               )}
               {groups!.map(g => (
                 <tr
@@ -341,6 +405,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     {g.latest.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
                     {g.latest.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
                   </td>
+                  <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap">
+                    {appProto(g.proto, g.dst_port, g.latest.src_port)}
+                  </td>
                   <td className="px-3 py-2 text-slate-400 max-w-sm">
                     <span className="line-clamp-2" title={g.description ?? undefined}>
                       {g.description ?? '–'}
@@ -350,7 +417,12 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     <TagList tags={g.tags} />
                   </td>
                   <td className="px-3 py-2">
-                    <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
+                    <div className="flex items-center gap-1.5">
+                      <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
+                      {g.bidirectional && (
+                        <span title="Bidirektional (Request + Response in Session)" className="text-cyan-500 text-sm shrink-0">↔</span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" />
@@ -379,6 +451,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                 <th className="px-3 py-2">Zeit</th>
                 <th className="px-3 py-2">Severity</th>
                 <th className="px-3 py-2">Regel</th>
+                <th className="px-3 py-2">Proto</th>
                 <th className="px-3 py-2">Beschreibung</th>
                 <th className="px-3 py-2">Tags</th>
                 <th className="px-3 py-2">Quelle</th>
@@ -389,7 +462,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={9} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
+                <tr><td colSpan={10} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
               )}
               {filtered.map(a => (
                 <tr
@@ -405,6 +478,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     {a.rule_id}
                     {a.is_test && <span className="ml-1 text-blue-400 text-xs">[TEST]</span>}
                     {a.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap">
+                    {appProto(a.proto, a.dst_port, a.src_port)}
                   </td>
                   <td className="px-3 py-2 text-slate-400 max-w-sm">
                     <span className="line-clamp-2" title={a.description ?? undefined}>

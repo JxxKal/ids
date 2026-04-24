@@ -31,6 +31,14 @@ MIN_COUNT      = int(os.environ.get("SUPPRESSION_MIN_COUNT",      "20"))
 MIN_DAYS       = int(os.environ.get("SUPPRESSION_MIN_DAYS",       "3"))
 
 
+def _session_key(rule_id: str, ip_a: str, ip_b: str) -> tuple[str, str, str]:
+    """Normalisiert IP-Paar so, dass beide Richtungen denselben Key liefern.
+    (rule_id, Client→Server) und (rule_id, Server→Client) matchen dieselbe Session."""
+    if ip_a <= ip_b:
+        return (rule_id, ip_a, ip_b)
+    return (rule_id, ip_b, ip_a)
+
+
 class SuppressionCache:
     def __init__(self, postgres_dsn: str) -> None:
         self._dsn = postgres_dsn
@@ -49,9 +57,12 @@ class SuppressionCache:
             self._connect()
             cur = self._conn.cursor()  # type: ignore[union-attr]
 
-            # Layer 1: Manuell markierte FPs
+            # Layer 1: Manuell markierte FPs — bidirektional normiert
             cur.execute("""
-                SELECT DISTINCT rule_id, src_ip::text, dst_ip::text
+                SELECT DISTINCT
+                    rule_id,
+                    LEAST(src_ip, dst_ip)::text    AS ip_a,
+                    GREATEST(src_ip, dst_ip)::text AS ip_b
                 FROM alerts
                 WHERE feedback = 'fp'
                   AND rule_id IS NOT NULL
@@ -60,20 +71,23 @@ class SuppressionCache:
             """)
             manual = {(r[0], r[1], r[2]) for r in cur.fetchall()}
 
-            # Layer 2: ML-gelernte Muster
-            #   - ≥ MIN_COUNT Treffer in LEARN_WINDOW_D Tagen
+            # Layer 2: ML-gelernte Muster — auch bidirektional
+            #   - ≥ MIN_COUNT Treffer in LEARN_WINDOW_D Tagen (Request+Response zählen zusammen)
             #   - auf ≥ MIN_DAYS verschiedenen Tagen gesehen
             #   - KEIN einziger TP-Feedback in dem Fenster (Sicherheit)
             #   - severity nie critical/high (Sicherheit)
             cur.execute("""
-                SELECT rule_id, src_ip::text, dst_ip::text
+                SELECT
+                    rule_id,
+                    LEAST(src_ip, dst_ip)::text    AS ip_a,
+                    GREATEST(src_ip, dst_ip)::text AS ip_b
                 FROM alerts
                 WHERE ts > NOW() - (%s || ' days')::interval
                   AND is_test = false
                   AND rule_id IS NOT NULL
                   AND src_ip  IS NOT NULL
                   AND dst_ip  IS NOT NULL
-                GROUP BY rule_id, src_ip, dst_ip
+                GROUP BY rule_id, LEAST(src_ip, dst_ip), GREATEST(src_ip, dst_ip)
                 HAVING COUNT(*)                                       >= %s
                    AND COUNT(DISTINCT DATE(ts))                       >= %s
                    AND COUNT(*) FILTER (WHERE feedback = 'tp')         = 0
@@ -88,7 +102,7 @@ class SuppressionCache:
             self._learned = learned
             self._last_refresh = time.monotonic()
             log.info(
-                "Suppression cache: %d manuell (fp) + %d ML-gelernt (window=%dd count>=%d days>=%d)",
+                "Suppression cache: %d manuell (fp) + %d ML-gelernt (window=%dd count>=%d days>=%d, bidirektional)",
                 len(self._manual), len(self._learned),
                 LEARN_WINDOW_D, MIN_COUNT, MIN_DAYS,
             )
@@ -101,10 +115,11 @@ class SuppressionCache:
             self.refresh()
 
     def classify(self, rule_id: str | None, src_ip: str | None, dst_ip: str | None) -> str | None:
-        """Gibt 'manual', 'learned' oder None zurück."""
+        """Gibt 'manual', 'learned' oder None zurück. Bidirektional: Request und
+        Response matchen denselben gespeicherten Key."""
         if not rule_id or not src_ip or not dst_ip:
             return None
-        key = (rule_id, src_ip, dst_ip)
+        key = _session_key(rule_id, src_ip, dst_ip)
         if key in self._manual:
             return "manual"
         if key in self._learned:
