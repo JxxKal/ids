@@ -145,11 +145,11 @@ def run(cfg: Config) -> None:
 
             # 2b. FP-Suppression: bekannte (rule_id, src_ip)-Paare → low
             suppression.maybe_refresh()
-            if suppression.should_suppress(alert.get("rule_id"), alert.get("src_ip")):
+            if suppression.should_suppress(alert.get("rule_id"), alert.get("src_ip"), alert.get("dst_ip")):
                 if alert.get("severity") != "low":
                     log.info(
-                        "FP-Suppression: %s %s → low",
-                        alert.get("rule_id"), alert.get("src_ip"),
+                        "FP-Suppression: %s %s → %s → low",
+                        alert.get("rule_id"), alert.get("src_ip"), alert.get("dst_ip"),
                     )
                     alert["severity"] = "low"
                     tags = list(alert.get("tags") or [])
