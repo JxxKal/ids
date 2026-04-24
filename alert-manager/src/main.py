@@ -42,10 +42,11 @@ logging.basicConfig(
 )
 log = logging.getLogger("alert-manager")
 
-INPUT_TOPIC  = "alerts-raw"
-OUTPUT_TOPIC = "alerts-enriched"
-POLL_TIMEOUT = 1.0
-GROUP_ID     = "alert-manager"
+INPUT_TOPIC    = "alerts-raw"
+FEEDBACK_TOPIC = "feedback"
+OUTPUT_TOPIC   = "alerts-enriched"
+POLL_TIMEOUT   = 1.0
+GROUP_ID       = "alert-manager"
 
 
 def _make_consumer(brokers: str) -> Consumer:
@@ -79,7 +80,9 @@ def run(cfg: Config) -> None:
 
     consumer = _make_consumer(cfg.kafka_brokers)
     producer  = _make_producer(cfg.kafka_brokers)
-    consumer.subscribe([INPUT_TOPIC])
+    # Subscribe auch auf das Feedback-Topic, damit der SuppressionCache
+    # bei FP-Markierung sofort refreshed wird (statt bis zu 60 s zu warten).
+    consumer.subscribe([INPUT_TOPIC, FEEDBACK_TOPIC])
 
     log.info(
         "Alert manager ready | dedup_window=%ds",
@@ -126,6 +129,21 @@ def run(cfg: Config) -> None:
                         break
                     continue
                 raise KafkaException(msg.error())
+
+            # Feedback-Topic: sofortiger Cache-Refresh, damit neue Alerts
+            # unmittelbar nach der FP-Markierung unterdrückt werden (vorher
+            # Wartezeit bis zum nächsten 60-s-Intervall).
+            if msg.topic() == FEEDBACK_TOPIC:
+                try:
+                    payload = orjson.loads(msg.value())
+                    log.info(
+                        "Feedback-Event empfangen (alert=%s, fb=%s) → force refresh",
+                        payload.get("alert_id", "?")[:8], payload.get("feedback"),
+                    )
+                except Exception:
+                    log.info("Feedback-Event empfangen → force refresh")
+                suppression.refresh()
+                continue
 
             try:
                 alert = orjson.loads(msg.value())
