@@ -63,7 +63,7 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | `sniffer` | Rust | ✅ | AF_PACKET Capture, Header-Parsing, Kafka-Publishing (raw-packets + pcap-headers) |
 | `flow-aggregator` | Python | ✅ | Pakete → Flows, statistische Features (Welford, IAT-Entropie) |
 | `signature-engine` | Python | ✅ | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
-| `ml-engine` | Python | ✅ | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update, konfigurierbarer Threshold |
+| `ml-engine` | Python | ✅ | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update, konfigurierbarer Threshold → **[ausführliche Doku](docs/ML_ENGINE.md)** |
 | `alert-manager` | Python | ✅ | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung |
 | `enrichment-service` | Python | ✅ | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache, Host-Trust-Prüfung |
 | `pcap-store` | Python | ✅ | Sliding-Window-Paketpuffer, PCAP-Writer, MinIO-Upload, DB-Update, WS-Push nach Upload |
@@ -296,6 +296,9 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 - **Feedback geben** – True/False Positive mit optionaler Notiz
   - Feedback-Banner nach Setzen (grün/rot) mit Zeitstempel und Notiz
   - Fließt beim nächsten ML-Retrain als Trainings-Sample ein
+  - **Adaptive Suppression**: alle nachfolgenden Alerts mit gleicher Regel +
+    gleicher Verbindung (bidirektional) werden automatisch auf `low`
+    herabgestuft. Details: [docs/ML_ENGINE.md](docs/ML_ENGINE.md)
 
 ### Netzwerke
 
