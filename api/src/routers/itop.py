@@ -24,7 +24,14 @@ from database import get_pool
 
 router = APIRouter(prefix="/api/itop", tags=["itop"])
 
-_CI_CLASSES = ["Server", "NetworkDevice", "PC"]
+# Maps CI class → output_fields for core/get.
+# Server and NetworkDevice have TeemIP's managementip_id_friendlyname (FK → IPv4Address).
+# PC uses plain-text managementip.
+_CI_CLASSES: dict[str, str] = {
+    "Server":        "name,managementip_id_friendlyname,description",
+    "NetworkDevice": "name,managementip_id_friendlyname,description",
+    "PC":            "name,managementip,description",
+}
 
 # iTop-Klassennamen für Subnets variieren je nach installierten Extensions.
 # TeemIP verwendet IPv4Subnet, ältere/andere Instanzen ggf. NetworkSubnet oder Subnet.
@@ -182,12 +189,11 @@ async def _sync(pool: asyncpg.Pool) -> None:
             _log(f"  Netzwerke: {nets_ok} upserted, {nets_err} Fehler.")
 
             # ── CI-Klassen → host_info ────────────────────────────────────────
-            for cls in _CI_CLASSES:
+            for cls, fields in _CI_CLASSES.items():
                 _log(f"Lade {cls} ...")
                 oql = f"SELECT {cls} WHERE org_name = '{org}'" if org else None
                 try:
-                    cis = await _core_get(client, base_url, user, pwd,
-                                          cls, "name,managementip_id_friendlyname,description", oql)
+                    cis = await _core_get(client, base_url, user, pwd, cls, fields, oql)
                 except Exception as exc:
                     _log(f"  {cls}: {exc} – übersprungen.")
                     continue
@@ -195,9 +201,13 @@ async def _sync(pool: asyncpg.Pool) -> None:
                 _log(f"  {len(cis)} Objekte gefunden.")
                 async with pool.acquire() as conn:
                     for ci in cis:
-                        # TeemIP speichert Management-IP als IPv4Address-Objekt;
-                        # die aufgelöste IP steht in managementip_id_friendlyname
-                        ip_raw = (ci.get("managementip_id_friendlyname") or "").strip()
+                        # TeemIP: Server/NetworkDevice use managementip_id_friendlyname (FK resolved).
+                        # PC uses plain-text managementip.
+                        ip_raw = (
+                            ci.get("managementip_id_friendlyname")
+                            or ci.get("managementip")
+                            or ""
+                        ).strip()
                         name = (ci.get("name") or "").strip() or None
                         if not ip_raw or ip_raw in ("0.0.0.0", "::/0", ""):
                             continue
