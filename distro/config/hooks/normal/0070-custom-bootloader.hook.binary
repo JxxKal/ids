@@ -1,17 +1,27 @@
 #!/bin/bash
 # Binary hook: Cyjan IDS bootloader – self-contained, kein INCLUDE-Chain.
 #
-# Problem: live-build generiert mehrere .cfg-Dateien unter binary/isolinux/
-# (live.cfg, install.cfg, stdmenu.cfg, advanced.cfg, menu.cfg) mit eigenen
-# TIMEOUT/DEFAULT-Werten. Je nach Include-Reihenfolge überschreibt eine
-# davon unsere Settings → Menü nur 1-2 Sek. oder gar nicht sichtbar.
+# Wichtig: live-build führt diesen Hook mit cwd=binary/ aus (siehe
+# /usr/lib/live/build/binary_hooks: `cd binary; ../"${HOOK}"`).
+# Deshalb sind alle Pfade hier RELATIV zum binary/-Verzeichnis —
+# OHNE "binary/"-Prefix!
 #
-# Lösung: Komplett self-contained isolinux.cfg bzw. grub.cfg schreiben,
-# alle konkurrierenden .cfg-Files löschen, splash.png explizit verteilen.
+# Schreibt am Anfang einen Marker in binary/cyjan-hook-ran.txt als Beweis
+# dass der Hook ausgeführt wurde (lässt sich nach dem ISO-Build auf dem
+# Dateisystem finden).
 set -eu
 
-SYSLINUX_SPLASH="config/bootloaders/syslinux/splash.png"
-GRUB_SPLASH="config/bootloaders/grub-efi/splash.png"
+# ── Debug-Marker ─────────────────────────────────────────────────────────────
+MARKER_FILE="cyjan-bootloader-hook-ran.txt"
+{
+    echo "Cyjan IDS custom bootloader hook executed at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "cwd: $(pwd)"
+    echo "contents before modifications:"
+    find boot/grub EFI isolinux syslinux -maxdepth 2 -type f 2>/dev/null | head -30 || true
+} > "${MARKER_FILE}"
+
+SYSLINUX_SPLASH="../config/bootloaders/syslinux/splash.png"
+GRUB_SPLASH="../config/bootloaders/grub-efi/splash.png"
 
 GRUB_CONTENT='set default=0
 set timeout=30
@@ -84,22 +94,23 @@ LABEL safe
 '
 
 # ── GRUB (Legacy + EFI) ──────────────────────────────────────────────────────
+# Pfade RELATIV zu binary/ — KEIN "binary/"-Prefix!
 for GRUB_DIR in \
-    binary/boot/grub \
-    binary/EFI/boot \
-    binary/boot/grub/x86_64-efi; do
+    boot/grub \
+    EFI/boot \
+    boot/grub/x86_64-efi; do
     [ -d "${GRUB_DIR}" ] || continue
 
-    # Konkurrierende Configs löschen (live-build erzeugt teilweise theme.cfg,
-    # x86_64-efi/grub.cfg, etc. die unsere Settings überschreiben könnten)
-    for EXTRA in theme.cfg install.cfg loopback.cfg; do
+    # Konkurrierende Configs löschen (live-build-Standard-Menü)
+    for EXTRA in theme.cfg install.cfg loopback.cfg config.cfg \
+                 install_start.cfg theme install_new.cfg; do
         rm -f "${GRUB_DIR}/${EXTRA}"
     done
 
-    if [ -f "${GRUB_DIR}/grub.cfg" ]; then
-        printf '%s' "${GRUB_CONTENT}" > "${GRUB_DIR}/grub.cfg"
-        echo "[cyjan] Wrote ${GRUB_DIR}/grub.cfg"
-    fi
+    # Live-build's eigene grub.cfg überschreiben
+    printf '%s' "${GRUB_CONTENT}" > "${GRUB_DIR}/grub.cfg"
+    echo "[cyjan] Wrote ${GRUB_DIR}/grub.cfg"
+
     if [ -f "${GRUB_SPLASH}" ]; then
         cp -f "${GRUB_SPLASH}" "${GRUB_DIR}/splash.png"
         echo "[cyjan] Copied splash.png → ${GRUB_DIR}/"
@@ -108,8 +119,8 @@ done
 
 # ── SYSLINUX / ISOLINUX ──────────────────────────────────────────────────────
 for SYS_DIR in \
-    binary/isolinux \
-    binary/syslinux; do
+    isolinux \
+    syslinux; do
     [ -d "${SYS_DIR}" ] || continue
 
     # Komplette Config in isolinux.cfg bzw. syslinux.cfg schreiben.
@@ -121,7 +132,7 @@ for SYS_DIR in \
     done
 
     MAIN_CFG="${SYS_DIR}/isolinux.cfg"
-    [ "${SYS_DIR}" = "binary/syslinux" ] && MAIN_CFG="${SYS_DIR}/syslinux.cfg"
+    [ "${SYS_DIR}" = "syslinux" ] && MAIN_CFG="${SYS_DIR}/syslinux.cfg"
 
     printf '%s' "${SYSLINUX_CONTENT}" > "${MAIN_CFG}"
     echo "[cyjan] Wrote ${MAIN_CFG} (self-contained)"
@@ -131,3 +142,10 @@ for SYS_DIR in \
         echo "[cyjan] Copied splash.png → ${SYS_DIR}/"
     fi
 done
+
+# Marker-File finalisieren
+echo "" >> "${MARKER_FILE}"
+echo "contents after modifications:" >> "${MARKER_FILE}"
+find boot/grub EFI isolinux syslinux -maxdepth 2 -type f 2>/dev/null | head -40 >> "${MARKER_FILE}" || true
+
+echo "[cyjan] Bootloader hook completed successfully"
