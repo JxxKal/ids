@@ -874,8 +874,9 @@ function MLLearnedPatterns() {
         <p className="text-xs text-slate-600 mt-1">
           Spikes gegenüber der Baseline durchbrechen die Suppression automatisch —
           das Muster bleibt gelernt, aber der Burst wird wieder sichtbar weil
-          er eben NICHT mehr normal ist. Kritische/hohe Alerts gehen nie in
-          die Baseline ein, ein TP-Feedback entfernt das Muster komplett.
+          er eben NICHT mehr normal ist. Gilt für alle Severities (auch critical/high):
+          wenn ein Muster lange Zeit konstant auftritt ohne TP-Feedback, wird es
+          als normal gelernt. Ein TP-Feedback entfernt das Muster sofort.
         </p>
       </div>
 

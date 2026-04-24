@@ -16,8 +16,10 @@ Layer 2 — ML-ADAPTIVE (Tag 'ml-suppressed'):
   aber der Burst wird wieder sichtbar weil er eben NICHT normal ist.
 
 Sicherheit:
-  - Critical/high Severity geht nie in die Baseline ein
-  - Ein TP-Feedback entfernt das Muster aus der Lernliste
+  - Ein TP-Feedback entfernt das Muster permanent aus der Lernliste
+  - Spikes (z-Score >= Z_THRESHOLD) durchbrechen die Suppression — ein
+    plötzlicher Anstieg wird IMMER durchgelassen, auch wenn das Muster
+    zuvor als gelernt klassifiziert war
   - Manuelle FP-Regeln haben Vorrang vor ML-Adaptive
 
 Refresh alle REFRESH_INTERVAL_S Sekunden aus der DB.
@@ -107,7 +109,6 @@ class SuppressionCache:
                       AND rule_id IS NOT NULL
                       AND src_ip  IS NOT NULL
                       AND dst_ip  IS NOT NULL
-                      AND severity NOT IN ('critical','high')
                     GROUP BY 1, 2, 3, 4
                 ),
                 baseline AS (
@@ -129,7 +130,6 @@ class SuppressionCache:
                     FROM alerts
                     WHERE ts > NOW() - INTERVAL '1 hour'
                       AND is_test = false
-                      AND severity NOT IN ('critical','high')
                     GROUP BY 1, 2, 3
                 ),
                 tp_pat AS (
