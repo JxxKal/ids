@@ -21,4 +21,7 @@ fi
 # Da wir ids als Login-User nutzen, deaktivieren wir die live-config Autologin-Komponente.
 find /lib/live/config/ -name "*autologin*" -exec chmod -x {} \; 2>/dev/null || true
 
-echo "[cyjan] Autologin konfiguriert."
+# SSH-Server aktivieren – sonst kein Remote-Zugriff auf die Live-ISO
+systemctl enable ssh.service 2>/dev/null || systemctl enable ssh.socket 2>/dev/null || true
+
+echo "[cyjan] Autologin + SSH konfiguriert."
