@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { clearToken, fetchAlerts, fetchMe, fetchSystemStats, getToken, setToken } from './api';
+import { clearToken, fetchAlerts, fetchMe, fetchSystemStats, fetchUnknownHosts, getToken, setToken } from './api';
 import type { SystemStats } from './api';
+import { UnknownHostsDrawer } from './components/UnknownHostsDrawer';
 import { disableDemoMode } from './demo/mode';
 import { resetStore as resetDemoStore } from './demo/store';
 import { AlertFeed } from './components/AlertFeed';
@@ -92,7 +93,9 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const { alerts, connected, setAlerts } = useWebSocket();
-  const [sysStats, setSysStats] = useState<SystemStats | null>(null);
+  const [sysStats,       setSysStats]       = useState<SystemStats | null>(null);
+  const [unknownCount,   setUnknownCount]   = useState<number | null>(null);
+  const [showUnknown,    setShowUnknown]    = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -100,6 +103,15 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
     const load = () => fetchSystemStats().then(d => { if (alive) setSysStats(d); }).catch(() => {});
     load();
     const t = setInterval(load, 15_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const load = () => fetchUnknownHosts(30).then(d => { if (alive) setUnknownCount(d.length); }).catch(() => {});
+    load();
+    const t = setInterval(load, 60_000);
     return () => { alive = false; clearInterval(t); };
   }, [user]);
 
@@ -212,6 +224,20 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                   {isLoading ? 'Lade…' : `${alertCount} Alerts`}
                 </span>
 
+                {/* Unbekannte Hosts */}
+                {unknownCount !== null && unknownCount > 0 && (
+                  <button
+                    onClick={() => setShowUnknown(true)}
+                    title={`${unknownCount} IPs in Alerts ohne Host-Eintrag – klicken zum Anzeigen`}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-slate-800 text-slate-400 border border-slate-600 hover:border-cyan-600 hover:text-cyan-300 transition-colors"
+                  >
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+                    </svg>
+                    {unknownCount} unbekannt
+                  </button>
+                )}
+
                 {/* Sniffer-Health-Warnung */}
                 {sysStats && sysStats.sniffer.drop_pct !== null && sysStats.sniffer.drop_pct > 1 && (
                   <span
@@ -285,6 +311,8 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
         {tab === 'tests'    && <div className="flex-1 overflow-auto p-5"><TestsPage    /></div>}
         {tab === 'settings' && <div className="flex-1 overflow-auto p-5"><SettingsPage /></div>}
       </main>
+
+      {showUnknown && <UnknownHostsDrawer onClose={() => setShowUnknown(false)} />}
     </div>
   );
 }

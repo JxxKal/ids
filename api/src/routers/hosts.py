@@ -61,6 +61,64 @@ def _row_to_host(row: asyncpg.Record) -> HostResponse:
     )
 
 
+@router.get("/unknown", summary="IPs aus Alerts ohne bekannten Host-Eintrag")
+async def list_unknown_hosts(
+    days:  int            = 30,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+    pool:  asyncpg.Pool   = Depends(get_pool),
+) -> list[dict]:
+    """IPs die in Alerts aufgetaucht sind, aber keinen host_info-Eintrag
+    mit Hostname oder Display-Name haben."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            WITH alert_ips AS (
+                SELECT DISTINCT ip FROM (
+                    SELECT src_ip AS ip FROM alerts
+                    WHERE src_ip IS NOT NULL AND is_test = false
+                      AND ts > NOW() - ($1 || ' days')::interval
+                    UNION
+                    SELECT dst_ip AS ip FROM alerts
+                    WHERE dst_ip IS NOT NULL AND is_test = false
+                      AND ts > NOW() - ($1 || ' days')::interval
+                ) t
+            ),
+            unknown AS (
+                SELECT ai.ip FROM alert_ips ai
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM host_info h
+                    WHERE h.ip = ai.ip
+                      AND (h.hostname IS NOT NULL OR h.display_name IS NOT NULL)
+                )
+            )
+            SELECT
+                u.ip::text                       AS ip,
+                COUNT(DISTINCT a.alert_id)::int  AS alert_count,
+                MAX(a.ts)                        AS last_seen,
+                MIN(a.ts)                        AS first_seen,
+                MODE() WITHIN GROUP (ORDER BY a.severity) AS top_severity
+            FROM unknown u
+            JOIN alerts a ON (a.src_ip = u.ip OR a.dst_ip = u.ip)
+              AND a.is_test = false
+              AND a.ts > NOW() - ($1 || ' days')::interval
+            GROUP BY u.ip
+            ORDER BY alert_count DESC, last_seen DESC
+            LIMIT $2
+            """,
+            days, limit,
+        )
+    return [
+        {
+            "ip":          r["ip"],
+            "alert_count": r["alert_count"],
+            "last_seen":   r["last_seen"].isoformat() if r["last_seen"] else None,
+            "first_seen":  r["first_seen"].isoformat() if r["first_seen"] else None,
+            "top_severity": r["top_severity"],
+        }
+        for r in rows
+    ]
+
+
 @router.get("", response_model=list[HostResponse])
 async def list_hosts(
     trusted: bool | None = None,
