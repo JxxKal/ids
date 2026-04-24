@@ -248,7 +248,9 @@ async def set_feedback(
                 "score":    alert.score,
                 "ts":       time.time(),
             }))
-            # WS-Push-Event damit alle Clients den Status live sehen
+            # WS-Push-Event damit alle Clients den Status live sehen —
+            # inkl. severity (wird bei FP auf 'low' gesetzt) und tags
+            # damit der Client-State vollständig konsistent bleibt.
             _feedback_producer.produce("alerts-enriched-push", value=orjson.dumps({
                 "type": "feedback_updated",
                 "data": {
@@ -256,6 +258,8 @@ async def set_feedback(
                     "feedback":     body.feedback,
                     "feedback_ts":  alert.feedback_ts.isoformat() if alert.feedback_ts else None,
                     "feedback_note": body.note,
+                    "severity":     alert.severity,
+                    "tags":         list(alert.tags or []),
                 },
             }))
             _feedback_producer.poll(0)

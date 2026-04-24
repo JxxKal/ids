@@ -256,4 +256,4 @@ export type WsMessage =
   | { type: 'alert';            data: Alert }
   | { type: 'alert_enriched';   data: { alert_id: string; enrichment: Enrichment } }
   | { type: 'pcap_available';   data: { alert_id: string } }
-  | { type: 'feedback_updated'; data: { alert_id: string; feedback: 'fp' | 'tp'; feedback_ts: string | null; feedback_note: string | null } };
+  | { type: 'feedback_updated'; data: { alert_id: string; feedback: 'fp' | 'tp'; feedback_ts: string | null; feedback_note: string | null; severity?: Alert['severity']; tags?: string[] } };

@@ -64,8 +64,28 @@ export function useWebSocket() {
               .slice(0, MAX_ALERTS);
           });
         } else if (msg.type === 'alert') {
+          // Dedupliziere: wenn alert_id bereits existiert (z.B. nach
+          // Kafka-Rebalance), merge statt überschreiben. Lokale Flags
+          // (feedback, severity nach FP-Markierung, tags wie auto-suppressed
+          // oder ml-suppressed, pcap) MÜSSEN erhalten bleiben.
           setAlerts(prev => {
-            const next = [msg.data, ...prev];
+            const incoming = msg.data;
+            const existing = prev.find(a => a.alert_id === incoming.alert_id);
+            if (existing) {
+              // Merge: lokale Feedback- und Suppression-Flags gewinnen
+              const merged: Alert = {
+                ...incoming,
+                feedback:       existing.feedback       ?? incoming.feedback,
+                feedback_ts:    existing.feedback_ts    ?? incoming.feedback_ts,
+                feedback_note:  existing.feedback_note  ?? incoming.feedback_note,
+                severity:       existing.feedback === 'fp' ? 'low' : incoming.severity,
+                tags:           existing.tags?.length ? existing.tags : incoming.tags,
+                pcap_available: existing.pcap_available || incoming.pcap_available,
+                enrichment:     existing.enrichment     ?? incoming.enrichment,
+              };
+              return prev.map(a => a.alert_id === incoming.alert_id ? merged : a);
+            }
+            const next = [incoming, ...prev];
             return next.length > MAX_ALERTS ? next.slice(0, MAX_ALERTS) : next;
           });
         } else if (msg.type === 'alert_enriched') {
@@ -79,13 +99,17 @@ export function useWebSocket() {
             a.alert_id === alert_id ? { ...a, pcap_available: true } : a,
           ));
         } else if (msg.type === 'feedback_updated') {
-          const { alert_id, feedback, feedback_ts, feedback_note } = msg.data;
+          // Zusätzlich zu feedback auch severity und tags aktualisieren —
+          // der API-Patch setzt severity='low' bei FP-Markierung.
+          const { alert_id, feedback, feedback_ts, feedback_note, severity, tags } = msg.data;
           setAlerts(prev => prev.map(a =>
             a.alert_id === alert_id ? {
               ...a,
               feedback,
               feedback_ts:   feedback_ts   ?? undefined,
               feedback_note: feedback_note ?? undefined,
+              severity:      severity ?? (feedback === 'fp' ? 'low' : a.severity),
+              tags:          tags ?? a.tags,
             } : a,
           ));
         }
