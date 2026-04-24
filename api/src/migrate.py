@@ -27,16 +27,37 @@ async def _is_already_applied(conn: asyncpg.Connection, name: str) -> bool:
     noch ausgeführt werden.
     """
     if name == "008_itop_cmdb.sql":
-        # Prüft ob 'cmdb' bereits in der trust_source CHECK-Constraint enthalten ist.
-        count = await conn.fetchval(
-            "SELECT COUNT(*) FROM pg_constraint "
-            "WHERE conrelid = 'host_info'::regclass "
-            "AND pg_get_constraintdef(oid) LIKE '%cmdb%'"
-        )
-        return count > 0
-    # Alle anderen Migrations werden beim Seeding als angewendet betrachtet
-    # (sie liefen über docker-entrypoint-initdb.d).
+        return await _cmdb_constraint_exists(conn)
     return True
+
+
+async def _cmdb_constraint_exists(conn: asyncpg.Connection) -> bool:
+    count = await conn.fetchval(
+        "SELECT COUNT(*) FROM pg_constraint "
+        "WHERE conrelid = 'host_info'::regclass "
+        "AND pg_get_constraintdef(oid) LIKE '%cmdb%'"
+    )
+    return count > 0
+
+
+async def _repair_if_needed(conn: asyncpg.Connection, sql_files: list[Path]) -> None:
+    """Repariert Migrations die als angewendet markiert sind, aber nicht aktiv sind.
+
+    Hintergrund: v1.0.9/v1.0.10 hat den Seeding-Pfad zu früh ausgeführt und
+    008_itop_cmdb.sql als angewendet markiert ohne es auszuführen. Dadurch fehlte
+    'cmdb' in der trust_source-Constraint und jeder iTop-Sync schlug fehl.
+    """
+    for sql_file in sql_files:
+        if sql_file.name != "008_itop_cmdb.sql":
+            continue
+        if not await _cmdb_constraint_exists(conn):
+            log.warning(
+                "008_itop_cmdb.sql ist in schema_migrations markiert, "
+                "aber 'cmdb' fehlt in der Constraint – führe Reparatur durch."
+            )
+            async with conn.transaction():
+                await conn.execute(sql_file.read_text())
+            log.info("Reparatur von 008_itop_cmdb.sql erfolgreich.")
 
 
 async def run(pool: asyncpg.Pool, migrations_dir: Path = _DEFAULT_DIR) -> None:
@@ -89,6 +110,7 @@ async def run(pool: asyncpg.Pool, migrations_dir: Path = _DEFAULT_DIR) -> None:
                 log.info("Seeding/Upgrade abgeschlossen.")
                 return
 
+        # Neue Migrations ausführen
         for sql_file in sql_files:
             name = sql_file.name
             if name in applied:
@@ -103,5 +125,9 @@ async def run(pool: asyncpg.Pool, migrations_dir: Path = _DEFAULT_DIR) -> None:
                     "INSERT INTO schema_migrations (id) VALUES ($1)", name
                 )
             log.info("Migration %s erfolgreich.", name)
+
+        # Reparaturlauf: prüft ob als "applied" markierte Migrations wirklich aktiv sind.
+        # Behebt Fehler aus v1.0.9/v1.0.10 wo Seeding zu früh ausgeführt wurde.
+        await _repair_if_needed(conn, sql_files)
 
     log.info("DB-Migrations abgeschlossen.")
