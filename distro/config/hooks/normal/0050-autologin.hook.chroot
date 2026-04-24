@@ -22,6 +22,19 @@ fi
 find /lib/live/config/ -name "*autologin*" -exec chmod -x {} \; 2>/dev/null || true
 
 # SSH-Server aktivieren – sonst kein Remote-Zugriff auf die Live-ISO
-systemctl enable ssh.service 2>/dev/null || systemctl enable ssh.socket 2>/dev/null || true
+# Defensive: unmask falls debian-live es maskiert hat, dann enable
+systemctl unmask ssh.service ssh.socket 2>/dev/null || true
+systemctl enable ssh.service 2>/dev/null || true
+systemctl enable ssh.socket 2>/dev/null || true
 
-echo "[cyjan] Autologin + SSH konfiguriert."
+# Cyjan-Bootstatus-Service aktivieren (zeigt IP+SSH auf TTY1 nach Boot)
+chmod +x /usr/local/bin/cyjan-bootstatus
+systemctl enable cyjan-bootstatus.service 2>/dev/null || true
+
+# SSH PasswordAuthentication explizit erlauben – manche Live-Configs disablen es
+if [ -f /etc/ssh/sshd_config ]; then
+    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    sed -i 's/^#*PermitRootLogin.*/PermitRootLogin no/'                /etc/ssh/sshd_config
+fi
+
+echo "[cyjan] Autologin + SSH + Bootstatus konfiguriert."

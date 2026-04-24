@@ -48,6 +48,18 @@ jobs:
 
           log() { echo "$*" | tee -a "$LOG"; }
 
+          log "=== Version-Marker schreiben ==="
+          VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
+          BUILD_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          BUILD_COMMIT=$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD 2>/dev/null || echo "?")
+          mkdir -p "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc"
+          {
+            echo "VERSION=${VERSION}"
+            echo "BUILD_TS=${BUILD_TS}"
+            echo "BUILD_COMMIT=${BUILD_COMMIT}"
+          } > "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc/cyjan-version"
+          cat "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc/cyjan-version" | tee -a "$LOG"
+
           log "=== lb config ==="
           cd "${GITHUB_WORKSPACE}/distro"
           cat auto/config | tee -a "$LOG"
