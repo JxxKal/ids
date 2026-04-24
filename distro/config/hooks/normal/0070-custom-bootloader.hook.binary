@@ -42,19 +42,19 @@ terminal_output console
 menuentry "Cyjan IDS - Starten (Live)" {
   search --set=root --file /live/vmlinuz
   linux  /live/vmlinuz boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration
-  initrd /live/initrd
+  initrd /live/initrd.img
 }
 
 menuentry "Cyjan IDS - Auf Festplatte installieren" {
   search --set=root --file /live/vmlinuz
   linux  /live/vmlinuz boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
-  initrd /live/initrd
+  initrd /live/initrd.img
 }
 
 menuentry "Cyjan IDS - Safe Mode (nomodeset)" {
   search --set=root --file /live/vmlinuz
   linux  /live/vmlinuz boot=live components nomodeset consoleblank=0 live-config.nocomponents=keyboard-configuration 3
-  initrd /live/initrd
+  initrd /live/initrd.img
 }
 '
 
@@ -74,15 +74,15 @@ SAY
 
 LABEL live
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration
+  APPEND initrd=/live/initrd.img boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration
 
 LABEL install
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
+  APPEND initrd=/live/initrd.img boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
 
 LABEL safe
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd boot=live components nomodeset consoleblank=0 live-config.nocomponents=keyboard-configuration 3
+  APPEND initrd=/live/initrd.img boot=live components nomodeset consoleblank=0 live-config.nocomponents=keyboard-configuration 3
 '
 
 # ── GRUB (Legacy + EFI) ──────────────────────────────────────────────────────
