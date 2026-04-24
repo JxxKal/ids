@@ -315,6 +315,8 @@ services:
       RULES_DIR: /rules
       MODELS_DIR: /models
       ML_BOOTSTRAP_MIN: ${ML_BOOTSTRAP_MIN:-500}
+      MIRROR_IFACE: ${MIRROR_IFACE:-}
+      MANAGEMENT_IFACE: ${MANAGEMENT_IFACE:-}
     volumes:
       - snort-rules:/rules
       - ml-models:/models
@@ -322,6 +324,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/ids:/opt/ids
       - ./infra/timescaledb/migrations:/migrations:ro
+      - /sys/class/net:/host/sys/class/net:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
 

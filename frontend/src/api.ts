@@ -621,3 +621,11 @@ export async function restartStack(): Promise<{ status: string }> {
   if (isDemoMode()) return { status: 'started' };
   return req('/api/system/restart', { method: 'POST' });
 }
+
+export async function getInterfaces(): Promise<import('./types').InterfaceInfo[]> {
+  if (isDemoMode()) return [
+    { name: 'eth0', role: 'management', operstate: 'up', addresses: ['192.168.1.100/24'], mac: '00:11:22:33:44:55' },
+    { name: 'eth1', role: 'sniffer',    operstate: 'up', addresses: [],                  mac: '00:11:22:33:44:56' },
+  ];
+  return req('/api/system/interfaces');
+}

@@ -1,18 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, Database, FileText, KeyRound, ListTree, Lock, Plug, RotateCcw, Sliders, Sparkles, Upload, Users,
+  Activity, Database, FileText, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
   fetchIrmaConfig, fetchItopConfig, fetchMLConfig, fetchMLStatus, fetchRuleSources,
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
-  fetchSystemUpdateStatus, fetchUsers, generateApiToken, getItopSyncStatus, patchRuleSource,
+  fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
   triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname,
 } from '../api';
 import type { SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig } from '../api';
-import type { IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
+import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
 
@@ -1980,6 +1980,103 @@ function IrmaSettings() {
   );
 }
 
+// ── NetworkInterfaces ─────────────────────────────────────────────────────────
+
+function StateDot({ state }: { state: string }) {
+  const up = state === 'up';
+  return (
+    <span
+      className={`inline-block w-2 h-2 rounded-full mr-1.5 ${up ? 'bg-green-400' : 'bg-red-500'}`}
+      title={state}
+    />
+  );
+}
+
+function NetworkInterfaces() {
+  const [ifaces, setIfaces]   = useState<InterfaceInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      setIfaces(await getInterfaces());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  const roleLabel = (r: InterfaceInfo['role']) =>
+    r === 'management' ? 'Management' : r === 'sniffer' ? 'Sniffer / Mirror' : null;
+
+  const roleColor = (r: InterfaceInfo['role']) =>
+    r === 'management' ? 'bg-blue-900/40 text-blue-300 border-blue-700/50' :
+    r === 'sniffer'    ? 'bg-purple-900/40 text-purple-300 border-purple-700/50' :
+                         'bg-slate-800/40 text-slate-400 border-slate-700/50';
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">Netzwerk-Interfaces</h2>
+        <button type="button" onClick={load} className="cyjan-btn-secondary text-xs px-2 py-1" disabled={loading}>
+          {loading ? 'Lädt …' : 'Aktualisieren'}
+        </button>
+      </div>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      {!loading && ifaces.length === 0 && !error && (
+        <p className="text-xs text-slate-500">Keine Interfaces gefunden – läuft die API mit host-Mounts?</p>
+      )}
+
+      <div className="space-y-2">
+        {ifaces.map(iface => (
+          <div key={iface.name} className="rounded border border-slate-700/60 bg-slate-900/50 p-3 text-xs">
+            <div className="flex items-center gap-2 mb-2">
+              <StateDot state={iface.operstate} />
+              <span className="font-mono font-semibold text-slate-100">{iface.name}</span>
+              {roleLabel(iface.role) && (
+                <span className={`px-1.5 py-0.5 rounded border text-[10px] ${roleColor(iface.role)}`}>
+                  {roleLabel(iface.role)}
+                </span>
+              )}
+              <span className={`ml-auto font-mono ${iface.operstate === 'up' ? 'text-green-400' : 'text-red-400'}`}>
+                {iface.operstate.toUpperCase()}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-400">
+              <div>
+                <span className="text-slate-500">MAC </span>
+                <span className="font-mono">{iface.mac || '—'}</span>
+              </div>
+              <div>
+                <span className="text-slate-500">IP </span>
+                {iface.addresses.length > 0
+                  ? iface.addresses.map(a => (
+                      <span key={a} className="font-mono text-slate-200 mr-2">{a}</span>
+                    ))
+                  : <span className="text-slate-600 italic">
+                      {iface.role === 'sniffer' ? 'keine (erwartet)' : 'keine'}
+                    </span>
+                }
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <p className="text-[11px] text-slate-600">
+        Das Sniffer-Interface wird beim Stack-Start automatisch aktiviert (ip link set up).
+      </p>
+    </div>
+  );
+}
+
 // ── SystemUpdate ──────────────────────────────────────────────────────────────
 
 const PHASE_LABEL: Record<SystemUpdateStatus['phase'], string> = {
@@ -2254,7 +2351,7 @@ function SystemUpdate() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'thorsten';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'rules-sources' | 'rules-list' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'thorsten';
 
 interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
@@ -2286,9 +2383,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
-      { id: 'ssl',    label: 'SSL-Zertifikat', icon: <Lock     {...ICON_PROPS} /> },
-      { id: 'syslog', label: 'Syslog / SIEM',  icon: <FileText {...ICON_PROPS} /> },
-      { id: 'update', label: 'System-Update',  icon: <Upload   {...ICON_PROPS} /> },
+      { id: 'interfaces', label: 'Interfaces',    icon: <Network  {...ICON_PROPS} /> },
+      { id: 'ssl',        label: 'SSL-Zertifikat', icon: <Lock     {...ICON_PROPS} /> },
+      { id: 'syslog',     label: 'Syslog / SIEM',  icon: <FileText {...ICON_PROPS} /> },
+      { id: 'update',     label: 'System-Update',  icon: <Upload   {...ICON_PROPS} /> },
     ],
   },
   {
@@ -2347,6 +2445,7 @@ export function SettingsPage() {
             {active === 'ml-config'     && <MLFilterConfig />}
             {active === 'rules-sources' && <RuleSources />}
             {active === 'rules-list'    && <RulesList />}
+            {active === 'interfaces'    && <NetworkInterfaces />}
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}
             {active === 'irma'          && <IrmaSettings />}

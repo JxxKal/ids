@@ -243,6 +243,14 @@ export interface SystemUpdateStatus {
   version?: string;
 }
 
+export interface InterfaceInfo {
+  name:       string;
+  role:       'management' | 'sniffer' | null;
+  operstate:  string;   // 'up' | 'down' | 'unknown'
+  addresses:  string[]; // CIDR strings, e.g. '192.168.1.100/24'
+  mac:        string;
+}
+
 export type WsMessage =
   | { type: 'initial';          data: Alert[] }
   | { type: 'alert';            data: Alert }
