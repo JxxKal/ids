@@ -1,0 +1,84 @@
+#!/bin/bash
+# Binary hook: Replaces live-build-generated bootloader configs with custom Cyjan IDS entries.
+# live-build overwrites config/bootloaders/ files during the binary stage, so we re-inject
+# our custom kernel parameters (fbcon=rotate:2, live-config.nocomponents) here.
+set -eu
+
+GRUB_CONTENT='set default=0
+set timeout=10
+
+insmod all_video
+insmod gfxterm
+insmod png
+
+if background_image $prefix/splash.png; then
+  set color_normal=white/black
+  set color_highlight=black/white
+fi
+
+set menu_color_normal=cyan/black
+set menu_color_highlight=black/cyan
+
+menuentry "Cyjan IDS \xe2\x80\x93 Starten (Live)" {
+  search --set=root --file /live/vmlinuz
+  linux  /live/vmlinuz boot=live components nomodeset fbcon=rotate:2 consoleblank=0 live-config.nocomponents=keyboard-configuration
+  initrd /live/initrd
+}
+
+menuentry "Cyjan IDS \xe2\x80\x93 Auf Festplatte installieren" {
+  search --set=root --file /live/vmlinuz
+  linux  /live/vmlinuz boot=live components nomodeset fbcon=rotate:2 consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
+  initrd /live/initrd
+}
+
+menuentry "Cyjan IDS \xe2\x80\x93 Safe Mode" {
+  search --set=root --file /live/vmlinuz
+  linux  /live/vmlinuz boot=live components nomodeset fbcon=rotate:2 consoleblank=0 live-config.nocomponents=keyboard-configuration 3
+  initrd /live/initrd
+}
+'
+
+SYSLINUX_CONTENT='UI vesamenu.c32
+MENU BACKGROUND splash.png
+MENU TITLE Cyjan IDS
+MENU COLOR title        * #00FFFFFF *
+MENU COLOR border       * #00000000 #00000000 none
+MENU COLOR sel          * #FF000000 #FF00CCCC *
+MENU COLOR unsel        * #FFDDDDDD #00000000 *
+MENU COLOR hotkey       * #FFFFFFFF *
+TIMEOUT 100
+
+LABEL live
+  MENU LABEL Cyjan IDS - Starten (Live)
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live components nomodeset fbcon=rotate:2 consoleblank=0 live-config.nocomponents=keyboard-configuration
+
+LABEL install
+  MENU LABEL Cyjan IDS - Auf Festplatte installieren
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live components nomodeset fbcon=rotate:2 consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
+
+LABEL safe
+  MENU LABEL Cyjan IDS - Safe Mode
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd boot=live components nomodeset fbcon=rotate:2 consoleblank=0 live-config.nocomponents=keyboard-configuration 3
+'
+
+for GRUB_CFG in \
+    binary/boot/grub/grub.cfg \
+    binary/EFI/boot/grub.cfg \
+    binary/boot/grub/x86_64-efi/grub.cfg; do
+    if [ -f "${GRUB_CFG}" ]; then
+        printf '%s' "${GRUB_CONTENT}" > "${GRUB_CFG}"
+        echo "[cyjan] Replaced ${GRUB_CFG}"
+    fi
+done
+
+for MENU_CFG in \
+    binary/isolinux/menu.cfg \
+    binary/syslinux/menu.cfg; do
+    if [ -f "${MENU_CFG}" ]; then
+        printf '%s' "${SYSLINUX_CONTENT}" > "${MENU_CFG}"
+        echo "[cyjan] Replaced ${MENU_CFG}"
+    fi
+done
