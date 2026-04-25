@@ -45,7 +45,10 @@ if [ "$LIVE_MODE" -eq 1 ] && [ -t 0 ]; then
 fi
 
 # ── HDD, erster Boot: Setup-Wizard ────────────────────────────────────────────
-if [ -f "$CYJAN_STATE/FIRSTBOOT" ] && [ -t 0 ]; then
+# Trigger: FIRSTBOOT-Marker ODER fehlende .env. Letzteres als Fallback, weil
+# der Marker durch einen abgebrochenen Wizard, manuelles `rm` oder einen Bug
+# verloren gehen kann – dann bliebe das System ohne Auto-Setup hängen.
+if { [ -f "$CYJAN_STATE/FIRSTBOOT" ] || [ ! -f "$IDS_DIR/.env" ]; } && [ -t 0 ]; then
   echo ""
   echo "  ╔══════════════════════════════════════════════╗"
   printf  "  ║  Cyjan IDS First-Boot Setup %-17s║\n" "${VERSION}"

@@ -360,12 +360,17 @@ fi
 # ("invalid argument"). Der klassische Builder umgeht das.
 log "Starte 'docker compose build' (BUILDKIT=0 für Live-System)..."
 build_rc=0
+# `exit "$rc"` im else-Zweig: ohne das wäre der letzte Befehl der Subshell ein
+# `echo` (Exit 0) und PIPESTATUS[0] meldete keinen Build-Fehler – der Wizard
+# fiele dann ohne sichtbare Meldung in Step "up -d".
 {
   echo 0; echo "# Baue Docker-Images (kann 10–15 Minuten dauern)..."
   if DOCKER_BUILDKIT=0 docker compose --profile "$COMPOSE_PROFILE" build "${BUILD_ARGS[@]}" >>"$LOG" 2>&1; then
     echo 100; echo "# Images fertig."
   else
+    rc=$?
     echo 100; echo "# FEHLER beim Build – siehe Log."
+    exit "$rc"
   fi
 } | gauge "Docker-Images bauen..." 0 || build_rc=$?
 # `|| build_rc=$?` verhindert dass set -e+pipefail die nachfolgende Diagnose
