@@ -13,7 +13,11 @@ ENV_FILE="$IDS_DIR/.env"
 DOCKER_PROXY_DIR="/etc/systemd/system/docker.service.d"
 CYJAN_STATE="/etc/cyjan"
 LOG="/var/log/cyjan/setup.log"
-TITLE="Cyjan IDS Setup"
+
+# Versionsinfo aus /etc/cyjan-version (vom CI gesetzt)
+_VERSION=""
+[ -r /etc/cyjan-version ] && _VERSION=$(. /etc/cyjan-version 2>/dev/null && echo "${VERSION:-}")
+TITLE="Cyjan IDS Setup ${_VERSION}"
 W=70   # Fensterbreite
 H=20   # Fensterhöhe
 
@@ -155,9 +159,9 @@ EOF
   fi
 fi
 
-API_PORT=$(input "API-Port" \
-  "Port für die REST-API und das Web-Interface:" \
-  "8001") || API_PORT="8001"
+# Web-Interface ist über nginx auf Port 80 verdrahtet (siehe docker-compose.yml,
+# frontend service). Die REST-API läuft fest auf 8001 → keine Frage nötig.
+API_PORT=8001
 
 # ── Schritt 4: Mirror-Interface (Sniffer) ─────────────────────────────────────
 
@@ -223,7 +227,8 @@ fi
 SUMMARY="Folgende Konfiguration wird gespeichert:
 
   Management-IP:   ${MGMT_IP}
-  API-Port:        ${API_PORT}
+  Web-Interface:   http://${MGMT_IP}/        (Port 80)
+  REST-API:        http://${MGMT_IP}:${API_PORT}/api/docs
   Mirror-Interface: ${MIRROR_IFACE:-nicht konfiguriert}
   Compose-Profile: ${COMPOSE_PROFILE}
   HTTP-Proxy:      ${PROXY_HTTP:-keiner}
@@ -359,7 +364,7 @@ IP_ADDR=$(hostname -I | awk '{print $1}')
 whiptail --title "$TITLE" --msgbox \
 "✓ Cyjan IDS wurde erfolgreich eingerichtet!
 
-  Web-Interface: http://${IP_ADDR}:${API_PORT}
+  Web-Interface: http://${IP_ADDR}/        (Port 80)
   API / Swagger: http://${IP_ADDR}:${API_PORT}/api/docs
 
   Standard-Login:   admin / admin-change-me
