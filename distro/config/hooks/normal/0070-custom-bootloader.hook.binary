@@ -27,8 +27,8 @@ GRUB_CONTENT='set default=0
 set timeout=5
 set timeout_style=menu
 
-# Kein Theme, kein fancy Background — minimal und funktional.
-# Sonst kollidiert das mit live-build-Theme-Resten.
+# `unset theme` lässt live-builds eingebackenes Theme nicht reinbluten – ohne
+# das überlagern dessen Hintergrund/Schriftarten unsere Konfiguration.
 unset theme
 
 insmod part_msdos
@@ -36,18 +36,28 @@ insmod part_gpt
 insmod iso9660
 insmod all_video
 insmod gfxterm
+insmod png
 
-terminal_output console
+# Splash + gfxterm sind Best-Effort: Wenn Font/PNG nicht ladbar sind (z.B. auf
+# sehr altem BIOS/UEFI), fällt grub auf den klassischen Konsolen-Modus zurück
+# und das Menü bleibt trotzdem benutzbar.
+if loadfont $prefix/font.pf2 ; then
+  set gfxmode=auto
+  terminal_output gfxterm
+fi
 
-menuentry "Cyjan IDS - Starten (Live)" {
-  search --set=root --file /live/vmlinuz
-  linux  /live/vmlinuz boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration
-  initrd /live/initrd.img
-}
+if background_image $prefix/splash.png ; then
+  set color_normal=white/black
+  set color_highlight=black/light-cyan
+  set menu_color_normal=white/black
+  set menu_color_highlight=black/light-cyan
+fi
 
+# Nur ein produktiver Eintrag – Live-Boot ohne Install gibt es nicht mehr,
+# das Live-System ruft den Installer ohnehin direkt aus dem Banner auf.
 menuentry "Cyjan IDS - Auf Festplatte installieren" {
   search --set=root --file /live/vmlinuz
-  linux  /live/vmlinuz boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
+  linux  /live/vmlinuz boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration
   initrd /live/initrd.img
 }
 
@@ -58,29 +68,27 @@ menuentry "Cyjan IDS - Safe Mode (nomodeset)" {
 }
 '
 
-SYSLINUX_CONTENT='DEFAULT live
+SYSLINUX_CONTENT='UI vesamenu.c32
+MENU BACKGROUND splash.png
+MENU TITLE Cyjan IDS
+MENU COLOR title        * #FFFFFFFF *
+MENU COLOR border       * #00000000 #00000000 none
+MENU COLOR sel          * #FF000000 #FF00CCCC *
+MENU COLOR unsel        * #FFDDDDDD #00000000 *
+MENU COLOR hotkey       * #FFFFFFFF *
+MENU AUTOBOOT Starte automatisch in # Sekunden...
 TIMEOUT 50
 PROMPT 0
-ONTIMEOUT live
+DEFAULT install
 
-SAY Cyjan IDS Boot
-SAY ================
-SAY 1) live      - Live-Modus (Default nach 5 Sek.)
-SAY 2) install   - Auf Festplatte installieren
-SAY 3) safe      - Safe Mode (nomodeset)
-SAY
-SAY Eintrag wahlen mit Tab, booten mit Enter.
-SAY
-
-LABEL live
+LABEL install
+  MENU LABEL Cyjan IDS - Auf Festplatte installieren
+  MENU DEFAULT
   KERNEL /live/vmlinuz
   APPEND initrd=/live/initrd.img boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration
 
-LABEL install
-  KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd.img boot=live components consoleblank=0 live-config.nocomponents=keyboard-configuration ids.install=1
-
 LABEL safe
+  MENU LABEL Cyjan IDS - Safe Mode (nomodeset)
   KERNEL /live/vmlinuz
   APPEND initrd=/live/initrd.img boot=live components nomodeset consoleblank=0 live-config.nocomponents=keyboard-configuration 3
 '

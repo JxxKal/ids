@@ -32,7 +32,9 @@ if [ "$LIVE_MODE" -eq 1 ] && [ -t 0 ]; then
   echo ""
   echo "  Starte Disk-Installer (sudo ids-installer)..."
   echo ""
-  sudo /usr/local/bin/ids-installer
+  # `-n` damit fehlende NOPASSWD-Regel sofort als Fehler sichtbar wird statt
+  # in einer stillen Passwort-Abfrage hängenzubleiben.
+  sudo -n /usr/local/bin/ids-installer
   rc=$?
   if [ "$rc" -ne 0 ]; then
     echo ""
@@ -60,7 +62,7 @@ if { [ -f "$CYJAN_STATE/FIRSTBOOT" ] || [ ! -f "$IDS_DIR/.env" ]; } && [ -t 0 ];
   echo ""
   echo "  Starte First-Boot-Wizard (sudo ids-setup)..."
   echo ""
-  sudo /usr/local/bin/ids-setup
+  sudo -n /usr/local/bin/ids-setup
   rc=$?
   if [ "$rc" -ne 0 ]; then
     echo ""

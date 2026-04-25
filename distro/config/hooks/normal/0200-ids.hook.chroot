@@ -18,8 +18,10 @@ mkdir -p /var/log/cyjan
 # First-Boot-Flag
 touch /etc/cyjan/FIRSTBOOT
 
-# ids-Benutzer: sudo für docker compose erlauben
-echo "ids ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/git, /usr/local/bin/ids-setup, /usr/local/bin/ids-update" \
+# ids-Benutzer: sudo ohne Passwort-Prompt für die IDS-Werkzeuge. ids-installer
+# muss hier mit drin stehen, sonst hängt der Live-Boot beim Autologin auf der
+# Passwort-Abfrage von `sudo ids-installer`.
+echo "ids ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/git, /usr/local/bin/ids-setup, /usr/local/bin/ids-update, /usr/local/bin/ids-installer" \
   > /etc/sudoers.d/ids-docker
 chmod 440 /etc/sudoers.d/ids-docker
 
