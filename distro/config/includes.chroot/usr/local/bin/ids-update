@@ -29,13 +29,21 @@ fi
 
 echo "[update] Neue Commits: $(git log --oneline "${OLD_COMMIT}..${NEW_COMMIT}")"
 
-# Profil laden
+# Profil laden – /etc/cyjan/profile speichert ggf. "prod,snort" als komma-
+# separierten String. Compose interpretiert `--profile "a,b"` als einen
+# einzigen Profilnamen, deshalb pro Profil ein eigenes --profile-Flag in
+# einem Array sammeln.
 PROFILE=$(cat "$CYJAN_STATE/profile" 2>/dev/null || echo "prod")
+PROFILE_FLAGS=()
+IFS=',' read -ra _profile_list <<< "$PROFILE"
+for _p in "${_profile_list[@]}"; do
+  [ -n "$_p" ] && PROFILE_FLAGS+=(--profile "$_p")
+done
 
 echo "[update] Baue geänderte Images..."
-docker compose --profile "$PROFILE" build | tee -a "$LOG"
+docker compose "${PROFILE_FLAGS[@]}" build | tee -a "$LOG"
 
 echo "[update] Starte geänderte Dienste neu..."
-docker compose --profile "$PROFILE" up -d | tee -a "$LOG"
+docker compose "${PROFILE_FLAGS[@]}" up -d | tee -a "$LOG"
 
 echo "[update] Update abgeschlossen $(date)" | tee -a "$LOG"
