@@ -112,21 +112,57 @@ jobs:
           body: |
             ## Cyjan IDS ${{ github.ref_name }}
 
+            Live-ISO mit integriertem Disk-Installer – einmal vom USB booten, Festplatte
+            wählen, neu starten, der First-Boot-Wizard übernimmt den Rest. Nach dem
+            Wizard läuft der komplette Cyjan-IDS-Stack (Sniffer, Flow-Aggregator, ML-
+            Engine, Signaturen, API, Frontend) und ist über das Web-Interface erreichbar.
+
             ### Installation
-            ```bash
-            dd if=${{ steps.build.outputs.iso_name }} of=/dev/sdX bs=4M status=progress
-            ```
-            Von USB booten (UEFI oder BIOS) → First-Boot-Wizard startet automatisch.
+
+            1. ISO auf USB-Stick schreiben:
+               ```bash
+               sudo dd if=${{ steps.build.outputs.iso_name }} of=/dev/sdX bs=4M status=progress conv=fsync
+               ```
+            2. Vom USB booten (UEFI oder Legacy/BIOS).
+            3. Boot-Menü → **"Cyjan IDS – Auf Festplatte installieren"** (Default nach 5 s).
+            4. Zielfestplatte wählen – ≥ 20 GB, alle Daten werden gelöscht.
+            5. Nach dem Reboot vom internen Datenträger startet der First-Boot-Wizard
+               automatisch auf der Konsole.
 
             ### First-Boot-Wizard konfiguriert
-            - Proxy (HTTP/HTTPS/No-Proxy)
-            - Passwörter & JWT-Secret
-            - Netzwerk-Interfaces
-            - IRMA-Integration (optional)
+            - Proxy (HTTP/HTTPS/No-Proxy) für Updates und Docker-Image-Pulls
+            - Management- und Mirror/SPAN-Interface (Auswahl aus Live-NIC-Liste)
+            - Optional: statische IP statt DHCP
+            - Postgres-Passwort, JWT-Secret, MinIO-Credentials (Default: Zufallswerte,
+              URL-sichere Charset)
+            - Systembenutzer-Passwörter für `ids` (Console/SSH) und `root` (sudo)
+            - IRMA-Integration (REST-Poll, optional)
+            - Suricata-Profil (optional)
+
+            Step 0 des Wizards zieht vor der `.env`-Erzeugung `git pull` und ersetzt
+            sich selbst – ein älteres ISO bekommt damit die neuesten Wizard-Fixes,
+            ohne dass man neu installieren muss.
+
+            ### Erstanmeldung
+            - Web-Interface: `http://<management-ip>/`
+            - API / Swagger: `http://<management-ip>:8001/api/docs`
+            - Default-Login: **`admin` / `admin-change-me`** → sofort ändern.
 
             ### Update nach Installation
             ```bash
-            sudo ids-update
+            sudo ids-update     # git pull + nur betroffene Images neu bauen
             ```
+
+            ### Konfiguration nachträglich ändern
+            ```bash
+            sudo ids-setup      # Wizard erneut, .env wird überschrieben
+            ```
+            Oder gezielt `/opt/ids/.env` editieren und `cd /opt/ids && sudo docker compose up -d`.
+
+            ### Standard-Zugänge nach der Installation
+            - Console-User: `ids` (Autologin auf TTY1, SSH erlaubt)
+            - Default-Passwörter aus der ISO: `ids` und root unverändert – im Wizard
+              ändern (Schritt „Systembenutzer-Passwörter") oder mit `sudo passwd ids` /
+              `sudo passwd root`.
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
