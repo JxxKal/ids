@@ -333,6 +333,17 @@ if yesno "Suricata IDS aktivieren?\n\n(Benötigt ein Mirror-Interface; liefert s
   COMPOSE_PROFILE="prod,snort"
 fi
 
+# `--profile "a,b"` ist KEIN Multiprofile-Aufruf – Compose nimmt den String
+# als einen einzigen Profilnamen, der natürlich nichts matcht. Sniffer (in
+# profile [prod]) wäre damit beim Ja-zu-Suricata-Pfad still aus dem Stack
+# herausgefallen, der Wizard hätte trotzdem Erfolg gemeldet. Stattdessen
+# pro Profil eine eigene `--profile <name>`-Flag in einem Array sammeln.
+PROFILE_FLAGS=()
+IFS=',' read -ra _profile_list <<< "$COMPOSE_PROFILE"
+for _p in "${_profile_list[@]}"; do
+  [ -n "$_p" ] && PROFILE_FLAGS+=(--profile "$_p")
+done
+
 # ── Schritt 8: Zusammenfassung ────────────────────────────────────────────────
 
 SUMMARY="Folgende Konfiguration wird gespeichert:
@@ -428,7 +439,7 @@ fi
 # Erst die .env validieren — wenn 'docker compose config' fehlschlägt, ist
 # die Diagnose im Log statt eines stummen Aborts in der gauge-Pipe.
 log "Validiere docker-compose-Konfiguration..."
-if ! docker compose --profile "$COMPOSE_PROFILE" config >/dev/null 2>>"$LOG"; then
+if ! docker compose "${PROFILE_FLAGS[@]}" config >/dev/null 2>>"$LOG"; then
   log "FEHLER: 'docker compose config' fehlgeschlagen – siehe Log."
   msg "docker-compose-Konfiguration ungültig.\n\nDetails: less $LOG\n\nAbbruch."
   exit 1
@@ -444,7 +455,7 @@ log "Starte 'docker compose build' (BUILDKIT=0)..."
 # Services mit `image:` (timescaledb, redis, kafka, minio …) sind im Build ein
 # No-Op und huschen nur durch den Balken – das ist akzeptabel, der Hauptanteil
 # der Build-Zeit liegt bei den Services mit eigenem Dockerfile.
-mapfile -t BUILD_SERVICES < <(docker compose --profile "$COMPOSE_PROFILE" config --services 2>/dev/null | sort -u)
+mapfile -t BUILD_SERVICES < <(docker compose "${PROFILE_FLAGS[@]}" config --services 2>/dev/null | sort -u)
 TOTAL=${#BUILD_SERVICES[@]}
 [ "$TOTAL" -eq 0 ] && TOTAL=1   # Schutz gegen Division durch 0
 
@@ -457,7 +468,7 @@ build_rc=0
     pct=$(( (i-1) * 95 / TOTAL ))
     echo "$pct"
     echo "# [$i/$TOTAL] Baue: $svc"
-    if ! DOCKER_BUILDKIT=0 docker compose --profile "$COMPOSE_PROFILE" build \
+    if ! DOCKER_BUILDKIT=0 docker compose "${PROFILE_FLAGS[@]}" build \
            "${BUILD_ARGS[@]}" "$svc" >>"$LOG" 2>&1; then
       rc=$?
       echo 100; echo "# FEHLER bei $svc – siehe Log."
@@ -476,7 +487,7 @@ if [ "$build_rc" -ne 0 ]; then
   exit 1
 fi
 
-if ! docker compose --profile "$COMPOSE_PROFILE" up -d >>"$LOG" 2>&1; then
+if ! docker compose "${PROFILE_FLAGS[@]}" up -d >>"$LOG" 2>&1; then
   log "FEHLER: 'docker compose up -d' fehlgeschlagen."
   msg "Stack-Start fehlgeschlagen.\n\nDetails: less $LOG\n\nAbbruch."
   exit 1
