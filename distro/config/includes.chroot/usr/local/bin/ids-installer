@@ -176,12 +176,17 @@ EOF
 
   echo 85; echo "# GRUB-Konfiguration wird erstellt..."
 
-  # Grub-Config ohne Live-Params
+  # Grub-Config ohne Live-Params.
+  # quiet+loglevel=3: ohne diese floodet der Kernel sonst die lokale Konsole
+  # mit veth-/bridge-/iptables-Events während Docker startet/Container baut –
+  # whiptail-UI und Login-Prompt auf tty1 werden dann übermalt. SSH ist davon
+  # nicht betroffen (eigenes pty), aber am Hypervisor-VT ist die Konsole sonst
+  # praktisch unbenutzbar.
   cat > "$MOUNT/etc/default/grub" <<'EOF'
 GRUB_DEFAULT=0
 GRUB_TIMEOUT=5
 GRUB_DISTRIBUTOR="Cyjan IDS"
-GRUB_CMDLINE_LINUX_DEFAULT="nomodeset"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 nomodeset"
 GRUB_CMDLINE_LINUX=""
 GRUB_TERMINAL=console
 EOF
