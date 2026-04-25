@@ -325,7 +325,7 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 #### Benutzer
 
 Lokale und SAML-synchronisierte Benutzer: Tabelle, Anlegen, Inline-Bearbeitung, Löschen.
-Standard nach Erstinstallation: `admin` / `changeme` → **sofort ändern!**
+Standard nach Erstinstallation: `admin` / `***REDACTED***` → **sofort ändern!**
 
 **Rollen:**
 

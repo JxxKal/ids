@@ -76,10 +76,13 @@ gauge()    { whiptail --title "$TITLE" --gauge       "$1" 8 $W "$2"; }
 # Mit `set -o pipefail` killt das den ganzen Wizard. Subshell ohne pipefail
 # isoliert den Effekt.
 #
-# Charset bewusst ohne $ ` " ' \ — Compose interpretiert $-Tokens in .env als
-# Variablen-Substitution, der Rest macht Heredoc-/Shell-Quoting kaputt.
+# Charset auf URL-/DSN-sichere Zeichen begrenzt: keine $ ` " ' \ (Compose-
+# Substitution / Heredoc-Quoting), keine ? & = + # @ : / % (zerlegen
+# postgresql://user:pass@host/db – asyncpg parst die DSN sonst und wirft
+# `bad query field` beim API-Start, was den Stack mit 502 Bad Gateway lahmlegt).
+# 64 Zeichen aus [A-Za-z0-9_.-] ergeben >380 Bit Entropie – mehr als genug.
 gen_secret() {
-  ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9!@#%^&*()_+=,.:?-' </dev/urandom | head -c 32 )
+  ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9_.-' </dev/urandom | head -c 32 )
 }
 
 # ── Schritt 1: Willkommen ─────────────────────────────────────────────────────
@@ -246,6 +249,49 @@ MINIO_SECRET=$(password "MinIO Secret Key" \
   "MinIO Secret Key (leer = Zufallswert):") || true
 if [ -z "$MINIO_SECRET" ]; then
   MINIO_SECRET=$(gen_secret)
+fi
+
+# ── Schritt 5b: Systembenutzer-Passwörter (ids, root) ─────────────────────────
+# Standard-Passwörter aus dem Live-System (`ids:ids` und root frei) sind nach
+# der Installation noch aktiv. Hier optional setzen lassen; chpasswd schreibt
+# direkt in /etc/shadow und greift auch ohne Reboot. Bestätigungs-Eingabe weil
+# `password` ohne Echo arbeitet und Tippfehler sonst erst beim nächsten Login
+# auffallen würden.
+ask_pwd_with_confirm() {
+  local LABEL="$1" PROMPT="$2" P1 P2
+  P1=$(password "$LABEL" "$PROMPT" 2>/dev/null) || P1=""
+  [ -z "$P1" ] && { echo ""; return; }
+  P2=$(password "$LABEL wiederholen" "Zur Bestätigung erneut eingeben:" 2>/dev/null) || P2=""
+  if [ "$P1" != "$P2" ]; then
+    msg "Eingaben stimmen nicht überein – $LABEL wird nicht geändert."
+    echo ""
+    return
+  fi
+  echo "$P1"
+}
+
+if yesno "Passwörter der Systembenutzer 'ids' (Console/SSH) und 'root' (sudo) jetzt setzen?\n\nWird empfohlen – nach der Installation gelten sonst die Defaults aus der Live-ISO (ids:ids, root ohne Passwort)."; then
+  IDS_USER_PWD=$(ask_pwd_with_confirm "ids-Passwort" \
+    "Neues Passwort für Benutzer 'ids' (leer lassen = unverändert):")
+  ROOT_PWD=$(ask_pwd_with_confirm "root-Passwort" \
+    "Neues Passwort für 'root' (leer lassen = unverändert):")
+
+  if [ -n "$IDS_USER_PWD" ]; then
+    if printf 'ids:%s\n' "$IDS_USER_PWD" | chpasswd 2>>"$LOG"; then
+      log "ids-Passwort geändert."
+    else
+      log "FEHLER: chpasswd ids fehlgeschlagen."
+      msg "ids-Passwort konnte nicht geändert werden – siehe $LOG."
+    fi
+  fi
+  if [ -n "$ROOT_PWD" ]; then
+    if printf 'root:%s\n' "$ROOT_PWD" | chpasswd 2>>"$LOG"; then
+      log "root-Passwort geändert."
+    else
+      log "FEHLER: chpasswd root fehlgeschlagen."
+      msg "root-Passwort konnte nicht geändert werden – siehe $LOG."
+    fi
+  fi
 fi
 
 # ── Schritt 6: IRMA-Integration ───────────────────────────────────────────────
