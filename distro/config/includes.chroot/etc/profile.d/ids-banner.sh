@@ -17,9 +17,11 @@ if [ -f "$CYJAN_STATE/FIRSTBOOT" ] && [ -t 0 ]; then
   echo ""
   echo "  Starte First-Boot-Wizard (sudo ids-setup)..."
   echo ""
-  if ! sudo /usr/local/bin/ids-setup; then
+  sudo /usr/local/bin/ids-setup
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
     echo ""
-    echo "  ⚠ ids-setup mit Fehler beendet (Exit $?)."
+    echo "  ⚠ ids-setup mit Fehler beendet (Exit $rc)."
     echo "  Logs: sudo less /var/log/cyjan/setup.log"
     echo "  Manuell starten: sudo ids-setup"
     echo ""

@@ -18,8 +18,10 @@ W=70   # Fensterbreite
 H=20   # Fensterhöhe
 
 mkdir -p "$(dirname "$LOG")"
-exec > >(tee -a "$LOG") 2>&1
-echo "=== Cyjan IDS Setup $(date) ==="
+# Globalen tee-Redirect bewusst NICHT setzen: das würde whiptail-UI mit ANSI-Müll
+# ins Log spülen und das Log unbrauchbar machen. Stattdessen log() pro Bedarf.
+log() { echo "[$(date +%H:%M:%S)] $*" >> "$LOG"; }
+log "=== Cyjan IDS Setup $(date) ==="
 
 # ── Hilfsfunktionen ───────────────────────────────────────────────────────────
 
@@ -29,8 +31,11 @@ input()    { whiptail --title "$TITLE" --inputbox   "$2" $H $W "$3" 3>&1 1>&2 2>
 password() { whiptail --title "$TITLE" --passwordbox "$2" $H $W "" 3>&1 1>&2 2>&3; }
 gauge()    { whiptail --title "$TITLE" --gauge       "$1" 8 $W "$2"; }
 
+# tr|head schließt die Pipe nach 32 Bytes → tr bekommt SIGPIPE (Exit 141).
+# Mit `set -o pipefail` killt das den ganzen Wizard. Subshell ohne pipefail
+# isoliert den Effekt.
 gen_secret() {
-  tr -dc 'A-Za-z0-9!@#$%^&*()_+' </dev/urandom | head -c 32
+  ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+' </dev/urandom | head -c 32 )
 }
 
 # ── Schritt 1: Willkommen ─────────────────────────────────────────────────────
@@ -41,8 +46,8 @@ whiptail --title "$TITLE" --msgbox \
 
 Dieser Wizard konfiguriert:
   • Proxy-Einstellungen (optional)
-  • Datenbank- und Sicherheitspasswörter
   • Netzwerk-Schnittstellen
+  • Datenbank- und Sicherheitspasswörter
   • IRMA-Integration (optional)
 
 Alle Einstellungen werden in $ENV_FILE gespeichert.
@@ -276,7 +281,7 @@ EOF
 
 chmod 600 "$ENV_FILE"
 chown ids:ids "$ENV_FILE"
-echo "[setup] .env geschrieben: $ENV_FILE"
+log ".env geschrieben: $ENV_FILE"
 
 # ── Schritt 10: GitHub Update (wenn Internet vorhanden) ───────────────────────
 
@@ -314,7 +319,7 @@ docker compose --profile "$COMPOSE_PROFILE" up -d
 
 rm -f "$CYJAN_STATE/FIRSTBOOT"
 echo "$COMPOSE_PROFILE" > "$CYJAN_STATE/profile"
-echo "[setup] First-Boot abgeschlossen."
+log "First-Boot abgeschlossen."
 
 # ── Fertig ────────────────────────────────────────────────────────────────────
 
@@ -336,4 +341,4 @@ Zum Update (ids-update):
 
 Das System ist jetzt einsatzbereit." $H $W
 
-echo "=== Setup abgeschlossen $(date) ===" >> "$LOG"
+log "=== Setup abgeschlossen $(date) ==="
