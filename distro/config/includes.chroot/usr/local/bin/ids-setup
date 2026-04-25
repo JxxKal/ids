@@ -258,8 +258,11 @@ MINIO_ACCESS_KEY=${MINIO_ACCESS}
 MINIO_SECRET_KEY=${MINIO_SECRET}
 
 # ── Netzwerk ──────────────────────────────────────────────────────────────────
-MGMT_INTERFACE=${MGMT_IFACE}
-MIRROR_INTERFACE=${MIRROR_IFACE:-eth1}
+# Achtung: docker-compose.yml verlangt exakt diese Namen (siehe .env.example).
+# MIRROR_IFACE ist mit \${MIRROR_IFACE:?…} markiert – bei Mismatch crasht
+# 'docker compose config' und der Wizard bricht stumm in Schritt 11 ab.
+MANAGEMENT_IFACE=${MGMT_IFACE}
+MIRROR_IFACE=${MIRROR_IFACE:-eth1}
 
 # ── IRMA-Integration ──────────────────────────────────────────────────────────
 IRMA_BASE_URL=${IRMA_BASE_URL}
@@ -298,22 +301,45 @@ fi
 
 # ── Schritt 11: Stack starten ─────────────────────────────────────────────────
 
-{
-  echo 0;  echo "# Baue Docker-Images (kann 10–15 Minuten dauern)..."
-  cd "$IDS_DIR"
-  # Proxy für docker build durchreichen
-  BUILD_ARGS=""
-  if [ -n "$PROXY_HTTP" ]; then
-    BUILD_ARGS="--build-arg HTTP_PROXY=${PROXY_HTTP} --build-arg HTTPS_PROXY=${PROXY_HTTPS:-$PROXY_HTTP}"
-  fi
-  docker compose --profile "$COMPOSE_PROFILE" build $BUILD_ARGS 2>&1 | \
-    tee -a "$LOG" | grep -c "Step\|---" | \
-    awk '{p=int($1/200*80)+20; if(p>99)p=99; print p; print "# Baue Images..."}'
-  echo 100; echo "# Images fertig."
-} | gauge "Docker-Images bauen..." 0
-
 cd "$IDS_DIR"
-docker compose --profile "$COMPOSE_PROFILE" up -d
+
+# Proxy für docker build durchreichen
+BUILD_ARGS=()
+if [ -n "$PROXY_HTTP" ]; then
+  BUILD_ARGS+=(--build-arg "HTTP_PROXY=${PROXY_HTTP}" --build-arg "HTTPS_PROXY=${PROXY_HTTPS:-$PROXY_HTTP}")
+fi
+
+# Erst die .env validieren — wenn 'docker compose config' fehlschlägt, ist
+# die Diagnose im Log statt eines stummen Aborts in der gauge-Pipe.
+log "Validiere docker-compose-Konfiguration..."
+if ! docker compose --profile "$COMPOSE_PROFILE" config >/dev/null 2>>"$LOG"; then
+  log "FEHLER: 'docker compose config' fehlgeschlagen – siehe Log."
+  msg "docker-compose-Konfiguration ungültig.\n\nDetails: less $LOG\n\nAbbruch."
+  exit 1
+fi
+
+# Build mit Live-Log; Fortschritt geht weiterhin durch gauge.
+log "Starte 'docker compose build'..."
+{
+  echo 0; echo "# Baue Docker-Images (kann 10–15 Minuten dauern)..."
+  if docker compose --profile "$COMPOSE_PROFILE" build "${BUILD_ARGS[@]}" >>"$LOG" 2>&1; then
+    echo 100; echo "# Images fertig."
+  else
+    echo 100; echo "# FEHLER beim Build – siehe Log."
+    exit 1
+  fi
+} | gauge "Docker-Images bauen..." 0
+build_rc=${PIPESTATUS[0]}
+if [ "$build_rc" -ne 0 ]; then
+  msg "docker compose build fehlgeschlagen.\n\nLetzte Log-Zeilen:\n$(tail -n 5 "$LOG")\n\nVollständig: less $LOG"
+  exit 1
+fi
+
+if ! docker compose --profile "$COMPOSE_PROFILE" up -d >>"$LOG" 2>&1; then
+  log "FEHLER: 'docker compose up -d' fehlgeschlagen."
+  msg "Stack-Start fehlgeschlagen.\n\nDetails: less $LOG\n\nAbbruch."
+  exit 1
+fi
 
 # ── Schritt 12: First-Boot-Flag entfernen ────────────────────────────────────
 
