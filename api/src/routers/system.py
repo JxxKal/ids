@@ -150,16 +150,23 @@ router = APIRouter(prefix="/api", tags=["system"])
 
 
 def _ip_addr_via_docker() -> list[dict] | None:
-    """ip -j addr vom Sniffer-Container (network_mode: host)."""
-    try:
-        r = subprocess.run(
-            ["docker", "exec", "ids-sniffer", "ip", "-j", "addr"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode == 0:
-            return json.loads(r.stdout)
-    except Exception:
-        pass
+    """ip -j addr aus einem Container mit network_mode: host.
+
+    Probiert mehrere Kandidaten – wenn der Sniffer crashloopt (z.B. weil das
+    Mirror-Interface noch keine Carrier hat), liefert snort/snort-bridge u.U.
+    trotzdem; sonst fällt der Endpoint auf den sysfs-Pfad zurück und zeigt
+    operstate + MAC ohne IPs.
+    """
+    for name in ("ids-sniffer", "ids-snort"):
+        try:
+            r = subprocess.run(
+                ["docker", "exec", name, "ip", "-j", "addr"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.returncode == 0:
+                return json.loads(r.stdout)
+        except Exception:
+            continue
     return None
 
 

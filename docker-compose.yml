@@ -333,7 +333,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/ids:/opt/ids
       - ./infra/timescaledb/migrations:/migrations:ro
-      - /sys/class/net:/host/sys/class/net:ro
+      # /sys komplett (ro): Einträge unter /sys/class/net sind Symlinks nach
+      # /sys/devices/.../net/<iface>. Ohne den Rest von /sys zeigen sie ins
+      # Leere und das Frontend bekommt unter "Interfaces" leere Felder
+      # (operstate=unknown, mac="", addresses=[]).
+      - /sys:/host/sys:ro
       - /proc:/host/proc:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
