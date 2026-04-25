@@ -258,10 +258,14 @@ fi
 # `password` ohne Echo arbeitet und Tippfehler sonst erst beim nächsten Login
 # auffallen würden.
 ask_pwd_with_confirm() {
+  # Kein `2>/dev/null` an den password-Aufrufen: password() schiebt mit
+  # `3>&1 1>&2 2>&3` die Whiptail-UI über stderr aufs Terminal. Wenn man
+  # stderr vorher auf /dev/null lenkt, zeichnet whiptail ins Nichts und der
+  # Wizard hängt mit blinkendem Cursor – ohne Fehlermeldung.
   local LABEL="$1" PROMPT="$2" P1 P2
-  P1=$(password "$LABEL" "$PROMPT" 2>/dev/null) || P1=""
+  P1=$(password "$LABEL" "$PROMPT") || P1=""
   [ -z "$P1" ] && { echo ""; return; }
-  P2=$(password "$LABEL wiederholen" "Zur Bestätigung erneut eingeben:" 2>/dev/null) || P2=""
+  P2=$(password "$LABEL wiederholen" "Zur Bestätigung erneut eingeben:") || P2=""
   if [ "$P1" != "$P2" ]; then
     msg "Eingaben stimmen nicht überein – $LABEL wird nicht geändert."
     echo ""
