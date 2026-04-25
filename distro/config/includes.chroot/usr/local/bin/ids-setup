@@ -27,6 +27,34 @@ mkdir -p "$(dirname "$LOG")"
 log() { echo "[$(date +%H:%M:%S)] $*" >> "$LOG"; }
 log "=== Cyjan IDS Setup $(date) ==="
 
+# ── Schritt 0: Code aktualisieren, dann mit neuem Code re-execen ──────────────
+#
+# Der Installer kopiert das Live-System 1:1 auf die Disk. Wenn die ISO älter
+# als main ist, läuft der Wizard mit veraltetem Schema (z.B. alte .env-
+# Variablennamen) und docker-compose crasht später. Daher: vor jeder Nutzer-
+# Interaktion einmal git pull und dann das eigene Skript neu starten – aber
+# nur, wenn wir nicht schon gerade aus einem Re-Exec kommen, sonst Endlosloop.
+if [ -z "${IDS_SETUP_PULLED:-}" ]; then
+  log "Schritt 0: Code-Update prüfen..."
+  if curl -s --max-time 5 https://github.com >/dev/null 2>&1; then
+    if cd "$IDS_DIR" 2>/dev/null && git pull --ff-only origin main >>"$LOG" 2>&1; then
+      # Skript-Pfad zeigt auf /usr/local/bin/ids-setup; der Pull aktualisiert
+      # auch die Quelle in $IDS_DIR/distro/.../ids-setup. Übernehmen + re-exec.
+      SRC="$IDS_DIR/distro/config/includes.chroot/usr/local/bin/ids-setup"
+      if [ -f "$SRC" ] && ! cmp -s "$SRC" "$0"; then
+        log "Aktualisiere $0 aus $SRC und re-execen."
+        install -m 0755 "$SRC" "$0" 2>>"$LOG" || true
+      fi
+    else
+      log "git pull fehlgeschlagen (kein Netz / Konflikt) – fahre mit lokalem Code fort."
+    fi
+  else
+    log "Kein GitHub erreichbar – fahre ohne Update fort."
+  fi
+  export IDS_SETUP_PULLED=1
+  exec "$0" "$@"
+fi
+
 # ── Hilfsfunktionen ───────────────────────────────────────────────────────────
 
 msg()      { whiptail --title "$TITLE" --msgbox     "$1" $H $W 3>&1 1>&2 2>&3; }
@@ -38,8 +66,11 @@ gauge()    { whiptail --title "$TITLE" --gauge       "$1" 8 $W "$2"; }
 # tr|head schließt die Pipe nach 32 Bytes → tr bekommt SIGPIPE (Exit 141).
 # Mit `set -o pipefail` killt das den ganzen Wizard. Subshell ohne pipefail
 # isoliert den Effekt.
+#
+# Charset bewusst ohne $ ` " ' \ — Compose interpretiert $-Tokens in .env als
+# Variablen-Substitution, der Rest macht Heredoc-/Shell-Quoting kaputt.
 gen_secret() {
-  ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+' </dev/urandom | head -c 32 )
+  ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9!@#%^&*()_+=,.:?-' </dev/urandom | head -c 32 )
 }
 
 # ── Schritt 1: Willkommen ─────────────────────────────────────────────────────
