@@ -66,6 +66,21 @@ yesno "ACHTUNG: Alle Daten auf $TARGET werden UNWIDERRUFLICH gelöscht!\n\nFestp
 EFI_MODE=0
 [ -d /sys/firmware/efi ] && EFI_MODE=1
 
+# Partitionsnamen müssen im Parent-Scope leben, weil { ... } | gauge in einer
+# Subshell läuft. Mit set -u würde der zweite Gauge-Block sonst sofort an
+# "ROOT_PART: unbound variable" sterben.
+case "$TARGET" in
+  /dev/nvme*|/dev/mmcblk*|/dev/loop*) PSEP="p" ;;
+  *) PSEP="" ;;
+esac
+if [ "$EFI_MODE" -eq 1 ]; then
+  EFI_PART="${TARGET}${PSEP}1"
+  ROOT_PART="${TARGET}${PSEP}2"
+else
+  EFI_PART=""
+  ROOT_PART="${TARGET}${PSEP}2"
+fi
+
 # ── Partitionierung ───────────────────────────────────────────────────────────
 {
   echo 5;  echo "# Partitionierungstabelle wird erstellt..."
@@ -82,16 +97,12 @@ EFI_MODE=0
     parted -s "$TARGET" set 1 esp on
     echo 15; echo "# Root-Partition..."
     parted -s "$TARGET" mkpart primary ext4 513MiB 100%
-    EFI_PART="${TARGET}1"
-    ROOT_PART="${TARGET}2"
   else
     echo 10; echo "# BIOS-Boot-Partition (1 MB)..."
     parted -s "$TARGET" mkpart primary 1MiB 2MiB
     parted -s "$TARGET" set 1 bios_grub on
     echo 15; echo "# Root-Partition..."
     parted -s "$TARGET" mkpart primary ext4 2MiB 100%
-    EFI_PART=""
-    ROOT_PART="${TARGET}2"
   fi
 
   # Partitionstabelle neu einlesen
