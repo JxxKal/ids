@@ -319,19 +319,25 @@ if ! docker compose --profile "$COMPOSE_PROFILE" config >/dev/null 2>>"$LOG"; th
 fi
 
 # Build mit Live-Log; Fortschritt geht weiterhin durch gauge.
-log "Starte 'docker compose build'..."
+# DOCKER_BUILDKIT=0: BuildKit versucht overlayfs-on-overlayfs für seinen Cache,
+# was im Live-System (root ist bereits overlay) vom Kernel verweigert wird
+# ("invalid argument"). Der klassische Builder umgeht das.
+log "Starte 'docker compose build' (BUILDKIT=0 für Live-System)..."
+build_rc=0
 {
   echo 0; echo "# Baue Docker-Images (kann 10–15 Minuten dauern)..."
-  if docker compose --profile "$COMPOSE_PROFILE" build "${BUILD_ARGS[@]}" >>"$LOG" 2>&1; then
+  if DOCKER_BUILDKIT=0 docker compose --profile "$COMPOSE_PROFILE" build "${BUILD_ARGS[@]}" >>"$LOG" 2>&1; then
     echo 100; echo "# Images fertig."
   else
     echo 100; echo "# FEHLER beim Build – siehe Log."
-    exit 1
   fi
-} | gauge "Docker-Images bauen..." 0
-build_rc=${PIPESTATUS[0]}
+} | gauge "Docker-Images bauen..." 0 || build_rc=$?
+# `|| build_rc=$?` verhindert dass set -e+pipefail die nachfolgende Diagnose
+# überspringt. PIPESTATUS[0] kennt den echten Exit der Subshell.
+[ "$build_rc" -eq 0 ] && build_rc=${PIPESTATUS[0]}
 if [ "$build_rc" -ne 0 ]; then
-  msg "docker compose build fehlgeschlagen.\n\nLetzte Log-Zeilen:\n$(tail -n 5 "$LOG")\n\nVollständig: less $LOG"
+  ERR_TAIL=$(grep -aE 'ERROR|failed|error:' "$LOG" | tail -n 8)
+  msg "docker compose build fehlgeschlagen (Exit $build_rc).\n\nFehler-Auszug:\n${ERR_TAIL:-(siehe Log)}\n\nVollständig: less $LOG"
   exit 1
 fi
 
