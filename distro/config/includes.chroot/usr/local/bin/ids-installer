@@ -5,14 +5,19 @@
 # ══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-TITLE="Cyjan IDS Installer"
+# Versionsinfo aus /etc/cyjan-version (vom CI gesetzt)
+_VERSION=""
+[ -r /etc/cyjan-version ] && _VERSION=$(. /etc/cyjan-version 2>/dev/null && echo "${VERSION:-}")
+TITLE="Cyjan IDS Installer ${_VERSION}"
 W=72
 H=20
 LOG="/tmp/ids-install.log"
 MOUNT="/mnt/ids-target"
 
-exec > >(tee -a "$LOG") 2>&1
-echo "=== Cyjan IDS Installer $(date) ==="
+# Globalen tee-Redirect bewusst NICHT nach Wizard-Style: würde whiptail-UI
+# als ANSI-Müll ins Log spülen. Stattdessen log()-Helper für Diagnose-Echos.
+log() { echo "[$(date +%H:%M:%S)] $*" >> "$LOG"; }
+log "=== Cyjan IDS Installer ${_VERSION} $(date) ==="
 
 # ── Hilfsfunktionen ───────────────────────────────────────────────────────────
 msg()    { whiptail --title "$TITLE" --msgbox   "$1" $H $W 3>&1 1>&2 2>&3; }
@@ -195,15 +200,19 @@ EOF
 } | gauge "Bootloader und Konfiguration..." 0
 
 # ── Fertig ────────────────────────────────────────────────────────────────────
-whiptail --title "$TITLE" --msgbox \
+log "Installation auf $TARGET abgeschlossen $(date)"
+
+if whiptail --title "$TITLE" --yesno \
 "✓ Cyjan IDS wurde erfolgreich auf $TARGET installiert!
 
-Das System ist jetzt startbereit.
-Bitte ISO/USB entfernen und neu starten.
+Bitte ISO/USB jetzt entfernen.
 
-  Login nach Boot: ids / ids
-  Dann: sudo ids-setup
+Beim nächsten Boot startet automatisch der First-Boot-Setup-Wizard
+(Konfiguration + Docker-Stack-Build).
 
-Installationslog: $LOG" $H $W
-
-echo "=== Installation abgeschlossen $(date) ==="
+Jetzt neu starten?" $H $W; then
+  log "Reboot ausgelöst"
+  systemctl reboot
+else
+  msg "Reboot übersprungen.\n\nManuell: sudo reboot\n\nLog: less $LOG"
+fi
