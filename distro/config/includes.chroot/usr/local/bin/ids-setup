@@ -36,6 +36,14 @@ mkdir -p "$(dirname "$LOG")"
 log() { echo "[$(date +%H:%M:%S)] $*" >> "$LOG"; }
 log "=== Cyjan IDS Setup $(date) ==="
 
+# Kernel-Console-Spam stummschalten: docker compose build/up triggert während
+# bridge-/veth-/iptables-Operationen massenhaft printk-Meldungen, die auf
+# tty1 mitten ins whiptail-UI laufen. SSH ist nicht betroffen (eigenes pty),
+# aber am Hypervisor-VT (Proxmox-Konsole) ist das UI sonst unleserlich und
+# auch der spätere Login-Prompt wird übermalt. `dmesg -n 1` lässt nur noch
+# Panics auf der Konsole durch, /var/log/kern.log bekommt weiterhin alles.
+dmesg -n 1 2>/dev/null || true
+
 # ── Schritt 0: Code aktualisieren, dann mit neuem Code re-execen ──────────────
 #
 # Der Installer kopiert das Live-System 1:1 auf die Disk. Wenn die ISO älter
