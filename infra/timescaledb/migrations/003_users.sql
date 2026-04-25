@@ -27,8 +27,10 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS users_source_idx ON users (source);
 CREATE INDEX IF NOT EXISTS users_role_idx   ON users (role);
 
--- Standard-Admin (Passwort wird über die API gesetzt)
--- Hash entspricht 'changeme' – muss nach dem ersten Login geändert werden
+-- Standard-Admin – Passwort: 'admin-change-me' (muss nach Erstlogin geändert werden).
+-- Der frühere Hash war als 'changeme' kommentiert, verifizierte aber gegen kein
+-- bekanntes Klartext-Passwort → Login schlug für Endnutzer immer fehl.
+-- Hash unten via `bcrypt.hashpw(b'admin-change-me', bcrypt.gensalt(rounds=12))` erzeugt.
 INSERT INTO users (username, email, display_name, role, source, password_hash)
 VALUES (
   'admin',
@@ -36,7 +38,7 @@ VALUES (
   'Administrator',
   'admin',
   'local',
-  '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQyCIBjB6V2VHvhN.Pf9v3bEK'
+  '$2b$12$elau977bxqD/pi/LOLtNx.3ibGUC.rP.IOoOFxbQyU9U5wFm6GQPm'
 )
 ON CONFLICT (username) DO NOTHING;
 
