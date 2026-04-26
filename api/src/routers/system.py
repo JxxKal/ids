@@ -274,10 +274,24 @@ def _env_set(key: str, value: str) -> None:
 
 
 def _spawn_sniffer_reconfig(ids_dir: Path, profile: str) -> None:
-    """Startet docker compose up -d sniffer in einem unabhängigen Container."""
-    compose_cmd = (
-        f"docker compose --project-directory {ids_dir} --profile {profile} up -d sniffer"
+    """Startet docker compose up -d sniffer in einem unabhängigen Container.
+
+    `profile` kann eine kommaseparierte Liste sein (z.B. "prod,snort"). Compose
+    interpretiert `--profile "a,b"` als EINEN Profilnamen, der nichts matcht;
+    deshalb pro Eintrag ein eigenes --profile-Flag.
+    """
+    profile_args = " ".join(
+        f"--profile {p.strip()}"
+        for p in profile.split(",")
+        if p.strip()
     )
+    compose_cmd = (
+        f"docker compose --project-directory {ids_dir} {profile_args} up -d sniffer"
+    )
+    # Diagnose-Log: ohne das war ein stilles Scheitern (Profile-Mismatch,
+    # fehlendes Image, Compose-Fehler) für die GUI nicht sichtbar – der Frontend-
+    # Notice meldete "wird umgestellt", aber der Sniffer blieb auf dem alten
+    # Interface. Output landet sichtbar in `docker logs ids-sniffer-reconfig`.
     subprocess.Popen(
         [
             "docker", "run", "--rm",
@@ -287,10 +301,10 @@ def _spawn_sniffer_reconfig(ids_dir: Path, profile: str) -> None:
             "-e", "COMPOSE_PROJECT_NAME=ids",
             "--name", "ids-sniffer-reconfig",
             "ids-api:latest",
-            "sh", "-c", f"sleep 2 && {compose_cmd}",
+            "sh", "-c",
+            f"set -ex; sleep 2; {compose_cmd}; echo 'Sniffer-Reconfig fertig' ",
         ],
         start_new_session=True, close_fds=True,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         env={**os.environ},
     )
 
