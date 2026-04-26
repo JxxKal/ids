@@ -114,13 +114,22 @@ def _net_rates(iface: str) -> dict | None:
         return None
 
 
+# tracing-subscriber im Sniffer rendert ANSI-Escape-Sequenzen (Farben +
+# Stile) selbst dann, wenn stdout kein TTY ist – der Pretty-Output landet
+# 1:1 in `docker logs`. Die `pps="…"`-Regex matcht damit nicht, weil
+# zwischen `pps` und `=` plötzlich `\e[3mpps\e[0m\e[2m=\e[0m"11"` steht.
+# Vor dem Regex-Pass also alle ANSI-Sequenzen wegputzen, damit das Frontend
+# wieder echte Werte zu sehen bekommt statt "…".
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+
+
 def _sniffer_stats() -> dict:
     try:
         r = subprocess.run(
             ["docker", "logs", "--tail", "30", "ids-sniffer"],
             capture_output=True, text=True, timeout=3,
         )
-        text = r.stdout + r.stderr
+        text = _ANSI_RE.sub("", r.stdout + r.stderr)
         for line in reversed(text.splitlines()):
             if "sniffer stats" not in line:
                 continue
