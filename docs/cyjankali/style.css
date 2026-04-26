@@ -1,0 +1,317 @@
+/* CYJANKALI – farbliche Grundpalette aus dem Banner.
+ * Navy-Hintergrund, Sky-Blue für Defender-Akzente, Kali-Red für Attacker-
+ * Akzente, Bernstein für die Cyankali-Apothekerflasche. */
+
+:root {
+  --bg:        #0b1220;
+  --bg-deep:   #060a14;
+  --panel:     #111c2e;
+  --panel-2:   #182640;
+  --border:    #1f3055;
+  --text:      #e2e8f0;
+  --text-mute: #94a3b8;
+  --text-dim:  #64748b;
+  --cyjan:     #0ea5e9;
+  --cyjan-2:   #38bdf8;
+  --kali:      #dc2626;
+  --kali-2:    #ef4444;
+  --amber:     #c08552;
+  --code-bg:   #0e1828;
+  --code-fg:   #cbd5e1;
+  --green:     #22c55e;
+  --yellow:    #eab308;
+  --orange:    #f97316;
+  --red:       #ef4444;
+  --max-width: 980px;
+  --radius:    8px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    radial-gradient(ellipse at top, #0e1f30 0%, var(--bg) 55%, var(--bg-deep) 100%);
+  min-height: 100vh;
+}
+
+a {
+  color: var(--cyjan-2);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 120ms ease;
+}
+a:hover { border-bottom-color: var(--cyjan-2); }
+
+/* ── Hero / Banner ────────────────────────────────────────────────────────── */
+
+.hero {
+  display: flex;
+  justify-content: center;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border);
+}
+.banner {
+  display: block;
+  width: 100%;
+  max-width: 1500px;
+  height: auto;
+}
+
+/* ── Top-Nav ──────────────────────────────────────────────────────────────── */
+
+.topnav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(11, 18, 32, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 24px;
+  padding: 12px 16px;
+  font-size: 14px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.topnav a {
+  color: var(--text-mute);
+  border-bottom: none;
+}
+.topnav a:hover { color: var(--cyjan-2); }
+
+/* ── Main Layout ──────────────────────────────────────────────────────────── */
+
+main {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+section {
+  margin-top: 48px;
+  scroll-margin-top: 64px;   /* unter sticky-nav */
+}
+
+h1, h2, h3 {
+  color: var(--text);
+  letter-spacing: 0.5px;
+}
+
+h1 {
+  font-size: 32px;
+  margin: 8px 0 16px;
+  border-bottom: 2px solid var(--cyjan);
+  padding-bottom: 8px;
+  display: inline-block;
+}
+h2 {
+  font-size: 24px;
+  margin-top: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 18px;
+  color: var(--cyjan-2);
+  margin-top: 32px;
+}
+
+p { margin: 12px 0; }
+
+.lede {
+  font-size: 17px;
+  color: #cbd5e1;
+}
+
+ul, ol { padding-left: 24px; }
+li { margin: 6px 0; }
+li code {
+  font-size: 0.92em;
+}
+
+code {
+  font-family: 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  border: 1px solid var(--border);
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--cyjan);
+  padding: 16px 18px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-family: 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--code-fg);
+  margin: 16px 0;
+}
+pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* ── Test-Kategorien ──────────────────────────────────────────────────────── */
+
+.test {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px 18px;
+  margin: 24px 0;
+}
+.test h3 {
+  margin-top: 0;
+}
+.test.placeholder {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-mute);
+}
+.test.placeholder h3 { color: var(--text-mute); }
+
+details {
+  margin-top: 12px;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
+summary {
+  cursor: pointer;
+  user-select: none;
+  color: var(--cyjan-2);
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+summary::marker { color: var(--cyjan); }
+details[open] summary { margin-bottom: 8px; }
+
+/* ── Verify Table ─────────────────────────────────────────────────────────── */
+
+.verify-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 14px;
+}
+.verify-table th, .verify-table td {
+  text-align: left;
+  padding: 10px 14px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.verify-table th {
+  background: var(--panel-2);
+  color: var(--cyjan-2);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+.verify-table tr:last-child td { border-bottom: none; }
+
+.dot-green, .dot-yellow, .dot-orange, .dot-red {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: 1px;
+}
+.dot-green  { background: var(--green);  }
+.dot-yellow { background: var(--yellow); }
+.dot-orange { background: var(--orange); }
+.dot-red    { background: var(--red);    }
+
+/* ── Buttons / Links ──────────────────────────────────────────────────────── */
+
+.btn-primary {
+  display: inline-block;
+  background: var(--cyjan);
+  color: #0b1220;
+  padding: 10px 18px;
+  border-radius: var(--radius);
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  border: none;
+  margin: 8px 0;
+}
+.btn-primary:hover {
+  background: var(--cyjan-2);
+  border-bottom-color: transparent;
+}
+
+.links li {
+  margin: 8px 0;
+}
+
+/* ── Disclaimer ───────────────────────────────────────────────────────────── */
+
+.disclaimer {
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.4);
+  border-left: 3px solid var(--kali);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+.disclaimer h2 {
+  color: var(--kali-2);
+  border-bottom-color: rgba(220, 38, 38, 0.3);
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+footer {
+  border-top: 1px solid var(--border);
+  margin-top: 64px;
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+footer a { color: var(--text-mute); }
+footer a:hover { color: var(--cyjan-2); }
+
+/* ── Mobile ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  body { font-size: 15px; }
+  h1 { font-size: 24px; }
+  h2 { font-size: 20px; }
+  pre { font-size: 12px; padding: 12px; }
+  main { padding: 24px 14px 48px; }
+  .topnav { gap: 6px 16px; font-size: 12px; }
+  .verify-table { font-size: 13px; }
+  .verify-table th, .verify-table td { padding: 8px 10px; }
+}
+
+.muted { color: var(--text-mute); font-size: 14px; }
