@@ -538,14 +538,23 @@ fi
 # komplett – der First-Boot ist ohne Internet möglich und in 1–2 Minuten fertig.
 # Ohne Bundle (z.B. nach manuellem `git pull` oder bei alten ISOs) fällt der
 # Wizard auf den klassischen Online-Build-Pfad zurück.
-OFFLINE_BUNDLE="/opt/cyjan-offline/images.tar.gz"
+# Bundle-Format: zstd-komprimiert (vorher gzip; gzip riss am 2-GiB-Asset-
+# Limit von GitHub Releases). Fallback auf .tar.gz für ältere ISOs.
+OFFLINE_BUNDLE=""
+for cand in /opt/cyjan-offline/images.tar.zst /opt/cyjan-offline/images.tar.gz; do
+  [ -f "$cand" ] && { OFFLINE_BUNDLE="$cand"; break; }
+done
 LOADED_OFFLINE=0
-if [ -f "$OFFLINE_BUNDLE" ]; then
+if [ -n "$OFFLINE_BUNDLE" ]; then
   log "Offline-Bundle gefunden: $OFFLINE_BUNDLE"
+  case "$OFFLINE_BUNDLE" in
+    *.zst) DECOMPRESS="zstd -dc" ;;
+    *.gz)  DECOMPRESS="gunzip -c" ;;
+  esac
   load_rc=0
   {
     echo 5;  echo "# Lade Offline-Image-Bundle aus dem ISO ($(du -h "$OFFLINE_BUNDLE" | cut -f1))..."
-    if gunzip -c "$OFFLINE_BUNDLE" | docker load >>"$LOG" 2>&1; then
+    if $DECOMPRESS "$OFFLINE_BUNDLE" | docker load >>"$LOG" 2>&1; then
       echo 100; echo "# Images geladen – kein Build nötig."
     else
       rc=$?

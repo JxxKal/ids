@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/api/system", tags=["update"])
 
 IDS_DIR       = Path("/opt/ids")
 _PROTECT      = {".env", ".git"}
-_IMAGE_FILES  = {"images.tar.gz", "images.tar"}
+_IMAGE_FILES  = {"images.tar.zst", "images.tar.gz", "images.tar"}
 _VERSION_FILE = IDS_DIR / "VERSION"
 
 
@@ -95,7 +96,12 @@ def _extract(zip_bytes: bytes, dest: Path) -> tuple[int, str | None]:
 
 
 def _unpack_images_to_temp(zip_bytes: bytes, member: str) -> Path:
-    suffix = ".tar.gz" if member.endswith(".gz") else ".tar"
+    if member.endswith(".zst"):
+        suffix = ".tar.zst"
+    elif member.endswith(".gz"):
+        suffix = ".tar.gz"
+    else:
+        suffix = ".tar"
     tmp = Path(tempfile.mktemp(suffix=suffix))
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         with zf.open(member) as src, open(tmp, "wb") as dst:
@@ -197,7 +203,16 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
                     if "Loaded image" in line:
                         loaded[0] += 1
                         _state["progress"] = min(78, 15 + loaded[0] * 6)
-                await _run_subprocess(["docker", "load", "-i", str(tmp_img)], on_load_line)
+
+                # docker load akzeptiert tar und tar.gz direkt, .tar.zst aber
+                # erst ab Engine 24+. Für Robustheit bei zstd entpacken wir
+                # explizit per `zstd -dc` und pipen in `docker load -i -`.
+                if str(tmp_img).endswith(".zst"):
+                    cmd = ["sh", "-c",
+                           f"zstd -dc {shlex.quote(str(tmp_img))} | docker load"]
+                else:
+                    cmd = ["docker", "load", "-i", str(tmp_img)]
+                await _run_subprocess(cmd, on_load_line)
             finally:
                 await asyncio.to_thread(tmp_img.unlink, True)
 
