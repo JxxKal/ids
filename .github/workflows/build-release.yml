@@ -75,9 +75,12 @@ jobs:
           done
 
           # Liste aller zu bündelnden Images (Custom + Externe).
+          # `snort` ist entscheidend: sobald der User Suricata bejaht, aktiviert
+          # der Wizard `--profile snort` und compose-up versucht ohne Internet
+          # `FROM debian:bookworm-slim` zu pullen, weil das Image fehlt.
           CUSTOM=(api frontend flow-aggregator signature-engine ml-engine \
                   alert-manager enrichment-service pcap-store training-loop \
-                  sniffer irma-bridge snort-bridge)
+                  sniffer irma-bridge snort snort-bridge)
 
           IMAGES=()
           for svc in "${CUSTOM[@]}"; do

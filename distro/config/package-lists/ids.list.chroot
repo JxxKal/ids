@@ -35,6 +35,11 @@ console-setup
 # SSH-Server (für Remote-Zugriff)
 openssh-server
 
+# NTP-Client für den Wizard-Step "Zeitserver" – Debian bookworm bündelt
+# systemd-timesyncd nicht mehr standardmäßig mit dem Basissystem, ohne das
+# Paket schlägt `systemctl restart systemd-timesyncd` fehl.
+systemd-timesyncd
+
 # Disk-Installer
 parted
 rsync
