@@ -79,7 +79,23 @@ docker compose exec -T timescaledb psql -U ids -d ids -f /docker-entrypoint-init
 
 ### ISO Build
 
-Triggered via GitHub Actions on tag push (`v*`) or `workflow_dispatch`. Produces `live-image-amd64.hybrid.iso` as a GitHub Release asset.
+Triggered via GitHub Actions on tag push (`v*`) or `workflow_dispatch`. Workflow `build-release.yml` baut drei Artefakte am selben SHA:
+
+- `cyjan-ids-<tag>.iso` — bootbares Live-Installer-ISO mit eingebettetem Image-Bundle (~1,5 GB), für Frischinstallationen.
+- `cyjan-ids-update-<tag>.zip` — gleiches Bundle + `docker-compose.yml` + `infra/`, für **Offline-Upgrade** über das Web-Frontend (Settings → System-Update).
+- `images.tar.zst` — internes Workflow-Artefakt (von beiden obigen Jobs konsumiert).
+
+**Wann muss neu gebaut werden?** Sobald ein Tag-Stand getestet als „good" gilt, brauchen Folge-Releases nicht zwingend ein neues ISO:
+
+| Änderung | Was reicht | ISO neu nötig? |
+|---|---|---|
+| Service-Code (api, frontend, sniffer, …), `docker-compose.yml`, Migrations | Tag pushen → CI baut nur das **Update-Paket**, User spielt es per GUI ein | nein |
+| Wizard-Logik (`ids-setup`), Installer (`ids-installer`), Boot-Hooks, Splash, Boot-Menü, Tastatur-/Zeitzone-Defaults | Komplettes ISO, sonst landen die Änderungen nicht bis zum First-Boot | ja |
+| `package-lists/`, neue Distro-Pakete, `auto/config`, GRUB-Cmdline | dito | ja |
+
+Faustregel: alles unter `distro/` braucht ein neues ISO; alles oberhalb kann via Update-ZIP nachgereicht werden. Wenn ein Tag nur Service-Änderungen enthält, kann der ISO-Job im Workflow per `workflow_dispatch`-Pfad weggelassen werden — der Update-Paket-Job läuft trotzdem mit dem aktuellen Bundle.
+
+Der Wizard auf der installierten Maschine pullt in Step 0 ohnehin `git pull origin main` und ersetzt sich selbst, deshalb kommen Wizard-**Bugfixes** über `sudo ids-setup` auch ohne neues ISO an — neue Wizard-**Features** (zusätzliche Steps, neue Auswahl-Optionen) erst beim nächsten Frischinstall.
 
 ## Architecture
 
