@@ -327,23 +327,42 @@ fi
 
 # ── Schritt 3: Management-Interface ──────────────────────────────────────────
 
+# Helfer: Filter für die Interface-Auswahl. Schmeißt veth/docker/bridge/loopback
+# raus und schneidet den `@if<idx>`-Suffix von veth-Pair-Namen ab. Ohne diese
+# zwei Schritte killt `ip -4 addr show <name>@if11` den Wizard via
+# `set -e` (Device existiert nicht), was die Bug-Hunt auf .81 deutlich
+# länger gemacht hat als nötig.
+_iface_is_real() {
+  case "$1" in
+    ""|lo) return 1 ;;
+    docker*|br-*|veth*|virbr*|tun*|tap*|dummy*|ovs*|cali*|flannel*|cilium*|cni*|lxc*)
+      return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 # Interface-Liste aufbauen (Name + aktuelle IP als Beschreibung)
 IFACE_MENU=()
 while read -r IF; do
-  # awk mit `; exit` statt `| head -1`: head schließt die Pipe nach der
-  # ersten Zeile, awk kriegt SIGPIPE bei der nächsten print – mit
-  # `set -o pipefail + set -e` killt das den Wizard auf Interfaces mit
-  # mehr als einer IPv4-Adresse, ohne sichtbaren Fehler.
-  IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2; exit}')
+  IF="${IF%@*}"            # `vethc2a3@if11` → `vethc2a3`
+  _iface_is_real "$IF" || continue
+  # `|| IP4=""` schützt vor set-e-Exit, falls das Interface kein IPv4 hat
+  # oder sonst ein Edge-Case zuschlägt.
+  IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2; exit}') || IP4=""
   IFACE_MENU+=("$IF" "${IP4:-keine IP}")
-done < <(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$')
+done < <(ip -o link show | awk -F': ' '{print $2}')
+
+if [ ${#IFACE_MENU[@]} -eq 0 ]; then
+  msg "Keine physischen Interfaces gefunden.\n\nWizard kann ohne Management-Interface nicht weitermachen."
+  exit 1
+fi
 
 MGMT_IFACE=$(whiptail --title "$TITLE" --menu \
   "Management-Interface auswählen:\n(Über dieses Interface ist das Web-Interface erreichbar)" \
   $H $W 6 "${IFACE_MENU[@]}" 3>&1 1>&2 2>&3) || MGMT_IFACE="${IFACE_MENU[0]}"
 
 # Aktuelle IP des gewählten Interfaces (DHCP oder statisch)
-MGMT_IP=$(ip -4 addr show "$MGMT_IFACE" 2>/dev/null | awk '/inet /{split($2,a,"/"); print a[1]; exit}')
+MGMT_IP=$(ip -4 addr show "$MGMT_IFACE" 2>/dev/null | awk '/inet /{split($2,a,"/"); print a[1]; exit}') || MGMT_IP=""
 MGMT_IP="${MGMT_IP:-0.0.0.0}"
 
 # Optional: statische IP konfigurieren
@@ -387,14 +406,12 @@ if yesno "Ist ein Mirror/SPAN-Port-Interface für den Packet-Sniffer vorhanden?"
   # Auswahl anbieten – freier Inputbox-Mode lädt zu Tippfehlern ein.
   MIRROR_MENU=()
   while read -r IF; do
+    IF="${IF%@*}"
     [ "$IF" = "$MGMT_IFACE" ] && continue
-    # awk mit `; exit` statt `| head -1`: head schließt die Pipe nach der
-  # ersten Zeile, awk kriegt SIGPIPE bei der nächsten print – mit
-  # `set -o pipefail + set -e` killt das den Wizard auf Interfaces mit
-  # mehr als einer IPv4-Adresse, ohne sichtbaren Fehler.
-  IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2; exit}')
+    _iface_is_real "$IF" || continue
+    IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2; exit}') || IP4=""
     MIRROR_MENU+=("$IF" "${IP4:-keine IP}")
-  done < <(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$')
+  done < <(ip -o link show | awk -F': ' '{print $2}')
 
   if [ ${#MIRROR_MENU[@]} -eq 0 ]; then
     msg "Keine zusätzlichen Interfaces neben '${MGMT_IFACE}' gefunden.\n\nMirror-Port wird übersprungen – der Sniffer-Service startet nicht."
