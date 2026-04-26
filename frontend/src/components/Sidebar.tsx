@@ -1,5 +1,6 @@
 import { FlaskConical, LayoutDashboard, Network, Server, Settings } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { fetchVersion } from '../api';
 
 export type NavTab = 'dashboard' | 'networks' | 'hosts' | 'tests' | 'settings';
 
@@ -18,6 +19,15 @@ const ITEMS: { id: NavTab; label: string; icon: ReactNode }[] = [
 ];
 
 export function Sidebar({ active, onNav, username }: Props) {
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchVersion()
+      .then(r => { if (!cancelled) setVersion(r.version); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <aside className="cyjan-sidebar">
       <div className="cyjan-sidebar-brand">
@@ -45,7 +55,7 @@ export function Sidebar({ active, onNav, username }: Props) {
       </nav>
 
       <div className="cyjan-sidebar-footer">
-        {username}@cyjan · v1.0
+        {username}@cyjan · {version ?? '…'}
       </div>
     </aside>
   );
