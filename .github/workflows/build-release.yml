@@ -1,13 +1,20 @@
 name: Build Cyjan IDS Release
 
 # Single Workflow für ISO + Update-Paket: ein gemeinsamer Image-Build-Schritt
-# füttert beide nachgeschalteten Jobs. Ergebnis bei Tag-Push:
-#   • cyjan-ids-<tag>.iso       (mit eingebettetem Offline-Image-Bundle)
-#   • cyjan-ids-update-<tag>.zip (gleiches Bundle + compose.yml für Offline-
-#     Upgrade über die GUI – Settings → System-Update lädt es per docker load
-#     ohne Internet ein. Der Online-Pfad ist `sudo ids-update` auf der Konsole,
-#     der git-pullt und betroffene Services neu baut.)
-# Beide landen am selben GitHub Release.
+# füttert beide nachgeschalteten Jobs.
+#
+# Tag-Pattern entscheidet was gebaut wird:
+#   • vN.0.0   (Major-Release, z.B. v2.0.0)  → ISO + Update-Paket
+#   • alle anderen vN.M.P                    → NUR Update-Paket
+#
+# Hintergrund: ISO-Build dauert 25–30 min und lohnt sich nur wenn Wizard,
+# Installer, Distro-Pakete oder Boot-Hooks geändert wurden – also genau die
+# Stellen die historisch zu Major-Bumps führen. Reine App-/Compose-/API-
+# Fixes brauchen kein neues ISO; das Update-ZIP über Settings → System-
+# Update reicht. Siehe CLAUDE.md → ISO Build.
+#
+# Wer trotzdem mal ein ISO braucht ohne Major-Tag (z.B. zum manuellen
+# Testen vor v2.0.0): workflow_dispatch mit `build_iso=true` triggern.
 
 on:
   push:
@@ -15,8 +22,8 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      release:
-        description: 'Als GitHub Release veröffentlichen?'
+      build_iso:
+        description: 'ISO mit bauen? (Default: nur Update-Paket)'
         type: boolean
         default: false
 
@@ -116,9 +123,17 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────
   # ISO bauen mit eingebettetem Image-Bundle.
+  #
+  # Läuft nur wenn:
+  #   • das gepushte Tag auf .0.0 endet (Major-Release), ODER
+  #   • workflow_dispatch mit build_iso=true manuell getriggert wurde.
+  # Sonst stoppt der Workflow nach build-images bei build-update-package.
   # ─────────────────────────────────────────────────────────────────────────
   build-iso:
     needs: build-images
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.build_iso) ||
+      (github.event_name == 'push' && endsWith(github.ref_name, '.0.0'))
     runs-on: ubuntu-24.04
     # Debian Bookworm Container: live-build unterstützt hier alle Optionen.
     # --privileged ist zwingend – lb build mountet Filesysteme im Chroot.

@@ -79,23 +79,30 @@ docker compose exec -T timescaledb psql -U ids -d ids -f /docker-entrypoint-init
 
 ### ISO Build
 
-Triggered via GitHub Actions on tag push (`v*`) or `workflow_dispatch`. Workflow `build-release.yml` baut drei Artefakte am selben SHA:
+Workflow `build-release.yml` baut zwei Artefakte aus einem gemeinsamen Image-Bundle:
 
 - `cyjan-ids-<tag>.iso` — bootbares Live-Installer-ISO mit eingebettetem Image-Bundle (~1,5 GB), für Frischinstallationen.
 - `cyjan-ids-update-<tag>.zip` — gleiches Bundle + `docker-compose.yml` + `infra/`, für **Offline-Upgrade** über das Web-Frontend (Settings → System-Update).
-- `images.tar.zst` — internes Workflow-Artefakt (von beiden obigen Jobs konsumiert).
 
-**Wann muss neu gebaut werden?** Sobald ein Tag-Stand getestet als „good" gilt, brauchen Folge-Releases nicht zwingend ein neues ISO:
+**Trigger-Policy** (seit dem ISO-Build stabil ist):
 
-| Änderung | Was reicht | ISO neu nötig? |
+| Auslöser | ISO? | Update-ZIP? |
 |---|---|---|
-| Service-Code (api, frontend, sniffer, …), `docker-compose.yml`, Migrations | Tag pushen → CI baut nur das **Update-Paket**, User spielt es per GUI ein | nein |
-| Wizard-Logik (`ids-setup`), Installer (`ids-installer`), Boot-Hooks, Splash, Boot-Menü, Tastatur-/Zeitzone-Defaults | Komplettes ISO, sonst landen die Änderungen nicht bis zum First-Boot | ja |
-| `package-lists/`, neue Distro-Pakete, `auto/config`, GRUB-Cmdline | dito | ja |
+| Tag-Push `vN.M.P` (z.B. `v1.3.4`) | – | ✓ |
+| Tag-Push `vN.0.0` (Major-Release) | ✓ | ✓ |
+| `workflow_dispatch` mit `build_iso=true` | ✓ | ✓ |
+| `workflow_dispatch` ohne Flag (Default) | – | ✓ |
 
-Faustregel: alles unter `distro/` braucht ein neues ISO; alles oberhalb kann via Update-ZIP nachgereicht werden. Wenn ein Tag nur Service-Änderungen enthält, kann der ISO-Job im Workflow per `workflow_dispatch`-Pfad weggelassen werden — der Update-Paket-Job läuft trotzdem mit dem aktuellen Bundle.
+ISO-Builds dauern 25–30 min und lohnen sich nur wenn Wizard, Installer, Distro-Pakete, GRUB-Cmdline, Boot-Hooks oder Splash geändert wurden. Solche Änderungen sammelt man bewusst bis zum nächsten Major-Bump.
 
-Der Wizard auf der installierten Maschine pullt in Step 0 ohnehin `git pull origin main` und ersetzt sich selbst, deshalb kommen Wizard-**Bugfixes** über `sudo ids-setup` auch ohne neues ISO an — neue Wizard-**Features** (zusätzliche Steps, neue Auswahl-Optionen) erst beim nächsten Frischinstall.
+**Was kommt wo durch:**
+
+| Änderung | Wie deployen |
+|---|---|
+| Service-Code (api, frontend, sniffer, …), `docker-compose.yml`, Migrations | Tag pushen → CI baut Update-Paket → in der GUI unter Settings → System-Update einspielen |
+| Wizard-Logik (`ids-setup`), Installer (`ids-installer`), Boot-Hooks, Splash, Boot-Menü, Tastatur-/Zeitzone-Defaults, `package-lists/`, GRUB-Cmdline | Sammeln, bis zum nächsten `vN.0.0`-Tag mitnehmen — oder wenn akut: `workflow_dispatch` mit `build_iso=true` |
+
+**Wizard-Bugfixes ohne neues ISO**: der Wizard auf der installierten Maschine pullt in Step 0 ohnehin `git pull origin main` und ersetzt sich selbst, deshalb kommen Bugfixes im Wizard-Skript auch ohne neues ISO an — `sudo ids-setup` auf der Zielmaschine zieht sie. Neue Wizard-**Features** (zusätzliche Steps, neue Auswahl-Optionen) erst beim nächsten Frischinstall aus dem ISO.
 
 ## Architecture
 
