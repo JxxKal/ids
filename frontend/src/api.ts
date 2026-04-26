@@ -20,13 +20,17 @@ export function clearToken(): void {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken();
+  // WICHTIG: `...init` MUSS vor `headers:` stehen, sonst überschreibt ein
+  // mitgebrachtes `init.headers` (z.B. Content-Type) die hier konstruierten
+  // Headers KOMPLETT inkl. Authorization. Genau das hat
+  // setInterfaceRole/POST 401 zurückgegeben, obwohl der Token gültig war.
   const res = await fetch(`${BASE}${path}`, {
+    ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
-    ...init,
   });
   if (res.status === 401) {
     clearToken();
@@ -651,9 +655,11 @@ export async function setInterfaceRole(
   iface: string,
 ): Promise<{ status: string; note?: string }> {
   if (isDemoMode()) return { status: 'saved' };
+  // `headers` bewusst nicht setzen – req() ergänzt Content-Type und
+  // Authorization eh, ein eigenes headers-Objekt würde die jetzt sauber
+  // gemergten Defaults aushebeln (siehe req()-Kommentar).
   return req('/api/system/interfaces/config', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role, iface }),
   });
 }
