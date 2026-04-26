@@ -17,12 +17,17 @@ mod stats;
 
 fn main() -> Result<()> {
     // ── Logging ──────────────────────────────────────────────────────────────
+    // ANSI bewusst aus: `docker logs` zeigt die Subscriber-Ausgabe direkt,
+    // und der API-Endpoint /system/stats parst die Felder per Regex. Mit ANSI
+    // wären Sequenzen wie `\e[3mpps\e[0m\e[2m=\e[0m"11"` dazwischen und der
+    // Match scheitert. Plain Text macht das Log gleichzeitig grep-bar.
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_env("RUST_LOG")
                 .unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .with_target(false)
+        .with_ansi(false)
         .init();
 
     // ── Konfiguration ────────────────────────────────────────────────────────
