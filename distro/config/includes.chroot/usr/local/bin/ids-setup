@@ -445,46 +445,81 @@ if ! docker compose "${PROFILE_FLAGS[@]}" config >/dev/null 2>>"$LOG"; then
   exit 1
 fi
 
+# ── Schritt 11a: Offline-Image-Bundle einspielen ──────────────────────────────
+# Die ISO bringt ~1,5 GB an vorgebauten Images mit (alle ids-* Services + die
+# externen wie timescaledb, kafka, redis, minio, kafka-ui). Wenn das Bundle da
+# ist, lädt der Wizard es per `docker load` und überspringt die Build-Phase
+# komplett – der First-Boot ist ohne Internet möglich und in 1–2 Minuten fertig.
+# Ohne Bundle (z.B. nach manuellem `git pull` oder bei alten ISOs) fällt der
+# Wizard auf den klassischen Online-Build-Pfad zurück.
+OFFLINE_BUNDLE="/opt/cyjan-offline/images.tar.gz"
+LOADED_OFFLINE=0
+if [ -f "$OFFLINE_BUNDLE" ]; then
+  log "Offline-Bundle gefunden: $OFFLINE_BUNDLE"
+  load_rc=0
+  {
+    echo 5;  echo "# Lade Offline-Image-Bundle aus dem ISO ($(du -h "$OFFLINE_BUNDLE" | cut -f1))..."
+    if gunzip -c "$OFFLINE_BUNDLE" | docker load >>"$LOG" 2>&1; then
+      echo 100; echo "# Images geladen – kein Build nötig."
+    else
+      rc=$?
+      echo 100; echo "# WARNUNG: docker load fehlgeschlagen, fahre mit Online-Build fort."
+      exit "$rc"
+    fi
+  } | gauge "Offline-Images laden..." 0 || load_rc=$?
+  [ "$load_rc" -eq 0 ] && load_rc=${PIPESTATUS[0]}
+  clear
+  if [ "$load_rc" -eq 0 ]; then
+    LOADED_OFFLINE=1
+    log "Offline-Images erfolgreich geladen."
+  else
+    log "Offline-Bundle konnte nicht geladen werden, fahre mit Online-Build fort."
+  fi
+fi
+
+# ── Schritt 11b: Build (nur wenn kein Bundle geladen wurde) ───────────────────
 # Build pro Service: ein Bulk-`docker compose build` zeigt im gauge nur 0%→100%
 # (kein Zwischenstand), weil sein stdout/stderr ins Log geht. Wir iterieren also
 # manuell über die Services und schicken pro fertiger Build-Stage einen Prozent-
 # wert an gauge. DOCKER_BUILDKIT=0 hält den klassischen Builder, der ohne
 # overlayfs-on-overlayfs-Probleme im Live-System auskommt.
-log "Starte 'docker compose build' (BUILDKIT=0)..."
-# Liste aller im Profil aktiven Services. Pro Iteration wird gauge aktualisiert.
-# Services mit `image:` (timescaledb, redis, kafka, minio …) sind im Build ein
-# No-Op und huschen nur durch den Balken – das ist akzeptabel, der Hauptanteil
-# der Build-Zeit liegt bei den Services mit eigenem Dockerfile.
-mapfile -t BUILD_SERVICES < <(docker compose "${PROFILE_FLAGS[@]}" config --services 2>/dev/null | sort -u)
-TOTAL=${#BUILD_SERVICES[@]}
-[ "$TOTAL" -eq 0 ] && TOTAL=1   # Schutz gegen Division durch 0
+if [ "$LOADED_OFFLINE" -ne 1 ]; then
+  log "Kein Offline-Bundle – starte 'docker compose build' (BUILDKIT=0)..."
+  # Liste aller im Profil aktiven Services. Pro Iteration wird gauge aktualisiert.
+  # Services mit `image:` (timescaledb, redis, kafka, minio …) sind im Build ein
+  # No-Op und huschen nur durch den Balken – das ist akzeptabel, der Hauptanteil
+  # der Build-Zeit liegt bei den Services mit eigenem Dockerfile.
+  mapfile -t BUILD_SERVICES < <(docker compose "${PROFILE_FLAGS[@]}" config --services 2>/dev/null | sort -u)
+  TOTAL=${#BUILD_SERVICES[@]}
+  [ "$TOTAL" -eq 0 ] && TOTAL=1   # Schutz gegen Division durch 0
 
-build_rc=0
-{
-  echo 0; echo "# Baue Docker-Images ($TOTAL Services, kann 10–15 Minuten dauern)..."
-  i=0
-  for svc in "${BUILD_SERVICES[@]}"; do
-    i=$((i+1))
-    pct=$(( (i-1) * 95 / TOTAL ))
-    echo "$pct"
-    echo "# [$i/$TOTAL] Baue: $svc"
-    if ! DOCKER_BUILDKIT=0 docker compose "${PROFILE_FLAGS[@]}" build \
-           "${BUILD_ARGS[@]}" "$svc" >>"$LOG" 2>&1; then
-      rc=$?
-      echo 100; echo "# FEHLER bei $svc – siehe Log."
-      exit "$rc"
-    fi
-  done
-  echo 100; echo "# Alle Images fertig."
-} | gauge "Docker-Images bauen..." 0 || build_rc=$?
-# `|| build_rc=$?` verhindert dass set -e+pipefail die nachfolgende Diagnose
-# überspringt. PIPESTATUS[0] kennt den echten Exit der Subshell.
-[ "$build_rc" -eq 0 ] && build_rc=${PIPESTATUS[0]}
-clear   # gauge hinterlässt Cursor-Reste auf manchen Konsolen
-if [ "$build_rc" -ne 0 ]; then
-  ERR_TAIL=$(grep -aE 'ERROR|failed|error:' "$LOG" | tail -n 8)
-  msg "docker compose build fehlgeschlagen (Exit $build_rc).\n\nFehler-Auszug:\n${ERR_TAIL:-(siehe Log)}\n\nVollständig: less $LOG"
-  exit 1
+  build_rc=0
+  {
+    echo 0; echo "# Baue Docker-Images ($TOTAL Services, kann 10–15 Minuten dauern)..."
+    i=0
+    for svc in "${BUILD_SERVICES[@]}"; do
+      i=$((i+1))
+      pct=$(( (i-1) * 95 / TOTAL ))
+      echo "$pct"
+      echo "# [$i/$TOTAL] Baue: $svc"
+      if ! DOCKER_BUILDKIT=0 docker compose "${PROFILE_FLAGS[@]}" build \
+             "${BUILD_ARGS[@]}" "$svc" >>"$LOG" 2>&1; then
+        rc=$?
+        echo 100; echo "# FEHLER bei $svc – siehe Log."
+        exit "$rc"
+      fi
+    done
+    echo 100; echo "# Alle Images fertig."
+  } | gauge "Docker-Images bauen..." 0 || build_rc=$?
+  # `|| build_rc=$?` verhindert dass set -e+pipefail die nachfolgende Diagnose
+  # überspringt. PIPESTATUS[0] kennt den echten Exit der Subshell.
+  [ "$build_rc" -eq 0 ] && build_rc=${PIPESTATUS[0]}
+  clear   # gauge hinterlässt Cursor-Reste auf manchen Konsolen
+  if [ "$build_rc" -ne 0 ]; then
+    ERR_TAIL=$(grep -aE 'ERROR|failed|error:' "$LOG" | tail -n 8)
+    msg "docker compose build fehlgeschlagen (Exit $build_rc).\n\nFehler-Auszug:\n${ERR_TAIL:-(siehe Log)}\n\nVollständig: less $LOG"
+    exit 1
+  fi
 fi
 
 if ! docker compose "${PROFILE_FLAGS[@]}" up -d >>"$LOG" 2>&1; then

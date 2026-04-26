@@ -6,6 +6,9 @@
 *.crt
 secrets/
 
+# ── ISO-Build-Artefakte (wird im CI in includes.chroot reinkopiert) ──────────
+distro/config/includes.chroot/opt/cyjan-offline/
+
 # ── Root-Mediendateien (nicht versioniert) ────────────────────────────────────
 /*.jpeg
 /*.jpg
