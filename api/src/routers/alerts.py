@@ -389,7 +389,13 @@ def _filter_pcap(
             matched += 1
         pos = rec_end
 
-    return bytes(out) if matched else pcap_bytes  # leer? lieber komplett zurück
+    # Bewusst KEIN Fallback auf das Original wenn matched==0 – das hat den
+    # Filter unsichtbar gemacht: bei einer Mismatch-Quelle (z.B. inet::text
+    # mit /32-Prefix vs Frame-Parser ohne Prefix) lieferte der Endpoint
+    # stillschweigend das volle Capture zurück und der Toggle wirkte tot.
+    # Lieber ehrlich ein leeres (aber valides) PCAP – der Operator sieht
+    # "0 Pakete" und weiß, der Filter hat alles weggefiltert.
+    return bytes(out)
 
 
 def _pcap_proxy(
@@ -443,10 +449,15 @@ def make_pcap_endpoint(minio: Minio, bucket: str):
         pool:     asyncpg.Pool  = Depends(get_pool),
     ):
         async with pool.acquire() as conn:
+            # `host(inet)` statt `inet::text`: inet hält die Netzmaske
+            # (z.B. /32 bei einer einzelnen Host-Adresse) und ::text gibt
+            # die mit zurück, was nie gegen einen Frame-Parser-Output
+            # ohne Prefix matcht. host() liefert garantiert nur die IP.
             row = await conn.fetchrow(
                 """
                 SELECT pcap_available, pcap_key,
-                       src_ip::text AS src_ip, dst_ip::text AS dst_ip,
+                       host(src_ip) AS src_ip,
+                       host(dst_ip) AS dst_ip,
                        src_port, dst_port
                 FROM alerts WHERE alert_id = $1::uuid
                 """,
