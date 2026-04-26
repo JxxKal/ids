@@ -11,12 +11,14 @@ import {
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
   triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname, fetchSystemStats,
   importSuricataRules,
+  fetchRuleFiles, fetchRuleFile, saveRuleFile, deleteRuleFile,
   fetchLearnedPatterns,
   fetchDbStats, cleanupDb, vacuumDb, setRetentionPolicy, backupDbUrl, restoreDb, fetchMaintenanceAudit,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
   DbStatsResponse, MaintenanceAuditEntry,
+  RuleFileMeta,
 } from '../api';
 import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -1772,6 +1774,259 @@ function SuricataOfflineImport() {
   );
 }
 
+// ── Eigene Signaturen: Datei-Editor ───────────────────────────────────────────
+// Zwei-Spalten-UX: links die Datei-Liste mit Größe + Mtime + Built-in-Marker,
+// rechts der Inhalt im Textarea. Speichern triggert serverseitig
+// `suricata -T`; bei Syntax-Fehler kommt 422 mit dem Suricata-Diagnose-Tail
+// zurück und das Frontend zeigt's rot über dem Editor an.
+function RuleFileEditor() {
+  const [files,    setFiles]    = useState<RuleFileMeta[]>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [content,  setContent]  = useState<string>('');
+  const [orig,     setOrig]     = useState<string>('');
+  const [busy,     setBusy]     = useState(false);
+  const [error,    setError]    = useState<string | null>(null);
+  const [info,     setInfo]     = useState<string | null>(null);
+  const [confirmDel, setConfirmDel] = useState<RuleFileMeta | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [newName,  setNewName]  = useState('');
+
+  const dirty = content !== orig;
+
+  async function refresh() {
+    setBusy(true);
+    try { setFiles(await fetchRuleFiles()); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+
+  useEffect(() => { refresh(); }, []);
+
+  async function open(name: string) {
+    if (dirty && !confirm('Ungespeicherte Änderungen verwerfen?')) return;
+    setError(null); setInfo(null);
+    setBusy(true);
+    try {
+      const f = await fetchRuleFile(name);
+      setSelected(name);
+      setContent(f.content);
+      setOrig(f.content);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    if (!selected) return;
+    setError(null); setInfo(null); setBusy(true);
+    try {
+      const r = await saveRuleFile(selected, content);
+      setOrig(content);
+      setInfo(
+        `${r.rules_count.toLocaleString('de-DE')} Regeln gespeichert · ` +
+        `suricata -T: ${r.test_ok ? '✓' : '⚠ skipped'} · Reload: ${r.reload}` +
+        (r.note ? ` · ${r.note}` : '')
+      );
+      await refresh();
+    } catch (e) {
+      // 422-Antwort von save: detail = { message, test_output }
+      const raw = e instanceof Error ? e.message : String(e);
+      const m = raw.match(/422[^:]*:\s*(.*)$/s);
+      if (m) {
+        try {
+          const detail = JSON.parse(m[1]).detail;
+          setError(`${detail?.message ?? 'Validation fehlgeschlagen'}\n\n${detail?.test_output ?? ''}`);
+        } catch { setError(raw); }
+      } else { setError(raw); }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doDelete(meta: RuleFileMeta) {
+    setBusy(true); setError(null); setInfo(null);
+    try {
+      await deleteRuleFile(meta.name);
+      if (selected === meta.name) {
+        setSelected(null); setContent(''); setOrig('');
+      }
+      setInfo(`'${meta.name}' gelöscht.`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startCreate() {
+    if (dirty && !confirm('Ungespeicherte Änderungen verwerfen?')) return;
+    setCreating(true); setNewName(''); setError(null); setInfo(null);
+  }
+  function cancelCreate() {
+    setCreating(false); setNewName('');
+  }
+  function commitCreate() {
+    const trimmed = newName.trim();
+    const name = trimmed.endsWith('.rules') ? trimmed : `${trimmed}.rules`;
+    if (!/^[A-Za-z0-9._-]+\.rules$/.test(name)) {
+      setError('Ungültiger Dateiname. Erlaubt: A-Z, a-z, 0-9, ".", "_", "-".');
+      return;
+    }
+    setSelected(name);
+    setContent(`# ${name}\n# Eigene Suricata-Signaturen – mit "Speichern" wird automatisch\n# suricata -T gegen den ganzen Rules-Stack laufen.\n\n`);
+    setOrig('');
+    setCreating(false); setNewName('');
+  }
+
+  const fmtSize = (b: number) => b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(1)} MB`;
+  const fmtTs   = (ts: number) => new Date(ts*1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">Eigene Signaturen</h2>
+        <div className="flex items-center gap-2">
+          <button className="btn-ghost text-xs" onClick={refresh} disabled={busy}>↻ Aktualisieren</button>
+          <button className="btn-primary text-xs" onClick={startCreate} disabled={busy || creating}>+ Neue Datei</button>
+        </div>
+      </div>
+
+      <p className="text-[11px] text-slate-500">
+        Editor für eigene <code className="font-mono">*.rules</code>-Dateien im
+        snort-rules-Volume. Beim Speichern läuft serverseitig{' '}
+        <code className="font-mono">suricata -T</code> gegen den gesamten
+        Regel-Stack – Syntaxfehler werden abgewiesen, Live-Reload via{' '}
+        <code className="font-mono">SIGUSR2</code> ist transparent. Built-in-
+        Dateien (von URL-Quellen gepullt) sind read-only zum Schutz vor
+        Überschreiben durch das nächste Update.
+      </p>
+
+      {creating && (
+        <div className="card p-3 flex items-end gap-2">
+          <div className="flex-1">
+            <label className="text-[11px] text-slate-400">Dateiname (.rules wird angehängt falls fehlend)</label>
+            <input
+              className="input w-full text-xs"
+              autoFocus
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              placeholder="my-custom"
+              onKeyDown={e => { if (e.key === 'Enter') commitCreate(); if (e.key === 'Escape') cancelCreate(); }}
+            />
+          </div>
+          <button className="btn-primary text-xs" onClick={commitCreate}>Anlegen</button>
+          <button className="btn-ghost text-xs"   onClick={cancelCreate}>Abbrechen</button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-3">
+        {/* Datei-Liste */}
+        <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1">
+          {files.length === 0 && !busy && (
+            <p className="text-[11px] text-slate-500 italic px-2 py-3">Keine .rules-Dateien</p>
+          )}
+          {files.map(f => (
+            <button
+              key={f.name}
+              type="button"
+              onClick={() => open(f.name)}
+              className={`w-full text-left px-2.5 py-2 rounded border text-[11px] transition-colors ${
+                selected === f.name
+                  ? 'bg-cyan-950/30 border-cyan-700/60 text-slate-100'
+                  : f.builtin
+                    ? 'bg-slate-900/30 border-slate-800/40 text-slate-400'
+                    : 'bg-slate-800/40 border-slate-700/50 text-slate-200 hover:border-slate-600'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono truncate flex-1">{f.name}</span>
+                {f.builtin && <span className="px-1 py-0.5 text-[9px] rounded bg-slate-700/40 text-slate-500 border border-slate-600/30">built-in</span>}
+              </div>
+              <div className="flex items-center gap-3 text-[10px] text-slate-500 mt-0.5">
+                <span>{f.rules.toLocaleString('de-DE')} Regeln</span>
+                <span>{fmtSize(f.size)}</span>
+                <span className="ml-auto">{fmtTs(f.modified)}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Editor-Spalte */}
+        <div className="space-y-2">
+          {!selected ? (
+            <p className="text-[11px] text-slate-500 italic px-3 py-6 text-center">
+              Datei links auswählen oder „+ Neue Datei" oben anlegen.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-mono text-xs text-slate-200">{selected}</span>
+                {dirty && <span className="text-[10px] text-amber-400">● ungespeichert</span>}
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-primary text-xs"
+                    disabled={!dirty || busy || files.find(f => f.name === selected)?.builtin}
+                    onClick={save}
+                  >
+                    {busy ? '…' : 'Speichern'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost text-xs"
+                    disabled={busy || !files.find(f => f.name === selected) || files.find(f => f.name === selected)?.builtin}
+                    onClick={() => {
+                      const f = files.find(x => x.name === selected);
+                      if (f) setConfirmDel(f);
+                    }}
+                  >
+                    Löschen
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <pre className="text-[11px] text-red-300 bg-red-950/30 border border-red-700/50 rounded px-3 py-2 whitespace-pre-wrap font-mono max-h-48 overflow-auto">{error}</pre>
+              )}
+              {info && (
+                <p className="text-[11px] text-green-300 bg-green-950/30 border border-green-700/50 rounded px-3 py-2">{info}</p>
+              )}
+
+              <textarea
+                className="w-full h-[480px] bg-slate-900/60 border border-slate-700/60 rounded p-3 font-mono text-xs text-slate-200 resize-y focus:outline-none focus:border-cyan-700"
+                spellCheck={false}
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                disabled={files.find(f => f.name === selected)?.builtin}
+                placeholder='alert tcp any any -> any 80 (msg:"Beispiel"; sid:1000001; rev:1;)'
+              />
+
+              {files.find(f => f.name === selected)?.builtin && (
+                <p className="text-[11px] text-amber-400 italic">
+                  Built-in-Datei – nur lesbar. Eigene Anpassungen in einer separaten Datei ablegen,
+                  damit das nächste Update sie nicht überschreibt.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {confirmDel && (
+        <ConfirmDialog
+          message={`Datei "${confirmDel.name}" mit ${confirmDel.rules.toLocaleString('de-DE')} Regeln löschen?`}
+          confirmLabel="Löschen"
+          onConfirm={() => { const m = confirmDel; setConfirmDel(null); doDelete(m); }}
+          onCancel={() => setConfirmDel(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 function RulesList() {
   const [rules,    setRules]    = useState<Rule[]>([]);
   const [total,    setTotal]    = useState(0);
@@ -3268,7 +3523,7 @@ function SystemHealth() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
+type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
 
 interface NavItem { id: SectionId; label: string; icon: ReactNode }
 interface NavGroup { label: string; items: NavItem[] }
@@ -3296,6 +3551,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'rules-sources', label: 'Rule-Quellen',  icon: <Database {...ICON_PROPS} /> },
       { id: 'rules-list',    label: 'Aktive Regeln', icon: <ListTree {...ICON_PROPS} /> },
+      { id: 'rules-editor',  label: 'Eigene Signaturen', icon: <FileText {...ICON_PROPS} /> },
     ],
   },
   {
@@ -3366,6 +3622,7 @@ export function SettingsPage() {
             {active === 'ml-learned'    && <MLLearnedPatterns />}
             {active === 'rules-sources' && <RuleSources />}
             {active === 'rules-list'    && <RulesList />}
+            {active === 'rules-editor'  && <RuleFileEditor />}
             {active === 'system-health'  && <SystemHealth />}
             {active === 'db-maintenance' && <DatabaseMaintenance />}
             {active === 'interfaces'    && <NetworkInterfaces />}
