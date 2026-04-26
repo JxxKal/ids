@@ -288,21 +288,36 @@ def _spawn_sniffer_reconfig(ids_dir: Path, profile: str) -> None:
     compose_cmd = (
         f"docker compose --project-directory {ids_dir} {profile_args} up -d sniffer"
     )
-    # Diagnose-Log: ohne das war ein stilles Scheitern (Profile-Mismatch,
-    # fehlendes Image, Compose-Fehler) für die GUI nicht sichtbar – der Frontend-
-    # Notice meldete "wird umgestellt", aber der Sniffer blieb auf dem alten
-    # Interface. Output landet sichtbar in `docker logs ids-sniffer-reconfig`.
+
+    # Vorhergehenden Reconfig-Container weg, falls er noch da ist – wir nutzen
+    # absichtlich KEIN --rm, damit `docker logs ids-sniffer-reconfig` nach
+    # einem Fehlschlag noch was zeigt. Ohne diese Präventivabräumung würde
+    # `docker run --name ids-sniffer-reconfig` mit "name already in use"
+    # scheitern.
+    subprocess.run(
+        ["docker", "rm", "-f", "ids-sniffer-reconfig"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+    # Output zusätzlich in /opt/ids/.cyjan-sniffer-reconfig.log spiegeln,
+    # damit auch nach einem späteren `docker rm` die Diagnose erhalten bleibt.
+    log_path = ids_dir / ".cyjan-sniffer-reconfig.log"
+    full_cmd = (
+        f"set -ex; sleep 2; "
+        f"{{ {compose_cmd}; echo 'Sniffer-Reconfig fertig'; }} "
+        f"2>&1 | tee {log_path}"
+    )
     subprocess.Popen(
         [
-            "docker", "run", "--rm",
+            "docker", "run", "-d",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
             "-v", f"{ids_dir}:{ids_dir}",
             "-w", str(ids_dir),
             "-e", "COMPOSE_PROJECT_NAME=ids",
             "--name", "ids-sniffer-reconfig",
             "ids-api:latest",
-            "sh", "-c",
-            f"set -ex; sleep 2; {compose_cmd}; echo 'Sniffer-Reconfig fertig' ",
+            "sh", "-c", full_cmd,
         ],
         start_new_session=True, close_fds=True,
         env={**os.environ},
