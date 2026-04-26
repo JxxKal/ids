@@ -16,6 +16,7 @@
  *   • Peer-Liste mit Direction, Bytes, Top-Ports und Alert-Count.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X, ArrowRight, ArrowLeft, ArrowLeftRight, AlertTriangle } from 'lucide-react';
 import { fetchHostConnections } from '../api';
 import type {
@@ -88,7 +89,10 @@ export function HostConnectionDrawer() {
 
   if (!ip) return null;
 
-  return (
+  // createPortal damit die Drawer-Hierarchie garantiert direkt an document.body
+  // hängt, unabhängig von App-Layout-Containern (sticky-Bezug, transformierte
+  // Vorfahren, contain: layout etc. können Position-Fixed sonst kapern).
+  return createPortal(
     <>
       {/* Backdrop */}
       <div
@@ -96,17 +100,17 @@ export function HostConnectionDrawer() {
         onClick={() => setIp(null)}
       />
 
-      {/* Drawer – flex-Spalten statt sticky-Header: Header bleibt immer
-          oben fix, der Body scrollt eigenständig. Sticky in einem
-          overflow-y-auto-Container hat in einigen Browsern unter bestimmten
-          Layout-Bedingungen die Tendenz "wegzurutschen", flex-Aufteilung
-          umgeht das Problem komplett. */}
+      {/* Drawer – outer aside ist 100vh hoch und flex-Container, body
+          (overflow-y-auto) bekommt EXPLIZIT min-h-0, sonst greift
+          flexbox' impliziter min-height:auto, der den scroll-container
+          über den Header hinauswachsen lässt – exakt das Symptom mit
+          dem mitscrollenden Header. */}
       <aside
-        className="fixed top-0 right-0 h-full w-full md:w-[720px] z-50
+        className="fixed top-0 right-0 h-screen w-full md:w-[720px] z-50
                    bg-slate-950 border-l border-slate-700/60 shadow-2xl
                    flex flex-col"
       >
-        <header className="shrink-0 border-b border-slate-800 px-5 py-3
+        <header className="flex-none border-b border-slate-800 px-5 py-3
                            bg-slate-950/95 backdrop-blur flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] uppercase tracking-widest text-slate-500">Host-Verbindungen</p>
@@ -126,7 +130,7 @@ export function HostConnectionDrawer() {
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-5">
           {/* Time-Range-Buttons */}
           <div className="flex items-center gap-1 bg-slate-900/60 border border-slate-700/50 rounded-lg p-1 w-fit">
             {WINDOWS.map(w => (
@@ -180,7 +184,8 @@ export function HostConnectionDrawer() {
           )}
         </div>
       </aside>
-    </>
+    </>,
+    document.body,
   );
 }
 
