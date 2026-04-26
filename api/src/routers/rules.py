@@ -1,16 +1,21 @@
 """Rules Engine: Rule-Quellen verwalten, aktive Regeln lesen, Update anstoßen."""
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
+import subprocess
+import tarfile
 import time
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
+
+from deps import require_admin
 
 router = APIRouter(prefix="/api/rules", tags=["rules"])
 
@@ -295,4 +300,146 @@ async def update_status() -> UpdateStatus:
         requested=requested,
         requested_at=requested_at,
         last_updated=last_updated,
+    )
+
+
+# ── Offline-Import ────────────────────────────────────────────────────────────
+
+_RULE_KEYWORDS = ("alert", "drop", "reject", "pass", "log")
+_MAX_UPLOAD_BYTES   = 50 * 1024 * 1024   # 50 MB – ETOpen ist ~7 MB, viel Headroom
+_ALLOWED_EXTENSIONS = (".rules", ".tar.gz", ".tgz")
+
+
+class ImportResponse(BaseModel):
+    status:         str
+    files_imported: list[str]
+    rules_count:    int
+    reload:         str
+    note:           str | None = None
+
+
+def _count_rules_in(path: Path) -> int:
+    try:
+        text = path.read_text(errors="ignore")
+    except OSError:
+        return 0
+    n = 0
+    for line in text.splitlines():
+        ln = line.lstrip()
+        if any(ln.startswith(k + " ") or ln.startswith(k + "(") for k in _RULE_KEYWORDS):
+            n += 1
+    return n
+
+
+def _extract_tar_safely(data: bytes, dest: Path) -> list[str]:
+    """Entpackt nur *.rules-Files, ignoriert Pfade die `..` oder absolute
+    Wege enthalten. Schreibt jeden Eintrag als basename direkt nach `dest`."""
+    written: list[str] = []
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        for member in tar.getmembers():
+            if not member.isfile():
+                continue
+            base = Path(member.name).name           # nur Dateiname, kein Pfad
+            if not base.endswith(".rules"):
+                continue
+            if not base or base.startswith("."):
+                continue
+            extracted = tar.extractfile(member)
+            if extracted is None:
+                continue
+            target = dest / base
+            target.write_bytes(extracted.read())
+            written.append(base)
+    return written
+
+
+def _signal_suricata_reload() -> tuple[bool, str]:
+    """SIGUSR2 an ids-snort triggert Live-Rule-Reload ohne Restart.
+    Wenn Suricata noch nicht läuft (z.B. erstes Setup ohne snort-Profil),
+    geben wir das als Hinweis zurück, ohne Fehler zu werfen."""
+    try:
+        r = subprocess.run(
+            ["docker", "kill", "--signal=SIGUSR2", "ids-snort"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            return True, "SIGUSR2 an ids-snort gesendet (Live-Reload)"
+        return False, (r.stderr or r.stdout or "docker kill fehlgeschlagen").strip()
+    except FileNotFoundError:
+        return False, "docker-CLI im API-Container nicht verfügbar"
+    except Exception as exc:                       # noqa: BLE001
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+@router.post(
+    "/suricata/import",
+    response_model=ImportResponse,
+    dependencies=[Depends(require_admin)],
+    summary="Offline-Import: Suricata-Regeln aus *.rules oder *.tar.gz",
+)
+async def import_suricata_rules(
+    file: UploadFile = File(...),
+    user: dict       = Depends(require_admin),
+) -> ImportResponse:
+    """Operator-Pfad für Maschinen ohne Internet: ETOpen-Tarball oder
+    eigene `*.rules` direkt hochladen. Inhalt landet im snort-rules-Volume,
+    Suricata bekommt SIGUSR2 für einen Live-Reload."""
+
+    name = (file.filename or "").lower()
+    if not name.endswith(_ALLOWED_EXTENSIONS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nur {', '.join(_ALLOWED_EXTENSIONS)} erlaubt",
+        )
+
+    # Read the whole upload up-front; größere Limits machen für Rule-Dateien
+    # keinen Sinn, ETOpen-Tarball ist <10 MB.
+    contents = await file.read()
+    if len(contents) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Datei zu groß ({len(contents) // (1024*1024)} MB > "
+                   f"{_MAX_UPLOAD_BYTES // (1024*1024)} MB)",
+        )
+
+    RULES_DIR.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    try:
+        if name.endswith(".rules"):
+            # Direkt-Upload einer einzelnen Regel-Datei
+            base = Path(file.filename).name
+            target = RULES_DIR / base
+            target.write_bytes(contents)
+            written.append(base)
+        else:
+            # tar.gz/tgz entpacken
+            written = _extract_tar_safely(contents, RULES_DIR)
+            if not written:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Archiv enthielt keine .rules-Dateien",
+                )
+    except tarfile.TarError as exc:
+        raise HTTPException(status_code=400, detail=f"Archiv defekt: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Schreibfehler: {exc}") from exc
+
+    rules_count = sum(_count_rules_in(RULES_DIR / f) for f in written)
+
+    reload_ok, reload_msg = _signal_suricata_reload()
+
+    note = None
+    if not reload_ok:
+        note = (
+            f"Regeln wurden geschrieben, aber Live-Reload schlug fehl "
+            f"({reload_msg}). Sobald der Suricata-Container läuft, werden "
+            f"sie beim nächsten Reload aktiv."
+        )
+
+    return ImportResponse(
+        status="ok",
+        files_imported=written,
+        rules_count=rules_count,
+        reload="sent" if reload_ok else "skipped",
+        note=note,
     )

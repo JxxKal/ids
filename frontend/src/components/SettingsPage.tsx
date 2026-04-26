@@ -10,6 +10,7 @@ import {
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
   triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname, fetchSystemStats,
+  importSuricataRules,
   fetchLearnedPatterns,
   fetchDbStats, cleanupDb, vacuumDb, setRetentionPolicy, backupDbUrl, restoreDb, fetchMaintenanceAudit,
 } from '../api';
@@ -1689,6 +1690,83 @@ function RuleSources() {
           onConfirm={() => { const s = confirmSrc; setConfirmSrc(null); handleDeleteSource(s); }}
           onCancel={() => setConfirmSrc(null)}
         />
+      )}
+
+      <SuricataOfflineImport />
+    </div>
+  );
+}
+
+// ── Offline-Import (für Maschinen ohne Internet) ──────────────────────────────
+function SuricataOfflineImport() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy,    setBusy]    = useState(false);
+  const [result,  setResult]  = useState<{ ok: boolean; msg: string; files?: string[]; rules?: number } | null>(null);
+
+  async function handleFile(f: File) {
+    if (!f) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await importSuricataRules(f);
+      const main = `${r.rules_count.toLocaleString('de-DE')} Regeln aus ${r.files_imported.length} Datei(en) importiert.`;
+      setResult({
+        ok:    true,
+        msg:   r.note ? `${main} ${r.note}` : `${main} Suricata-Reload: ${r.reload}.`,
+        files: r.files_imported,
+        rules: r.rules_count,
+      });
+    } catch (e) {
+      setResult({ ok: false, msg: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  }
+
+  return (
+    <div className="card p-3 space-y-2 mt-4 border-cyan-700/40 bg-cyan-950/10">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-xs font-semibold text-slate-200">Offline-Import</h3>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            Für Maschinen ohne Internet: ETOpen-Tarball oder eigene <code className="font-mono">*.rules</code>-Datei
+            hochladen. Die Datei landet im snort-rules-Volume und Suricata erhält
+            ein <code className="font-mono">SIGUSR2</code> für den Live-Reload.
+          </p>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".rules,.tar.gz,.tgz,application/gzip,application/x-tar"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+          disabled={busy}
+          className="text-[11px] text-slate-300 file:mr-2 file:px-3 file:py-1 file:rounded file:border-0 file:bg-cyan-700 file:text-white file:cursor-pointer hover:file:bg-cyan-600 file:text-[11px] file:font-medium"
+        />
+      </div>
+
+      {busy && (
+        <p className="text-[11px] text-slate-400">⏳ Übertrage und entpacke …</p>
+      )}
+
+      {result && (
+        <div className={`text-[11px] rounded border px-2.5 py-1.5 ${
+          result.ok
+            ? 'border-green-700/50 bg-green-950/30 text-green-300'
+            : 'border-red-700/50 bg-red-950/30 text-red-300'
+        }`}>
+          <p>{result.ok ? '✓ ' : '⚠ '}{result.msg}</p>
+          {result.files && result.files.length > 0 && (
+            <ul className="mt-1 ml-4 list-disc text-slate-400">
+              {result.files.slice(0, 12).map(f => (
+                <li key={f} className="font-mono text-[10px]">{f}</li>
+              ))}
+              {result.files.length > 12 && (
+                <li className="text-slate-500 text-[10px]">… und {result.files.length - 12} weitere</li>
+              )}
+            </ul>
+          )}
+        </div>
       )}
     </div>
   );

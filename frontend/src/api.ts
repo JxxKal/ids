@@ -419,6 +419,38 @@ export async function fetchRuleUpdateStatus(): Promise<UpdateStatus> {
   return req('/api/rules/update/status');
 }
 
+export interface SuricataImportResult {
+  status:         string;
+  files_imported: string[];
+  rules_count:    number;
+  reload:         string;
+  note?:          string | null;
+}
+
+// `req()` darf nicht verwendet werden – es setzt Content-Type: application/json
+// und überschreibt damit den vom Browser für FormData generierten Header
+// (multipart/form-data; boundary=…). Daher direkter fetch() mit Bearer-Header.
+export async function importSuricataRules(file: File): Promise<SuricataImportResult> {
+  const token = getToken();
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  const res = await fetch(`${BASE}/api/rules/suricata/import`, {
+    method:  'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body:    fd,
+  });
+  if (res.status === 401) {
+    clearToken();
+    window.dispatchEvent(new Event('ids:unauthorized'));
+    throw new Error('401 Unauthorized');
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  }
+  return res.json();
+}
+
 // ── SAML Config ───────────────────────────────────────────────────────────────
 
 const SAML_DEFAULTS: SamlConfig = {
