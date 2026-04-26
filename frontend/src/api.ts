@@ -121,8 +121,10 @@ export async function setFeedback(
   });
 }
 
-export function pcapUrl(alertId: string): string {
-  return `${BASE}/api/alerts/${alertId}/pcap`;
+// raw=true liefert das ungefilterte ±60s-Capture-Fenster aus pcap-store
+// (sonst per Default nur die Pakete die zum Alert-Flow passen).
+export function pcapUrl(alertId: string, raw = false): string {
+  return `${BASE}/api/alerts/${alertId}/pcap${raw ? '?raw=true' : ''}`;
 }
 
 export function alertsExportUrl(params: {
