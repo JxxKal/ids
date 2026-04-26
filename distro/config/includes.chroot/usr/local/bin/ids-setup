@@ -100,6 +100,7 @@ whiptail --title "$TITLE" --msgbox \
 "Willkommen beim Cyjan IDS First-Boot-Setup.
 
 Dieser Wizard konfiguriert:
+  • Tastatur, Zeitzone und Zeitserver
   • Proxy-Einstellungen (optional)
   • Netzwerk-Schnittstellen
   • Datenbank- und Sicherheitspasswörter
@@ -109,6 +110,91 @@ Alle Einstellungen werden in $ENV_FILE gespeichert.
 Der IDS-Stack startet automatisch nach Abschluss.
 
 Weiter mit OK." $H $W
+
+# ── Schritt 1b: Tastatur, Zeitzone, Zeitserver ────────────────────────────────
+# Tastaturlayout zuerst, weil alle nachfolgenden Eingaben (Proxy-URL,
+# Passwörter) sonst mit dem Default-us-Layout der Live-ISO eingegeben würden
+# und Sonderzeichen am falschen Ort landen.
+
+KBD=$(whiptail --title "$TITLE" --menu \
+  "Tastaturlayout für die Konsole auswählen:" $H $W 8 \
+  "de"    "Deutsch (Deutschland)" \
+  "de-CH" "Deutsch (Schweiz)" \
+  "at"    "Deutsch (Österreich)" \
+  "fr"    "Français (France)" \
+  "fr-CH" "Français (Suisse)" \
+  "it"    "Italiano" \
+  "us"    "English (US)" \
+  "gb"    "English (UK)" \
+  3>&1 1>&2 2>&3) || KBD="us"
+
+# /etc/default/keyboard akzeptiert ein einfaches Layout (z.B. "de") oder
+# layout+variant ("ch" mit XKBVARIANT="de_nodeadkeys"). Für Schweizer Layouts
+# splitten wir.
+KBD_LAYOUT="$KBD"
+KBD_VARIANT=""
+case "$KBD" in
+  de-CH) KBD_LAYOUT="ch"; KBD_VARIANT="de_nodeadkeys" ;;
+  fr-CH) KBD_LAYOUT="ch"; KBD_VARIANT="fr_nodeadkeys" ;;
+esac
+
+if [ -f /etc/default/keyboard ]; then
+  sed -i \
+    -e 's|^XKBLAYOUT=.*|XKBLAYOUT="'"$KBD_LAYOUT"'"|' \
+    -e 's|^XKBVARIANT=.*|XKBVARIANT="'"$KBD_VARIANT"'"|' \
+    /etc/default/keyboard
+else
+  cat > /etc/default/keyboard <<EOF
+XKBMODEL="pc105"
+XKBLAYOUT="$KBD_LAYOUT"
+XKBVARIANT="$KBD_VARIANT"
+XKBOPTIONS=""
+BACKSPACE="guess"
+EOF
+fi
+# setupcon liest /etc/default/keyboard und konfiguriert console-setup +
+# Keymap auf allen Linux-VTs. SSH-Sessions sind nicht betroffen, weil dort
+# das Keymap im Client liegt.
+setupcon -f --save 2>>"$LOG" || true
+log "Tastatur: $KBD_LAYOUT${KBD_VARIANT:+/$KBD_VARIANT}"
+
+# Zeitzone
+TZ=$(whiptail --title "$TITLE" --menu \
+  "Zeitzone auswählen:" $H $W 8 \
+  "Europe/Berlin"    "Berlin / Deutschland (CET/CEST)" \
+  "Europe/Vienna"    "Wien / Österreich (CET/CEST)" \
+  "Europe/Zurich"    "Zürich / Schweiz (CET/CEST)" \
+  "Europe/Paris"     "Paris / Frankreich (CET/CEST)" \
+  "Europe/Amsterdam" "Amsterdam / Niederlande (CET/CEST)" \
+  "Europe/London"    "London / UK (GMT/BST)" \
+  "UTC"              "UTC (Universal Time)" \
+  3>&1 1>&2 2>&3) || TZ="UTC"
+
+# timedatectl ist auf Debian der saubere Pfad – setzt /etc/localtime,
+# /etc/timezone und benachrichtigt RTC. Fallback auf manuelles Symlink falls
+# systemd nicht erreichbar (z.B. im chroot beim ISO-Build).
+if ! timedatectl set-timezone "$TZ" 2>>"$LOG"; then
+  ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
+  echo "$TZ" > /etc/timezone
+fi
+log "Zeitzone: $TZ"
+
+# NTP-Server
+NTP=$(input "NTP-Server" \
+  "Zeitserver für die Uhrensynchronisation\n(leer oder 'pool.ntp.org' = öffentlicher Default; mehrere kommagetrennt):" \
+  "pool.ntp.org") || NTP="pool.ntp.org"
+
+NTP_SERVERS="${NTP//,/ }"   # "a.de,b.de" → "a.de b.de" für systemd-timesyncd
+mkdir -p /etc/systemd/timesyncd.conf.d
+cat > /etc/systemd/timesyncd.conf.d/99-cyjan.conf <<EOF
+# Generiert von ids-setup am $(date)
+[Time]
+NTP=${NTP_SERVERS}
+FallbackNTP=pool.ntp.org
+EOF
+systemctl restart systemd-timesyncd 2>>"$LOG" || true
+timedatectl set-ntp true 2>>"$LOG" || true
+log "NTP: $NTP_SERVERS"
 
 # ── Schritt 2: Proxy ──────────────────────────────────────────────────────────
 
