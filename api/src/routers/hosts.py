@@ -76,11 +76,11 @@ async def list_unknown_hosts(
                 SELECT DISTINCT ip FROM (
                     SELECT src_ip AS ip FROM alerts
                     WHERE src_ip IS NOT NULL AND is_test = false
-                      AND ts > NOW() - ($1 || ' days')::interval
+                      AND ts > NOW() - (make_interval(days := $1))
                     UNION
                     SELECT dst_ip AS ip FROM alerts
                     WHERE dst_ip IS NOT NULL AND is_test = false
-                      AND ts > NOW() - ($1 || ' days')::interval
+                      AND ts > NOW() - (make_interval(days := $1))
                 ) t
             ),
             unknown AS (
@@ -100,7 +100,7 @@ async def list_unknown_hosts(
             FROM unknown u
             JOIN alerts a ON (a.src_ip = u.ip OR a.dst_ip = u.ip)
               AND a.is_test = false
-              AND a.ts > NOW() - ($1 || ' days')::interval
+              AND a.ts > NOW() - (make_interval(days := $1))
             GROUP BY u.ip
             ORDER BY alert_count DESC, last_seen DESC
             LIMIT $2
