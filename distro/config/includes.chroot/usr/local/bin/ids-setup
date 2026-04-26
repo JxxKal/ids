@@ -155,7 +155,23 @@ fi
 # setupcon liest /etc/default/keyboard und konfiguriert console-setup +
 # Keymap auf allen Linux-VTs. SSH-Sessions sind nicht betroffen, weil dort
 # das Keymap im Client liegt.
-setupcon -f --save 2>>"$LOG" || true
+#
+# WICHTIG: KEIN `-f` an setupcon übergeben. Das ist die Kurzform von
+# `--font-only` und konfiguriert ausschließlich die Konsolen-Schrift, das
+# Keymap bleibt unangetastet. Default-Aufruf (ohne Flags) macht beides:
+# Font + Keyboard laden, Cache speichern, auf die aktive Konsole anwenden.
+setupcon --force 2>>"$LOG" || true
+# Als Sicherheitsnetz: wenn der gewählten XKB-Layout ein offensichtliches
+# Console-Keymap-Pendant hat, direkt loadkeys nachschieben. Greift auch falls
+# setupcon stumm scheitert.
+case "$KBD" in
+  de|at|de-CH) loadkeys de-latin1 2>>"$LOG" || true ;;
+  fr)         loadkeys fr-latin1 2>>"$LOG" || true ;;
+  fr-CH)      loadkeys fr_CH-latin1 2>>"$LOG" || true ;;
+  it)         loadkeys it 2>>"$LOG" || true ;;
+  gb)         loadkeys uk 2>>"$LOG" || true ;;
+  us)         loadkeys us 2>>"$LOG" || true ;;
+esac
 log "Tastatur: $KBD_LAYOUT${KBD_VARIANT:+/$KBD_VARIANT}"
 
 # Zeitzone
