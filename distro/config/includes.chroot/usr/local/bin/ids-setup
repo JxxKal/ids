@@ -93,21 +93,56 @@ gen_secret() {
   ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9_.-' </dev/urandom | head -c 32 )
 }
 
-# ── Schritt 1: Willkommen ─────────────────────────────────────────────────────
+# ── Schritt 1: Willkommen + Modus-Wahl ───────────────────────────────────────
+# Wenn schon eine .env existiert, wäre eine Voll-Neukonfiguration mit frisch
+# generierten Secrets ein Datenbank-Killer (Postgres-Volume passt nicht mehr
+# zum neuen POSTGRES_PASSWORD → API-Crashloop). Default ist daher der
+# Light-Modus: Konfiguration ändern, Secrets erhalten, Stack neu starten.
 
 clear
+
+SETUP_MODE="full"
+EXISTING_ENV=""
+if [ -f "$ENV_FILE" ]; then
+  EXISTING_ENV=$(cat "$ENV_FILE")
+  CHOICE=$(whiptail --title "$TITLE" --menu \
+    "Bestehende Konfiguration in $ENV_FILE gefunden.\n\nWelchen Modus?" $H $W 4 \
+    "light" "Konfig ändern (Tastatur, Netz, IRMA, Secrets bleiben erhalten)" \
+    "full"  "Neukonfiguration mit frischen Secrets (Achtung: DB-Reset nötig!)" \
+    "exit"  "Abbrechen" \
+    3>&1 1>&2 2>&3) || CHOICE="exit"
+  case "$CHOICE" in
+    exit)
+      msg "Setup abgebrochen."
+      exit 0
+      ;;
+    light)
+      SETUP_MODE="light"
+      log "Modus: light (Secrets aus bestehender .env übernommen)."
+      ;;
+    full)
+      if ! yesno "Achtung: Voll-Neukonfiguration generiert frische Secrets.\n\nDie bestehende Postgres-Datenbank passt danach nicht mehr zum neuen POSTGRES_PASSWORD und der API-Container kommt nicht mehr hoch.\n\nVor diesem Modus solltest du den Stack inkl. Volumes löschen:\n\n  cd $IDS_DIR && sudo docker compose down -v\n\nWirklich fortfahren?"; then
+        msg "Modus 'voll' abgebrochen. Wähle stattdessen 'light' oder löse den Stack manuell auf."
+        exit 1
+      fi
+      SETUP_MODE="full"
+      log "Modus: full (Secrets werden neu generiert)."
+      ;;
+  esac
+fi
+
 whiptail --title "$TITLE" --msgbox \
-"Willkommen beim Cyjan IDS First-Boot-Setup.
+"Willkommen beim Cyjan IDS Setup.
 
-Dieser Wizard konfiguriert:
-  • Tastatur, Zeitzone und Zeitserver
-  • Proxy-Einstellungen (optional)
+Modus: ${SETUP_MODE^^}
+
+Schritte:
+  • Tastatur, Zeitzone, Zeitserver
+  • Proxy (optional)
   • Netzwerk-Schnittstellen
-  • Datenbank- und Sicherheitspasswörter
-  • IRMA-Integration (optional)
-
-Alle Einstellungen werden in $ENV_FILE gespeichert.
-Der IDS-Stack startet automatisch nach Abschluss.
+  • $([ "$SETUP_MODE" = "full" ] && echo 'Datenbank- und Sicherheitspasswörter' || echo 'Sicherheits-Secrets bleiben unverändert')
+  • IRMA / Suricata (optional)
+  • Stack-Restart
 
 Weiter mit OK." $H $W
 
@@ -160,16 +195,32 @@ fi
 # `--font-only` und konfiguriert ausschließlich die Konsolen-Schrift, das
 # Keymap bleibt unangetastet. Default-Aufruf (ohne Flags) macht beides:
 # Font + Keyboard laden, Cache speichern, auf die aktive Konsole anwenden.
-setupcon --force 2>>"$LOG" || true
-# Als Sicherheitsnetz das frisch gecachte Keymap explizit auf den aktiven VT
-# laden. Nicht `loadkeys de-latin1` o.ä. – die Keymap-Files-Datenbasis
-# (/usr/share/keymaps) gehört zum kbd-Daten-Paket und ist auf der schlanken
-# ISO nicht mit dabei. setupcon legt aber die Cache-Datei
-# /etc/console-setup/cached_UTF-8_del.kmap.gz an, und die genügt loadkeys.
+# Auf manchen Live-Installs hat console-setup beim Boot nichts gerendert –
+# wir erzwingen den Service explizit, damit der Boot-Hook beim nächsten
+# Reboot definitiv das frisch geschriebene /etc/default/keyboard liest.
+systemctl enable console-setup.service 2>>"$LOG" || true
+
+# `setupcon --force` (NICHT `-f`, das wäre `--font-only`) regeneriert font-
+# und keymap-Cache und versucht den keymap auf die aktive Linux-Konsole
+# anzuwenden. Den Exit-Code loggen, damit wir bei "still englisch"-Bug-
+# Reports sehen, ob setupcon überhaupt durchlief.
+setupcon --force >>"$LOG" 2>&1
+sc_rc=$?
+log "setupcon exit=$sc_rc"
+
+# Als Sicherheitsnetz das frisch gecachte Keymap explizit auf /dev/console
+# laden. /usr/share/keymaps wäre die "klassische" loadkeys-Quelle, die liegt
+# aber im kbd-Daten-Paket und ist auf der schlanken ISO nicht dabei.
+# setupcon legt /etc/console-setup/cached_UTF-8_del.kmap.gz an, und das
+# genügt loadkeys – plus es ist garantiert konsistent zur XKB-Wahl.
+loaded_via=""
 for _kmap in /etc/console-setup/cached_*.kmap.gz; do
-  [ -f "$_kmap" ] && loadkeys "$_kmap" 2>>"$LOG" && break
+  if [ -f "$_kmap" ] && loadkeys --console=/dev/tty1 "$_kmap" 2>>"$LOG"; then
+    loaded_via="$_kmap"
+    break
+  fi
 done
-log "Tastatur: $KBD_LAYOUT${KBD_VARIANT:+/$KBD_VARIANT}"
+log "Tastatur: $KBD_LAYOUT${KBD_VARIANT:+/$KBD_VARIANT}, geladen via: ${loaded_via:-(keiner – Cache fehlt)}"
 
 # Zeitzone
 TZ=$(whiptail --title "$TITLE" --menu \
@@ -335,27 +386,47 @@ if yesno "Ist ein Mirror/SPAN-Port-Interface für den Packet-Sniffer vorhanden?"
   fi
 fi
 
-# ── Schritt 5: Sicherheitspasswörter ─────────────────────────────────────────
+# ── Schritt 5: Sicherheits-Secrets ────────────────────────────────────────────
+# Light-Modus übernimmt die bestehenden Werte aus der vorhandenen .env, damit
+# Postgres-/MinIO-Volumes weiterhin authentifizieren und JWTs valid bleiben.
+# Voll-Modus generiert frisch (User wurde oben gewarnt, dass das einen DB-
+# Reset bedingt).
+extract_env() {
+  echo "$EXISTING_ENV" | grep -E "^${1}=" | head -1 | cut -d= -f2-
+}
 
-msg "Sicherheitseinstellungen\n\nIm nächsten Schritt werden Passwörter konfiguriert.\nFalls Sie keine eingeben, werden sichere Zufallswerte generiert."
+if [ "$SETUP_MODE" = "light" ]; then
+  POSTGRES_PASSWORD=$(extract_env POSTGRES_PASSWORD)
+  API_SECRET=$(extract_env API_SECRET_KEY)
+  MINIO_ACCESS=$(extract_env MINIO_ACCESS_KEY)
+  MINIO_SECRET=$(extract_env MINIO_SECRET_KEY)
+  # Notfall-Fallback, falls die alte .env unvollständig war:
+  [ -n "$POSTGRES_PASSWORD" ] || POSTGRES_PASSWORD=$(gen_secret)
+  [ -n "$API_SECRET" ]        || API_SECRET=$(gen_secret)
+  [ -n "$MINIO_ACCESS" ]      || MINIO_ACCESS="ids-access"
+  [ -n "$MINIO_SECRET" ]      || MINIO_SECRET=$(gen_secret)
+  log "Light-Modus: Secrets aus bestehender .env übernommen."
+else
+  msg "Sicherheitseinstellungen\n\nIm nächsten Schritt werden Passwörter konfiguriert.\nFalls Sie keine eingeben, werden sichere Zufallswerte generiert."
 
-POSTGRES_PASSWORD=$(password "Datenbankpasswort" \
-  "PostgreSQL-Passwort (leer = Zufallswert generieren):") || true
-if [ -z "$POSTGRES_PASSWORD" ]; then
-  POSTGRES_PASSWORD=$(gen_secret)
-  msg "Datenbankpasswort wurde automatisch generiert.\nBitte notieren Sie es aus der Datei:\n$ENV_FILE"
-fi
+  POSTGRES_PASSWORD=$(password "Datenbankpasswort" \
+    "PostgreSQL-Passwort (leer = Zufallswert generieren):") || true
+  if [ -z "$POSTGRES_PASSWORD" ]; then
+    POSTGRES_PASSWORD=$(gen_secret)
+    msg "Datenbankpasswort wurde automatisch generiert.\nBitte notieren Sie es aus der Datei:\n$ENV_FILE"
+  fi
 
-API_SECRET=$(gen_secret)   # immer zufällig (JWT-Signing)
+  API_SECRET=$(gen_secret)   # immer zufällig (JWT-Signing)
 
-MINIO_ACCESS=$(input "MinIO Access Key" \
-  "MinIO Access Key (leer = 'ids-access'):" \
-  "ids-access") || MINIO_ACCESS="ids-access"
+  MINIO_ACCESS=$(input "MinIO Access Key" \
+    "MinIO Access Key (leer = 'ids-access'):" \
+    "ids-access") || MINIO_ACCESS="ids-access"
 
-MINIO_SECRET=$(password "MinIO Secret Key" \
-  "MinIO Secret Key (leer = Zufallswert):") || true
-if [ -z "$MINIO_SECRET" ]; then
-  MINIO_SECRET=$(gen_secret)
+  MINIO_SECRET=$(password "MinIO Secret Key" \
+    "MinIO Secret Key (leer = Zufallswert):") || true
+  if [ -z "$MINIO_SECRET" ]; then
+    MINIO_SECRET=$(gen_secret)
+  fi
 fi
 
 # ── Schritt 5b: Systembenutzer-Passwörter (ids, root) ─────────────────────────
@@ -553,12 +624,18 @@ fi
 # Wizard auf den klassischen Online-Build-Pfad zurück.
 # Bundle-Format: zstd-komprimiert (vorher gzip; gzip riss am 2-GiB-Asset-
 # Limit von GitHub Releases). Fallback auf .tar.gz für ältere ISOs.
+#
+# Light-Modus überspringt sowohl Bundle-Load als auch Build: Images sind
+# vom ersten Wizard-Lauf schon im Daemon, nur compose up -d nötig damit
+# kompose die geänderten Env-Vars (z.B. MIRROR_IFACE) übernimmt.
 OFFLINE_BUNDLE=""
 for cand in /opt/cyjan-offline/images.tar.zst /opt/cyjan-offline/images.tar.gz; do
   [ -f "$cand" ] && { OFFLINE_BUNDLE="$cand"; break; }
 done
 LOADED_OFFLINE=0
-if [ -n "$OFFLINE_BUNDLE" ]; then
+if [ "$SETUP_MODE" = "light" ]; then
+  log "Light-Modus: überspringe Offline-Bundle-Load."
+elif [ -n "$OFFLINE_BUNDLE" ]; then
   log "Offline-Bundle gefunden: $OFFLINE_BUNDLE"
   case "$OFFLINE_BUNDLE" in
     *.zst) DECOMPRESS="zstd -dc" ;;
@@ -591,7 +668,8 @@ fi
 # manuell über die Services und schicken pro fertiger Build-Stage einen Prozent-
 # wert an gauge. DOCKER_BUILDKIT=0 hält den klassischen Builder, der ohne
 # overlayfs-on-overlayfs-Probleme im Live-System auskommt.
-if [ "$LOADED_OFFLINE" -ne 1 ]; then
+# Light-Modus überspringt das auch – die Images sind vom Erst-Lauf schon da.
+if [ "$SETUP_MODE" != "light" ] && [ "$LOADED_OFFLINE" -ne 1 ]; then
   log "Kein Offline-Bundle – starte 'docker compose build' (BUILDKIT=0)..."
   # Liste aller im Profil aktiven Services. Pro Iteration wird gauge aktualisiert.
   # Services mit `image:` (timescaledb, redis, kafka, minio …) sind im Build ein
