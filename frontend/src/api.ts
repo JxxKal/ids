@@ -762,6 +762,11 @@ export async function fetchSystemUpdateStatus(): Promise<SystemUpdateStatus> {
   return req<SystemUpdateStatus>('/api/system/update/status');
 }
 
+export async function fetchVersion(): Promise<{ version: string }> {
+  if (isDemoMode()) return { version: 'demo' };
+  return req<{ version: string }>('/api/system/version');
+}
+
 export async function restartStack(): Promise<{ status: string }> {
   if (isDemoMode()) return { status: 'started' };
   return req('/api/system/restart', { method: 'POST' });
