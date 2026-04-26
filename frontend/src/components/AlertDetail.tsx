@@ -110,12 +110,16 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
       onClick={onClose}
     >
       <div
-        className="cyjan-card w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-xl"
+        className="cyjan-card w-full max-w-3xl max-h-[90vh] rounded-xl flex flex-col"
         onClick={e => e.stopPropagation()}
         style={{ borderLeft: `4px solid ${SEV_BORDER[alert.severity] ?? '#0ea5e9'}` }}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+        {/* Header – flex-none, bleibt fix oben. Vorher hatte die ganze Card
+            overflow-y-auto und Header/Body waren Geschwister im selben
+            Scroll-Container, deshalb bewegte sich der Header beim Scrollen
+            mit. Jetzt: card = flex-col, header = flex-none, body = flex-1
+            min-h-0 overflow-y-auto. */}
+        <div className="flex-none flex items-center justify-between px-5 py-4 border-b border-slate-800">
           <div className="flex items-center gap-3 flex-wrap">
             <SeverityBadge severity={alert.severity} />
             <span className="font-semibold text-cyan-100 font-mono">{alert.rule_id}</span>
@@ -130,7 +134,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           </button>
         </div>
 
-        <div className="px-5 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
           <p className="text-slate-300 text-xs mb-4 leading-relaxed">{alert.description}</p>
 
           <SectionTitle>Alert</SectionTitle>
