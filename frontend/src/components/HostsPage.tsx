@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Network } from 'lucide-react';
 import {
   createHost,
   deleteHost,
@@ -8,6 +9,7 @@ import {
   updateHost,
 } from '../api';
 import type { Host } from '../types';
+import { showHostConnections } from './HostConnectionDrawer';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TrustBadge } from './TrustBadge';
 
@@ -194,7 +196,17 @@ export function HostsPage() {
             )}
             {hosts.map(h => (
               <tr key={h.ip} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                <td className="px-4 py-2 font-mono text-slate-200">{h.ip}</td>
+                <td className="px-4 py-2 font-mono text-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => showHostConnections(h.ip)}
+                    title="Verbindungs-Übersicht für diesen Host anzeigen"
+                    className="group inline-flex items-center gap-1.5 hover:text-cyan-300 transition-colors"
+                  >
+                    <Network size={11} className="text-slate-500 group-hover:text-cyan-400 transition-colors" />
+                    {h.ip}
+                  </button>
+                </td>
                 <td className="px-4 py-2">
                   {editState?.ip === h.ip ? (
                     <input

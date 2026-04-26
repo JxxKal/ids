@@ -358,3 +358,226 @@ def _detect_order(a: str, b: str) -> tuple[str, str | None]:
     if is_ip(a):
         return b, a   # Format: IP;Hostname
     return a, None    # Kein IP in beiden Spalten (z.B. Header)
+
+
+# ── Connections-View für einen Host ───────────────────────────────────────────
+# Aggregiert alle Flows + Alerts wo `src_ip = ip` ODER `dst_ip = ip` über ein
+# Zeitfenster, gruppiert nach Peer. Plus 60-Bucket-Histogramm für die Sparkline
+# unter dem Time-Slider im Frontend.
+#
+# Query-Strategie: drei Queries parallel, in Python zusammengefügt – sauberer
+# als ein 80-Zeilen-CTE-Monster und erlaubt es uns, Severity-Ranking und
+# Top-Ports-Sortierung auf der Python-Seite zu machen, wo das nochmal
+# wartbarer ist.
+
+_WINDOW_PRESETS = {
+    "15m":  900,
+    "1h":   3600,
+    "6h":   21600,
+    "24h":  86400,
+}
+_SEV_RANK = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+_SEV_INV  = {v: k for k, v in _SEV_RANK.items()}
+
+
+@router.get(
+    "/{ip}/connections",
+    summary="Alle Verbindungen eines Hosts in einem Zeitfenster (für Drawer-Visualisierung)",
+)
+async def get_host_connections(
+    ip:     str,
+    window: str            = Query("1h", description=f"Preset: {','.join(_WINDOW_PRESETS)}"),
+    until:  int | None     = Query(None, description="Unix-Sekunden, Default = now"),
+    pool:   asyncpg.Pool   = Depends(get_pool),
+) -> dict:
+    if window not in _WINDOW_PRESETS:
+        raise HTTPException(400, f"window muss eins von {list(_WINDOW_PRESETS)} sein")
+
+    win_sec = _WINDOW_PRESETS[window]
+
+    async with pool.acquire() as conn:
+        # Validation des IP-Strings: Cast nach inet im SQL-Layer hebt
+        # ungültige Eingaben sofort als InvalidTextRepresentation.
+        try:
+            await conn.fetchval("SELECT $1::inet", ip)
+        except (asyncpg.exceptions.InvalidTextRepresentationError, ValueError) as exc:
+            raise HTTPException(400, f"Ungültige IP: {exc}") from exc
+
+        # Window-Grenzen + Bucket-Größe (60 Buckets über das Fenster) als
+        # Server-seitige Werte – damit das Frontend keinen until-Parameter
+        # senden muss um konsistente Buckets zu kriegen, sondern einfach
+        # `now()` der DB nimmt.
+        until_ts_sql = "to_timestamp($2)" if until else "now()"
+        params: list = [ip]
+        if until:
+            params.append(until)
+
+        # ── Peers ──────────────────────────────────────────────────────────
+        peer_rows = await conn.fetch(
+            f"""
+            WITH params AS (
+                SELECT
+                    $1::inet                                AS host_ip,
+                    {until_ts_sql}                          AS w_end,
+                    {until_ts_sql} - INTERVAL '{win_sec} seconds' AS w_start
+            )
+            SELECT
+                CASE WHEN f.src_ip = p.host_ip THEN f.dst_ip ELSE f.src_ip END
+                                                                    AS peer_ip,
+                COUNT(*)                                            AS flow_count,
+                SUM(f.byte_count)::bigint                           AS total_bytes,
+                SUM(CASE WHEN f.src_ip = p.host_ip
+                          THEN f.byte_count ELSE 0 END)::bigint    AS bytes_out,
+                SUM(CASE WHEN f.dst_ip = p.host_ip
+                          THEN f.byte_count ELSE 0 END)::bigint    AS bytes_in,
+                bool_or(f.src_ip = p.host_ip)                      AS has_out,
+                bool_or(f.dst_ip = p.host_ip)                      AS has_in
+            FROM flows f, params p
+            WHERE (f.src_ip = p.host_ip OR f.dst_ip = p.host_ip)
+              AND f.start_ts >= p.w_start
+              AND f.start_ts <  p.w_end
+            GROUP BY peer_ip
+            ORDER BY total_bytes DESC NULLS LAST
+            LIMIT 100
+            """,
+            *params,
+        )
+
+        # ── Top-Ports pro Peer (separate Query, in Python aggregiert) ────
+        port_rows = await conn.fetch(
+            f"""
+            WITH params AS (
+                SELECT
+                    $1::inet                                AS host_ip,
+                    {until_ts_sql}                          AS w_end,
+                    {until_ts_sql} - INTERVAL '{win_sec} seconds' AS w_start
+            )
+            SELECT
+                CASE WHEN f.src_ip = p.host_ip THEN f.dst_ip ELSE f.src_ip END AS peer_ip,
+                CASE WHEN f.src_ip = p.host_ip THEN f.dst_port ELSE f.src_port END AS peer_port,
+                f.proto                                            AS proto,
+                COUNT(*)                                           AS cnt
+            FROM flows f, params p
+            WHERE (f.src_ip = p.host_ip OR f.dst_ip = p.host_ip)
+              AND f.start_ts >= p.w_start
+              AND f.start_ts <  p.w_end
+              AND ((f.src_ip = p.host_ip AND f.dst_port IS NOT NULL)
+                OR (f.dst_ip = p.host_ip AND f.src_port IS NOT NULL))
+            GROUP BY peer_ip, peer_port, proto
+            ORDER BY peer_ip, cnt DESC
+            """,
+            *params,
+        )
+
+        # ── Alerts pro Peer ───────────────────────────────────────────────
+        alert_rows = await conn.fetch(
+            f"""
+            WITH params AS (
+                SELECT
+                    $1::inet                                AS host_ip,
+                    {until_ts_sql}                          AS w_end,
+                    {until_ts_sql} - INTERVAL '{win_sec} seconds' AS w_start
+            )
+            SELECT
+                CASE WHEN a.src_ip = p.host_ip THEN a.dst_ip ELSE a.src_ip END AS peer_ip,
+                COUNT(*)                                              AS alert_count,
+                MAX(CASE a.severity
+                        WHEN 'low' THEN 1 WHEN 'medium' THEN 2
+                        WHEN 'high' THEN 3 WHEN 'critical' THEN 4
+                        ELSE 0 END)                                   AS sev_rank
+            FROM alerts a, params p
+            WHERE (a.src_ip = p.host_ip OR a.dst_ip = p.host_ip)
+              AND a.is_test = false
+              AND a.ts >= p.w_start
+              AND a.ts <  p.w_end
+              AND (a.src_ip = p.host_ip AND a.dst_ip IS NOT NULL
+                OR a.dst_ip = p.host_ip AND a.src_ip IS NOT NULL)
+            GROUP BY peer_ip
+            """,
+            *params,
+        )
+
+        # ── Histogramm: 60 Buckets über das Fenster ──────────────────────
+        bucket_sec = max(1, win_sec // 60)
+        hist_rows = await conn.fetch(
+            f"""
+            WITH params AS (
+                SELECT
+                    $1::inet                                AS host_ip,
+                    {until_ts_sql}                          AS w_end,
+                    {until_ts_sql} - INTERVAL '{win_sec} seconds' AS w_start
+            )
+            SELECT
+                EXTRACT(EPOCH FROM time_bucket(INTERVAL '{bucket_sec} seconds',
+                                               f.start_ts))::bigint AS bucket_ts,
+                COUNT(*)                                  AS flow_count,
+                SUM(f.byte_count)::bigint                 AS bytes
+            FROM flows f, params p
+            WHERE (f.src_ip = p.host_ip OR f.dst_ip = p.host_ip)
+              AND f.start_ts >= p.w_start
+              AND f.start_ts <  p.w_end
+            GROUP BY bucket_ts
+            ORDER BY bucket_ts
+            """,
+            *params,
+        )
+
+        # Window-Grenzen für die Antwort.
+        bounds = await conn.fetchrow(
+            f"SELECT EXTRACT(EPOCH FROM ({until_ts_sql} - INTERVAL '{win_sec} seconds'))::bigint AS s, "
+            f"       EXTRACT(EPOCH FROM ({until_ts_sql}))::bigint AS e",
+            *params,
+        )
+
+    # ── Top-Ports + Alerts in das Peers-Dict mergen ──────────────────────
+    peers_by_ip: dict[str, dict] = {}
+    for r in peer_rows:
+        peer_ip = str(r["peer_ip"])
+        peers_by_ip[peer_ip] = {
+            "ip":           peer_ip,
+            "direction":    "both" if r["has_in"] and r["has_out"] else
+                            "out"  if r["has_out"] else "in",
+            "flow_count":   int(r["flow_count"]),
+            "total_bytes":  int(r["total_bytes"] or 0),
+            "bytes_in":     int(r["bytes_in"]    or 0),
+            "bytes_out":    int(r["bytes_out"]   or 0),
+            "top_ports":    [],
+            "alert_count":  0,
+            "max_severity": None,
+        }
+
+    # Top-Ports: bis zu 5 pro Peer (sind bereits cnt-DESC sortiert).
+    for r in port_rows:
+        ip_key = str(r["peer_ip"])
+        if ip_key not in peers_by_ip:
+            continue
+        plist = peers_by_ip[ip_key]["top_ports"]
+        if len(plist) >= 5:
+            continue
+        port = r["peer_port"]
+        if port is None:
+            continue
+        plist.append({"port": int(port), "proto": r["proto"], "count": int(r["cnt"])})
+
+    # Alerts pro Peer
+    for r in alert_rows:
+        ip_key = str(r["peer_ip"])
+        if ip_key not in peers_by_ip:
+            continue
+        peers_by_ip[ip_key]["alert_count"]  = int(r["alert_count"])
+        peers_by_ip[ip_key]["max_severity"] = _SEV_INV.get(int(r["sev_rank"] or 0))
+
+    return {
+        "ip":           ip,
+        "window":       window,
+        "window_sec":   win_sec,
+        "window_start": int(bounds["s"]) if bounds else None,
+        "window_end":   int(bounds["e"]) if bounds else None,
+        "bucket_sec":   bucket_sec,
+        "peers":        list(peers_by_ip.values()),
+        "histogram":    [
+            {"ts": int(r["bucket_ts"]), "flows": int(r["flow_count"]),
+             "bytes": int(r["bytes"] or 0)}
+            for r in hist_rows
+        ],
+    }

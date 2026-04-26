@@ -11,6 +11,7 @@ import { LoginPage } from './components/LoginPage';
 import { NetworksPage } from './components/NetworksPage';
 import { SettingsPage } from './components/SettingsPage';
 import { SeverityBarsCard } from './components/SeverityBarsCard';
+import { HostConnectionDrawer } from './components/HostConnectionDrawer';
 import { Sidebar, type NavTab } from './components/Sidebar';
 import { TestsPage } from './components/TestsPage';
 import { ThreatGauge } from './components/ThreatGauge';
@@ -313,6 +314,10 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
       </main>
 
       {showUnknown && <UnknownHostsDrawer onClose={() => setShowUnknown(false)} />}
+
+      {/* Globaler Host-Connection-Drawer: lauscht auf
+          window.dispatchEvent(new CustomEvent('ids:show-host-connections', {detail:{ip}})) */}
+      <HostConnectionDrawer />
     </div>
   );
 }

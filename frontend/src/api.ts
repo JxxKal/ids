@@ -427,6 +427,49 @@ export interface SuricataImportResult {
   note?:          string | null;
 }
 
+// ── Host-Connection-View ─────────────────────────────────────────────────────
+
+export type HostConnectionWindow = '15m' | '1h' | '6h' | '24h';
+
+export interface HostConnectionPeer {
+  ip:            string;
+  direction:     'in' | 'out' | 'both';
+  flow_count:    number;
+  total_bytes:   number;
+  bytes_in:      number;
+  bytes_out:     number;
+  top_ports:     { port: number; proto: string; count: number }[];
+  alert_count:   number;
+  max_severity:  'low' | 'medium' | 'high' | 'critical' | null;
+}
+
+export interface HostConnectionHistogramBucket {
+  ts:    number;
+  flows: number;
+  bytes: number;
+}
+
+export interface HostConnectionsResponse {
+  ip:           string;
+  window:       HostConnectionWindow;
+  window_sec:   number;
+  window_start: number;
+  window_end:   number;
+  bucket_sec:   number;
+  peers:        HostConnectionPeer[];
+  histogram:    HostConnectionHistogramBucket[];
+}
+
+export async function fetchHostConnections(
+  ip:     string,
+  window: HostConnectionWindow,
+  until?: number,
+): Promise<HostConnectionsResponse> {
+  const p = new URLSearchParams({ window });
+  if (until) p.set('until', String(until));
+  return req(`/api/hosts/${encodeURIComponent(ip)}/connections?${p}`);
+}
+
 export interface RuleFileMeta {
   name:     string;
   size:     number;
