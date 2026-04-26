@@ -3,7 +3,10 @@ name: Build Cyjan IDS Release
 # Single Workflow für ISO + Update-Paket: ein gemeinsamer Image-Build-Schritt
 # füttert beide nachgeschalteten Jobs. Ergebnis bei Tag-Push:
 #   • cyjan-ids-<tag>.iso       (mit eingebettetem Offline-Image-Bundle)
-#   • cyjan-ids-update-<tag>.zip (gleiches Bundle + compose.yml für Online-Update)
+#   • cyjan-ids-update-<tag>.zip (gleiches Bundle + compose.yml für Offline-
+#     Upgrade über die GUI – Settings → System-Update lädt es per docker load
+#     ohne Internet ein. Der Online-Pfad ist `sudo ids-update` auf der Konsole,
+#     der git-pullt und betroffene Services neu baut.)
 # Beide landen am selben GitHub Release.
 
 on:
@@ -259,11 +262,16 @@ jobs:
             - Default-Login: **`admin` / `admin-change-me`** → sofort ändern.
 
             ### Update nach Installation
-            ```bash
-            sudo ids-update          # git pull + nur betroffene Images neu bauen
-            ```
-            Oder offline: `cyjan-ids-update-${{ github.ref_name }}.zip` über
-            Settings → System-Update einspielen.
+            Zwei Pfade, je nach Internetzugang:
+
+            * **Online (Konsole)**: `sudo ids-update` auf der Maschine →
+              `git pull` aus diesem Repo, dann `docker compose build` + `up -d`
+              für betroffene Services.
+            * **Offline (Web-GUI)**: `cyjan-ids-update-${{ github.ref_name }}.zip`
+              herunterladen und in der Frontend-Oberfläche unter
+              **Settings → System-Update** hochladen. Die API extrahiert das
+              ZIP, lädt das Bundle via `docker load` und startet die
+              Container neu – kein Internet-Zugang notwendig.
 
             ### Konfiguration nachträglich ändern
             ```bash
