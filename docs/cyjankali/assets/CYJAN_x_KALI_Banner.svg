@@ -1,0 +1,266 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 500" role="img" aria-labelledby="t d">
+  <title id="t">CYJAN × KALI — Penetration Testing Banner</title>
+  <desc id="d">Banner showing CYJAN shield and Kali Linux dragon with Cyankali apothecary bottle in the middle. Tagline: Den Wächter angreifen — den Angreifer erkennen.</desc>
+
+  <defs>
+    
+    <pattern id="hex" x="0" y="0" width="60" height="52" patternUnits="userSpaceOnUse">
+      <polygon points="30,2 58,18 58,34 30,50 2,34 2,18" fill="none" stroke="#164e63" stroke-width="0.6" stroke-opacity="0.55"></polygon>
+    </pattern>
+
+    
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#0c1a2e" stop-opacity="0.85"></stop>
+      <stop offset="60%" stop-color="#020617" stop-opacity="0"></stop>
+    </radialGradient>
+    <linearGradient id="bgFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#020617"></stop>
+      <stop offset="100%" stop-color="#050a1a"></stop>
+    </linearGradient>
+
+    
+    <radialGradient id="cyanGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.55"></stop>
+      <stop offset="60%" stop-color="#0891b2" stop-opacity="0.18"></stop>
+      <stop offset="100%" stop-color="#0891b2" stop-opacity="0"></stop>
+    </radialGradient>
+
+    
+    <radialGradient id="redGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ef4444" stop-opacity="0.55"></stop>
+      <stop offset="60%" stop-color="#b91c1c" stop-opacity="0.18"></stop>
+      <stop offset="100%" stop-color="#7f1d1d" stop-opacity="0"></stop>
+    </radialGradient>
+
+    
+    <linearGradient id="bottleBody" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e3a4f"></stop>
+      <stop offset="35%" stop-color="#0c4a5c"></stop>
+      <stop offset="50%" stop-color="#0e7490"></stop>
+      <stop offset="65%" stop-color="#0c4a5c"></stop>
+      <stop offset="100%" stop-color="#0a1e2a"></stop>
+    </linearGradient>
+    <linearGradient id="bottleNeck" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e3a4f"></stop>
+      <stop offset="50%" stop-color="#155e75"></stop>
+      <stop offset="100%" stop-color="#0a1e2a"></stop>
+    </linearGradient>
+    <linearGradient id="bottleHL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#67e8f9" stop-opacity="0"></stop>
+      <stop offset="50%" stop-color="#67e8f9" stop-opacity="0.4"></stop>
+      <stop offset="100%" stop-color="#67e8f9" stop-opacity="0"></stop>
+    </linearGradient>
+
+    
+    <radialGradient id="liquidGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity="0.7"></stop>
+      <stop offset="100%" stop-color="#0891b2" stop-opacity="0"></stop>
+    </radialGradient>
+
+    
+    <linearGradient id="labelPaper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fef3c7"></stop>
+      <stop offset="100%" stop-color="#fde68a"></stop>
+    </linearGradient>
+
+    
+    <filter id="redBlur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3"></feGaussianBlur>
+    </filter>
+    <filter id="cyanBlur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3"></feGaussianBlur>
+    </filter>
+
+    
+    <clipPath id="bottleClip">
+      <path d="M 660 168 L 660 152 Q 660 144 668 144 L 832 144 Q 840 144 840 152 L 840 168 L 850 188 L 850 412 Q 850 432 830 432 L 670 432 Q 650 432 650 412 L 650 188 Z"></path>
+    </clipPath>
+  </defs>
+
+  
+  <rect width="1500" height="500" fill="url(#bgFade)"></rect>
+  <rect width="1500" height="500" fill="url(#hex)"></rect>
+  <rect width="1500" height="500" fill="url(#bgGlow)"></rect>
+
+  
+  <ellipse cx="180" cy="250" rx="220" ry="200" fill="url(#cyanGlow)"></ellipse>
+  <ellipse cx="1320" cy="250" rx="220" ry="200" fill="url(#redGlow)"></ellipse>
+
+  
+  <ellipse cx="750" cy="445" rx="170" ry="14" fill="#000" opacity="0.6"></ellipse>
+
+  
+  <g transform="translate(180,250)">
+    
+    <path d="M 0 -120 L 95 -78 L 95 38 Q 95 110 0 156 Q -95 110 -95 38 L -95 -78 Z" fill="#0f172a" stroke="#0ea5e9" stroke-width="2.4"></path>
+    
+    <path d="M 0 -108 L 84 -71 L 84 36 Q 84 99 0 140 Q -84 99 -84 36 L -84 -71 Z" fill="none" stroke="#38bdf8" stroke-width="0.9" opacity="0.6"></path>
+
+    
+    <g opacity="0.18" stroke="#38bdf8" stroke-width="0.6" fill="none">
+      <polygon points="-30,-60 -10,-72 10,-60 10,-36 -10,-24 -30,-36"></polygon>
+      <polygon points="10,-60 30,-72 50,-60 50,-36 30,-24 10,-36"></polygon>
+      <polygon points="-50,-24 -30,-36 -10,-24 -10,0 -30,12 -50,0"></polygon>
+      <polygon points="30,-24 50,-36 70,-24 70,0 50,12 30,0"></polygon>
+      <polygon points="-30,12 -10,0 10,12 10,36 -10,48 -30,36"></polygon>
+      <polygon points="10,12 30,0 50,12 50,36 30,48 10,36"></polygon>
+    </g>
+
+    
+    <ellipse cx="0" cy="0" rx="44" ry="22" fill="none" stroke="#0ea5e9" stroke-width="1.4" opacity="0.7"></ellipse>
+    <ellipse cx="0" cy="0" rx="38" ry="18" fill="none" stroke="#22d3ee" stroke-width="1.6"></ellipse>
+    <circle cx="0" cy="0" r="16" fill="#0ea5e9" opacity="0.18"></circle>
+    <circle cx="0" cy="0" r="12" fill="none" stroke="#38bdf8" stroke-width="1"></circle>
+    <circle cx="0" cy="0" r="6" fill="none" stroke="#7dd3fc" stroke-width="0.8"></circle>
+    <circle cx="0" cy="0" r="3.2" fill="#38bdf8"></circle>
+    <circle cx="0" cy="0" r="1.4" fill="#e0f2fe"></circle>
+
+    
+    <circle cx="0" cy="-108" r="3" fill="#22d3ee"></circle>
+    <circle cx="0" cy="-108" r="6" fill="none" stroke="#22d3ee" stroke-width="0.8" opacity="0.5"></circle>
+
+    
+    <text x="0" y="80" text-anchor="middle" font-family="&#39;Inter&#39;, &#39;Helvetica Neue&#39;, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="6" fill="#22d3ee">DEFENDER</text>
+    <text x="0" y="98" text-anchor="middle" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="9" letter-spacing="3" fill="#67e8f9" opacity="0.8">IDS · BLUE TEAM</text>
+  </g>
+
+  
+  <g transform="translate(0,0)">
+    
+    <g>
+      
+      <path d="M 690 110 L 690 100 Q 690 92 698 92 L 802 92 Q 810 92 810 100 L 810 110 Q 810 118 802 118 L 698 118 Q 690 118 690 110 Z" fill="#0a1e2a" stroke="#0e7490" stroke-width="1.2"></path>
+      <rect x="694" y="118" width="112" height="6" fill="#0e7490" opacity="0.6"></rect>
+
+      
+      <path d="M 700 124 L 700 152 L 690 168 L 660 168 L 660 152 Q 660 144 668 144 L 692 144 L 692 124 Z" fill="url(#bottleNeck)"></path>
+      <path d="M 800 124 L 800 152 L 810 168 L 840 168 L 840 152 Q 840 144 832 144 L 808 144 L 808 124 Z" fill="url(#bottleNeck)"></path>
+      <rect x="700" y="124" width="100" height="20" fill="url(#bottleNeck)"></rect>
+
+      
+      <path d="M 660 168 L 690 168 L 800 168 L 840 168 L 850 188 L 850 412 Q 850 432 830 432 L 670 432 Q 650 432 650 412 L 650 188 Z" fill="url(#bottleBody)" stroke="#0e7490" stroke-width="1.6"></path>
+
+      
+      <g clip-path="url(#bottleClip)">
+        <ellipse cx="750" cy="320" rx="120" ry="120" fill="url(#liquidGlow)"></ellipse>
+        <ellipse cx="750" cy="370" rx="105" ry="50" fill="#22d3ee" opacity="0.18"></ellipse>
+      </g>
+
+      
+      <rect x="660" y="170" width="180" height="260" fill="url(#bottleHL)" clip-path="url(#bottleClip)" opacity="0.5"></rect>
+      <path d="M 672 200 Q 668 300 678 410" stroke="#67e8f9" stroke-width="2" fill="none" opacity="0.45"></path>
+      <path d="M 680 220 Q 676 310 686 400" stroke="#67e8f9" stroke-width="1" fill="none" opacity="0.25"></path>
+
+      
+      <line x1="694" y1="92" x2="806" y2="92" stroke="#67e8f9" stroke-width="0.8" opacity="0.5"></line>
+
+      
+      <g>
+        <rect x="678" y="240" width="144" height="160" rx="2" fill="url(#labelPaper)" stroke="#92400e" stroke-width="1"></rect>
+        <rect x="684" y="246" width="132" height="148" rx="1" fill="none" stroke="#b45309" stroke-width="0.4" opacity="0.6"></rect>
+
+        
+        <g transform="translate(750, 290)" fill="#1c1917">
+          
+          <path d="M -16 -8 Q -16 -22 0 -22 Q 16 -22 16 -8 L 16 4 Q 16 8 12 8 L 8 8 L 8 14 L 4 14 L 4 10 L -4 10 L -4 14 L -8 14 L -8 8 L -12 8 Q -16 8 -16 4 Z"></path>
+          
+          <circle cx="-7" cy="-6" r="3.5" fill="#fef3c7"></circle>
+          <circle cx="7" cy="-6" r="3.5" fill="#fef3c7"></circle>
+          
+          <polygon points="0,-2 -2,3 2,3" fill="#fef3c7"></polygon>
+          
+          <g transform="translate(0, 18)" stroke="#1c1917" stroke-width="3.5" stroke-linecap="round">
+            <line x1="-18" y1="-6" x2="18" y2="6"></line>
+            <line x1="-18" y1="6" x2="18" y2="-6"></line>
+            <circle cx="-19" cy="-7" r="2.5" fill="#1c1917"></circle>
+            <circle cx="-19" cy="7" r="2.5" fill="#1c1917"></circle>
+            <circle cx="19" cy="-7" r="2.5" fill="#1c1917"></circle>
+            <circle cx="19" cy="7" r="2.5" fill="#1c1917"></circle>
+          </g>
+        </g>
+
+        
+        <text x="750" y="345" text-anchor="middle" font-family="&#39;Inter&#39;, &#39;Helvetica Neue&#39;, Arial, sans-serif" font-size="20" font-weight="800" letter-spacing="3" fill="#451a03">CYANKALI</text>
+        <line x1="700" y1="354" x2="800" y2="354" stroke="#92400e" stroke-width="0.6" opacity="0.7"></line>
+        <text x="750" y="368" text-anchor="middle" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="8" letter-spacing="2" fill="#78350f">PENTEST GRADE</text>
+        <text x="750" y="382" text-anchor="middle" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="7" letter-spacing="1.4" fill="#92400e" opacity="0.85">CYJAN × KALI · 100 ml</text>
+      </g>
+
+      
+      <line x1="666" y1="416" x2="834" y2="416" stroke="#0e7490" stroke-width="1" opacity="0.6"></line>
+    </g>
+
+    
+    <g opacity="0.35" stroke="#67e8f9" stroke-width="1.2" fill="none">
+      <path d="M 720 90 Q 718 78 726 70 Q 732 62 728 50"></path>
+      <path d="M 750 86 Q 752 72 746 60 Q 742 50 750 40"></path>
+      <path d="M 780 90 Q 782 78 774 70 Q 768 62 772 50"></path>
+    </g>
+  </g>
+
+  
+  <g transform="translate(1320,250)">
+    
+    <path d="M 0 -120 L 95 -78 L 95 38 Q 95 110 0 156 Q -95 110 -95 38 L -95 -78 Z" fill="#1a0a0e" stroke="#dc2626" stroke-width="2.4"></path>
+    <path d="M 0 -108 L 84 -71 L 84 36 Q 84 99 0 140 Q -84 99 -84 36 L -84 -71 Z" fill="none" stroke="#ef4444" stroke-width="0.9" opacity="0.55"></path>
+
+    
+    <g fill="#dc2626" stroke="#fca5a5" stroke-width="0.6">
+      
+      <path d="M -55 -10 Q -55 -38 -28 -42 Q -10 -56 10 -50 Q 28 -56 40 -42 Q 55 -38 55 -10 Q 55 6 50 14 L 38 16 L 32 22 L 22 18 L 14 24 L 6 18 L 0 24 L -6 18 L -14 24 L -22 18 L -32 22 L -38 16 L -50 14 Q -55 6 -55 -10 Z"></path>
+      
+      <polygon points="-48,-32 -42,-58 -36,-30" fill="#7f1d1d"></polygon>
+      <polygon points="-22,-46 -18,-72 -10,-44" fill="#7f1d1d"></polygon>
+      <polygon points="10,-48 14,-72 22,-46" fill="#7f1d1d"></polygon>
+      <polygon points="36,-30 42,-58 48,-32" fill="#7f1d1d"></polygon>
+    </g>
+
+    
+    <ellipse cx="0" cy="-12" rx="14" ry="6" fill="#0c0a09"></ellipse>
+    <circle cx="0" cy="-12" r="3.5" fill="#22d3ee"></circle>
+    <circle cx="0" cy="-12" r="1.4" fill="#e0f2fe"></circle>
+
+    
+    <g fill="#fef3c7">
+      <polygon points="-22,16 -18,28 -14,16"></polygon>
+      <polygon points="-10,18 -6,32 -2,18"></polygon>
+      <polygon points="2,18 6,32 10,18"></polygon>
+      <polygon points="14,16 18,28 22,16"></polygon>
+    </g>
+
+    
+    <circle cx="0" cy="-108" r="3" fill="#fca5a5"></circle>
+    <circle cx="0" cy="-108" r="6" fill="none" stroke="#fca5a5" stroke-width="0.8" opacity="0.5"></circle>
+
+    
+    <text x="0" y="80" text-anchor="middle" font-family="&#39;Inter&#39;, &#39;Helvetica Neue&#39;, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="6" fill="#ef4444">ATTACKER</text>
+    <text x="0" y="98" text-anchor="middle" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="9" letter-spacing="3" fill="#fca5a5" opacity="0.8">KALI · RED TEAM</text>
+  </g>
+
+  
+  <g font-family="&#39;Inter&#39;, &#39;Helvetica Neue&#39;, Arial, sans-serif" font-weight="800">
+    
+    <text x="310" y="200" font-size="100" letter-spacing="5" fill="#0ea5e9">CYJAN</text>
+    
+    <text x="905" y="200" font-size="100" letter-spacing="5" fill="#dc2626">KALI</text>
+  </g>
+
+  
+  <line x1="310" y1="222" x2="595" y2="222" stroke="#0ea5e9" stroke-width="1.4" opacity="0.55"></line>
+  <line x1="905" y1="222" x2="1155" y2="222" stroke="#dc2626" stroke-width="1.4" opacity="0.55"></line>
+
+  
+  <text x="750" y="468" text-anchor="middle" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="14" font-weight="500" letter-spacing="6" fill="#94a3b8">
+    <tspan fill="#67e8f9">DEN WÄCHTER ANGREIFEN</tspan>
+    <tspan fill="#475569">  ·  </tspan>
+    <tspan fill="#fca5a5">DEN ANGREIFER ERKENNEN</tspan>
+  </text>
+
+  
+  <text x="1480" y="32" text-anchor="end" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="10" letter-spacing="2.2" fill="#475569">github.com/JxxKal/ids · pentest-suite</text>
+  
+  <text x="20" y="32" font-family="&#39;JetBrains Mono&#39;, monospace" font-size="10" letter-spacing="2.2" fill="#475569">CYJAN IDS · v1.0 · 2026</text>
+
+  
+  <line x1="0" y1="498" x2="1500" y2="498" stroke="#0ea5e9" stroke-width="0.5" opacity="0.4"></line>
+</svg>
