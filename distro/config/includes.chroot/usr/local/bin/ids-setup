@@ -161,17 +161,14 @@ fi
 # Keymap bleibt unangetastet. Default-Aufruf (ohne Flags) macht beides:
 # Font + Keyboard laden, Cache speichern, auf die aktive Konsole anwenden.
 setupcon --force 2>>"$LOG" || true
-# Als Sicherheitsnetz: wenn der gewählten XKB-Layout ein offensichtliches
-# Console-Keymap-Pendant hat, direkt loadkeys nachschieben. Greift auch falls
-# setupcon stumm scheitert.
-case "$KBD" in
-  de|at|de-CH) loadkeys de-latin1 2>>"$LOG" || true ;;
-  fr)         loadkeys fr-latin1 2>>"$LOG" || true ;;
-  fr-CH)      loadkeys fr_CH-latin1 2>>"$LOG" || true ;;
-  it)         loadkeys it 2>>"$LOG" || true ;;
-  gb)         loadkeys uk 2>>"$LOG" || true ;;
-  us)         loadkeys us 2>>"$LOG" || true ;;
-esac
+# Als Sicherheitsnetz das frisch gecachte Keymap explizit auf den aktiven VT
+# laden. Nicht `loadkeys de-latin1` o.ä. – die Keymap-Files-Datenbasis
+# (/usr/share/keymaps) gehört zum kbd-Daten-Paket und ist auf der schlanken
+# ISO nicht mit dabei. setupcon legt aber die Cache-Datei
+# /etc/console-setup/cached_UTF-8_del.kmap.gz an, und die genügt loadkeys.
+for _kmap in /etc/console-setup/cached_*.kmap.gz; do
+  [ -f "$_kmap" ] && loadkeys "$_kmap" 2>>"$LOG" && break
+done
 log "Tastatur: $KBD_LAYOUT${KBD_VARIANT:+/$KBD_VARIANT}"
 
 # Zeitzone
