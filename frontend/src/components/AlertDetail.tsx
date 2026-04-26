@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { Network } from 'lucide-react';
 import { setFeedback } from '../api';
 import type { Alert } from '../types';
 import { AlertFlowPopup } from './AlertFlowPopup';
+import { showHostConnections } from './HostConnectionDrawer';
 import { PcapPreview } from './PcapPreview';
 import { SeverityBadge } from './SeverityBadge';
 import { TrustBadge } from './TrustBadge';
@@ -18,6 +20,28 @@ function Row({ label, value }: { label: string; value?: string | number | null }
     <div className="flex gap-3 py-1.5 border-b border-slate-800/50">
       <span className="w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
       <span className="text-slate-200 text-xs break-all font-mono">{String(value)}</span>
+    </div>
+  );
+}
+
+// IP-Zeile mit Klick-Trigger: öffnet den HostConnectionDrawer für die IP.
+// Render-Schicht ist bewusst sehr nah an Row(), nur das innere span wird zu
+// einem button mit Hover-Highlight + Network-Icon.
+function IpRow({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex gap-3 py-1.5 border-b border-slate-800/50">
+      <span className="w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
+      <button
+        type="button"
+        onClick={() => showHostConnections(value)}
+        title="Verbindungs-Übersicht für diesen Host anzeigen"
+        className="group inline-flex items-center gap-1.5 text-slate-200 text-xs break-all font-mono
+                   hover:text-cyan-300 transition-colors"
+      >
+        <Network size={11} className="text-slate-500 group-hover:text-cyan-400 transition-colors" />
+        {value}
+      </button>
     </div>
   );
 }
@@ -90,10 +114,10 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           <Row label="Timestamp"   value={new Date(alert.ts).toLocaleString()} />
           <Row label="Score"       value={alert.score.toFixed(3)} />
           <Row label="Proto"       value={alert.proto} />
-          <Row label="Src IP"      value={alert.src_ip} />
-          <Row label="Src Port"    value={alert.src_port} />
-          <Row label="Dst IP"      value={alert.dst_ip} />
-          <Row label="Dst Port"    value={alert.dst_port} />
+          <IpRow label="Src IP"    value={alert.src_ip} />
+          <Row   label="Src Port"  value={alert.src_port} />
+          <IpRow label="Dst IP"    value={alert.dst_ip} />
+          <Row   label="Dst Port"  value={alert.dst_port} />
 
           {enr && (
             <>
