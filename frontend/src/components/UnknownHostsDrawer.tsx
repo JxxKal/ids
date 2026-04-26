@@ -24,6 +24,13 @@ export function UnknownHostsDrawer({ onClose }: { onClose: () => void }) {
   const [added,   setAdded]   = useState<Set<string>>(new Set());
   const [adding,  setAdding]  = useState<string | null>(null);
 
+  // ESC schließt – konsistent mit AlertFlowPopup, HostConnectionDrawer
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   useEffect(() => {
     fetchUnknownHosts(30)
       .then(setHosts)
@@ -73,7 +80,10 @@ export function UnknownHostsDrawer({ onClose }: { onClose: () => void }) {
           </span>
           <span className="text-[11px] text-slate-600 font-mono">letzte 30 Tage</span>
           <div className="flex-1" />
-          <button onClick={onClose} className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-colors text-sm">✕</button>
+          <button onClick={onClose} title="Schließen"
+            className="text-[11px] px-3 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors">
+            ESC · ✕
+          </button>
         </div>
 
         {/* Search */}

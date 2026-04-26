@@ -96,14 +96,18 @@ export function HostConnectionDrawer() {
         onClick={() => setIp(null)}
       />
 
-      {/* Drawer */}
+      {/* Drawer – flex-Spalten statt sticky-Header: Header bleibt immer
+          oben fix, der Body scrollt eigenständig. Sticky in einem
+          overflow-y-auto-Container hat in einigen Browsern unter bestimmten
+          Layout-Bedingungen die Tendenz "wegzurutschen", flex-Aufteilung
+          umgeht das Problem komplett. */}
       <aside
         className="fixed top-0 right-0 h-full w-full md:w-[720px] z-50
-                   bg-slate-950 border-l border-slate-700/60
-                   shadow-2xl overflow-y-auto"
+                   bg-slate-950 border-l border-slate-700/60 shadow-2xl
+                   flex flex-col"
       >
-        <header className="sticky top-0 z-10 bg-slate-950/95 backdrop-blur
-                           border-b border-slate-800 px-5 py-3 flex items-center gap-3">
+        <header className="shrink-0 border-b border-slate-800 px-5 py-3
+                           bg-slate-950/95 backdrop-blur flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] uppercase tracking-widest text-slate-500">Host-Verbindungen</p>
             <h2 className="font-mono text-base text-slate-100 truncate">{ip}</h2>
@@ -111,14 +115,18 @@ export function HostConnectionDrawer() {
           <button
             type="button"
             onClick={() => setIp(null)}
-            className="p-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition"
-            title="Schließen (Esc)"
+            title="Schließen"
+            className="text-[11px] px-3 py-1 rounded border border-slate-600/30
+                       text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300
+                       transition-colors inline-flex items-center gap-1.5"
           >
-            <X size={18} />
+            <span>ESC</span>
+            <span className="text-slate-600">·</span>
+            <X size={12} />
           </button>
         </header>
 
-        <div className="px-5 py-4 space-y-5">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
           {/* Time-Range-Buttons */}
           <div className="flex items-center gap-1 bg-slate-900/60 border border-slate-700/50 rounded-lg p-1 w-fit">
             {WINDOWS.map(w => (

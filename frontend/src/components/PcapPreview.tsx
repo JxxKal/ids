@@ -316,6 +316,13 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
   // true  = ungefiltertes ±60s-Capture-Fenster aus pcap-store
   const [rawMode, setRawMode]     = useState(false);
 
+  // ESC schließt – konsistent mit AlertFlowPopup, HostConnectionDrawer.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewH, setViewH]         = useState(500);
@@ -416,9 +423,9 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
               {dl?'…':'↓ Download'}
             </button>
           )}
-          <button onClick={onClose}
-            className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-700 transition-colors text-sm">
-            ✕
+          <button onClick={onClose} title="Schließen"
+            className="text-[11px] px-3 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors">
+            ESC · ✕
           </button>
         </div>
 

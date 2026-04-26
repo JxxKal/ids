@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Network } from 'lucide-react';
 import { setFeedback } from '../api';
 import type { Alert } from '../types';
@@ -80,6 +80,16 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
   const [showGraph, setShowGraph] = useState(false);
   const [showPcap, setShowPcap] = useState(false);
 
+  // ESC schließt – konsistent mit AlertFlowPopup, HostConnectionDrawer.
+  // Greift nur, wenn keine Sub-Modals offen sind, weil die ihren eigenen
+  // ESC-Handler haben und sonst beide gleichzeitig zugemacht würden.
+  useEffect(() => {
+    if (showGraph || showPcap) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose, showGraph, showPcap]);
+
   const giveFeedback = async (fb: 'fp' | 'tp') => {
     setLoading(true);
     try {
@@ -113,9 +123,10 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           </div>
           <button
             onClick={onClose}
-            className="text-slate-500 hover:text-cyan-300 hover:bg-slate-800 rounded w-7 h-7 flex items-center justify-center leading-none transition-colors"
+            title="Schließen"
+            className="text-[11px] px-3 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors"
           >
-            ×
+            ESC · ✕
           </button>
         </div>
 
