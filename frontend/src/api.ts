@@ -427,6 +427,50 @@ export interface SuricataImportResult {
   note?:          string | null;
 }
 
+export interface RuleFileMeta {
+  name:     string;
+  size:     number;
+  rules:    number;
+  modified: number;
+  builtin:  boolean;
+}
+
+export interface RuleFileContent {
+  name:    string;
+  content: string;
+  size:    number;
+  rules:   number;
+}
+
+export interface RuleFileSaveResponse {
+  name:        string;
+  saved:       boolean;
+  rules_count: number;
+  test_ok:     boolean;
+  test_output?: string | null;
+  reload:      string;
+  note?:       string | null;
+}
+
+export async function fetchRuleFiles(): Promise<RuleFileMeta[]> {
+  return req('/api/rules/files');
+}
+
+export async function fetchRuleFile(name: string): Promise<RuleFileContent> {
+  return req(`/api/rules/files/${encodeURIComponent(name)}`);
+}
+
+export async function saveRuleFile(name: string, content: string): Promise<RuleFileSaveResponse> {
+  return req(`/api/rules/files/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body:   JSON.stringify({ content }),
+  });
+}
+
+export async function deleteRuleFile(name: string): Promise<void> {
+  await req(`/api/rules/files/${encodeURIComponent(name)}`, { method: 'DELETE' });
+}
+
 // `req()` darf nicht verwendet werden – es setzt Content-Type: application/json
 // und überschreibt damit den vom Browser für FormData generierten Header
 // (multipart/form-data; boundary=…). Daher direkter fetch() mit Bearer-Header.

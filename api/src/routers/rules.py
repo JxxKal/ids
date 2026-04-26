@@ -443,3 +443,235 @@ async def import_suricata_rules(
         reload="sent" if reload_ok else "skipped",
         note=note,
     )
+
+
+# ── Datei-Editor ──────────────────────────────────────────────────────────────
+# Ein-Datei-Editor für eigene Suricata-Signaturen. Backend stellt sicher dass
+# nur *.rules-Dateien angefasst werden, der Filename basename-only ist (kein
+# Path-Traversal) und ein `suricata -T`-Test grobe Syntax-Fehler abfängt
+# bevor die Datei aktiv wird.
+
+_MAX_RULE_FILE_BYTES   = 5 * 1024 * 1024   # 5 MB pro File reicht in Praxis
+_FILE_NAME_RE          = re.compile(r'^[A-Za-z0-9._-]+\.rules$')
+_PROTECTED_FILE_NAMES  = {"update-sources.txt", "sources.json", "update.trigger"}
+
+
+class RuleFileMeta(BaseModel):
+    name:       str
+    size:       int
+    rules:      int
+    modified:   float
+    builtin:    bool
+
+
+class RuleFileContent(BaseModel):
+    name:    str
+    content: str
+    size:    int
+    rules:   int
+
+
+class RuleFileSaveRequest(BaseModel):
+    content: str
+
+
+class RuleFileSaveResponse(BaseModel):
+    name:        str
+    saved:       bool
+    rules_count: int
+    test_ok:     bool
+    test_output: str | None = None
+    reload:      str
+    note:        str | None = None
+
+
+def _safe_rules_path(name: str) -> Path:
+    """Lehnt Pfad-Traversal, leere Namen und nicht-`.rules`-Dateien ab."""
+    if name in _PROTECTED_FILE_NAMES:
+        raise HTTPException(400, f"'{name}' ist eine geschützte Konfig-Datei")
+    if not _FILE_NAME_RE.match(name):
+        raise HTTPException(
+            400,
+            "Ungültiger Dateiname. Erlaubt: A-Z, a-z, 0-9, '.', '_', '-' und Endung .rules",
+        )
+    return RULES_DIR / name
+
+
+def _is_builtin(path: Path) -> bool:
+    """Built-in = via URL-Quelle gepullt → Operator soll nicht direkt drüber-
+    bügeln, weil das nächste Update den Edit überschreibt. Wir markieren alles
+    als builtin, was in update-sources.txt verlinkt ist (heuristisch über
+    den Dateinamen)."""
+    try:
+        url_file = RULES_DIR / "update-sources.txt"
+        if not url_file.exists():
+            return False
+        urls = url_file.read_text().splitlines()
+    except OSError:
+        return False
+    name = path.name.lower()
+    return any(name in url.lower() for url in urls if url.strip())
+
+
+def _validate_with_suricata(file_path: Path) -> tuple[bool, str]:
+    """Lädt das gesamte Rules-Verzeichnis im Snort-Container probeweise.
+    `-S file` macht zwar einen "rules-only"-Pass, aber Inter-Datei-Variablen
+    (flowbits etc.) brauchen den vollständigen Config-Lauf. Dafür gibt's
+    `suricata -T -c <yaml>` ohne -S, das den ganzen Stack durchparst."""
+    try:
+        r = subprocess.run(
+            ["docker", "exec", "ids-snort",
+             "suricata", "-T", "-c", "/etc/suricata/suricata.yaml"],
+            capture_output=True, text=True, timeout=20,
+        )
+        # Suricata druckt seine Diagnose primär nach stderr.
+        out = (r.stdout + r.stderr).strip()
+        return r.returncode == 0, out
+    except FileNotFoundError:
+        return False, "docker-CLI im API-Container nicht verfügbar"
+    except subprocess.TimeoutExpired:
+        return False, "suricata -T Timeout (>20s) – Container vermutlich überlastet"
+    except Exception as exc:                       # noqa: BLE001
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+@router.get(
+    "/files",
+    response_model=list[RuleFileMeta],
+    dependencies=[Depends(require_admin)],
+    summary="Liste aller *.rules-Dateien im Volume",
+)
+async def list_rule_files() -> list[RuleFileMeta]:
+    if not RULES_DIR.is_dir():
+        return []
+    out: list[RuleFileMeta] = []
+    for path in sorted(RULES_DIR.glob("*.rules")):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        out.append(RuleFileMeta(
+            name=path.name,
+            size=stat.st_size,
+            rules=_count_rules_in(path),
+            modified=stat.st_mtime,
+            builtin=_is_builtin(path),
+        ))
+    return out
+
+
+@router.get(
+    "/files/{name}",
+    response_model=RuleFileContent,
+    dependencies=[Depends(require_admin)],
+    summary="Inhalt einer einzelnen *.rules-Datei",
+)
+async def get_rule_file(name: str) -> RuleFileContent:
+    path = _safe_rules_path(name)
+    if not path.is_file():
+        raise HTTPException(404, "Datei nicht gefunden")
+    try:
+        content = path.read_text(errors="replace")
+    except OSError as exc:
+        raise HTTPException(500, f"Lesefehler: {exc}") from exc
+    return RuleFileContent(
+        name=name,
+        content=content,
+        size=path.stat().st_size,
+        rules=_count_rules_in(path),
+    )
+
+
+@router.put(
+    "/files/{name}",
+    response_model=RuleFileSaveResponse,
+    dependencies=[Depends(require_admin)],
+    summary="Inhalt schreiben + suricata -T validieren + Live-Reload",
+)
+async def save_rule_file(name: str, body: RuleFileSaveRequest) -> RuleFileSaveResponse:
+    path = _safe_rules_path(name)
+
+    if len(body.content.encode("utf-8")) > _MAX_RULE_FILE_BYTES:
+        raise HTTPException(
+            413,
+            f"Datei zu groß (max {_MAX_RULE_FILE_BYTES // (1024*1024)} MB)",
+        )
+
+    # Backup für den Fall dass `suricata -T` failt → wir restoren bevor
+    # SIGUSR2 die Live-Config neu lädt und Suricata damit auf eine kaputte
+    # Regel-Konfig stößt.
+    backup: bytes | None = None
+    if path.exists():
+        try:
+            backup = path.read_bytes()
+        except OSError:
+            backup = None
+
+    try:
+        path.write_text(body.content, encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(500, f"Schreibfehler: {exc}") from exc
+
+    rules_count = _count_rules_in(path)
+
+    test_ok, test_output = _validate_with_suricata(path)
+    if not test_ok and backup is not None:
+        # Rollback: alte Version wiederherstellen, kein Reload
+        try:
+            path.write_bytes(backup)
+        except OSError:
+            pass
+        raise HTTPException(
+            422,
+            detail={
+                "message": "suricata -T meldet Syntaxfehler – Änderung verworfen",
+                "test_output": test_output[-2000:] if test_output else None,
+            },
+        )
+
+    # Wenn Suricata nicht läuft (test_ok=False, kein backup-Rollback nötig
+    # weil wir's gar nicht testen konnten), trotzdem speichern – beim nächsten
+    # Start lädt es dann von der frischen Datei.
+    reload_ok, reload_msg = _signal_suricata_reload()
+    note: str | None = None
+    if not test_ok:
+        note = (
+            f"Suricata war nicht erreichbar für `-T`-Validation ({test_output[:200]}). "
+            f"Datei wurde gespeichert; bitte beim nächsten Container-Start auf "
+            f"Syntaxfehler im Suricata-Log achten."
+        )
+
+    return RuleFileSaveResponse(
+        name=name,
+        saved=True,
+        rules_count=rules_count,
+        test_ok=test_ok,
+        test_output=(test_output[-1500:] if test_output else None) if test_ok else None,
+        reload="sent" if reload_ok else f"skipped ({reload_msg})",
+        note=note,
+    )
+
+
+@router.delete(
+    "/files/{name}",
+    status_code=204,
+    response_model=None,
+    dependencies=[Depends(require_admin)],
+    summary="Eine *.rules-Datei löschen + Suricata-Reload",
+)
+async def delete_rule_file(name: str) -> None:
+    path = _safe_rules_path(name)
+    if _is_builtin(path):
+        raise HTTPException(
+            400,
+            f"'{name}' kommt aus einer aktiven Update-Quelle. Erst die Quelle "
+            f"deaktivieren oder löschen, sonst pullt der nächste Update-Lauf "
+            f"sie wieder rein.",
+        )
+    if not path.exists():
+        raise HTTPException(404, "Datei nicht gefunden")
+    try:
+        path.unlink()
+    except OSError as exc:
+        raise HTTPException(500, f"Löschfehler: {exc}") from exc
+    _signal_suricata_reload()
