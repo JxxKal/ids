@@ -36,6 +36,12 @@ mkdir -p "$(dirname "$LOG")"
 log() { echo "[$(date +%H:%M:%S)] $*" >> "$LOG"; }
 log "=== Cyjan IDS Setup $(date) ==="
 
+# ERR-Trap: bei jedem `set -e`-Abbruch landet die Quellzeile + Exit-Code im
+# Log, statt dass der Wizard stumm verschwindet. Hat Bug-Hunting auf 192.168
+# .1.81 hinter sich – ohne diese Zeilen war jeder unhandled-Pipe-Fehler oder
+# unerwartete Non-Zero-Return ein lautloser Exit.
+trap 'rc=$?; echo "[$(date +%H:%M:%S)] FATAL: line ${LINENO} exit ${rc} | cmd: ${BASH_COMMAND}" >> "$LOG"' ERR
+
 # Kernel-Console-Spam stummschalten: docker compose build/up triggert während
 # bridge-/veth-/iptables-Operationen massenhaft printk-Meldungen, die auf
 # tty1 mitten ins whiptail-UI laufen. SSH ist nicht betroffen (eigenes pty),
