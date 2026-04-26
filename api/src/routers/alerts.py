@@ -214,6 +214,60 @@ async def get_alert(
     return _row_to_alert(row)
 
 
+@router.delete("/{alert_id}/feedback", response_model=AlertResponse)
+async def clear_feedback(
+    alert_id: str,
+    pool:     asyncpg.Pool = Depends(get_pool),
+) -> AlertResponse:
+    """Setzt Feedback und Notiz zurück + entfernt das zugehörige Training-
+    Sample, damit ein versehentlich gegebenes Label das ML-Modell nicht
+    weiter beeinflusst. Severity bleibt wie sie ist (wir setzen NICHT auf
+    den ursprünglichen Wert zurück, weil wir den FP-Override nicht
+    rekonstruieren können – beim nächsten Alert mit gleichem Pattern wäre
+    der korrekte Wert ohnehin wieder da)."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE alerts
+                SET feedback      = NULL,
+                    feedback_ts   = NULL,
+                    feedback_note = NULL
+                WHERE alert_id = $1::uuid
+                RETURNING *
+                """,
+                alert_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Alert not found")
+            await conn.execute(
+                "DELETE FROM training_samples WHERE alert_id = $1::uuid",
+                alert_id,
+            )
+
+    alert = _row_to_alert(row)
+
+    # WS-Push, damit das Frontend (und andere Sessions) den Reset live sehen.
+    if _feedback_producer is not None:
+        try:
+            _feedback_producer.produce("alerts-enriched-push", value=orjson.dumps({
+                "type": "feedback_updated",
+                "data": {
+                    "alert_id":     alert_id,
+                    "feedback":     None,
+                    "feedback_ts":  None,
+                    "feedback_note": None,
+                    "severity":     alert.severity,
+                    "tags":         list(alert.tags or []),
+                },
+            }))
+            _feedback_producer.poll(0)
+        except Exception:
+            pass
+
+    return alert
+
+
 @router.patch("/{alert_id}/feedback", response_model=AlertResponse)
 async def set_feedback(
     alert_id: str,

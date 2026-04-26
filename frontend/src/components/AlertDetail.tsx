@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Network } from 'lucide-react';
-import { setFeedback } from '../api';
+import { clearFeedback, setFeedback } from '../api';
 import type { Alert } from '../types';
 import { AlertFlowPopup } from './AlertFlowPopup';
 import { showHostConnections } from './HostConnectionDrawer';
@@ -79,6 +79,10 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
   const [loading, setLoading]   = useState(false);
   const [showGraph, setShowGraph] = useState(false);
   const [showPcap, setShowPcap] = useState(false);
+  // Edit-Modus: Operator hat ein bestehendes Feedback und will es korrigieren
+  // oder die Notiz nachschärfen. Toggle blendet den TP/FP-/Eingabe-Block
+  // wieder ein und befüllt die Notiz mit dem bisherigen Wert.
+  const [editing, setEditing]   = useState(false);
 
   // ESC schließt – konsistent mit AlertFlowPopup, HostConnectionDrawer.
   // Greift nur, wenn keine Sub-Modals offen sind, weil die ihren eigenen
@@ -95,11 +99,32 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
     try {
       const updated = await setFeedback(alert.alert_id, fb, note || undefined);
       onUpdate(updated);
+      setEditing(false);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
+  };
+
+  const removeFeedback = async () => {
+    if (!confirm('Feedback komplett entfernen?\n\nDas zugehörige Training-Sample wird ebenfalls aus der DB gelöscht, damit es das ML-Modell beim nächsten Retrain nicht mehr beeinflusst.')) return;
+    setLoading(true);
+    try {
+      const updated = await clearFeedback(alert.alert_id);
+      onUpdate(updated);
+      setEditing(false);
+      setNote('');
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startEdit = () => {
+    setNote(alert.feedback_note ?? '');
+    setEditing(true);
   };
 
   const enr = alert.enrichment;
@@ -254,7 +279,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
             </>
           )}
 
-          {!alert.feedback ? (
+          {(!alert.feedback || editing) ? (
             <>
               <input
                 className="cyjan-input flex-1 text-xs min-w-[180px]"
@@ -265,22 +290,57 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
               <button
                 onClick={() => giveFeedback('tp')}
                 disabled={loading}
-                className="px-3 py-1.5 rounded text-xs font-mono bg-red-900/40 text-red-200 border border-red-700/50 hover:bg-red-900/60 disabled:opacity-50 transition-colors"
+                className={`px-3 py-1.5 rounded text-xs font-mono border transition-colors disabled:opacity-50 ${
+                  alert.feedback === 'tp'
+                    ? 'bg-red-900/60 text-red-100 border-red-500/70 ring-1 ring-red-500/40'
+                    : 'bg-red-900/40 text-red-200 border-red-700/50 hover:bg-red-900/60'
+                }`}
               >
                 ⚠ True Positive
               </button>
               <button
                 onClick={() => giveFeedback('fp')}
                 disabled={loading}
-                className="px-3 py-1.5 rounded text-xs font-mono bg-green-900/40 text-green-200 border border-green-700/50 hover:bg-green-900/60 disabled:opacity-50 transition-colors"
+                className={`px-3 py-1.5 rounded text-xs font-mono border transition-colors disabled:opacity-50 ${
+                  alert.feedback === 'fp'
+                    ? 'bg-green-900/60 text-green-100 border-green-500/70 ring-1 ring-green-500/40'
+                    : 'bg-green-900/40 text-green-200 border-green-700/50 hover:bg-green-900/60'
+                }`}
               >
                 ✓ False Positive
               </button>
+              {editing && (
+                <button
+                  onClick={() => { setEditing(false); setNote(''); }}
+                  disabled={loading}
+                  className="px-3 py-1.5 rounded text-xs font-mono bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700/80 transition-colors disabled:opacity-50"
+                >
+                  Abbrechen
+                </button>
+              )}
             </>
           ) : (
-            <span className="text-xs text-slate-600 italic font-mono">
-              Feedback gesetzt – Buttons deaktiviert.
-            </span>
+            <>
+              <span className="text-xs text-slate-500 italic font-mono mr-auto">
+                Feedback gesetzt – ML-Sample ist hinterlegt.
+              </span>
+              <button
+                onClick={startEdit}
+                disabled={loading}
+                className="px-3 py-1.5 rounded text-xs font-mono bg-cyan-500/15 text-cyan-200 border border-cyan-500/50 hover:bg-cyan-500/25 transition-colors disabled:opacity-50"
+                title="Label oder Notiz korrigieren"
+              >
+                ✎ Ändern
+              </button>
+              <button
+                onClick={removeFeedback}
+                disabled={loading}
+                className="px-3 py-1.5 rounded text-xs font-mono bg-slate-800/80 text-slate-300 border border-slate-700 hover:bg-red-950/40 hover:text-red-200 hover:border-red-700/50 transition-colors disabled:opacity-50"
+                title="Feedback entfernen + Training-Sample aus ML-Pool löschen"
+              >
+                ✕ Entfernen
+              </button>
+            </>
           )}
         </div>
       </div>
