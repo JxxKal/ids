@@ -304,12 +304,17 @@ Environment="HTTP_PROXY=${PROXY_HTTP}"
 Environment="HTTPS_PROXY=${PROXY_HTTPS:-$PROXY_HTTP}"
 Environment="NO_PROXY=${PROXY_NO}"
 EOF
-  systemctl daemon-reload
-  systemctl restart docker
+  # Beide Aufrufe mit `|| true` abfangen – ein fehlgeschlagener
+  # daemon-reload (kein dbus, restricted env) oder ein hängender
+  # docker-restart (laufende Container, Timeout) hat den Wizard sonst
+  # mit set -e still abgewürgt, ohne msg/log.
+  systemctl daemon-reload 2>>"$LOG" || log "WARN: systemctl daemon-reload fehlgeschlagen"
+  systemctl restart docker 2>>"$LOG" || log "WARN: systemctl restart docker fehlgeschlagen"
 
-  # Git-Proxy
-  git config --global http.proxy  "${PROXY_HTTP}"
-  git config --global https.proxy "${PROXY_HTTPS:-$PROXY_HTTP}"
+  # Git-Proxy – ebenfalls absichern, git config kann auf restricted HOMEs
+  # scheitern und das ist kein Grund den ganzen Wizard zu beenden.
+  git config --global http.proxy  "${PROXY_HTTP}"     2>>"$LOG" || true
+  git config --global https.proxy "${PROXY_HTTPS:-$PROXY_HTTP}" 2>>"$LOG" || true
 
   msg "Proxy-Einstellungen gespeichert."
 fi
@@ -319,7 +324,11 @@ fi
 # Interface-Liste aufbauen (Name + aktuelle IP als Beschreibung)
 IFACE_MENU=()
 while read -r IF; do
-  IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2}' | head -1)
+  # awk mit `; exit` statt `| head -1`: head schließt die Pipe nach der
+  # ersten Zeile, awk kriegt SIGPIPE bei der nächsten print – mit
+  # `set -o pipefail + set -e` killt das den Wizard auf Interfaces mit
+  # mehr als einer IPv4-Adresse, ohne sichtbaren Fehler.
+  IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2; exit}')
   IFACE_MENU+=("$IF" "${IP4:-keine IP}")
 done < <(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$')
 
@@ -328,7 +337,7 @@ MGMT_IFACE=$(whiptail --title "$TITLE" --menu \
   $H $W 6 "${IFACE_MENU[@]}" 3>&1 1>&2 2>&3) || MGMT_IFACE="${IFACE_MENU[0]}"
 
 # Aktuelle IP des gewählten Interfaces (DHCP oder statisch)
-MGMT_IP=$(ip -4 addr show "$MGMT_IFACE" 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -1)
+MGMT_IP=$(ip -4 addr show "$MGMT_IFACE" 2>/dev/null | awk '/inet /{split($2,a,"/"); print a[1]; exit}')
 MGMT_IP="${MGMT_IP:-0.0.0.0}"
 
 # Optional: statische IP konfigurieren
@@ -339,7 +348,7 @@ if yesno "Das Interface '$MGMT_IFACE' hat aktuell die IP: ${MGMT_IP}\n\nMöchten
 
   STATIC_GW=$(input "Gateway" \
     "Standard-Gateway:" \
-    "$(ip route show default 2>/dev/null | awk '/default/{print $3}' | head -1)") || STATIC_GW=""
+    "$(ip route show default 2>/dev/null | awk '/default/{print $3; exit}')") || STATIC_GW=""
 
   if [ -n "$STATIC_IP" ]; then
     # /etc/network/interfaces schreiben
@@ -373,7 +382,11 @@ if yesno "Ist ein Mirror/SPAN-Port-Interface für den Packet-Sniffer vorhanden?"
   MIRROR_MENU=()
   while read -r IF; do
     [ "$IF" = "$MGMT_IFACE" ] && continue
-    IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2}' | head -1)
+    # awk mit `; exit` statt `| head -1`: head schließt die Pipe nach der
+  # ersten Zeile, awk kriegt SIGPIPE bei der nächsten print – mit
+  # `set -o pipefail + set -e` killt das den Wizard auf Interfaces mit
+  # mehr als einer IPv4-Adresse, ohne sichtbaren Fehler.
+  IP4=$(ip -4 addr show "$IF" 2>/dev/null | awk '/inet /{print $2; exit}')
     MIRROR_MENU+=("$IF" "${IP4:-keine IP}")
   done < <(ip -o link show | awk -F': ' '{print $2}' | grep -v '^lo$')
 
@@ -392,7 +405,9 @@ fi
 # Voll-Modus generiert frisch (User wurde oben gewarnt, dass das einen DB-
 # Reset bedingt).
 extract_env() {
-  echo "$EXISTING_ENV" | grep -E "^${1}=" | head -1 | cut -d= -f2-
+  # `grep -m1` statt `head -1`: vermeidet SIGPIPE auf grep, wenn die .env
+  # mehrere Zeilen mit demselben Key haben sollte (sollte sie nicht, aber).
+  echo "$EXISTING_ENV" | grep -m1 -E "^${1}=" | cut -d= -f2-
 }
 
 if [ "$SETUP_MODE" = "light" ]; then
