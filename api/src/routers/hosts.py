@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import time
 from typing import Annotated
 
 import asyncpg
@@ -522,12 +523,11 @@ async def get_host_connections(
             *params,
         )
 
-        # Window-Grenzen für die Antwort.
-        bounds = await conn.fetchrow(
-            f"SELECT EXTRACT(EPOCH FROM ({until_ts_sql} - INTERVAL '{win_sec} seconds'))::bigint AS s, "
-            f"       EXTRACT(EPOCH FROM ({until_ts_sql}))::bigint AS e",
-            *params,
-        )
+    # Window-Grenzen Python-seitig ausrechnen – früher als DB-Query, gestolpert
+    # über asyncpg "server expects 0 arguments, 1 was passed" weil das SQL kein
+    # $1 referenzierte aber `*params` mitbekam. Hier reicht local time.
+    end_epoch   = int(until) if until else int(time.time())
+    start_epoch = end_epoch - win_sec
 
     # ── Top-Ports + Alerts in das Peers-Dict mergen ──────────────────────
     peers_by_ip: dict[str, dict] = {}
@@ -571,8 +571,8 @@ async def get_host_connections(
         "ip":           ip,
         "window":       window,
         "window_sec":   win_sec,
-        "window_start": int(bounds["s"]) if bounds else None,
-        "window_end":   int(bounds["e"]) if bounds else None,
+        "window_start": start_epoch,
+        "window_end":   end_epoch,
         "bucket_sec":   bucket_sec,
         "peers":        list(peers_by_ip.values()),
         "histogram":    [
