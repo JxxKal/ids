@@ -21,7 +21,7 @@ export function Sidebar({ active, onNav, username }: Props) {
   return (
     <aside className="cyjan-sidebar">
       <div className="cyjan-sidebar-brand">
-        <img src="/cyjan_logo_compact.svg" alt="" className="cyjan-sidebar-logo" />
+        <img src="/cyjan_logo_cyan_max.svg" alt="" className="cyjan-sidebar-logo" />
         <div className="cyjan-sidebar-wordmark">
           CY<span>JAN</span>
         </div>
