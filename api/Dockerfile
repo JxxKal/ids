@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev postgresql-client gzip curl ca-certificates gnupg \
+    gcc libpq-dev postgresql-client gzip zstd curl ca-certificates gnupg \
     libxmlsec1-dev pkg-config \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \

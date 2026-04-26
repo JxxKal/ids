@@ -26,6 +26,7 @@ nano
 htop
 less
 unzip
+zstd
 sudo
 bash-completion
 locales
