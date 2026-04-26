@@ -2654,22 +2654,29 @@ function NetworkInterfaces() {
       )}
 
       <div className="space-y-2">
-        {ifaces.map(iface => (
+        {ifaces.map(iface => {
+          // `roles` ist die neue Liste; `role` der Legacy-Einzelwert. Single-
+          // NIC-Setups (Mgmt = Sniffer) lieferten unter dem alten Modell still
+          // nur eine Rolle, jetzt sind beide Badges sichtbar.
+          const roles = iface.roles ?? (iface.role ? [iface.role] : []);
+          const isSniffer    = roles.includes('sniffer');
+          const isManagement = roles.includes('management');
+          return (
           <div
             key={iface.name}
             className={`rounded border p-3 text-xs transition-colors ${
-              iface.role ? 'border-slate-600/80 bg-slate-800/60' : 'border-slate-700/50 bg-slate-900/40'
+              roles.length > 0 ? 'border-slate-600/80 bg-slate-800/60' : 'border-slate-700/50 bg-slate-900/40'
             }`}
           >
             {/* Header row */}
             <div className="flex items-center gap-2 mb-2.5">
               <StateDot state={iface.operstate} />
               <span className="font-mono font-semibold text-slate-100 text-sm">{iface.name}</span>
-              {iface.role && (
-                <span className={`px-1.5 py-0.5 rounded border text-[10px] ${ROLE_COLOR[iface.role]}`}>
-                  {ROLE_LABEL[iface.role]}
+              {roles.map(r => (
+                <span key={r} className={`px-1.5 py-0.5 rounded border text-[10px] ${ROLE_COLOR[r]}`}>
+                  {ROLE_LABEL[r]}
                 </span>
-              )}
+              ))}
               <span className={`ml-auto font-mono text-[10px] ${iface.operstate === 'up' ? 'text-green-400' : 'text-red-400'}`}>
                 {iface.operstate.toUpperCase()}
               </span>
@@ -2688,7 +2695,7 @@ function NetworkInterfaces() {
                       <span key={a} className="font-mono text-slate-200 mr-2">{a}</span>
                     ))
                   : <span className="italic text-slate-600">
-                      {iface.role === 'sniffer' ? 'keine (erwartet)' : 'keine'}
+                      {isSniffer && !isManagement ? 'keine (erwartet)' : 'keine'}
                     </span>
                 }
               </div>
@@ -2723,7 +2730,7 @@ function NetworkInterfaces() {
               <div className="flex gap-2 pt-2 border-t border-slate-700/40">
                 <button
                   type="button"
-                  disabled={iface.role === 'sniffer' || !!applying}
+                  disabled={isSniffer || !!applying}
                   onClick={() => setConfirm({ role: 'sniffer', iface: iface.name })}
                   className="cyjan-btn-secondary text-[11px] px-2 py-1 disabled:opacity-40 disabled:cursor-default"
                 >
@@ -2731,7 +2738,7 @@ function NetworkInterfaces() {
                 </button>
                 <button
                   type="button"
-                  disabled={iface.role === 'management' || !!applying}
+                  disabled={isManagement || !!applying}
                   onClick={() => setConfirm({ role: 'management', iface: iface.name })}
                   className="cyjan-btn-secondary text-[11px] px-2 py-1 disabled:opacity-40 disabled:cursor-default"
                 >
@@ -2740,7 +2747,8 @@ function NetworkInterfaces() {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <p className="text-[11px] text-slate-600">

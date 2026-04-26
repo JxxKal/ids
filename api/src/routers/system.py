@@ -224,11 +224,18 @@ async def get_interfaces() -> list[dict]:
         name = iface.get("ifname", "")
         if not _is_physical(name):
             continue
-        role = None
+
+        # Mehrere Rollen pro Interface erlauben – im Single-NIC-Setup ist die
+        # Management-NIC gleichzeitig der Sniffer (promiscuous). Das alte
+        # `if/elif` hat in dem Fall die Management-Markierung still überschrieben,
+        # sodass die GUI für beide Interfaces "als Management setzen" anbot
+        # und der User die Bind-Adresse seines eigenen Frontends nicht mehr
+        # erkennen konnte.
+        roles: list[str] = []
+        if mgmt_iface and name == mgmt_iface:
+            roles.append("management")
         if mirror_iface and name == mirror_iface:
-            role = "sniffer"
-        elif mgmt_iface and name == mgmt_iface:
-            role = "management"
+            roles.append("sniffer")
 
         addresses = [
             f"{a['local']}/{a['prefixlen']}"
@@ -238,7 +245,10 @@ async def get_interfaces() -> list[dict]:
         ]
         result.append({
             "name":      name,
-            "role":      role,
+            # `role` für Rückwärtskompatibilität – ältere Frontend-Builds lesen
+            # weiter den ersten Eintrag; neuere greifen `roles` direkt.
+            "role":      roles[0] if roles else None,
+            "roles":     roles,
             "operstate": iface.get("operstate", "unknown").lower(),
             "addresses": addresses,
             "mac":       iface.get("address", ""),

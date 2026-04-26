@@ -243,9 +243,15 @@ export interface SystemUpdateStatus {
   version?: string;
 }
 
+export type InterfaceRole = 'management' | 'sniffer';
+
 export interface InterfaceInfo {
   name:       string;
-  role:       'management' | 'sniffer' | null;
+  // `role` ist der Legacy-Wert (erste Rolle); `roles` ist die saubere Liste,
+  // damit ein Single-NIC-Setup gleichzeitig Management UND Sniffer sein kann
+  // ohne dass eine Markierung still verloren geht.
+  role:       InterfaceRole | null;
+  roles?:     InterfaceRole[];
   operstate:  string;   // 'up' | 'down' | 'unknown'
   addresses:  string[]; // CIDR strings, e.g. '192.168.1.100/24'
   mac:        string;
