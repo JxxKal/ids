@@ -312,18 +312,24 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
   const [filterErr, setFilterErr] = useState(false);
   const [selected, setSelected]   = useState<number|null>(null);
   const [dl, setDl]               = useState(false);
+  // false = nur die Pakete des Alert-Flows (server-seitig gefiltert)
+  // true  = ungefiltertes ±60s-Capture-Fenster aus pcap-store
+  const [rawMode, setRawMode]     = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewH, setViewH]         = useState(500);
 
-  const fn = filename ?? `alert-${alertId.slice(0,8)}.pcap`;
+  const fn = (filename ?? `alert-${alertId.slice(0,8)}.pcap`).replace(
+    /(\.pcap)?$/,
+    rawMode ? '-full.pcap' : '-filtered.pcap'
+  );
 
   useEffect(() => {
     let alive=true;
-    setLoading(true); setError(null);
+    setLoading(true); setError(null); setSelected(null);
     const tok=getToken();
-    fetch(pcapUrl(alertId), { headers:tok?{Authorization:`Bearer ${tok}`}:{} })
+    fetch(pcapUrl(alertId, rawMode), { headers:tok?{Authorization:`Bearer ${tok}`}:{} })
       .then(r=>{ if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
       .then(buf=>{
         if (!alive) return;
@@ -333,7 +339,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
       })
       .catch(e=>{ if(alive){ setError(e.message); setLoading(false); } });
     return ()=>{ alive=false; };
-  }, [alertId]);
+  }, [alertId, rawMode]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -386,6 +392,24 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
             PCAP Vorschau — <span className="text-cyan-400">{fn}</span>
           </span>
           <div className="flex-1"/>
+
+          {/* Raw-Mode-Toggle: per Default zeigt das PCAP nur den Alert-Flow.
+              Mit "Vollständiges Fenster" lädt das ungefilterte ±60s-Capture
+              aus pcap-store für nachträgliche Forensik. */}
+          <label
+            className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none whitespace-nowrap"
+            title="Default: nur Pakete des Alert-Flows (server-seitig gefiltert). Aktivieren: das volle ±60-s-Capture-Fenster."
+          >
+            <input
+              type="checkbox"
+              checked={rawMode}
+              onChange={e => setRawMode(e.target.checked)}
+              disabled={loading}
+              className="cursor-pointer accent-cyan-500"
+            />
+            Vollständiges Fenster
+          </label>
+
           {rawBuf && (
             <button onClick={download} disabled={dl}
               className="px-3 py-1 text-xs rounded border border-cyan-700/50 text-cyan-400 bg-cyan-950/30 hover:bg-cyan-900/40 transition-colors disabled:opacity-50 whitespace-nowrap">
