@@ -24,23 +24,36 @@ function Row({ label, value }: { label: string; value?: string | number | null }
   );
 }
 
-// IP-Zeile mit Klick-Trigger: öffnet den HostConnectionDrawer für die IP.
-// Render-Schicht ist bewusst sehr nah an Row(), nur das innere span wird zu
-// einem button mit Hover-Highlight + Network-Icon.
+// IP-Zeile mit explizitem Trigger-Button für den HostConnectionDrawer.
+// IP bleibt als Plain-Text lesbar, daneben ein klar beschrifteter Button
+// "Host-Graph" – damit ist der Einstieg auf einen Blick sichtbar (vorher
+// war's nur ein subtiles Network-Icon auf der IP, das User übersehen haben).
+// Die IP selbst ist zusätzlich klickbar als Power-User-Shortcut.
 function IpRow({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
   return (
-    <div className="flex gap-3 py-1.5 border-b border-slate-800/50">
+    <div className="flex gap-3 py-1.5 border-b border-slate-800/50 items-center">
       <span className="w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
       <button
         type="button"
         onClick={() => showHostConnections(value)}
-        title="Verbindungs-Übersicht für diesen Host anzeigen"
-        className="group inline-flex items-center gap-1.5 text-slate-200 text-xs break-all font-mono
-                   hover:text-cyan-300 transition-colors"
+        title="Klick = alle Verbindungen dieses Hosts in einem Zeitfenster"
+        className="text-slate-200 text-xs break-all font-mono hover:text-cyan-300 transition-colors"
       >
-        <Network size={11} className="text-slate-500 group-hover:text-cyan-400 transition-colors" />
         {value}
+      </button>
+      <button
+        type="button"
+        onClick={() => showHostConnections(value)}
+        title="Alle Verbindungen dieses Hosts (Zeitfenster 15 min – 24 h, mit Time-Slider)"
+        className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded
+                   text-[10px] font-mono uppercase tracking-wider
+                   bg-cyan-500/10 text-cyan-300 border border-cyan-500/40
+                   hover:bg-cyan-500/20 hover:border-cyan-500/60
+                   transition-colors whitespace-nowrap"
+      >
+        <Network size={11} />
+        Host-Graph
       </button>
     </div>
   );
