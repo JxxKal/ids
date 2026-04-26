@@ -315,3 +315,33 @@ footer a:hover { color: var(--cyjan-2); }
 }
 
 .muted { color: var(--text-mute); font-size: 14px; }
+
+/* ── Defensive Tests-Header ───────────────────────────────────────────────── */
+
+.lab-only {
+  background: rgba(14, 165, 233, 0.06);
+  border: 1px solid rgba(14, 165, 233, 0.4);
+  border-left: 3px solid var(--cyjan);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  margin: 12px 0 24px;
+  font-size: 14px;
+  color: var(--text-mute);
+}
+.lab-only strong { color: var(--cyjan-2); }
+
+/* ── Disclaimer-Markenhinweis ─────────────────────────────────────────────── */
+
+.trademark-note {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(220, 38, 38, 0.35);
+  color: var(--text-mute);
+}
+
+/* ── Footer-Links-Zeile ───────────────────────────────────────────────────── */
+
+.footer-links {
+  margin-top: 6px;
+}
+.footer-links a { margin: 0 6px; }

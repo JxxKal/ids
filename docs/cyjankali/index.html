@@ -83,6 +83,15 @@
     plus die <em>erwartete</em> Reaktion im Cyjan-Frontend. Wenn der Alert
     ausbleibt → Anti-Pattern für eine Regel- oder ML-Modell-Verbesserung.
   </p>
+  <aside class="lab-only">
+    <strong>Detection-Validation, kein Angriffs-Toolkit.</strong> Diese
+    Skripte simulieren typische Angriffsmuster <em>gegen das eigene IDS</em>,
+    damit du prüfen kannst, ob die Detection greift. Bevor du irgendetwas
+    davon laufen lässt: das Zielsystem ist in deiner Hand und du hast die
+    schriftliche Berechtigung des Eigentümers? Wenn nein, hör hier auf —
+    siehe <a href="#disclaimer">Disclaimer</a>. Alle Beispiele zeigen
+    private RFC1918-Adressen (192.168.x.y) als Marker für „eigenes Lab".
+  </aside>
 
   <article class="test">
     <h3 id="test-recon">1. Reconnaissance · nmap-Scans</h3>
@@ -152,15 +161,25 @@ sqlmap -u "$TARGET/login.php" \
   <article class="test">
     <h3 id="test-bruteforce">3. Brute-Force · hydra gegen SSH</h3>
     <p>
-      Klassisches SSH-Login-Hammern. Tests sowohl die Signature-Engine
-      (Connection-Burst-Pattern) als auch die ML-Anomaly-Detection.
+      Klassisches SSH-Login-Hammern gegen einen <strong>eigenen Lab-Account</strong>.
+      Testet sowohl die Signature-Engine (Connection-Burst-Pattern) als auch
+      die ML-Anomaly-Detection.
+    </p>
+    <p class="muted">
+      Die Wordlists sind bewusst Variablen — kopiere die Datei nicht
+      ungeprüft mit <code>rockyou.txt</code> gegen einen produktiven Host.
+      Lege dir für den Test einen separaten Lab-User mit kontrolliertem,
+      definitiv erratbaren Passwort an, damit du den Treffer auch
+      nachweisen kannst, ohne fremde Accounts zu verbrennen.
     </p>
 <pre><code class="lang-bash">#!/usr/bin/env bash
 TARGET=${1:-192.168.56.10}
+USERLIST=${USERLIST:-/path/to/your-lab-userlist.txt}
+PASSLIST=${PASSLIST:-/path/to/your-controlled-pwlist.txt}
 
-echo "[+] hydra: SSH brute-force mit Top-100-Wordlist"
-hydra -L /usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt \
-      -P /usr/share/wordlists/rockyou.txt \
+echo "[+] hydra: SSH brute-force gegen Lab-Account"
+hydra -L "$USERLIST" \
+      -P "$PASSLIST" \
       -t 4 -e nsr \
       ssh://"$TARGET"
 </code></pre>
@@ -174,21 +193,28 @@ hydra -L /usr/share/wordlists/seclists/Usernames/top-usernames-shortlist.txt \
   </article>
 
   <article class="test">
-    <h3 id="test-mitm">4. MITM · responder + LLMNR-Poisoning</h3>
+    <h3 id="test-mitm">4. MITM · responder im Analysis-Modus</h3>
     <p>
-      Klassischer Windows-Lab-Angriff. Der Sniffer sollte den
-      LLMNR/NBT-Broadcast-Traffic erkennen.
+      Klassischer Windows-Lab-Angriff. Wir nutzen
+      <strong>Analysis-Mode (<code>-A</code>)</strong>: responder beobachtet
+      LLMNR/NBT-Broadcasts und protokolliert sie, schreibt aber
+      <em>nichts</em> aktiv ins Netz zurück. Reicht für die IDS-Detection
+      völlig aus — der Sniffer sieht den Broadcast-Traffic ohnehin —, vermeidet
+      aber das Spoofen fremder Hostnamen, was ein anderer rechtlicher
+      Korridor wäre.
     </p>
 <pre><code class="lang-bash">#!/usr/bin/env bash
+# Passive Analysis-Only: responder loggt LLMNR/NBT-Queries, ohne sie zu
+# beantworten. Aktiv-Spoofing (-wF) bewusst NICHT aufgeführt.
 IFACE=${1:-eth0}
 
-sudo responder -I "$IFACE" -wF
+sudo responder -I "$IFACE" -A
 </code></pre>
     <details>
       <summary>Erwartete IDS-Reaktion</summary>
       <ul>
-        <li><strong>Signature-Engine</strong>: <code>llmnr-spoof</code> Alert (Severity <code>critical</code>).</li>
-        <li><strong>Connection-Graph</strong>: Kali-Box antwortet plötzlich auf LLMNR-Queries, die sie nicht erwarten würde.</li>
+        <li><strong>Signature-Engine</strong>: <code>llmnr-broadcast-storm</code> Alert (Severity <code>medium</code>).</li>
+        <li><strong>Connection-Graph</strong>: Cluster broadcast-aktiver Hosts wird sichtbar; Kali-Box ist passiver Beobachter.</li>
       </ul>
     </details>
   </article>
@@ -267,9 +293,22 @@ sudo responder -I "$IFACE" -wF
     USA gilt <strong>18 U.S.C. § 1030</strong> (CFAA).
   </p>
   <p>
-    Wer das CYJANKALI-Material gegen produktive Systeme richtet, tut das auf
-    eigene Verantwortung – die Maintainer von Cyjan IDS übernehmen für
-    daraus resultierende Konsequenzen ausdrücklich keine Haftung.
+    <strong>Keine Gewähr.</strong> Die Skripte werden „as-is" zu Bildungs-
+    und Detection-Validation-Zwecken bereitgestellt — ohne Zusicherung von
+    Funktion, Sicherheit oder rechtmäßiger Verwendung. Wer das CYJANKALI-
+    Material gegen produktive Systeme richtet, tut das auf eigene
+    Verantwortung; die Maintainer übernehmen für daraus resultierende
+    Konsequenzen ausdrücklich keine Haftung.
+  </p>
+  <p class="trademark-note">
+    <small>
+      <strong>Markenhinweis:</strong> Kali Linux ist eine eingetragene
+      Marke der OffSec Services Limited. Dieses Projekt steht in keiner
+      Verbindung zu Kali Linux, OffSec oder dem Kali-Linux-Team. Der Name
+      „CYJANKALI" referenziert das chemische Gift <em>Cyankali</em>
+      (Kaliumcyanid) — die Doppeldeutung mit „Kali" ist Wortspiel, keine
+      Endorsement-Behauptung.
+    </small>
   </p>
 </section>
 
@@ -282,6 +321,13 @@ sudo responder -I "$IFACE" -wF
       <a href="https://github.com/JxxKal/ids" rel="noopener">Cyjan IDS</a>-Projekts.
       Pull-Requests sind willkommen unter
       <code>docs/cyjankali/</code>.
+    </small>
+  </p>
+  <p class="footer-links">
+    <small>
+      <a href="impressum.html">Impressum</a> ·
+      <a href="#disclaimer">Disclaimer</a> ·
+      <a href="https://github.com/JxxKal/ids" rel="noopener">Source-Repo</a>
     </small>
   </p>
 </footer>
