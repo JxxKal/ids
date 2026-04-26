@@ -109,6 +109,10 @@ export async function fetchAlerts(filters: AlertFilters = {}): Promise<{
   return req(`/api/alerts?${params}`);
 }
 
+export async function clearFeedback(alertId: string): Promise<Alert> {
+  return req(`/api/alerts/${alertId}/feedback`, { method: 'DELETE' });
+}
+
 export async function setFeedback(
   alertId: string,
   feedback: 'fp' | 'tp',
