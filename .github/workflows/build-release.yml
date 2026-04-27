@@ -354,7 +354,60 @@ jobs:
           - docker-compose.yml und infra/ aktualisiert
           - Container mit `docker compose up -d` neu gestartet
           - .env, .git und Datenbank bleiben unverändert
+
+          ## Notfall-Wiederherstellung
+
+          Falls die GUI-Update-Pipeline scheitert (z.B. weil eine sehr alte
+          API-Version im Container das aktuelle Bundle-Format nicht erkennt
+          und daraufhin in den Build-Pfad fällt), liegt nach der Extraktion
+          alles unter /opt/ids/ und das Recovery-Script erledigt den Rest:
+
+              sudo bash /opt/ids/recover.sh
           EOF
+
+          # Recovery-Script: lädt das Image-Bundle direkt vom Host und startet
+          # den Stack. Wird nur gebraucht wenn die API-Pipeline scheitert (z.B.
+          # nach Format-Wechsel auf Maschinen mit alter API-Version, die das
+          # Bundle als reguläre Datei extrahiert hat statt als Bundle).
+          cat > "$PKG/recover.sh" << 'EOF'
+          #!/bin/sh
+          # Cyjan IDS – Notfall-Wiederherstellung nach gescheitertem GUI-Update.
+          # Lädt das Image-Bundle aus /opt/ids und startet den Stack neu.
+          set -eu
+          IDS_DIR="/opt/ids"
+          cd "$IDS_DIR"
+
+          PROFILE="$(cat /etc/cyjan/profile 2>/dev/null || echo prod)"
+          echo "Compose-Profil: $PROFILE"
+
+          if [ -f images.tar.zst ]; then
+            if ! command -v zstd >/dev/null 2>&1; then
+              echo "FEHLER: zstd fehlt auf dem Host."
+              echo "  - Online: sudo apt install -y zstd"
+              echo "  - Offline: zstd-Binary von einer anderen Maschine nach"
+              echo "    /usr/local/bin/ kopieren und chmod +x setzen."
+              exit 1
+            fi
+            echo "Lade images.tar.zst via zstd -dc | docker load ..."
+            zstd -dc images.tar.zst | docker load
+            rm -f images.tar.zst
+          elif [ -f images.tar.gz ]; then
+            echo "Lade images.tar.gz via gunzip -c | docker load ..."
+            gunzip -c images.tar.gz | docker load
+            rm -f images.tar.gz
+          elif [ -f images.tar ]; then
+            echo "Lade images.tar ..."
+            docker load -i images.tar
+            rm -f images.tar
+          else
+            echo "Kein Image-Bundle gefunden – fahre nur mit compose up fort."
+          fi
+
+          echo "Starte Stack mit Profil $PROFILE ..."
+          docker compose --project-directory "$IDS_DIR" --profile "$PROFILE" up -d
+          echo "Fertig."
+          EOF
+          chmod +x "$PKG/recover.sh"
 
           zip -r "${PKG}.zip" "$PKG/"
           echo "Paketgröße: $(du -sh ${PKG}.zip | cut -f1)"
