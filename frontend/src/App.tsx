@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { clearToken, fetchAlerts, fetchMe, fetchSystemStats, fetchUnknownHosts, getToken, setToken } from './api';
 import type { SystemStats } from './api';
 import { UnknownHostsDrawer } from './components/UnknownHostsDrawer';
@@ -22,14 +23,6 @@ import type { Alert, User } from './types';
 
 type TimeWindow = 'live' | '1m' | '15m' | '1h' | '4h' | '1d';
 
-const TAB_TITLES: Record<NavTab, string> = {
-  dashboard: 'Übersicht',
-  networks:  'Netzwerk-Inventar',
-  hosts:     'Host-Inventar',
-  tests:     'Test-Szenarien',
-  settings:  'Einstellungen',
-};
-
 const TIME_WINDOWS: { id: TimeWindow; label: string; seconds?: number }[] = [
   { id: 'live',  label: 'Live' },
   { id: '1m',    label: '1 Min',   seconds: 60 },
@@ -40,6 +33,7 @@ const TIME_WINDOWS: { id: TimeWindow; label: string; seconds?: number }[] = [
 ];
 
 export default function App() {
+  const { t } = useTranslation();
   const [user,    setUser]    = useState<User | null>(null);
   const [authChk, setAuthChk] = useState(true);
 
@@ -68,7 +62,7 @@ export default function App() {
   if (authChk) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <span className="text-slate-600 text-sm">Lade…</span>
+        <span className="text-slate-600 text-sm">{t('common.loading')}</span>
       </div>
     );
   }
@@ -81,6 +75,7 @@ export default function App() {
 }
 
 function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
+  const { t } = useTranslation();
   const [tab, setTab]         = useState<NavTab>('dashboard');
   const [showTest, setShowTest] = useState(
     () => localStorage.getItem('showTest') === 'true'
@@ -173,7 +168,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
 
       <main className="flex-1 flex flex-col overflow-hidden">
         <TopBar
-          title={TAB_TITLES[tab]}
+          title={t(`tabs.${tab}`)}
           live={connected && timeWindow === 'live'}
           kpis={tab === 'dashboard' ? kpis : []}
           username={user.username}
@@ -222,7 +217,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                 </div>
 
                 <span className="text-xs text-slate-500 font-mono">
-                  {isLoading ? 'Lade…' : `${alertCount} Alerts`}
+                  {isLoading ? t('common.loading') : `${alertCount} Alerts`}
                 </span>
 
                 {/* Unbekannte Hosts */}

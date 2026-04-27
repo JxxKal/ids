@@ -1,0 +1,81 @@
+{
+  "common": {
+    "loading": "Loading…"
+  },
+  "sidebar": {
+    "dashboard": "Dashboard",
+    "networks": "Networks",
+    "hosts": "Hosts",
+    "tests": "Scenarios",
+    "settings": "Settings",
+    "footer": "{{username}}@cyjan · {{version}}"
+  },
+  "topbar": {
+    "live": "Live",
+    "offline": "Offline",
+    "logout": "Sign out"
+  },
+  "tabs": {
+    "dashboard": "Overview",
+    "networks": "Network inventory",
+    "hosts": "Host inventory",
+    "tests": "Test scenarios",
+    "settings": "Settings"
+  },
+  "login": {
+    "title": "Sign in",
+    "username": "Username",
+    "password": "Password",
+    "submit": "SIGN IN",
+    "submitting": "SIGNING IN…",
+    "errorDefault": "Sign-in failed",
+    "saml": "SIGN IN WITH SSO",
+    "or": "OR",
+    "demoHint": "Try it with:",
+    "demoSub": "→ click to fill the fields",
+    "demoTitle": "Use demo credentials",
+    "footer": "Authorised access only",
+    "tagline": "PROTECT · DETECT · RESPOND",
+    "subtitle": "OT SENTRYMODE"
+  },
+  "settings": {
+    "groups": {
+      "general": "General",
+      "users": "Users & access",
+      "ml": "AI/ML engine",
+      "rules": "Rule set",
+      "system": "System",
+      "integrations": "Integrations",
+      "extra": "Extra"
+    },
+    "items": {
+      "general": "Language & display",
+      "users": "User management",
+      "saml": "SAML / SSO",
+      "ml-status": "Status & learning phase",
+      "ml-config": "Filter configuration",
+      "ml-learned": "Learned patterns",
+      "rules-sources": "Rule sources",
+      "rules-list": "Active rules",
+      "rules-editor": "Custom signatures",
+      "system-health": "System load",
+      "interfaces": "Interfaces",
+      "ssl": "SSL certificate",
+      "syslog": "Syslog / SIEM",
+      "update": "System update",
+      "db-maintenance": "Database",
+      "irma": "IRMA",
+      "itop": "iTop CMDB",
+      "thorsten": "For Thorsten"
+    },
+    "general": {
+      "title": "Language & display",
+      "languageLabel": "Language",
+      "languageHelp": "Language is stored in this browser and applies to this device only.",
+      "languages": {
+        "de": "German",
+        "en": "English"
+      }
+    }
+  }
+}
