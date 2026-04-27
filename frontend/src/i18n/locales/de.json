@@ -1,6 +1,9 @@
 {
   "common": {
-    "loading": "Lade…"
+    "loading": "Lade…",
+    "all": "Alle",
+    "noData": "Keine Daten",
+    "dash": "–"
   },
   "sidebar": {
     "dashboard": "Dashboard",
@@ -37,6 +40,117 @@
     "footer": "Nur autorisierter Zugriff",
     "tagline": "PROTECT · DETECT · RESPOND",
     "subtitle": "OT SENTRYMODE"
+  },
+  "dashboard": {
+    "kpi": {
+      "alertsPerHour": "alerts / 1h",
+      "visible": "sichtbar"
+    },
+    "timeWindows": {
+      "live": "Live",
+      "1m": "1 Min",
+      "15m": "15 Min",
+      "1h": "1 Std",
+      "4h": "4 Std",
+      "1d": "1 Tag",
+      "clickToRefresh": "Klick zum Aktualisieren"
+    },
+    "alertCount": "{{count}} Alerts",
+    "unknownHosts": {
+      "label": "{{count}} unbekannt",
+      "title": "{{count}} IPs in Alerts ohne Host-Eintrag – klicken zum Anzeigen"
+    },
+    "snifferDrops": {
+      "label": "⚠ Drops {{pct}} %",
+      "title": "Paketverlust am Sniffer: {{pct}} % — Details unter Einstellungen → Systemauslastung"
+    },
+    "filters": {
+      "mlOnly": "Nur KI/ML-Alarme",
+      "showTest": "Testverkehr anzeigen"
+    },
+    "snapshotHint": "Snapshot · Schaltfläche erneut klicken zum Aktualisieren"
+  },
+  "threatGauge": {
+    "title": "Threat Level · {{minutes}} min",
+    "status": {
+      "green": "Normal",
+      "yellow": "Moderat",
+      "orange": "Erhöht",
+      "red": "Kritisch"
+    }
+  },
+  "severityCard": {
+    "title": "Alerts · Severity"
+  },
+  "protocolsCard": {
+    "title": "Top Protokolle"
+  },
+  "trust": {
+    "validated": "Validiert",
+    "validatedVia": "Validiert via {{source}}",
+    "unknownLabel": "Unbekannt",
+    "knownLabel": "Bekannt",
+    "sources": {
+      "manual": "manuell",
+      "csv": "CSV",
+      "dns": "DNS",
+      "cmdb": "iTop/CMDB",
+      "import": "Import"
+    }
+  },
+  "alertFeed": {
+    "search": "Suche: IP, Regel, Tag, …",
+    "filters": {
+      "severity": "Schweregrad filtern",
+      "source": "Quelle filtern",
+      "feedback": "Feedback-Status filtern",
+      "allSources": "Alle Quellen",
+      "noFeedback": "Kein Feedback",
+      "sources": {
+        "signature": "Signatur",
+        "ml": "ML / KI",
+        "suricata": "Suricata",
+        "external": "Extern (IRMA)"
+      }
+    },
+    "groupedToggle": {
+      "grouped": "⊞ Gruppiert",
+      "single": "≡ Einzeln",
+      "title": "Gleiche Regel + Quell-IP zusammenfassen"
+    },
+    "irmaAssetToggle": {
+      "title": "IRMA-Alarme mit Regel ASSET::* ausblenden"
+    },
+    "csvExport": {
+      "title": "Gefilterte Alerts als CSV exportieren (max. 5000)"
+    },
+    "counts": {
+      "groups": "Gruppen",
+      "alerts": "Alerts"
+    },
+    "columns": {
+      "lastSeen": "Letzte",
+      "time": "Zeit",
+      "severity": "Severity",
+      "rule": "Regel",
+      "proto": "Proto",
+      "description": "Beschreibung",
+      "tags": "Tags",
+      "source": "Quelle",
+      "destination": "Ziel",
+      "hits": "Treffer",
+      "score": "Score"
+    },
+    "noAlerts": "Keine Alerts",
+    "bidirectional": "Bidirektional (Request + Response in Session)",
+    "pcap": {
+      "open": "PCAP Vorschau öffnen",
+      "unavailable": "Kein PCAP – Sniffer läuft nicht oder kein Paketpuffer für diesen Alert"
+    },
+    "feedback": {
+      "fpTitle": "False Positive – Falschalarm bestätigt, fließt in ML-Training ein",
+      "tpTitle": "True Positive – Angriff bestätigt, fließt in ML-Training ein"
+    }
   },
   "settings": {
     "groups": {

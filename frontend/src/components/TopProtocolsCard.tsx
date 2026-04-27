@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Alert } from '../types';
 
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export function TopProtocolsCard({ alerts, showTest }: Props) {
+  const { t } = useTranslation();
   const rows = useMemo(() => {
     const visible = showTest ? alerts : alerts.filter(a => !a.is_test);
     const total = visible.length || 1;
@@ -23,9 +25,9 @@ export function TopProtocolsCard({ alerts, showTest }: Props) {
 
   return (
     <div className="cyjan-kpi-card">
-      <div className="cyjan-kpi-card-title">Top Protokolle</div>
+      <div className="cyjan-kpi-card-title">{t('protocolsCard.title')}</div>
       {rows.length === 0 && (
-        <div className="text-xs text-slate-600 py-2">Keine Daten</div>
+        <div className="text-xs text-slate-600 py-2">{t('common.noData')}</div>
       )}
       <div className="flex flex-col gap-1.5">
         {rows.map(r => (

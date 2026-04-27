@@ -1,6 +1,9 @@
 {
   "common": {
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "all": "All",
+    "noData": "No data",
+    "dash": "–"
   },
   "sidebar": {
     "dashboard": "Dashboard",
@@ -37,6 +40,117 @@
     "footer": "Authorised access only",
     "tagline": "PROTECT · DETECT · RESPOND",
     "subtitle": "OT SENTRYMODE"
+  },
+  "dashboard": {
+    "kpi": {
+      "alertsPerHour": "alerts / 1h",
+      "visible": "visible"
+    },
+    "timeWindows": {
+      "live": "Live",
+      "1m": "1 min",
+      "15m": "15 min",
+      "1h": "1 h",
+      "4h": "4 h",
+      "1d": "1 day",
+      "clickToRefresh": "Click to refresh"
+    },
+    "alertCount": "{{count}} alerts",
+    "unknownHosts": {
+      "label": "{{count}} unknown",
+      "title": "{{count}} IPs in alerts without a host entry – click to view"
+    },
+    "snifferDrops": {
+      "label": "⚠ drops {{pct}} %",
+      "title": "Sniffer packet loss: {{pct}} % — details under Settings → System load"
+    },
+    "filters": {
+      "mlOnly": "AI/ML alerts only",
+      "showTest": "Show test traffic"
+    },
+    "snapshotHint": "Snapshot · click the time button again to refresh"
+  },
+  "threatGauge": {
+    "title": "Threat level · {{minutes}} min",
+    "status": {
+      "green": "Normal",
+      "yellow": "Moderate",
+      "orange": "Elevated",
+      "red": "Critical"
+    }
+  },
+  "severityCard": {
+    "title": "Alerts · severity"
+  },
+  "protocolsCard": {
+    "title": "Top protocols"
+  },
+  "trust": {
+    "validated": "Validated",
+    "validatedVia": "Validated via {{source}}",
+    "unknownLabel": "Unknown",
+    "knownLabel": "Known",
+    "sources": {
+      "manual": "manual",
+      "csv": "CSV",
+      "dns": "DNS",
+      "cmdb": "iTop/CMDB",
+      "import": "Import"
+    }
+  },
+  "alertFeed": {
+    "search": "Search: IP, rule, tag, …",
+    "filters": {
+      "severity": "Filter by severity",
+      "source": "Filter by source",
+      "feedback": "Filter by feedback status",
+      "allSources": "All sources",
+      "noFeedback": "No feedback",
+      "sources": {
+        "signature": "Signature",
+        "ml": "ML / AI",
+        "suricata": "Suricata",
+        "external": "External (IRMA)"
+      }
+    },
+    "groupedToggle": {
+      "grouped": "⊞ Grouped",
+      "single": "≡ Individual",
+      "title": "Group by rule + source IP"
+    },
+    "irmaAssetToggle": {
+      "title": "Hide IRMA alerts with rule ASSET::*"
+    },
+    "csvExport": {
+      "title": "Export filtered alerts as CSV (max 5000)"
+    },
+    "counts": {
+      "groups": "groups",
+      "alerts": "alerts"
+    },
+    "columns": {
+      "lastSeen": "Last seen",
+      "time": "Time",
+      "severity": "Severity",
+      "rule": "Rule",
+      "proto": "Proto",
+      "description": "Description",
+      "tags": "Tags",
+      "source": "Source",
+      "destination": "Destination",
+      "hits": "Hits",
+      "score": "Score"
+    },
+    "noAlerts": "No alerts",
+    "bidirectional": "Bidirectional (request + response in session)",
+    "pcap": {
+      "open": "Open PCAP preview",
+      "unavailable": "No PCAP – sniffer not running or no packet buffer for this alert"
+    },
+    "feedback": {
+      "fpTitle": "False positive – confirmed, feeds into ML training",
+      "tpTitle": "True positive – attack confirmed, feeds into ML training"
+    }
   },
   "settings": {
     "groups": {
