@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Alert, Enrichment } from '../types';
 import { alertsExportUrl } from '../api';
 import { AlertDetail } from './AlertDetail';
@@ -8,6 +9,7 @@ import { PcapPreview } from './PcapPreview';
 // ── PCAP-Vorschau ─────────────────────────────────────────────────────────────
 
 function PcapButton({ alertId, available }: { alertId: string; available: boolean }) {
+  const { t } = useTranslation();
   const [show, setShow] = useState(false);
 
   return (
@@ -15,7 +17,7 @@ function PcapButton({ alertId, available }: { alertId: string; available: boolea
       <button
         onClick={e => { e.stopPropagation(); if (available) setShow(true); }}
         disabled={!available}
-        title={available ? 'PCAP Vorschau öffnen' : 'Kein PCAP – Sniffer läuft nicht oder kein Paketpuffer für diesen Alert'}
+        title={available ? t('alertFeed.pcap.open') : t('alertFeed.pcap.unavailable')}
         className={`px-1.5 py-0.5 rounded text-[11px] border whitespace-nowrap transition-colors ${
           available
             ? 'border-blue-700/50 text-blue-400 bg-blue-950/30 hover:bg-blue-900/50 hover:text-blue-300'
@@ -31,12 +33,6 @@ function PcapButton({ alertId, available }: { alertId: string; available: boolea
 
 // ── IP-Zelle mit Hostname + Trust-Badge ────────────────────────────────────────
 
-const TRUST_SOURCE_LABEL: Record<string, string> = {
-  manual: 'manuell',
-  csv:    'Import',
-  dns:    'DNS',
-};
-
 function IpCell({
   ip, port, enrichment, dir,
 }: {
@@ -45,6 +41,7 @@ function IpCell({
   enrichment?: Enrichment;
   dir: 'src' | 'dst';
 }) {
+  const { t } = useTranslation();
   const hostname    = dir === 'src' ? enrichment?.src_hostname    : enrichment?.dst_hostname;
   const displayName = dir === 'src' ? enrichment?.src_display_name: enrichment?.dst_display_name;
   const trusted     = dir === 'src' ? enrichment?.src_trusted      : enrichment?.dst_trusted;
@@ -53,7 +50,7 @@ function IpCell({
   const primary  = displayName ?? hostname ?? ip ?? '–';
   const showIp   = !!ip && primary !== ip;
   const portStr  = port ? `:${port}` : '';
-  const srcLabel = trustSrc ? TRUST_SOURCE_LABEL[trustSrc] ?? trustSrc : null;
+  const srcLabel = trustSrc ? t(`trust.sources.${trustSrc}`, { defaultValue: trustSrc }) : null;
 
   return (
     <div className="leading-tight">
@@ -64,7 +61,7 @@ function IpCell({
       {trusted && (
         <span
           className="inline-flex items-center gap-0.5 text-[10px] text-green-400 bg-green-950/50 border border-green-800/40 rounded px-1 mt-0.5"
-          title={srcLabel ? `Validiert via ${srcLabel}` : 'Validiert'}
+          title={srcLabel ? t('trust.validatedVia', { source: srcLabel }) : t('trust.validated')}
         >
           ✓{srcLabel && <span className="text-green-600">{srcLabel}</span>}
         </span>
@@ -157,9 +154,10 @@ function appProto(proto: string | undefined, dstPort: number | null | undefined,
 }
 
 function FeedbackBadge({ feedback }: { feedback: 'fp' | 'tp' }) {
+  const { t } = useTranslation();
   return feedback === 'fp'
-    ? <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] leading-none bg-green-950/50 text-green-300 border-green-700/40" title="False Positive – Falschalarm bestätigt, fließt in ML-Training ein">✓ FP</span>
-    : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] leading-none bg-red-950/50 text-red-300 border-red-700/40"   title="True Positive – Angriff bestätigt, fließt in ML-Training ein">⚠ TP</span>;
+    ? <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] leading-none bg-green-950/50 text-green-300 border-green-700/40" title={t('alertFeed.feedback.fpTitle')}>✓ FP</span>
+    : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[10px] leading-none bg-red-950/50 text-red-300 border-red-700/40"   title={t('alertFeed.feedback.tpTitle')}>⚠ TP</span>;
 }
 
 function TagList({ tags }: { tags: string[] }) {
@@ -249,6 +247,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
 // ── Komponente ─────────────────────────────────────────────────────────────────
 
 export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
+  const { t } = useTranslation();
   const [selected,          setSelected]          = useState<Alert | null>(null);
   const [severityF,         setSeverityF]         = useState('');
   const [sourceF,           setSourceF]           = useState('');
@@ -305,28 +304,28 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           id="alert-search"
           name="alert-search"
           className="input flex-1 min-w-32"
-          placeholder="Suche: IP, Regel, Tag, …"
+          placeholder={t('alertFeed.search')}
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
         <select className="input w-28" value={severityF} onChange={e => setSeverityF(e.target.value)}
-          title="Schweregrad filtern">
+          title={t('alertFeed.filters.severity')}>
           {SEVERITIES.map(s => (
-            <option key={s} value={s}>{s || 'Alle'}</option>
+            <option key={s} value={s}>{s || t('common.all')}</option>
           ))}
         </select>
         <select className="input w-28" value={sourceF} onChange={e => setSourceF(e.target.value)}
-          title="Quelle filtern">
-          <option value="">Alle Quellen</option>
-          <option value="signature">Signatur</option>
-          <option value="ml">ML / KI</option>
-          <option value="suricata">Suricata</option>
-          <option value="external">Extern (IRMA)</option>
+          title={t('alertFeed.filters.source')}>
+          <option value="">{t('alertFeed.filters.allSources')}</option>
+          <option value="signature">{t('alertFeed.filters.sources.signature')}</option>
+          <option value="ml">{t('alertFeed.filters.sources.ml')}</option>
+          <option value="suricata">{t('alertFeed.filters.sources.suricata')}</option>
+          <option value="external">{t('alertFeed.filters.sources.external')}</option>
         </select>
         <select className="input w-28" value={feedbackF} onChange={e => setFeedbackF(e.target.value)}
-          title="Feedback-Status filtern">
-          <option value="">Alle</option>
-          <option value="none">Kein Feedback</option>
+          title={t('alertFeed.filters.feedback')}>
+          <option value="">{t('common.all')}</option>
+          <option value="none">{t('alertFeed.filters.noFeedback')}</option>
           <option value="fp">False Positive</option>
           <option value="tp">True Positive</option>
         </select>
@@ -339,9 +338,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
               ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/50'
               : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
           }`}
-          title="Gleiche Regel + Quell-IP zusammenfassen"
+          title={t('alertFeed.groupedToggle.title')}
         >
-          {grouped ? '⊞ Gruppiert' : '≡ Einzeln'}
+          {grouped ? t('alertFeed.groupedToggle.grouped') : t('alertFeed.groupedToggle.single')}
         </button>
 
         {/* IRMA Asset-Warnungen unterdrücken */}
@@ -352,7 +351,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
               ? 'bg-violet-500/15 text-violet-200 border-violet-500/50'
               : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
           }`}
-          title="IRMA-Alarme mit Regel ASSET::* ausblenden"
+          title={t('alertFeed.irmaAssetToggle.title')}
         >
           {suppressIrmaAsset ? '∅ ASSET' : 'ASSET'}
         </button>
@@ -362,13 +361,13 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           href={exportUrl}
           download="alerts_export.csv"
           className="px-2.5 py-1 rounded text-xs font-medium border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors"
-          title="Gefilterte Alerts als CSV exportieren (max. 5000)"
+          title={t('alertFeed.csvExport.title')}
         >
           ↓ CSV
         </a>
 
         <span className="text-sm font-medium text-slate-300 shrink-0">
-          {rowCount} <span className="text-xs font-normal text-slate-500">{grouped && groups!.some(g => g.count > 1) ? 'Gruppen' : 'Alerts'}</span>
+          {rowCount} <span className="text-xs font-normal text-slate-500">{grouped && groups!.some(g => g.count > 1) ? t('alertFeed.counts.groups') : t('alertFeed.counts.alerts')}</span>
         </span>
       </div>
 
@@ -379,21 +378,21 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           <table className="w-full text-xs">
             <thead className="cyjan-table-head sticky top-0 z-10">
               <tr className="text-left">
-                <th className="px-3 py-2">Letzte</th>
-                <th className="px-3 py-2">Severity</th>
-                <th className="px-3 py-2">Regel</th>
-                <th className="px-3 py-2">Proto</th>
-                <th className="px-3 py-2">Beschreibung</th>
-                <th className="px-3 py-2">Tags</th>
-                <th className="px-3 py-2">Quelle</th>
-                <th className="px-3 py-2">Ziel</th>
-                <th className="px-3 py-2 text-right">Treffer</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.lastSeen')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.tags')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.source')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.destination')}</th>
+                <th className="px-3 py-2 text-right">{t('alertFeed.columns.hits')}</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {groups!.length === 0 && (
-                <tr><td colSpan={10} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
+                <tr><td colSpan={10} className="text-center text-slate-600 py-12">{t('alertFeed.noAlerts')}</td></tr>
               )}
               {groups!.map(g => (
                 <tr
@@ -432,7 +431,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     <div className="flex items-center gap-1.5">
                       <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
                       {g.bidirectional && (
-                        <span title="Bidirektional (Request + Response in Session)" className="text-cyan-500 text-sm shrink-0">↔</span>
+                        <span title={t('alertFeed.bidirectional')} className="text-cyan-500 text-sm shrink-0">↔</span>
                       )}
                     </div>
                   </td>
@@ -460,21 +459,21 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           <table className="w-full text-xs">
             <thead className="cyjan-table-head sticky top-0 z-10">
               <tr className="text-left">
-                <th className="px-3 py-2">Zeit</th>
-                <th className="px-3 py-2">Severity</th>
-                <th className="px-3 py-2">Regel</th>
-                <th className="px-3 py-2">Proto</th>
-                <th className="px-3 py-2">Beschreibung</th>
-                <th className="px-3 py-2">Tags</th>
-                <th className="px-3 py-2">Quelle</th>
-                <th className="px-3 py-2">Ziel</th>
-                <th className="px-3 py-2">Score</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.time')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.tags')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.source')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.destination')}</th>
+                <th className="px-3 py-2">{t('alertFeed.columns.score')}</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={10} className="text-center text-slate-600 py-12">Keine Alerts</td></tr>
+                <tr><td colSpan={10} className="text-center text-slate-600 py-12">{t('alertFeed.noAlerts')}</td></tr>
               )}
               {filtered.map(a => (
                 <tr

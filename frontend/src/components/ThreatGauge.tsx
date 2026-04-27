@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchThreatLevel } from '../api';
 import type { ThreatLevel } from '../types';
-
-const STATUS_LABEL: Record<string, string> = {
-  green:  'Normal',
-  yellow: 'Moderat',
-  orange: 'Erhöht',
-  red:    'Kritisch',
-};
 
 const STATUS_COLOR: Record<string, string> = {
   green:  '#22c55e',
@@ -17,6 +11,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function ThreatGauge() {
+  const { t } = useTranslation();
   const [data, setData] = useState<ThreatLevel | null>(null);
 
   useEffect(() => {
@@ -32,14 +27,14 @@ export function ThreatGauge() {
   if (!data) {
     return (
       <div className="cyjan-kpi-card flex items-center justify-center" style={{ minHeight: 152 }}>
-        <span className="text-slate-600 text-xs font-mono">lade…</span>
+        <span className="text-slate-600 text-xs font-mono">{t('common.loading')}</span>
       </div>
     );
   }
 
   const value = Math.max(0, Math.min(100, data.level));
   const color = STATUS_COLOR[data.label] ?? STATUS_COLOR.green;
-  const status = STATUS_LABEL[data.label] ?? '–';
+  const status = t(`threatGauge.status.${data.label}`, { defaultValue: '–' });
   const circ = 2 * Math.PI * 54;
   const offset = circ - (value / 100) * circ;
 
@@ -81,7 +76,7 @@ export function ThreatGauge() {
 
       <div className="flex-1 min-w-0">
         <div className="cyjan-kpi-card-title mb-1" style={{ marginBottom: 4 }}>
-          Threat Level · {data.window_min} min
+          {t('threatGauge.title', { minutes: data.window_min })}
         </div>
         <div className="text-sm font-semibold text-cyan-100 mb-2" style={{ fontFamily: 'Inter, sans-serif' }}>
           {status}

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Alert } from '../types';
 
 interface Props {
@@ -6,6 +7,9 @@ interface Props {
   showTest: boolean;
 }
 
+// Severity-Labels bleiben sprachneutral – die Begriffe critical/high/medium/low
+// sind im Security-Kontext etabliert und werden auch in der DE-Version so
+// verwendet (gleiche Schreibweise auf Englisch wie auf Deutsch).
 const ROWS: { key: Alert['severity']; label: string; color: string }[] = [
   { key: 'critical', label: 'critical', color: '#ef4444' },
   { key: 'high',     label: 'high',     color: '#dc2626' },
@@ -14,6 +18,7 @@ const ROWS: { key: Alert['severity']; label: string; color: string }[] = [
 ];
 
 export function SeverityBarsCard({ alerts, showTest }: Props) {
+  const { t } = useTranslation();
   const counts = useMemo(() => {
     const visible = showTest ? alerts : alerts.filter(a => !a.is_test);
     const c: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
@@ -27,7 +32,7 @@ export function SeverityBarsCard({ alerts, showTest }: Props) {
 
   return (
     <div className="cyjan-kpi-card">
-      <div className="cyjan-kpi-card-title">Alerts · Severity</div>
+      <div className="cyjan-kpi-card-title">{t('severityCard.title')}</div>
       <div className="flex flex-col gap-1.5">
         {ROWS.map(r => {
           const v = counts[r.key];

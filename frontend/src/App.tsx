@@ -23,13 +23,13 @@ import type { Alert, User } from './types';
 
 type TimeWindow = 'live' | '1m' | '15m' | '1h' | '4h' | '1d';
 
-const TIME_WINDOWS: { id: TimeWindow; label: string; seconds?: number }[] = [
-  { id: 'live',  label: 'Live' },
-  { id: '1m',    label: '1 Min',   seconds: 60 },
-  { id: '15m',   label: '15 Min',  seconds: 900 },
-  { id: '1h',    label: '1 Std',   seconds: 3_600 },
-  { id: '4h',    label: '4 Std',   seconds: 14_400 },
-  { id: '1d',    label: '1 Tag',   seconds: 86_400 },
+const TIME_WINDOWS: { id: TimeWindow; seconds?: number }[] = [
+  { id: 'live'                     },
+  { id: '1m',  seconds: 60         },
+  { id: '15m', seconds: 900        },
+  { id: '1h',  seconds: 3_600      },
+  { id: '4h',  seconds: 14_400     },
+  { id: '1d',  seconds: 86_400     },
 ];
 
 export default function App() {
@@ -157,10 +157,10 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
       return ms >= cutoff && (showTest || !a.is_test);
     }).length;
     return [
-      { label: 'alerts / 1h', value: String(lastHour),   color: '#fdba74' },
-      { label: 'sichtbar',    value: String(alertCount), color: '#7dd3fc' },
+      { label: t('dashboard.kpi.alertsPerHour'), value: String(lastHour),   color: '#fdba74' },
+      { label: t('dashboard.kpi.visible'),       value: String(alertCount), color: '#7dd3fc' },
     ];
-  }, [alerts, alertCount, showTest]);
+  }, [alerts, alertCount, showTest, t]);
 
   return (
     <div className="min-h-screen flex">
@@ -194,7 +194,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                       <button
                         key={w.id}
                         onClick={() => handleWindowSelect(w.id)}
-                        title={w.id !== 'live' && isActive ? 'Klick zum Aktualisieren' : undefined}
+                        title={w.id !== 'live' && isActive ? t('dashboard.timeWindows.clickToRefresh') : undefined}
                         className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-slate-800 last:border-r-0 font-mono ${
                           isActive
                             ? 'bg-cyan-500/15 text-cyan-200'
@@ -208,43 +208,43 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                                 ? (connected ? 'bg-green-500 shadow-[0_0_6px_#22c55e]' : 'bg-red-500')
                                 : 'bg-slate-600'
                             }`} />
-                            Live
+                            {t('dashboard.timeWindows.live')}
                           </span>
-                        ) : w.label}
+                        ) : t(`dashboard.timeWindows.${w.id}`)}
                       </button>
                     );
                   })}
                 </div>
 
                 <span className="text-xs text-slate-500 font-mono">
-                  {isLoading ? t('common.loading') : `${alertCount} Alerts`}
+                  {isLoading ? t('common.loading') : t('dashboard.alertCount', { count: alertCount })}
                 </span>
 
                 {/* Unbekannte Hosts */}
                 {unknownCount !== null && unknownCount > 0 && (
                   <button
                     onClick={() => setShowUnknown(true)}
-                    title={`${unknownCount} IPs in Alerts ohne Host-Eintrag – klicken zum Anzeigen`}
+                    title={t('dashboard.unknownHosts.title', { count: unknownCount })}
                     className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-slate-800 text-slate-400 border border-slate-600 hover:border-cyan-600 hover:text-cyan-300 transition-colors"
                   >
                     <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
                     </svg>
-                    {unknownCount} unbekannt
+                    {t('dashboard.unknownHosts.label', { count: unknownCount })}
                   </button>
                 )}
 
                 {/* Sniffer-Health-Warnung */}
                 {sysStats && sysStats.sniffer.drop_pct !== null && sysStats.sniffer.drop_pct > 1 && (
                   <span
-                    title={`Paketverlust am Sniffer: ${sysStats.sniffer.drop_pct.toFixed(2)} % — Details unter Einstellungen → Systemauslastung`}
+                    title={t('dashboard.snifferDrops.title', { pct: sysStats.sniffer.drop_pct.toFixed(2) })}
                     className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono cursor-default ${
                       sysStats.sniffer.drop_pct > 5
                         ? 'bg-red-900/40 text-red-300 border border-red-700/50'
                         : 'bg-amber-900/40 text-amber-300 border border-amber-700/50'
                     }`}
                   >
-                    ⚠ Drops {sysStats.sniffer.drop_pct.toFixed(1)} %
+                    {t('dashboard.snifferDrops.label', { pct: sysStats.sniffer.drop_pct.toFixed(1) })}
                   </span>
                 )}
 
@@ -261,7 +261,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                     }}
                   />
                   <span className={mlOnly ? 'text-cyan-400 font-medium' : 'text-slate-500'}>
-                    Nur KI/ML-Alarme
+                    {t('dashboard.filters.mlOnly')}
                   </span>
                 </label>
 
@@ -278,13 +278,13 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                         localStorage.setItem('showTest', String(e.target.checked));
                       }}
                     />
-                    Testverkehr anzeigen
+                    {t('dashboard.filters.showTest')}
                   </label>
                 )}
 
                 {timeWindow !== 'live' && !isLoading && (
                   <span className="text-xs text-slate-600 italic">
-                    Snapshot · Schaltfläche erneut klicken zum Aktualisieren
+                    {t('dashboard.snapshotHint')}
                   </span>
                 )}
             </div>
