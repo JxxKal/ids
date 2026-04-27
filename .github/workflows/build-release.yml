@@ -220,9 +220,13 @@ jobs:
 
           VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
           ISO_NAME="cyjan-ids-${VERSION}.iso"
+          ISO_LATEST="cyjan-ids-latest.iso"
           cp "$ISO" "${GITHUB_WORKSPACE}/${ISO_NAME}"
+          cp "$ISO" "${GITHUB_WORKSPACE}/${ISO_LATEST}"
           echo "iso_name=${ISO_NAME}" >> "$GITHUB_OUTPUT"
+          echo "iso_latest=${ISO_LATEST}" >> "$GITHUB_OUTPUT"
           log "ISO: ${ISO_NAME} ($(du -sh "${GITHUB_WORKSPACE}/${ISO_NAME}" | cut -f1))"
+          log "ISO-Alias: ${ISO_LATEST} (stabiler Permalink)"
 
       - name: Build-Log hochladen
         if: always()
@@ -245,7 +249,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && steps.build.outputs.iso_name != ''
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.build.outputs.iso_name }}
+          files: |
+            ${{ steps.build.outputs.iso_name }}
+            ${{ steps.build.outputs.iso_latest }}
           body: |
             ## Cyjan IDS ${{ github.ref_name }}
 
@@ -410,8 +416,13 @@ jobs:
           chmod +x "$PKG/recover.sh"
 
           zip -r "${PKG}.zip" "$PKG/"
+          # Stabiler Alias-Name für externe Permalinks via
+          # /releases/latest/download/cyjan-ids-update-latest.zip
+          PKG_LATEST="cyjan-ids-update-latest.zip"
+          cp "${PKG}.zip" "${PKG_LATEST}"
           echo "Paketgröße: $(du -sh ${PKG}.zip | cut -f1)"
           echo "PKG_ZIP=${PKG}.zip" >> "$GITHUB_ENV"
+          echo "PKG_ZIP_LATEST=${PKG_LATEST}" >> "$GITHUB_ENV"
 
       - name: Update-Paket als Artefakt hochladen
         uses: actions/upload-artifact@v4
@@ -424,5 +435,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.PKG_ZIP }}
+          files: |
+            ${{ env.PKG_ZIP }}
+            ${{ env.PKG_ZIP_LATEST }}
           fail_on_unmatched_files: true
