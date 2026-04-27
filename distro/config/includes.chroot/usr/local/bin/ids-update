@@ -29,6 +29,20 @@ fi
 
 echo "[update] Neue Commits: $(git log --oneline "${OLD_COMMIT}..${NEW_COMMIT}")"
 
+# Selbst-Update: dieses Skript liegt in /usr/local/bin/, der Pull aktualisiert
+# nur die Quelle in $IDS_DIR/distro/.... Vor allen weiteren Schritten kopieren
+# wir uns selbst frisch raus und re-execen, sonst läuft die alte Version
+# weiter und verpasst neue Patch-Logik (z.B. das System-Unit-Sync unten).
+if [ -z "${IDS_UPDATE_RELOADED:-}" ]; then
+  SRC="$IDS_DIR/distro/config/includes.chroot/usr/local/bin/ids-update"
+  if [ -f "$SRC" ] && ! cmp -s "$SRC" "$0"; then
+    echo "[update] Aktualisiere $0 aus $SRC und re-execen." | tee -a "$LOG"
+    install -m 0755 "$SRC" "$0" 2>>"$LOG" || true
+    export IDS_UPDATE_RELOADED=1
+    exec "$0" "$@"
+  fi
+fi
+
 # Profil laden – /etc/cyjan/profile speichert ggf. "prod,snort" als komma-
 # separierten String. Compose interpretiert `--profile "a,b"` als einen
 # einzigen Profilnamen, deshalb pro Profil ein eigenes --profile-Flag in
