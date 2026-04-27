@@ -1,5 +1,6 @@
 import { FlaskConical, LayoutDashboard, Network, Server, Settings } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchVersion } from '../api';
 
 export type NavTab = 'dashboard' | 'networks' | 'hosts' | 'tests' | 'settings';
@@ -10,15 +11,16 @@ interface Props {
   username: string;
 }
 
-const ITEMS: { id: NavTab; label: string; icon: ReactNode }[] = [
-  { id: 'dashboard', label: 'Dashboard',    icon: <LayoutDashboard size={16} strokeWidth={1.8} /> },
-  { id: 'networks',  label: 'Netzwerke',    icon: <Network         size={16} strokeWidth={1.8} /> },
-  { id: 'hosts',     label: 'Hosts',        icon: <Server          size={16} strokeWidth={1.8} /> },
-  { id: 'tests',     label: 'Szenarien',    icon: <FlaskConical    size={16} strokeWidth={1.8} /> },
-  { id: 'settings',  label: 'Einstellungen',icon: <Settings        size={16} strokeWidth={1.8} /> },
+const ITEMS: { id: NavTab; icon: ReactNode }[] = [
+  { id: 'dashboard', icon: <LayoutDashboard size={16} strokeWidth={1.8} /> },
+  { id: 'networks',  icon: <Network         size={16} strokeWidth={1.8} /> },
+  { id: 'hosts',     icon: <Server          size={16} strokeWidth={1.8} /> },
+  { id: 'tests',     icon: <FlaskConical    size={16} strokeWidth={1.8} /> },
+  { id: 'settings',  icon: <Settings        size={16} strokeWidth={1.8} /> },
 ];
 
 export function Sidebar({ active, onNav, username }: Props) {
+  const { t } = useTranslation();
   const [version, setVersion] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -48,14 +50,14 @@ export function Sidebar({ active, onNav, username }: Props) {
               className={`cyjan-sidebar-item ${isActive ? 'is-active' : ''}`}
             >
               <span className="cyjan-sidebar-icon">{item.icon}</span>
-              {item.label}
+              {t(`sidebar.${item.id}`)}
             </button>
           );
         })}
       </nav>
 
       <div className="cyjan-sidebar-footer">
-        {username}@cyjan · {version ?? '…'}
+        {t('sidebar.footer', { username, version: version ?? '…' })}
       </div>
     </aside>
   );

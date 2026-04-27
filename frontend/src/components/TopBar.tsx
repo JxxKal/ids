@@ -1,4 +1,5 @@
 import { LogOut } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface Kpi {
   label: string;
@@ -15,13 +16,14 @@ interface Props {
 }
 
 export function TopBar({ title, live, kpis = [], username, onLogout }: Props) {
+  const { t } = useTranslation();
   return (
     <div className="cyjan-topbar">
       <div className="cyjan-topbar-left">
         <h1 className="cyjan-topbar-title">{title}</h1>
         <span className={`cyjan-live-badge ${live ? 'is-live' : 'is-offline'}`}>
           <span className="cyjan-live-dot" />
-          {live ? 'Live' : 'Offline'}
+          {live ? t('topbar.live') : t('topbar.offline')}
         </span>
       </div>
 
@@ -40,7 +42,7 @@ export function TopBar({ title, live, kpis = [], username, onLogout }: Props) {
           <button
             type="button"
             onClick={onLogout}
-            title="Abmelden"
+            title={t('topbar.logout')}
             className="cyjan-topbar-logout"
           >
             <LogOut size={14} />

@@ -1,0 +1,81 @@
+{
+  "common": {
+    "loading": "Lade…"
+  },
+  "sidebar": {
+    "dashboard": "Dashboard",
+    "networks": "Netzwerke",
+    "hosts": "Hosts",
+    "tests": "Szenarien",
+    "settings": "Einstellungen",
+    "footer": "{{username}}@cyjan · {{version}}"
+  },
+  "topbar": {
+    "live": "Live",
+    "offline": "Offline",
+    "logout": "Abmelden"
+  },
+  "tabs": {
+    "dashboard": "Übersicht",
+    "networks": "Netzwerk-Inventar",
+    "hosts": "Host-Inventar",
+    "tests": "Test-Szenarien",
+    "settings": "Einstellungen"
+  },
+  "login": {
+    "title": "Anmelden",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "submit": "ANMELDEN",
+    "submitting": "ANMELDEN…",
+    "errorDefault": "Anmeldung fehlgeschlagen",
+    "saml": "MIT SSO ANMELDEN",
+    "or": "ODER",
+    "demoHint": "Zum Ausprobieren:",
+    "demoSub": "→ klicken, um Felder zu füllen",
+    "demoTitle": "Demo-Zugangsdaten übernehmen",
+    "footer": "Nur autorisierter Zugriff",
+    "tagline": "PROTECT · DETECT · RESPOND",
+    "subtitle": "OT SENTRYMODE"
+  },
+  "settings": {
+    "groups": {
+      "general": "Allgemein",
+      "users": "Benutzer & Zugang",
+      "ml": "KI/ML-Engine",
+      "rules": "Regelwerk",
+      "system": "System",
+      "integrations": "Integrationen",
+      "extra": "Extra"
+    },
+    "items": {
+      "general": "Sprache & Anzeige",
+      "users": "Benutzerverwaltung",
+      "saml": "SAML / SSO",
+      "ml-status": "Status & Lernphase",
+      "ml-config": "Filter-Konfiguration",
+      "ml-learned": "Gelernte Muster",
+      "rules-sources": "Rule-Quellen",
+      "rules-list": "Aktive Regeln",
+      "rules-editor": "Eigene Signaturen",
+      "system-health": "Systemauslastung",
+      "interfaces": "Interfaces",
+      "ssl": "SSL-Zertifikat",
+      "syslog": "Syslog / SIEM",
+      "update": "System-Update",
+      "db-maintenance": "Datenbank",
+      "irma": "IRMA",
+      "itop": "iTop CMDB",
+      "thorsten": "Für Thorsten"
+    },
+    "general": {
+      "title": "Sprache & Anzeige",
+      "languageLabel": "Sprache",
+      "languageHelp": "Die Spracheinstellung wird im Browser gespeichert und gilt für dieses Gerät.",
+      "languages": {
+        "de": "Deutsch",
+        "en": "Englisch"
+      }
+    }
+  }
+}

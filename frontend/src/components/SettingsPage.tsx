@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
-  Activity, Database, FileText, HardDrive, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Sliders, Sparkles, Upload, Users,
+  Activity, Database, FileText, Globe, HardDrive, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
+import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../i18n';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
   fetchIrmaConfig, fetchItopConfig, fetchMLConfig, fetchMLStatus, fetchRuleSources,
@@ -3523,65 +3525,122 @@ function SystemHealth() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
+type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
 
-interface NavItem { id: SectionId; label: string; icon: ReactNode }
-interface NavGroup { label: string; items: NavItem[] }
+// Labels werden zur Render-Zeit über i18n aufgelöst:
+//   group:  t('settings.groups.<key>')
+//   item:   t('settings.items.<id>')
+interface NavItem { id: SectionId; icon: ReactNode }
+interface NavGroup { key: string; items: NavItem[] }
 
 const ICON_PROPS = { size: 14, strokeWidth: 1.8 } as const;
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    label: 'Benutzer & Zugang',
+    key: 'general',
     items: [
-      { id: 'users', label: 'Benutzerverwaltung', icon: <Users     {...ICON_PROPS} /> },
-      { id: 'saml',  label: 'SAML / SSO',         icon: <KeyRound  {...ICON_PROPS} /> },
+      { id: 'general', icon: <Globe {...ICON_PROPS} /> },
     ],
   },
   {
-    label: 'KI/ML-Engine',
+    key: 'users',
     items: [
-      { id: 'ml-status',  label: 'Status & Lernphase',     icon: <Activity  {...ICON_PROPS} /> },
-      { id: 'ml-config',  label: 'Filter-Konfiguration',   icon: <Sliders   {...ICON_PROPS} /> },
-      { id: 'ml-learned', label: 'Gelernte Muster',        icon: <Sparkles  {...ICON_PROPS} /> },
+      { id: 'users', icon: <Users    {...ICON_PROPS} /> },
+      { id: 'saml',  icon: <KeyRound {...ICON_PROPS} /> },
     ],
   },
   {
-    label: 'Regelwerk',
+    key: 'ml',
     items: [
-      { id: 'rules-sources', label: 'Rule-Quellen',  icon: <Database {...ICON_PROPS} /> },
-      { id: 'rules-list',    label: 'Aktive Regeln', icon: <ListTree {...ICON_PROPS} /> },
-      { id: 'rules-editor',  label: 'Eigene Signaturen', icon: <FileText {...ICON_PROPS} /> },
+      { id: 'ml-status',  icon: <Activity {...ICON_PROPS} /> },
+      { id: 'ml-config',  icon: <Sliders  {...ICON_PROPS} /> },
+      { id: 'ml-learned', icon: <Sparkles {...ICON_PROPS} /> },
     ],
   },
   {
-    label: 'System',
+    key: 'rules',
     items: [
-      { id: 'system-health',  label: 'Systemauslastung',  icon: <Activity  {...ICON_PROPS} /> },
-      { id: 'interfaces',     label: 'Interfaces',        icon: <Network   {...ICON_PROPS} /> },
-      { id: 'ssl',            label: 'SSL-Zertifikat',    icon: <Lock      {...ICON_PROPS} /> },
-      { id: 'syslog',         label: 'Syslog / SIEM',     icon: <FileText  {...ICON_PROPS} /> },
-      { id: 'update',         label: 'System-Update',     icon: <Upload    {...ICON_PROPS} /> },
-      { id: 'db-maintenance', label: 'Datenbank',         icon: <HardDrive {...ICON_PROPS} /> },
+      { id: 'rules-sources', icon: <Database {...ICON_PROPS} /> },
+      { id: 'rules-list',    icon: <ListTree {...ICON_PROPS} /> },
+      { id: 'rules-editor',  icon: <FileText {...ICON_PROPS} /> },
     ],
   },
   {
-    label: 'Integrationen',
+    key: 'system',
     items: [
-      { id: 'irma', label: 'IRMA',      icon: <Plug     {...ICON_PROPS} /> },
-      { id: 'itop', label: 'iTop CMDB', icon: <Database {...ICON_PROPS} /> },
+      { id: 'system-health',  icon: <Activity  {...ICON_PROPS} /> },
+      { id: 'interfaces',     icon: <Network   {...ICON_PROPS} /> },
+      { id: 'ssl',            icon: <Lock      {...ICON_PROPS} /> },
+      { id: 'syslog',         icon: <FileText  {...ICON_PROPS} /> },
+      { id: 'update',         icon: <Upload    {...ICON_PROPS} /> },
+      { id: 'db-maintenance', icon: <HardDrive {...ICON_PROPS} /> },
     ],
   },
   {
-    label: 'Extra',
+    key: 'integrations',
     items: [
-      { id: 'thorsten', label: 'Für Thorsten', icon: <Sparkles {...ICON_PROPS} /> },
+      { id: 'irma', icon: <Plug     {...ICON_PROPS} /> },
+      { id: 'itop', icon: <Database {...ICON_PROPS} /> },
+    ],
+  },
+  {
+    key: 'extra',
+    items: [
+      { id: 'thorsten', icon: <Sparkles {...ICON_PROPS} /> },
     ],
   },
 ];
 
+// ── Allgemein: Sprache & Anzeige ──────────────────────────────────────────────
+
+function GeneralSettings() {
+  const { t, i18n } = useTranslation();
+  const current = (i18n.resolvedLanguage ?? i18n.language ?? 'de').split('-')[0] as SupportedLanguage;
+
+  function handleChange(lng: SupportedLanguage) {
+    if (lng === current) return;
+    void i18n.changeLanguage(lng);
+  }
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold text-slate-200">{t('settings.general.title')}</h2>
+
+      <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-4 space-y-3">
+        <label className="text-xs font-medium text-slate-300 block">
+          {t('settings.general.languageLabel')}
+        </label>
+        <div className="flex gap-2">
+          {SUPPORTED_LANGUAGES.map(lng => {
+            const isActive = current === lng;
+            return (
+              <button
+                key={lng}
+                type="button"
+                onClick={() => handleChange(lng)}
+                className={`px-3 py-1.5 rounded text-xs font-medium border transition-colors ${
+                  isActive
+                    ? 'bg-cyan-500/15 text-cyan-200 border-cyan-600/60'
+                    : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-slate-200 hover:border-slate-500'
+                }`}
+                aria-pressed={isActive}
+              >
+                {t(`settings.general.languages.${lng}`)}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-slate-500">
+          {t('settings.general.languageHelp')}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage() {
-  const [active, setActive] = useState<SectionId>('users');
+  const { t } = useTranslation();
+  const [active, setActive] = useState<SectionId>('general');
 
   const isThorsten = active === 'thorsten';
 
@@ -3591,8 +3650,8 @@ export function SettingsPage() {
       {/* ── Submenu (Stil wie Hauptmenü) ─────────────────────────────────── */}
       <nav className="cyjan-settings-nav">
         {NAV_GROUPS.map(group => (
-          <div key={group.label} className="cyjan-settings-nav-group">
-            <div className="cyjan-settings-nav-grouplabel">{group.label}</div>
+          <div key={group.key} className="cyjan-settings-nav-group">
+            <div className="cyjan-settings-nav-grouplabel">{t(`settings.groups.${group.key}`)}</div>
             {group.items.map(item => (
               <button
                 key={item.id}
@@ -3601,7 +3660,7 @@ export function SettingsPage() {
                 className={`cyjan-sidebar-item ${active === item.id ? 'is-active' : ''}`}
               >
                 <span className="cyjan-sidebar-icon">{item.icon}</span>
-                {item.label}
+                {t(`settings.items.${item.id}`)}
               </button>
             ))}
           </div>
@@ -3615,6 +3674,7 @@ export function SettingsPage() {
         ) : (
         <div className="max-w-4xl mx-auto py-6 px-6">
           <div className="card p-5">
+            {active === 'general'       && <GeneralSettings />}
             {active === 'users'         && <UserManagement />}
             {active === 'saml'          && <SamlSettings />}
             {active === 'ml-status'     && <MLStatusDisplay />}

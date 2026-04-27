@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchSamlEnabled, login, setToken } from '../api';
 import { disableDemoMode, enableDemoMode } from '../demo/mode';
 import type { User } from '../types';
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function LoginPage({ onLogin }: Props) {
+  const { t } = useTranslation();
   const [username,    setUsername]    = useState('');
   const [password,    setPassword]    = useState('');
   const [error,       setError]       = useState('');
@@ -32,7 +34,7 @@ export function LoginPage({ onLogin }: Props) {
       onLogin(res.user, res.access_token);
     } catch (err: unknown) {
       disableDemoMode();
-      setError(err instanceof Error ? err.message : 'Anmeldung fehlgeschlagen');
+      setError(err instanceof Error ? err.message : t('login.errorDefault'));
     } finally {
       setLoading(false);
     }
@@ -52,7 +54,7 @@ export function LoginPage({ onLogin }: Props) {
             </div>
           </div>
           <div className="absolute -bottom-2 left-0 right-0 text-center text-[10px] tracking-[6px] text-cyan-400/80 font-mono">
-            PROTECT · DETECT · RESPOND
+            {t('login.tagline')}
           </div>
         </div>
       </div>
@@ -63,17 +65,17 @@ export function LoginPage({ onLogin }: Props) {
           <h1 className="text-3xl font-bold text-cyan-100 tracking-tight" style={{ fontFamily: 'Inter, sans-serif' }}>
             CYJAN <span className="text-cyan-400">IDS</span>
           </h1>
-          <p className="text-xs text-cyan-400/60 tracking-[4px] font-mono">OT SENTRYMODE</p>
+          <p className="text-xs text-cyan-400/60 tracking-[4px] font-mono">{t('login.subtitle')}</p>
         </div>
 
         <div className="cyjan-card rounded-xl p-6 backdrop-blur-sm">
           <h2 className="text-sm font-semibold text-cyan-200 mb-4 tracking-wide uppercase" style={{ fontFamily: 'JetBrains Mono, monospace' }}>
-            Anmelden
+            {t('login.title')}
           </h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="login-user" className="text-[11px] text-slate-400 tracking-wider uppercase font-mono">
-                Benutzername
+                {t('login.username')}
               </label>
               <input
                 id="login-user"
@@ -89,7 +91,7 @@ export function LoginPage({ onLogin }: Props) {
             </div>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="login-pw" className="text-[11px] text-slate-400 tracking-wider uppercase font-mono">
-                Passwort
+                {t('login.password')}
               </label>
               <input
                 id="login-pw"
@@ -114,7 +116,7 @@ export function LoginPage({ onLogin }: Props) {
               disabled={loading}
               className="cyjan-btn-primary w-full"
             >
-              {loading ? 'ANMELDEN…' : 'ANMELDEN'}
+              {loading ? t('login.submitting') : t('login.submit')}
             </button>
           </form>
 
@@ -122,7 +124,7 @@ export function LoginPage({ onLogin }: Props) {
             <>
               <div className="flex items-center gap-2 mt-4">
                 <div className="flex-1 h-px bg-slate-700/60" />
-                <span className="text-[10px] text-slate-600 font-mono tracking-widest">ODER</span>
+                <span className="text-[10px] text-slate-600 font-mono tracking-widest">{t('login.or')}</span>
                 <div className="flex-1 h-px bg-slate-700/60" />
               </div>
               <a
@@ -132,7 +134,7 @@ export function LoginPage({ onLogin }: Props) {
                            hover:bg-purple-900/40 hover:border-purple-600 transition-colors
                            text-sm font-medium tracking-wide"
               >
-                MIT SSO ANMELDEN
+                {t('login.saml')}
               </a>
             </>
           )}
@@ -143,17 +145,17 @@ export function LoginPage({ onLogin }: Props) {
           type="button"
           onClick={() => { setUsername('demo'); setPassword('demo'); setError(''); }}
           className="mt-5 w-full cyjan-demo-hint group"
-          title="Demo-Zugangsdaten übernehmen"
+          title={t('login.demoTitle')}
         >
           <span className="cyjan-demo-pill">DEMO</span>
           <span className="cyjan-demo-text">
-            Zum Ausprobieren: <code>demo</code> / <code>demo</code>
-            <span className="cyjan-demo-sub">→ klicken, um Felder zu füllen</span>
+            {t('login.demoHint')} <code>demo</code> / <code>demo</code>
+            <span className="cyjan-demo-sub">{t('login.demoSub')}</span>
           </span>
         </button>
 
         <p className="text-center text-[10px] text-slate-600 mt-6 tracking-[3px] font-mono uppercase">
-          Nur autorisierter Zugriff
+          {t('login.footer')}
         </p>
       </div>
     </div>
