@@ -1,0 +1,38 @@
+#!/bin/sh
+# Cyjan IDS – idempotenter docker compose up beim Boot.
+#
+# Hintergrund: Die Restart-Policy `unless-stopped` lässt manuell gestoppte
+# Container nach einem Reboot bewusst NICHT wieder anlaufen. Dadurch konnten
+# einzelne Services (z.B. nach einem `docker stop ids-api` oder einem unsauber
+# beendeten Update) den nächsten Reboot nicht überleben. Außerdem zieht ein
+# Hard-Power-Off Container manchmal von ihrem Compose-Netzwerk ab.
+#
+# Diese Unit wird beim Boot einmal aufgerufen und bringt den Compose-Stack auf
+# den in /etc/cyjan/profile hinterlegten Soll-Zustand. Idempotent: bereits
+# laufende Container bleiben unangetastet.
+set -eu
+
+IDS_DIR="/opt/ids"
+PROFILE_FILE="/etc/cyjan/profile"
+
+# /etc/cyjan/profile enthält ein Komma-getrenntes Profil-Set, z.B. "prod" oder
+# "prod,snort". Compose interpretiert "a,b" als EINEN Profilnamen, deshalb
+# müssen wir pro Profil ein eigenes --profile-Flag setzen.
+PROFILE_RAW="$(cat "$PROFILE_FILE" 2>/dev/null || echo prod)"
+
+set --
+old_ifs="${IFS-}"
+IFS=','
+for p in $PROFILE_RAW; do
+  [ -n "$p" ] && set -- "$@" --profile "$p"
+done
+IFS="$old_ifs"
+
+if [ ! -d "$IDS_DIR" ]; then
+  echo "cyjan-stack-up: $IDS_DIR existiert nicht – Stack-Init übersprungen." >&2
+  exit 0
+fi
+
+cd "$IDS_DIR"
+echo "cyjan-stack-up: docker compose $* up -d (aus $IDS_DIR)"
+exec docker compose "$@" up -d

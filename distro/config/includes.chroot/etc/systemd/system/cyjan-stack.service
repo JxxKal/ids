@@ -1,0 +1,18 @@
+[Unit]
+Description=Cyjan IDS Compose-Stack auf Soll-Zustand bringen
+Documentation=https://github.com/JxxKal/ids
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+ConditionPathExists=/opt/ids/docker-compose.yml
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/cyjan-stack-up
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

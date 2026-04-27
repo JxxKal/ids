@@ -46,4 +46,37 @@ docker compose "${PROFILE_FLAGS[@]}" build | tee -a "$LOG"
 echo "[update] Starte geänderte Dienste neu..."
 docker compose "${PROFILE_FLAGS[@]}" up -d | tee -a "$LOG"
 
+# Nachzügler-Sync: System-Dateien, die im ISO-Hook landen, kommen via reinem
+# git-pull nicht an. Wir spiegeln idempotent die wenigen Stellen, deren
+# Drift Reboot- oder Boot-Pfad bricht.
+echo "[update] Synchronisiere System-Units aus distro/..." | tee -a "$LOG"
+
+# cyjan-stack.service + Helper: idempotenter Compose-up beim Boot. Fehlt auf
+# Maschinen, deren ISO älter ist als dieser Commit.
+SRC_UNIT="$IDS_DIR/distro/config/includes.chroot/etc/systemd/system/cyjan-stack.service"
+SRC_BIN="$IDS_DIR/distro/config/includes.chroot/usr/local/bin/cyjan-stack-up"
+DST_UNIT="/etc/systemd/system/cyjan-stack.service"
+DST_BIN="/usr/local/bin/cyjan-stack-up"
+RELOAD_SYSTEMD=0
+
+if [ -f "$SRC_UNIT" ] && ! cmp -s "$SRC_UNIT" "$DST_UNIT"; then
+  install -m 0644 "$SRC_UNIT" "$DST_UNIT"
+  RELOAD_SYSTEMD=1
+  echo "[update]   $DST_UNIT aktualisiert" | tee -a "$LOG"
+fi
+
+if [ -f "$SRC_BIN" ] && ! cmp -s "$SRC_BIN" "$DST_BIN"; then
+  install -m 0755 "$SRC_BIN" "$DST_BIN"
+  echo "[update]   $DST_BIN aktualisiert" | tee -a "$LOG"
+fi
+
+if [ "$RELOAD_SYSTEMD" = "1" ]; then
+  systemctl daemon-reload
+fi
+
+if [ -f "$DST_UNIT" ] && ! systemctl is-enabled --quiet cyjan-stack.service 2>/dev/null; then
+  systemctl enable cyjan-stack.service 2>>"$LOG" && \
+    echo "[update]   cyjan-stack.service aktiviert" | tee -a "$LOG"
+fi
+
 echo "[update] Update abgeschlossen $(date)" | tee -a "$LOG"

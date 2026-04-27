@@ -25,8 +25,13 @@ echo "ids ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/git, /usr/local/bin/ids-
   > /etc/sudoers.d/ids-docker
 chmod 440 /etc/sudoers.d/ids-docker
 
-# systemd service aktivieren
+# systemd services aktivieren
 systemctl enable ids-firstboot.service
+# cyjan-stack.service: bringt nach jedem Boot den Compose-Stack idempotent
+# auf den in /etc/cyjan/profile gespeicherten Soll-Zustand. Ohne diese Unit
+# bleiben manuell gestoppte oder nach Hard-Power-Off im Exited-Zustand
+# gelandete Container über den Reboot hinweg unten.
+systemctl enable cyjan-stack.service
 
 echo "[cyjan] IDS-Verzeichnis: $IDS_DIR"
-echo "[cyjan] First-Boot-Service aktiviert"
+echo "[cyjan] First-Boot- und Stack-Boot-Service aktiviert"
