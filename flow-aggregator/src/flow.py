@@ -187,15 +187,18 @@ class FlowState:
         Heuristik in dieser Reihenfolge (definitiv → wahrscheinlich):
           1. TCP SYN-only           → src=Client (3WHS-Init)
           2. TCP SYN+ACK            → src=Server (mid-capture sieht Antwort)
-          3. RFC1918/Loopback vs Public → private Seite = Client (NAT-Default:
-             ohne Port-Forwarding kann nur die private Seite Outbound init)
-          4. Port-Heuristik (low<high) → niedrigerer Port = Server
-          5. Default                → src bleibt Client (first-packet-Annahme)
+          3. RFC1918/Loopback vs Public → private Seite = Client
+             (NAT-Default ohne Port-Forwarding)
+          4. Well-Known (<1024) vs Ephemeral (>=1024) → Well-Known = Server
+             (deckt Standard-Routing-Umgebungen ohne NAT ab: 99 % der
+             Konversationen mit Diensten wie HTTP, HTTPS, SSH, DNS, NTP)
+          5. Allgemein low<high     → niedrigerer Port = Server (schwacher
+             Fallback wenn beide >=1024, z.B. zwei ephemeral-Endpoints)
+          6. Default                → src bleibt Client (first-packet)
 
-        Damit ist der typische NAT-Outbound-Fall (192.168.x.y → public IP)
-        deterministisch: schon bei jedem Paket nach dem ersten weiß der
-        Aggregator, dass die private Seite der Client ist – egal ob das
-        erste sichtbare Paket eine Server-Antwort war (Mid-Stream-Capture).
+        Damit funktioniert sowohl der NAT-Outbound-Fall (192.168.x.y →
+        public IP) als auch reine Routing-Setups deterministisch – egal ob
+        der Sniffer den 3WHS gesehen hat oder mid-stream einsteigt.
         """
         sip   = pkt.ip.src
         dip   = pkt.ip.dst
@@ -225,10 +228,28 @@ class FlowState:
                 client_first = False             # public (src) → private (dst)
                 decided = True
 
-        if not decided:
-            # Port-Heuristik nur greift wenn beide Endpunkte gleichartig
-            # (beide privat oder beide public). Niedrigerer Port = Server.
-            if sport is not None and dport is not None and sport < dport:
+        if not decided and sport is not None and dport is not None:
+            # Service-Port-vs-Ephemeral-Heuristik: starkes Signal in reinen
+            # Routing-Umgebungen ohne NAT. Konvention: Server bindet sich
+            # auf einen Well-Known-Port (< 1024), Client wählt einen
+            # Ephemeral-Port (>= 1024). Funktioniert für 99 % der TCP/UDP-
+            # Konversationen mit Standard-Diensten (HTTP, HTTPS, SSH, DNS,
+            # SMTP, NTP, …).
+            sport_well_known = sport < 1024
+            dport_well_known = dport < 1024
+            if sport_well_known and not dport_well_known:
+                client_first = False             # src ist Server (sport=Service)
+                decided = True
+            elif dport_well_known and not sport_well_known:
+                client_first = True              # dst ist Server (dport=Service)
+                decided = True
+
+        if not decided and sport is not None and dport is not None:
+            # Allgemeine Port-Heuristik als letzte Stufe: wenn weder NAT-
+            # noch Well-Known-Signal griff, ist die Seite mit dem niedrigeren
+            # Port wahrscheinlicher der Server. Schwächeres Signal als die
+            # vorigen Stufen, aber besser als "first-packet wins".
+            if sport < dport:
                 client_first = False
 
         if client_first:
