@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Network } from 'lucide-react';
 import { clearFeedback, setFeedback } from '../api';
 import type { Alert } from '../types';
@@ -30,6 +31,7 @@ function Row({ label, value }: { label: string; value?: string | number | null }
 // war's nur ein subtiles Network-Icon auf der IP, das User übersehen haben).
 // Die IP selbst ist zusätzlich klickbar als Power-User-Shortcut.
 function IpRow({ label, value }: { label: string; value?: string | null }) {
+  const { t } = useTranslation();
   if (!value) return null;
   return (
     <div className="flex gap-3 py-1.5 border-b border-slate-800/50 items-center">
@@ -37,7 +39,7 @@ function IpRow({ label, value }: { label: string; value?: string | null }) {
       <button
         type="button"
         onClick={() => showHostConnections(value)}
-        title="Klick = alle Verbindungen dieses Hosts in einem Zeitfenster"
+        title={t('alertDetail.ipRowTitle')}
         className="text-slate-200 text-xs break-all font-mono hover:text-cyan-300 transition-colors"
       >
         {value}
@@ -45,7 +47,7 @@ function IpRow({ label, value }: { label: string; value?: string | null }) {
       <button
         type="button"
         onClick={() => showHostConnections(value)}
-        title="Alle Verbindungen dieses Hosts (Zeitfenster 15 min – 24 h, mit Time-Slider)"
+        title={t('alertDetail.hostGraphTitle')}
         className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded
                    text-[10px] font-mono uppercase tracking-wider
                    bg-cyan-500/10 text-cyan-300 border border-cyan-500/40
@@ -53,7 +55,7 @@ function IpRow({ label, value }: { label: string; value?: string | null }) {
                    transition-colors whitespace-nowrap"
       >
         <Network size={11} />
-        Host-Graph
+        {t('alertDetail.hostGraphLabel')}
       </button>
     </div>
   );
@@ -75,6 +77,7 @@ const SEV_BORDER: Record<string, string> = {
 };
 
 export function AlertDetail({ alert, onClose, onUpdate }: Props) {
+  const { t } = useTranslation();
   const [note, setNote]         = useState('');
   const [loading, setLoading]   = useState(false);
   const [showGraph, setShowGraph] = useState(false);
@@ -108,7 +111,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
   };
 
   const removeFeedback = async () => {
-    if (!confirm('Feedback komplett entfernen?\n\nDas zugehörige Training-Sample wird ebenfalls aus der DB gelöscht, damit es das ML-Modell beim nächsten Retrain nicht mehr beeinflusst.')) return;
+    if (!confirm(t('alertDetail.fb.removeConfirm'))) return;
     setLoading(true);
     try {
       const updated = await clearFeedback(alert.alert_id);
@@ -152,7 +155,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           </div>
           <button
             onClick={onClose}
-            title="Schließen"
+            title={t('common.close')}
             className="text-[11px] px-3 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors"
           >
             ESC · ✕
@@ -177,14 +180,14 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
               <SectionTitle>Enrichment</SectionTitle>
               <div className="flex gap-4 py-1 border-b border-slate-800">
                 <div className="flex flex-col gap-1 flex-1">
-                  <span className="text-xs text-slate-500">Quelle</span>
+                  <span className="text-xs text-slate-500">{t('alertDetail.enrichmentSource')}</span>
                   <div className="flex items-center gap-1.5">
                     <TrustBadge trusted={enr.src_trusted ?? false} source={enr.src_trust_source} />
                     {enr.src_display_name && <span className="text-xs text-slate-300">{enr.src_display_name}</span>}
                   </div>
                 </div>
                 <div className="flex flex-col gap-1 flex-1">
-                  <span className="text-xs text-slate-500">Ziel</span>
+                  <span className="text-xs text-slate-500">{t('alertDetail.enrichmentDestination')}</span>
                   <div className="flex items-center gap-1.5">
                     <TrustBadge trusted={enr.dst_trusted ?? false} source={enr.dst_trust_source} />
                     {enr.dst_display_name && <span className="text-xs text-slate-300">{enr.dst_display_name}</span>}
@@ -225,21 +228,18 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           }`}>
             <div className="flex items-center gap-2 mb-1">
               <span className={`font-semibold ${alert.feedback === 'fp' ? 'text-green-300' : 'text-red-300'}`}>
-                {alert.feedback === 'fp' ? '✓ False Positive – Falschalarm bestätigt' : '⚠ True Positive – Angriff bestätigt'}
+                {alert.feedback === 'fp' ? t('alertDetail.fb.fpBanner') : t('alertDetail.fb.tpBanner')}
               </span>
               {alert.feedback_ts && (
                 <span className="text-slate-600 ml-auto">{new Date(alert.feedback_ts).toLocaleString()}</span>
               )}
             </div>
             {alert.feedback_note && (
-              <p className="text-slate-400 mb-1.5">Notiz: {alert.feedback_note}</p>
+              <p className="text-slate-400 mb-1.5">{t('alertDetail.fb.note', { note: alert.feedback_note })}</p>
             )}
             <p className="text-slate-600 flex items-center gap-1">
               <span className="text-cyan-700">⬡</span>
-              Dieses Feedback fließt beim nächsten Modell-Retrain in das KI-Training ein
-              {alert.source !== 'ml'
-                ? ' (nur ML-Alerts werden als Trainings-Sample verwendet).'
-                : '.'}
+              {alert.source === 'ml' ? t('alertDetail.fb.trainingMl') : t('alertDetail.fb.trainingNonMl')}
             </p>
           </div>
         )}
@@ -253,7 +253,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
             <button
               onClick={() => setShowGraph(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-mono bg-cyan-500/15 text-cyan-200 border border-cyan-500/50 hover:bg-cyan-500/25 transition-colors"
-              title="Alle Verbindungen zwischen Quelle und Ziel im ±5-min-Fenster"
+              title={t('alertDetail.graphTitle')}
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="3" cy="8" r="2" />
@@ -262,7 +262,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
                 <line x1="9" y1="6" x2="11" y2="8" />
                 <line x1="9" y1="10" x2="11" y2="8" />
               </svg>
-              Verbindungsgraph
+              {t('alertDetail.graphLabel')}
             </button>
           )}
           {alert.pcap_available && (
@@ -271,7 +271,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
                 onClick={() => setShowPcap(true)}
                 className="px-3 py-1.5 rounded text-xs font-mono bg-cyan-500/15 text-cyan-200 border border-cyan-500/50 hover:bg-cyan-500/25 transition-colors"
               >
-                ⧉ PCAP Vorschau
+                {t('alertDetail.pcap')}
               </button>
               {showPcap && (
                 <PcapPreview alertId={alert.alert_id} onClose={() => setShowPcap(false)} />
@@ -283,7 +283,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
             <>
               <input
                 className="cyjan-input flex-1 text-xs min-w-[180px]"
-                placeholder="Notiz (optional)"
+                placeholder={t('alertDetail.fb.notePlaceholder')}
                 value={note}
                 onChange={e => setNote(e.target.value)}
               />
@@ -296,7 +296,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
                     : 'bg-red-900/40 text-red-200 border-red-700/50 hover:bg-red-900/60'
                 }`}
               >
-                ⚠ True Positive
+                {t('alertDetail.fb.tp')}
               </button>
               <button
                 onClick={() => giveFeedback('fp')}
@@ -307,7 +307,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
                     : 'bg-green-900/40 text-green-200 border-green-700/50 hover:bg-green-900/60'
                 }`}
               >
-                ✓ False Positive
+                {t('alertDetail.fb.fp')}
               </button>
               {editing && (
                 <button
@@ -315,30 +315,30 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
                   disabled={loading}
                   className="px-3 py-1.5 rounded text-xs font-mono bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700/80 transition-colors disabled:opacity-50"
                 >
-                  Abbrechen
+                  {t('common.cancel')}
                 </button>
               )}
             </>
           ) : (
             <>
               <span className="text-xs text-slate-500 italic font-mono mr-auto">
-                Feedback gesetzt – ML-Sample ist hinterlegt.
+                {t('alertDetail.fb.set')}
               </span>
               <button
                 onClick={startEdit}
                 disabled={loading}
                 className="px-3 py-1.5 rounded text-xs font-mono bg-cyan-500/15 text-cyan-200 border border-cyan-500/50 hover:bg-cyan-500/25 transition-colors disabled:opacity-50"
-                title="Label oder Notiz korrigieren"
+                title={t('alertDetail.fb.editTitle')}
               >
-                ✎ Ändern
+                {t('alertDetail.fb.edit')}
               </button>
               <button
                 onClick={removeFeedback}
                 disabled={loading}
                 className="px-3 py-1.5 rounded text-xs font-mono bg-slate-800/80 text-slate-300 border border-slate-700 hover:bg-red-950/40 hover:text-red-200 hover:border-red-700/50 transition-colors disabled:opacity-50"
-                title="Feedback entfernen + Training-Sample aus ML-Pool löschen"
+                title={t('alertDetail.fb.removeTitle')}
               >
-                ✕ Entfernen
+                {t('alertDetail.fb.remove')}
               </button>
             </>
           )}
