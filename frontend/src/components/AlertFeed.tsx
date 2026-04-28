@@ -470,7 +470,23 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
     is_test:  showTest ? null : false,
   });
 
-  const groups  = useMemo(() => grouped ? groupAlerts(filtered) : null, [grouped, filtered]);
+  const groups  = useMemo(() => {
+    if (!grouped) return null;
+    const gs = groupAlerts(filtered);
+    if (sortByPriority) {
+      // groupAlerts sortiert intern nach last_ts desc – beim Priority-Sort
+      // brauchen wir die Boundary-Priority der jeweils neuesten Mitgliedschaft
+      // (g.latest) als primären Schlüssel und last_ts als Tie-Breaker.
+      const order: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+      gs.sort((a, b) => {
+        const pa = order[a.latest.boundary_priority ?? ''] ?? 99;
+        const pb = order[b.latest.boundary_priority ?? ''] ?? 99;
+        if (pa !== pb) return pa - pb;
+        return tsMs(b.last_ts) - tsMs(a.last_ts);
+      });
+    }
+    return gs;
+  }, [grouped, filtered, sortByPriority]);
   const rowCount = grouped ? groups!.length : filtered.length;
 
   const handleUpdate = (updated: Alert) => {
