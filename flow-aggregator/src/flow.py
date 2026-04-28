@@ -17,8 +17,23 @@ from typing import Optional
 
 from models import FlowRecord, PacketEvent
 
-# Flow-Key: (Proto, Src-IP, Dst-IP, Src-Port, Dst-Port)
+# Flow-Key: kanonisierter 5-Tupel-Schlüssel.
+# Beide Richtungen einer Konversation hashen auf den gleichen Schlüssel:
+# Endpunkte (ip,port) werden lexikographisch sortiert vor dem Tupel-Build.
+# Damit kommt es pro Client-Server-Paar nur zu EINEM FlowState statt zwei.
 type FlowKey = tuple[str, str, str, Optional[int], Optional[int]]
+
+
+def _canonical_key(proto: str, src_ip: str, src_port: Optional[int],
+                   dst_ip: str, dst_port: Optional[int]) -> FlowKey:
+    """Sortiert die Endpunkte so, dass A→B und B→A denselben Key liefern."""
+    a = (src_ip, src_port if src_port is not None else -1)
+    b = (dst_ip, dst_port if dst_port is not None else -1)
+    if a > b:
+        a, b = b, a
+    return (proto, a[0], b[0],
+            a[1] if a[1] >= 0 else None,
+            b[1] if b[1] >= 0 else None)
 
 # ── Online-Statistiken (Welford-Algorithmus) ──────────────────────────────────
 
@@ -100,30 +115,39 @@ class ConnState:
 
 @dataclass
 class FlowState:
-    # Identität
+    # Identität (Client/Server-Sichtweise; gesetzt beim ersten Paket).
+    # src_ip/src_port = Client-Side, dst_ip/dst_port = Server-Side. Damit
+    # entspricht das emittierte Tupel der konventionellen Verbindungs-Richtung,
+    # auch wenn das physische erste Paket vom Server kam (mid-stream-Capture).
     flow_id: str           = field(default_factory=lambda: str(uuid.uuid4()))
-    src_ip: str            = ""
-    dst_ip: str            = ""
+    src_ip: str            = ""    # Client (Initiator)
+    dst_ip: str            = ""    # Server (Responder)
     src_port: Optional[int] = None
     dst_port: Optional[int] = None
     proto: str             = "OTHER"
     ip_version: int        = 4
+    direction_decided: bool = False   # erste Heuristik schon angewandt?
 
     # Zeitstempel
     start_ts: float        = 0.0
     last_seen: float       = 0.0
     last_pkt_ts: float     = 0.0
 
-    # Volumen
+    # Volumen (kombiniert beide Richtungen)
     pkt_count: int         = 0
     byte_count: int        = 0
     pkt_size: WelfordStats = field(default_factory=WelfordStats)
+    # Zusätzlich pro Richtung – nützlich für ML-Features (Up/Down-Ratio).
+    pkt_count_fwd: int     = 0   # Client → Server
+    byte_count_fwd: int    = 0
+    pkt_count_rev: int     = 0   # Server → Client
+    byte_count_rev: int    = 0
 
     # Timing / IAT
     iat: WelfordStats      = field(default_factory=WelfordStats)
     iat_hist: list[int]    = field(default_factory=lambda: [0] * _IAT_BUCKET_COUNT)
 
-    # TCP-Flag-Zähler (absolut)
+    # TCP-Flag-Zähler (absolut, aufsummiert über beide Richtungen)
     tcp_flags: dict[str, int] = field(default_factory=lambda: {
         "SYN": 0, "ACK": 0, "FIN": 0, "RST": 0,
         "PSH": 0, "URG": 0, "ECE": 0, "CWR": 0,
@@ -133,8 +157,55 @@ class FlowState:
     conn_state: str        = ConnState.NEW
     should_flush: bool     = False   # True = sofort flushen (RST/FIN-Closed)
 
+    def _decide_direction(self, pkt: PacketEvent) -> None:
+        """Entscheidet beim ersten Paket wer Client und wer Server ist.
+
+        Heuristik (in dieser Reihenfolge):
+          1. TCP SYN-only      → src ist Client (klassischer 3WHS-Init)
+          2. TCP SYN+ACK       → src ist Server (mid-capture, sehen Antwort)
+          3. Port-Heuristik    → niedriger Port = Server, hoher Port = Client
+          4. Fallback          → src bleibt Client (best guess)
+
+        Wichtig für NAT-Setups: ohne diese Heuristik landeten Server-Antwort-
+        Pakete in einem eigenen Flow mit "vertauschter" src/dst. Bidirektionale
+        Aggregation + Initiator-Heuristik liefert pro Konversation EINEN Flow
+        mit konventioneller Client→Server-Richtung.
+        """
+        sip   = pkt.ip.src
+        dip   = pkt.ip.dst
+        sport = pkt.transport.src_port if pkt.transport else None
+        dport = pkt.transport.dst_port if pkt.transport else None
+
+        client_first = True   # Default: src ist Client
+
+        if pkt.transport and pkt.transport.tcp:
+            flags = set(pkt.transport.tcp.flags)
+            if "SYN" in flags and "ACK" not in flags:
+                client_first = True              # echter SYN → src=Client
+            elif "SYN" in flags and "ACK" in flags:
+                client_first = False             # SYN-ACK → src=Server
+            else:
+                # Mid-stream ohne SYN: Port-Heuristik
+                if sport is not None and dport is not None and sport < dport:
+                    client_first = False         # niedrigerer Port = Server
+        else:
+            # UDP/ICMP: Port-Heuristik
+            if sport is not None and dport is not None and sport < dport:
+                client_first = False
+
+        if client_first:
+            self.src_ip, self.src_port = sip, sport
+            self.dst_ip, self.dst_port = dip, dport
+        else:
+            self.src_ip, self.src_port = dip, dport
+            self.dst_ip, self.dst_port = sip, sport
+        self.direction_decided = True
+
     def add_packet(self, pkt: PacketEvent) -> None:
         now = pkt.ts
+
+        if not self.direction_decided:
+            self._decide_direction(pkt)
 
         if self.pkt_count == 0:
             self.start_ts = now
@@ -150,6 +221,16 @@ class FlowState:
         self.pkt_count  += 1
         self.byte_count += pkt.pkt_len
         self.pkt_size.update(float(pkt.pkt_len))
+
+        # Per-Direction-Zähler (forward = Client→Server)
+        pkt_src_port = pkt.transport.src_port if pkt.transport else None
+        is_forward   = (pkt.ip.src == self.src_ip and pkt_src_port == self.src_port)
+        if is_forward:
+            self.pkt_count_fwd  += 1
+            self.byte_count_fwd += pkt.pkt_len
+        else:
+            self.pkt_count_rev  += 1
+            self.byte_count_rev += pkt.pkt_len
 
         # TCP: Flags zählen und Zustandsautomat
         if pkt.transport and pkt.transport.tcp:
@@ -210,6 +291,15 @@ class FlowState:
             "tcp_flags_abs":    dict(self.tcp_flags),
             "connection_state": self.conn_state,
             "half_open":        half_open,
+            # Per-Direction-Bilanz: Client→Server (fwd) vs Server→Client (rev).
+            # Hilfreich für ML-Features (Upload/Download-Ratio) und für die
+            # AlertFeed-Anzeige (PCAP-Vorschau zeigt beide Richtungen, aber der
+            # Flow-Record meldet nur EINEN konventionellen src/dst – Client/
+            # Server – ab diesem Commit).
+            "pkt_count_fwd":    self.pkt_count_fwd,
+            "pkt_count_rev":    self.pkt_count_rev,
+            "byte_count_fwd":   self.byte_count_fwd,
+            "byte_count_rev":   self.byte_count_rev,
         }
 
         return FlowRecord(
@@ -246,13 +336,18 @@ class FlowAggregator:
 
     @staticmethod
     def _key(pkt: PacketEvent) -> Optional[FlowKey]:
-        """Gibt None zurück für Nicht-IP-Pakete (ARP etc.)."""
+        """Gibt einen kanonisierten Schlüssel zurück. None für Nicht-IP-Pakete.
+
+        Beide Richtungen einer TCP/UDP/ICMP-Konversation hashen auf den
+        gleichen Schlüssel (ip+port-Endpunkte sortiert) – damit landet jede
+        Konversation in EINEM FlowState statt in zweien.
+        """
         if not pkt.ip:
             return None
         proto     = pkt.transport.proto if pkt.transport else "OTHER"
         src_port  = pkt.transport.src_port if pkt.transport else None
         dst_port  = pkt.transport.dst_port if pkt.transport else None
-        return (proto, pkt.ip.src, pkt.ip.dst, src_port, dst_port)
+        return _canonical_key(proto, pkt.ip.src, src_port, pkt.ip.dst, dst_port)
 
     def add_packet(self, pkt: PacketEvent) -> list[FlowRecord]:
         """
@@ -265,11 +360,12 @@ class FlowAggregator:
 
         if key not in self._flows:
             assert pkt.ip is not None  # guaranteed by _key check
+            # FlowState.src_ip/dst_ip werden NICHT vom ersten Paket übernommen,
+            # sondern in _decide_direction() beim ersten add_packet() anhand
+            # der Initiator-Heuristik gesetzt (TCP-SYN-Erkennung + Port-
+            # Heuristik). Damit ist src=Client, dst=Server pro Konversation –
+            # konsistent über beide Richtungen.
             self._flows[key] = FlowState(
-                src_ip=pkt.ip.src,
-                dst_ip=pkt.ip.dst,
-                src_port=pkt.transport.src_port if pkt.transport else None,
-                dst_port=pkt.transport.dst_port if pkt.transport else None,
                 proto=pkt.transport.proto if pkt.transport else "OTHER",
                 ip_version=pkt.ip.version,
             )
