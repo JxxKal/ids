@@ -37,6 +37,11 @@ services:
     image: apache/kafka:latest
     container_name: ids-kafka
     restart: unless-stopped
+    # Sauberer Shutdown: Kafka muss vor SIGKILL die Logs committen, Partitions
+    # schließen und den Controller-Quorum freigeben. Default 10s reicht im
+    # Idle-Fall, ist unter Last knapp – 30s gibt Reserve für Reboots mit
+    # frischem Backlog.
+    stop_grace_period: 30s
     networks: [ids-net]
     volumes:
       - kafka-data:/var/lib/kafka/data
@@ -99,6 +104,12 @@ services:
     image: timescale/timescaledb:latest-pg16
     container_name: ids-timescaledb
     restart: unless-stopped
+    # Sauberer Shutdown: PostgreSQL muss bei SIGTERM einen Smart-Shutdown-
+    # Checkpoint fahren (alle dirty buffers flushen, WAL syncen). Default 10s
+    # reicht bei kleiner DB, kann bei großen Hypertables (Alerts/Flows wachsen
+    # schnell) deutlich länger dauern. 60s schützt vor unsauberer Beendigung
+    # mit potenzieller Recovery beim nächsten Boot.
+    stop_grace_period: 60s
     networks: [ids-net]
     volumes:
       - timescaledb-data:/var/lib/postgresql/data
@@ -136,6 +147,10 @@ services:
     image: minio/minio:latest
     container_name: ids-minio
     restart: unless-stopped
+    # Sauberer Shutdown: MinIO flusht laufende PCAP-Uploads aus dem Cache,
+    # schließt offene Multipart-Uploads. 30s ist reichlich für den OT-Use-
+    # Case, in dem PCAPs nur ein paar MB groß sind.
+    stop_grace_period: 30s
     networks: [ids-net]
     volumes:
       - minio-data:/data

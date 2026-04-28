@@ -10,9 +10,19 @@ ConditionPathExists=/opt/ids/docker-compose.yml
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/bin/cyjan-stack-up
+# Sauberer Shutdown: bevor docker.service beim Reboot beendet wird, fahren
+# wir explizit `docker compose stop` – das honoriert die stop_grace_period
+# pro Service (timescaledb 60s, kafka 30s, minio 30s) und gibt dem
+# stateful-stack so Zeit für Checkpoints/WAL-Sync. Ohne ExecStop würde der
+# Daemon-Shutdown alle Container parallel mit nur 10s Grace beenden.
+# `--timeout 90` deckt das Maximum (timescaledb 60s + Reserve) ab.
+ExecStop=/bin/sh -c 'cd /opt/ids && docker compose stop --timeout 90'
 StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=600
+# Stop-Timeout > Summe der Service-Stop-Grace-Periods: lieber etwas Puffer,
+# damit systemd nicht den Stop selbst killt während compose noch wartet.
+TimeoutStopSec=120
 
 [Install]
 WantedBy=multi-user.target
