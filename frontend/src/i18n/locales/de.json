@@ -6,7 +6,88 @@
     "dash": "–",
     "close": "Schließen",
     "cancel": "Abbrechen",
-    "error": "Fehler: {{message}}"
+    "error": "Fehler: {{message}}",
+    "errorGeneric": "Fehler",
+    "save": "Speichern",
+    "edit": "Bearbeiten",
+    "delete": "Löschen",
+    "add": "Hinzufügen"
+  },
+  "hosts": {
+    "addHost": "Host hinzufügen",
+    "exampleCsv": "Beispiel-CSV",
+    "exampleCsvTitle": "Beispiel-CSV herunterladen",
+    "importCsv": "CSV importieren",
+    "importResult": "Importiert: {{imported}} | Übersprungen: {{skipped}}",
+    "importErrors": " | Fehler: {{errors}}",
+    "importError": "Import-Fehler",
+    "ipRequired": "IP-Adresse *",
+    "displayName": "Anzeigename",
+    "displayNamePlaceholder": "z.B. Router, Drucker …",
+    "csvFormatHint": "CSV-Format: <code>Hostname;IP-Adresse</code> oder <code>IP-Adresse;Hostname</code> – Semikolon oder Komma als Trennzeichen.",
+    "searchPlaceholder": "IP oder Name suchen…",
+    "filterAll": "Alle",
+    "filterTrusted": "Bekannt",
+    "filterUnknown": "Unbekannt",
+    "count": "{{count}} Hosts",
+    "noHosts": "Keine Hosts",
+    "columns": {
+      "ip": "IP",
+      "displayHostname": "Anzeigename / Hostname",
+      "trust": "Trust",
+      "geoAsn": "Geo / ASN",
+      "ping": "Ping",
+      "lastSeen": "Zuletzt gesehen"
+    },
+    "showConnectionsTitle": "Verbindungs-Übersicht für diesen Host anzeigen",
+    "trustedToggle": "Trusted",
+    "deleteConfirm": "Host {{ip}} löschen?"
+  },
+  "networks": {
+    "addNetwork": "Netzwerk hinzufügen",
+    "cidrRequired": "CIDR *",
+    "nameRequired": "Name *",
+    "namePlaceholder": "Office LAN",
+    "description": "Beschreibung",
+    "descriptionPlaceholder": "optional",
+    "color": "Farbe",
+    "noNetworks": "Keine Netzwerke",
+    "columns": {
+      "cidr": "CIDR",
+      "name": "Name",
+      "description": "Beschreibung",
+      "color": "Farbe"
+    },
+    "deleteConfirm": "Netzwerk \"{{name}}\" ({{cidr}}) löschen?"
+  },
+  "unknownHosts": {
+    "title": "Unbekannte Hosts",
+    "windowLabel": "letzte 30 Tage",
+    "loadError": "Daten konnten nicht geladen werden",
+    "searchPlaceholder": "IP filtern…",
+    "allKnown": "Alle Hosts sind bekannt",
+    "columns": {
+      "ip": "IP-Adresse",
+      "alerts": "Alerts",
+      "severity": "Severity",
+      "lastSeen": "Zuletzt gesehen",
+      "firstSeen": "Erstmals gesehen"
+    },
+    "added": "✓ Hinzugefügt",
+    "addToInventory": "+ Inventar",
+    "footerHint": "Hosts ohne hostname oder display_name in host_info · Klick auf \"+ Inventar\" legt den Host an"
+  },
+  "hostConnDrawer": {
+    "title": "Host-Verbindungen",
+    "loading": "Lade Verbindungen …",
+    "noFlows": "Keine Flows zu diesem Host im gewählten Zeitfenster.",
+    "flowsPerBucket": "Flows pro {{bucket}}",
+    "max": "max {{value}}",
+    "graphAriaLabel": "Verbindungen von {{host}}",
+    "topPeersHint": "Top 30 von {{count}} Peers (nach Bytes). Rest in der Liste unten.",
+    "peers": "Peers ({{count}})",
+    "peerFlows": "{{count}} flows",
+    "truncated": "Nur 100 Peers angezeigt – API-Limit. Bei dichtem Traffic Zeitfenster verkleinern."
   },
   "alertDetail": {
     "ipRowTitle": "Klick = alle Verbindungen dieses Hosts in einem Zeitfenster",

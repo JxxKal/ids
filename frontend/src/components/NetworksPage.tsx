@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createNetwork, deleteNetwork, downloadNetworksExampleCsv, fetchNetworks, importNetworksCsv, updateNetwork } from '../api';
 import type { KnownNetwork } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -6,6 +7,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 type EditState = { name: string; description: string; color: string } | null;
 
 export function NetworksPage() {
+  const { t } = useTranslation();
   const [networks, setNetworks]         = useState<KnownNetwork[]>([]);
   const [form, setForm]                 = useState({ cidr: '', name: '', description: '', color: '#4CAF50' });
   const [error, setError]               = useState('');
@@ -33,7 +35,7 @@ export function NetworksPage() {
       setForm({ cidr: '', name: '', description: '', color: '#4CAF50' });
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler');
+      setError(err instanceof Error ? err.message : t('common.errorGeneric'));
     } finally {
       setLoading(false);
     }
@@ -76,13 +78,14 @@ export function NetworksPage() {
     setError('');
     try {
       const result = await importNetworksCsv(file);
-      setImportResult(
-        `Importiert: ${result.imported} | Übersprungen: ${result.skipped}` +
-        (result.errors.length ? ` | Fehler: ${result.errors.slice(0, 3).join('; ')}` : '')
-      );
+      let msg = t('hosts.importResult', { imported: result.imported, skipped: result.skipped });
+      if (result.errors.length) {
+        msg += t('hosts.importErrors', { errors: result.errors.slice(0, 3).join('; ') });
+      }
+      setImportResult(msg);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Import-Fehler');
+      setError(err instanceof Error ? err.message : t('hosts.importError'));
     }
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -94,17 +97,17 @@ export function NetworksPage() {
       {/* Form */}
       <div className="card p-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-300">Netzwerk hinzufügen</h2>
+          <h2 className="text-sm font-semibold text-slate-300">{t('networks.addNetwork')}</h2>
           <div className="flex items-center gap-2">
             <button
               onClick={() => downloadNetworksExampleCsv().catch(() => {})}
               className="btn-ghost text-xs text-slate-500 hover:text-slate-300"
-              title="Beispiel-CSV herunterladen"
+              title={t('hosts.exampleCsvTitle')}
             >
-              Beispiel-CSV
+              {t('hosts.exampleCsv')}
             </button>
             <label className="btn-ghost cursor-pointer text-xs">
-              CSV importieren
+              {t('hosts.importCsv')}
               <input
                 ref={fileRef}
                 type="file"
@@ -118,7 +121,7 @@ export function NetworksPage() {
         </div>
         <form onSubmit={submit} className="flex flex-wrap gap-2 items-end">
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">CIDR *</span>
+            <span className="text-xs text-slate-500">{t('networks.cidrRequired')}</span>
             <input
               required
               className="input w-44"
@@ -128,26 +131,26 @@ export function NetworksPage() {
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">Name *</span>
+            <span className="text-xs text-slate-500">{t('networks.nameRequired')}</span>
             <input
               required
               className="input w-40"
-              placeholder="Office LAN"
+              placeholder={t('networks.namePlaceholder')}
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">Beschreibung</span>
+            <span className="text-xs text-slate-500">{t('networks.description')}</span>
             <input
               className="input w-48"
-              placeholder="optional"
+              placeholder={t('networks.descriptionPlaceholder')}
               value={form.description}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">Farbe</span>
+            <span className="text-xs text-slate-500">{t('networks.color')}</span>
             <input
               type="color"
               className="h-8 w-10 rounded bg-slate-800 border border-slate-700 cursor-pointer"
@@ -156,7 +159,7 @@ export function NetworksPage() {
             />
           </label>
           <button type="submit" disabled={loading} className="btn-primary self-end">
-            {loading ? '…' : 'Hinzufügen'}
+            {loading ? '…' : t('common.add')}
           </button>
           {error && <span className="text-red-400 text-xs self-end">{error}</span>}
         </form>
@@ -167,17 +170,17 @@ export function NetworksPage() {
         <table className="w-full text-xs">
           <thead className="cyjan-table-head">
             <tr className="text-left">
-              <th>CIDR</th>
-              <th>Name</th>
-              <th>Beschreibung</th>
-              <th>Farbe</th>
+              <th>{t('networks.columns.cidr')}</th>
+              <th>{t('networks.columns.name')}</th>
+              <th>{t('networks.columns.description')}</th>
+              <th>{t('networks.columns.color')}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {networks.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-slate-600 py-8">Keine Netzwerke</td>
+                <td colSpan={5} className="text-center text-slate-600 py-8">{t('networks.noNetworks')}</td>
               </tr>
             )}
             {networks.map(n => (
@@ -233,8 +236,8 @@ export function NetworksPage() {
                   {editId === n.id ? (
                     <div className="flex gap-1.5 justify-end">
                       {editError && <span className="text-red-400 text-xs self-center">{editError}</span>}
-                      <button onClick={saveEdit} className="btn-primary text-xs">Speichern</button>
-                      <button onClick={cancelEdit} className="btn-ghost text-xs">Abbrechen</button>
+                      <button onClick={saveEdit} className="btn-primary text-xs">{t('common.save')}</button>
+                      <button onClick={cancelEdit} className="btn-ghost text-xs">{t('common.cancel')}</button>
                     </div>
                   ) : (
                     <div className="flex gap-1.5 justify-end">
@@ -242,13 +245,13 @@ export function NetworksPage() {
                         onClick={() => startEdit(n)}
                         className="btn-ghost text-xs"
                       >
-                        Bearbeiten
+                        {t('common.edit')}
                       </button>
                       <button
                         onClick={() => setConfirmId(n.id)}
                         className="btn-ghost text-xs text-red-500 hover:text-red-400"
                       >
-                        Löschen
+                        {t('common.delete')}
                       </button>
                     </div>
                   )}
@@ -261,7 +264,7 @@ export function NetworksPage() {
 
       {confirmId && confirmNetwork && (
         <ConfirmDialog
-          message={`Netzwerk "${confirmNetwork.name}" (${confirmNetwork.cidr}) löschen?`}
+          message={t('networks.deleteConfirm', { name: confirmNetwork.name, cidr: confirmNetwork.cidr })}
           onConfirm={() => { setConfirmId(null); remove(confirmId); }}
           onCancel={() => setConfirmId(null)}
         />
