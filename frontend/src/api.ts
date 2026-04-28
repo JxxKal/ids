@@ -667,6 +667,32 @@ export async function saveSigRulesOverrides(
   });
 }
 
+// ── Suricata SID-Overrides ───────────────────────────────────────────────────
+
+export interface SuricataOverrideEntry {
+  enabled?:  boolean | null;
+  severity?: 'critical' | 'high' | 'medium' | 'low' | null;
+}
+
+export interface SuricataOverridesResponse {
+  overrides: Record<string, SuricataOverrideEntry>;
+}
+
+export async function fetchSuricataOverrides(): Promise<SuricataOverridesResponse> {
+  if (isDemoMode()) return { overrides: {} };
+  return req<SuricataOverridesResponse>('/api/sig-rules/suricata-overrides');
+}
+
+export async function saveSuricataOverrides(
+  overrides: Record<string, SuricataOverrideEntry>,
+): Promise<SuricataOverridesResponse> {
+  if (isDemoMode()) return { overrides: {} };
+  return req<SuricataOverridesResponse>('/api/sig-rules/suricata-overrides', {
+    method: 'PUT',
+    body: JSON.stringify({ overrides }),
+  });
+}
+
 // ── iTop CMDB ─────────────────────────────────────────────────────────────────
 
 const ITOP_DEFAULT: import('./types').ItopConfig = {

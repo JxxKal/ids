@@ -561,7 +561,12 @@ services:
         condition: service_healthy
     volumes:
       - snort-alerts:/var/log/suricata:ro
+      # Read-only Mount auf den signature-rules-Volume für Per-SID-Overrides.
+      # Datei: /sig-rules/custom/_suricata_overrides.json. snort-bridge liest
+      # nur, geschrieben wird ausschließlich von der api.
+      - signature-rules:/sig-rules:ro
     environment:
       KAFKA_BROKERS: kafka:9092
       SNORT_ALERT_FILE: /var/log/suricata/eve.json
       TEST_MODE: ${TEST_MODE:-false}
+      SURICATA_OVERRIDES_FILE: /sig-rules/custom/_suricata_overrides.json

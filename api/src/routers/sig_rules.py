@@ -44,6 +44,7 @@ router = APIRouter(prefix="/api/sig-rules", tags=["sig-rules"])
 BUILTIN_DIR = Path(os.getenv("SIG_BUILTIN_DIR", "/opt/ids/signature-engine/rules"))
 CUSTOM_DIR  = Path(os.getenv("SIG_CUSTOM_DIR",  "/sig-rules/custom"))
 OVERRIDES_FILE = CUSTOM_DIR / "_overrides.json"
+SURICATA_OVERRIDES_FILE = CUSTOM_DIR / "_suricata_overrides.json"
 
 VALID_SEVERITIES = {"critical", "high", "medium", "low"}
 
@@ -222,3 +223,90 @@ async def put_overrides(body: SigRulesOverrides) -> SigRulesOverrides:
     _write_overrides_file(payload)
     log.info("Sig-Rule-Overrides geschrieben: %d Einträge", len(payload))
     return await get_overrides()
+
+
+# ── Suricata-SID-Overrides ─────────────────────────────────────────────────
+
+
+class SuricataOverrideEntry(BaseModel):
+    enabled:  bool | None = None
+    severity: Literal["critical", "high", "medium", "low"] | None = None
+
+
+class SuricataOverridesPayload(BaseModel):
+    overrides: dict[str, SuricataOverrideEntry] = Field(default_factory=dict)
+
+
+def _read_suricata_overrides_file() -> dict[str, dict]:
+    if not SURICATA_OVERRIDES_FILE.exists():
+        return {}
+    try:
+        data = json.loads(SURICATA_OVERRIDES_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(500, f"Suricata-Overrides-Datei nicht lesbar: {exc}") from exc
+    return data if isinstance(data, dict) else {}
+
+
+def _write_suricata_overrides_file(payload: dict[str, dict]) -> None:
+    try:
+        CUSTOM_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = SURICATA_OVERRIDES_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.replace(SURICATA_OVERRIDES_FILE)
+    except OSError as exc:
+        raise HTTPException(500, f"Suricata-Overrides-Datei nicht schreibbar: {exc}") from exc
+
+
+@router.get(
+    "/suricata-overrides",
+    response_model=SuricataOverridesPayload,
+    dependencies=[Depends(require_admin)],
+    summary="Per-SID Severity-Override + Disable für Suricata-Regeln",
+)
+async def get_suricata_overrides() -> SuricataOverridesPayload:
+    raw = _read_suricata_overrides_file()
+    cleaned: dict[str, SuricataOverrideEntry] = {}
+    for sid, ov in raw.items():
+        if not isinstance(ov, dict):
+            continue
+        # Validate SID is numeric — wir akzeptieren nur Stringkeys mit int-Wert
+        try:
+            int(str(sid))
+        except ValueError:
+            continue
+        cleaned[str(sid)] = SuricataOverrideEntry(
+            enabled=ov.get("enabled") if isinstance(ov.get("enabled"), bool) else None,
+            severity=ov.get("severity") if (
+                isinstance(ov.get("severity"), str)
+                and ov.get("severity", "").lower() in VALID_SEVERITIES
+            ) else None,
+        )
+    return SuricataOverridesPayload(overrides=cleaned)
+
+
+@router.put(
+    "/suricata-overrides",
+    response_model=SuricataOverridesPayload,
+    dependencies=[Depends(require_admin)],
+    summary="Suricata-SID-Overrides setzen (komplett ersetzen)",
+)
+async def put_suricata_overrides(body: SuricataOverridesPayload) -> SuricataOverridesPayload:
+    payload: dict[str, dict] = {}
+    for sid, ov in body.overrides.items():
+        # Numerischen Schlüssel verlangen – snort-bridge filtert das ohnehin,
+        # aber wir wollen kein Schrott-File schreiben.
+        try:
+            int(sid)
+        except ValueError:
+            continue
+        entry: dict = {}
+        if ov.enabled is not None:
+            entry["enabled"] = ov.enabled
+        if ov.severity is not None:
+            entry["severity"] = ov.severity
+        if entry:
+            payload[str(sid)] = entry
+
+    _write_suricata_overrides_file(payload)
+    log.info("Suricata-SID-Overrides geschrieben: %d Einträge", len(payload))
+    return await get_suricata_overrides()

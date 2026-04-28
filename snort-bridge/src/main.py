@@ -39,6 +39,8 @@ from datetime import datetime, timezone
 
 from confluent_kafka import Producer
 
+from sid_overrides import SuricataOverrides
+
 # ── Konfiguration ─────────────────────────────────────────────────────────────
 
 KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "kafka:9092")
@@ -145,6 +147,8 @@ def main() -> None:
         "bootstrap.servers": KAFKA_BROKERS,
         "linger.ms": 20,
     })
+    overrides = SuricataOverrides()
+    overrides.reload_if_changed()
     log.info("Suricata-Bridge gestartet  →  %s @ %s", ALERTS_TOPIC, KAFKA_BROKERS)
 
     for line in _tail(ALERT_FILE):
@@ -155,6 +159,15 @@ def main() -> None:
             alert = _map_alert(rec)
             if alert is None:
                 continue
+
+            # Per-SID-Override: Drop oder Severity umroutet. Reload-Check
+            # ist intern auf 30s gerated → billig pro Alert.
+            overrides.reload_if_changed()
+            sid = int(rec.get("alert", {}).get("signature_id", 0))
+            alert = overrides.apply(alert, sid)
+            if alert is None:
+                continue
+
             producer.produce(
                 ALERTS_TOPIC,
                 json.dumps(alert, default=str).encode(),

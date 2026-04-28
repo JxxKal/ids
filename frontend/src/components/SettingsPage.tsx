@@ -19,6 +19,8 @@ import {
   fetchDnsResolvers, saveDnsResolvers,
   fetchSigRules, fetchSigRulesOverrides, saveSigRulesOverrides,
   type SigRuleEntry, type SigRuleOverride,
+  fetchSuricataOverrides, saveSuricataOverrides,
+  type SuricataOverrideEntry,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
@@ -2042,6 +2044,11 @@ function RulesList() {
   const [search,   setSearch]   = useState('');
   const [offset,   setOffset]   = useState(0);
   const [loading,  setLoading]  = useState(false);
+  const [overrides,        setOverrides]        = useState<Record<string, SuricataOverrideEntry>>({});
+  const [originalOverrides, setOriginal]        = useState<Record<string, SuricataOverrideEntry>>({});
+  const [info, setInfo]   = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
   const LIMIT = 100;
 
   useEffect(() => {
@@ -2051,6 +2058,52 @@ function RulesList() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [search, offset]);
+
+  // Overrides werden nur einmal geladen – nicht pro Page-Wechsel
+  useEffect(() => {
+    fetchSuricataOverrides()
+      .then(r => { setOverrides(r.overrides); setOriginal(r.overrides); })
+      .catch(e => setError(t('settings.rules.overridesLoadError', { message: e instanceof Error ? e.message : String(e) })));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const dirty = useMemo(() =>
+    JSON.stringify(overrides) !== JSON.stringify(originalOverrides),
+  [overrides, originalOverrides]);
+
+  const updateOverride = (sid: number | null, patch: Partial<SuricataOverrideEntry>) => {
+    if (sid == null) return;
+    const key = String(sid);
+    setOverrides(prev => {
+      const cur = prev[key] ?? {};
+      const next: SuricataOverrideEntry = { ...cur, ...patch };
+      const out = { ...prev };
+      // Wenn wieder Default (enabled=true UND severity=null), Eintrag löschen
+      if ((next.enabled === true || next.enabled == null) && next.severity == null) {
+        delete out[key];
+      } else {
+        out[key] = next;
+      }
+      return out;
+    });
+    setInfo('');
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      const r = await saveSuricataOverrides(overrides);
+      setOverrides(r.overrides);
+      setOriginal(r.overrides);
+      setInfo(t('settings.rules.overridesSaved'));
+    } catch (e) {
+      setError(t('settings.rules.overridesSaveError', { message: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const pages = Math.ceil(total / LIMIT);
   const page  = Math.floor(offset / LIMIT);
@@ -2070,6 +2123,12 @@ function RulesList() {
         />
       </div>
 
+      <p className="text-[11px] text-slate-500 leading-relaxed">
+        {t('settings.rules.overrideHint')}
+      </p>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
       {loading ? (
         <p className="text-slate-500 text-xs">{t('common.loading')}</p>
       ) : rules.length === 0 ? (
@@ -2087,42 +2146,97 @@ function RulesList() {
                   <th className="pb-2 pr-3 w-28">Classtype</th>
                   <th className="pb-2 pr-3 w-16">{t('settings.rules.colAction')}</th>
                   <th className="pb-2 pr-3 w-16">{t('settings.rules.colStatus')}</th>
+                  <th className="pb-2 pr-3 w-32">{t('settings.rules.colSeverityOverride')}</th>
+                  <th className="pb-2 pr-3 w-12 text-center">{t('settings.rules.colEnabled')}</th>
                   <th className="pb-2 w-40">{t('settings.rules.colFile')}</th>
                 </tr>
               </thead>
               <tbody>
-                {rules.map((r, i) => (
-                  <tr key={`${r.sid}-${i}`} className={`border-b border-slate-800/40 hover:bg-slate-800/20 ${!r.enabled ? 'opacity-40' : ''}`}>
-                    <td className="py-1.5 pr-3 font-mono text-slate-400">{r.sid ?? '—'}</td>
-                    <td className="py-1.5 pr-3 text-slate-300 max-w-xs truncate" title={r.msg}>{r.msg}</td>
-                    <td className="py-1.5 pr-3 text-slate-500 truncate">{r.classtype ?? '—'}</td>
-                    <td className="py-1.5 pr-3">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
-                        r.action === 'drop' ? 'bg-red-900/40 text-red-300' :
-                        r.action === 'pass' ? 'bg-green-900/40 text-green-300' :
-                        'bg-slate-700/50 text-slate-400'
-                      }`}>{r.action}</span>
-                    </td>
-                    <td className="py-1.5 pr-3">
-                      <span className={`text-[10px] ${r.enabled ? 'text-green-500' : 'text-slate-600'}`}>
-                        {r.enabled ? t('settings.rules.statusActive') : t('settings.rules.statusOff')}
-                      </span>
-                    </td>
-                    <td className="py-1.5 font-mono text-slate-600 text-[10px] truncate">{r.file}</td>
-                  </tr>
-                ))}
+                {rules.map((r, i) => {
+                  const sidKey = r.sid != null ? String(r.sid) : null;
+                  const ov: SuricataOverrideEntry = (sidKey && overrides[sidKey]) || {};
+                  const ovDisabled = ov.enabled === false;
+                  const sevValue: string = ov.severity ?? 'default';
+                  const hasChange = ov.severity != null;
+                  return (
+                    <tr key={`${r.sid}-${i}`} className={`border-b border-slate-800/40 hover:bg-slate-800/20 ${!r.enabled || ovDisabled ? 'opacity-40' : ''}`}>
+                      <td className="py-1.5 pr-3 font-mono text-slate-400">{r.sid ?? '—'}</td>
+                      <td className="py-1.5 pr-3 text-slate-300 max-w-xs truncate" title={r.msg}>{r.msg}</td>
+                      <td className="py-1.5 pr-3 text-slate-500 truncate">{r.classtype ?? '—'}</td>
+                      <td className="py-1.5 pr-3">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                          r.action === 'drop' ? 'bg-red-900/40 text-red-300' :
+                          r.action === 'pass' ? 'bg-green-900/40 text-green-300' :
+                          'bg-slate-700/50 text-slate-400'
+                        }`}>{r.action}</span>
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <span className={`text-[10px] ${r.enabled ? 'text-green-500' : 'text-slate-600'}`}>
+                          {r.enabled ? t('settings.rules.statusActive') : t('settings.rules.statusOff')}
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <select
+                          className={`input text-xs w-28 ${hasChange ? 'border-amber-600 text-amber-200' : ''}`}
+                          value={sevValue}
+                          disabled={r.sid == null}
+                          onChange={e => {
+                            const v = e.target.value;
+                            updateOverride(r.sid, { severity: v === 'default' ? null : (v as SuricataOverrideEntry['severity']) });
+                          }}
+                        >
+                          <option value="default">{t('settings.rules.severityDefault')}</option>
+                          <option value="critical">critical</option>
+                          <option value="high">high</option>
+                          <option value="medium">medium</option>
+                          <option value="low">low</option>
+                        </select>
+                      </td>
+                      <td className="py-1.5 pr-3 text-center">
+                        <input
+                          type="checkbox"
+                          className="accent-cyan-500"
+                          checked={ov.enabled !== false}
+                          disabled={r.sid == null}
+                          onChange={e => updateOverride(r.sid, { enabled: e.target.checked ? null : false })}
+                        />
+                      </td>
+                      <td className="py-1.5 font-mono text-slate-600 text-[10px] truncate">{r.file}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          {pages > 1 && (
-            <div className="flex items-center gap-2 text-xs text-slate-500">
-              <button className="btn-ghost text-xs disabled:opacity-30" disabled={page === 0}
-                onClick={() => setOffset(Math.max(0, offset - LIMIT))}>{t('settings.rules.prev')}</button>
-              <span>{page + 1} / {pages}</span>
-              <button className="btn-ghost text-xs disabled:opacity-30" disabled={page >= pages - 1}
-                onClick={() => setOffset(offset + LIMIT)}>{t('settings.rules.next')}</button>
+
+          <div className="flex items-center justify-between gap-3 pt-2 flex-wrap">
+            {pages > 1 ? (
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <button className="btn-ghost text-xs disabled:opacity-30" disabled={page === 0}
+                  onClick={() => setOffset(Math.max(0, offset - LIMIT))}>{t('settings.rules.prev')}</button>
+                <span>{page + 1} / {pages}</span>
+                <button className="btn-ghost text-xs disabled:opacity-30" disabled={page >= pages - 1}
+                  onClick={() => setOffset(offset + LIMIT)}>{t('settings.rules.next')}</button>
+              </div>
+            ) : <span />}
+            <div className="flex items-center gap-2">
+              {info && <span className="text-[11px] text-green-400">{info}</span>}
+              <button
+                onClick={() => { setOverrides(originalOverrides); setInfo(''); }}
+                disabled={!dirty || saving}
+                className="btn-ghost text-xs disabled:opacity-30"
+              >
+                {t('settings.rules.overridesReset')}
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={!dirty || saving}
+                className="btn-primary text-xs disabled:opacity-50 whitespace-nowrap"
+              >
+                {saving ? '…' : t('settings.rules.overridesSave')}
+              </button>
             </div>
-          )}
+          </div>
         </>
       )}
     </div>
