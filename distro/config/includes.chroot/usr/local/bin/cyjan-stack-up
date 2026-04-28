@@ -34,5 +34,37 @@ if [ ! -d "$IDS_DIR" ]; then
 fi
 
 cd "$IDS_DIR"
+
+# Hard-Power-Off-Detektion: Wir hatten zweimal die Situation, dass nach einem
+# unsauberen Reboot einzelne Container in den Daemon zurückkamen, dabei aber
+# ihr Compose-Netzwerk verloren hatten (`Networks: {}` im docker inspect).
+# `docker compose up -d` erkennt diesen Zustand NICHT als Konfig-Drift und
+# startet die kaputten Container nur, ohne sie ans Netz zu hängen – dann
+# scheitert die DNS-Auflösung von service-zu-service (kafka, timescaledb…).
+#
+# Lösung: vor dem normalen up -d prüfen wir alle Compose-Services auf ein
+# valides Network-Attachment. Sobald einer ohne Netzwerk dasteht, machen wir
+# `up -d --force-recreate`, damit alle Container frisch erzeugt werden und
+# zum Netzwerk dazustoßen. Im Normalfall (sauberer Reboot) bleibt es beim
+# leichten up -d.
+WEDGED=0
+for svc in $(docker compose "$@" ps --services 2>/dev/null); do
+  cname="ids-${svc}"
+  if ! docker container inspect "$cname" >/dev/null 2>&1; then
+    continue                                          # Service noch nie gestartet
+  fi
+  nets=$(docker container inspect "$cname" --format '{{len .NetworkSettings.Networks}}' 2>/dev/null || echo 0)
+  if [ "$nets" = "0" ]; then
+    echo "cyjan-stack-up: $cname ohne Netz-Attachment → force-recreate"
+    WEDGED=1
+    break
+  fi
+done
+
+if [ "$WEDGED" = "1" ]; then
+  echo "cyjan-stack-up: docker compose $* up -d --force-recreate (Recovery)"
+  exec docker compose "$@" up -d --force-recreate
+fi
+
 echo "cyjan-stack-up: docker compose $* up -d (aus $IDS_DIR)"
 exec docker compose "$@" up -d
