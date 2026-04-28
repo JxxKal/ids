@@ -603,6 +603,26 @@ export async function saveSamlConfig(value: SamlConfig): Promise<void> {
   await req('/api/config/saml', { method: 'PATCH', body: JSON.stringify({ value }) });
 }
 
+// ── DNS-Resolver-Allowlist ────────────────────────────────────────────────────
+
+export interface DnsResolversConfig { resolvers: string[] }
+
+export async function fetchDnsResolvers(): Promise<DnsResolversConfig> {
+  if (isDemoMode()) return { resolvers: [] };
+  try {
+    const r = await req<{ key: string; value: DnsResolversConfig }>('/api/config/dns_resolvers');
+    return { resolvers: Array.isArray(r.value?.resolvers) ? r.value.resolvers : [] };
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) return { resolvers: [] };
+    throw e;
+  }
+}
+
+export async function saveDnsResolvers(value: DnsResolversConfig): Promise<void> {
+  if (isDemoMode()) return;
+  await req('/api/config/dns_resolvers', { method: 'PATCH', body: JSON.stringify({ value }) });
+}
+
 // ── iTop CMDB ─────────────────────────────────────────────────────────────────
 
 const ITOP_DEFAULT: import('./types').ItopConfig = {

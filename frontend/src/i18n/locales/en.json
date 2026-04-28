@@ -387,6 +387,7 @@
       "rules-editor": "Custom signatures",
       "system-health": "System load",
       "interfaces": "Interfaces",
+      "dns-resolvers": "DNS resolvers",
       "ssl": "SSL certificate",
       "syslog": "Syslog / SIEM",
       "update": "System update",
@@ -394,6 +395,22 @@
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "thorsten": "For Thorsten"
+    },
+    "dnsResolvers": {
+      "title": "DNS resolver allowlist",
+      "intro": "Enter the IPs (or CIDR ranges) of your DNS resolvers here. Alerts with severity medium or low that involve one of these resolvers as source or destination are dropped before being written to the database. High and critical alerts (e.g. DNS tunnelling, DGA) remain visible.",
+      "rationale": "Background: the sniffer sees two unidirectional flows per DNS conversation. The server-response flow (resolver → client:ephemeral) looks like a port scan because the resolver answers many distinct ephemeral ports within 60 s. The allowlist hides these FPs.",
+      "addLabel": "Add resolver",
+      "addPlaceholder": "192.168.1.1 or 10.0.0.0/24",
+      "addBtn": "Add",
+      "noEntries": "No resolvers configured – filter is inactive.",
+      "invalidEntry": "Invalid IP or CIDR",
+      "duplicate": "Entry already exists",
+      "save": "Save",
+      "saved": "Saved.",
+      "saveError": "Save failed: {{message}}",
+      "loadError": "Could not load allowlist: {{message}}",
+      "applyHint": "Changes take effect within 60 seconds without restarting the alert-manager."
     },
     "general": {
       "title": "Language & display",

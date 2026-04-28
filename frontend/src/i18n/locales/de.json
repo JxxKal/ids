@@ -387,6 +387,7 @@
       "rules-editor": "Eigene Signaturen",
       "system-health": "Systemauslastung",
       "interfaces": "Interfaces",
+      "dns-resolvers": "DNS-Resolver",
       "ssl": "SSL-Zertifikat",
       "syslog": "Syslog / SIEM",
       "update": "System-Update",
@@ -394,6 +395,22 @@
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "thorsten": "Für Thorsten"
+    },
+    "dnsResolvers": {
+      "title": "DNS-Resolver-Allowlist",
+      "intro": "Trage hier die IPs (oder CIDR-Bereiche) deiner DNS-Resolver ein. Alerts mit Severity medium oder low, an denen einer dieser Resolver als Quelle oder Ziel beteiligt ist, werden vor dem Schreiben in die Datenbank verworfen. High- und Critical-Alerts (z.B. DNS-Tunneling, DGA) bleiben durchgängig sichtbar.",
+      "rationale": "Hintergrund: der Sniffer sieht pro DNS-Konversation zwei unidirektionale Flows. Der Server-Antwort-Flow (Resolver → Client:ephemeral) sieht aus wie ein Port-Scan, weil der Resolver in 60 s an viele unterschiedliche ephemeral Ports antwortet. Diese FPs blendet die Allowlist aus.",
+      "addLabel": "Resolver hinzufügen",
+      "addPlaceholder": "192.168.1.1 oder 10.0.0.0/24",
+      "addBtn": "Hinzufügen",
+      "noEntries": "Keine Resolver konfiguriert – Filter ist inaktiv.",
+      "invalidEntry": "Ungültige IP oder CIDR",
+      "duplicate": "Eintrag existiert bereits",
+      "save": "Speichern",
+      "saved": "Gespeichert.",
+      "saveError": "Speichern fehlgeschlagen: {{message}}",
+      "loadError": "Konnte Allowlist nicht laden: {{message}}",
+      "applyHint": "Änderungen wirken nach max. 60 Sekunden ohne Neustart des alert-managers."
     },
     "general": {
       "title": "Sprache & Anzeige",

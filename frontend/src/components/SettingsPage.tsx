@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Activity, Database, FileText, Globe, HardDrive, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Sliders, Sparkles, Upload, Users,
+  Activity, Database, FileText, Globe, HardDrive, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Server, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../i18n';
 import {
@@ -16,6 +16,7 @@ import {
   fetchRuleFiles, fetchRuleFile, saveRuleFile, deleteRuleFile,
   fetchLearnedPatterns,
   fetchDbStats, cleanupDb, vacuumDb, setRetentionPolicy, backupDbUrl, restoreDb, fetchMaintenanceAudit,
+  fetchDnsResolvers, saveDnsResolvers,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
@@ -3530,9 +3531,149 @@ function SystemHealth() {
   );
 }
 
+// ── DnsResolverSettings ─────────────────────────────────────────────────────
+
+// Akzeptiert IPv4, IPv6 und CIDR-Notation (kein vollständiger Validator – nur
+// "Plausibilitäts-Check"-Heuristik, der echte Validator sitzt im alert-manager
+// via ipaddress.ip_network).
+function isLikelyIpOrCidr(s: string): boolean {
+  const trimmed = s.trim();
+  if (!trimmed) return false;
+  // IPv4 (mit oder ohne /N)
+  if (/^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/.test(trimmed)) return true;
+  // IPv6 (sehr grob – mind. ein Doppelpunkt + Hex/`::`/Slash)
+  if (/^[0-9a-fA-F:]+(\/\d{1,3})?$/.test(trimmed) && trimmed.includes(':')) return true;
+  return false;
+}
+
+function DnsResolverSettings() {
+  const { t } = useTranslation();
+  const [resolvers, setResolvers] = useState<string[]>([]);
+  const [draft, setDraft]         = useState('');
+  const [error, setError]         = useState('');
+  const [info, setInfo]           = useState('');
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState(false);
+  const [dirty, setDirty]         = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetchDnsResolvers()
+      .then(r => { if (alive) { setResolvers(r.resolvers); setLoading(false); } })
+      .catch(e => {
+        if (alive) {
+          setError(t('settings.dnsResolvers.loadError', { message: e instanceof Error ? e.message : String(e) }));
+          setLoading(false);
+        }
+      });
+    return () => { alive = false; };
+  }, [t]);
+
+  const handleAdd = () => {
+    setError('');
+    setInfo('');
+    const v = draft.trim();
+    if (!isLikelyIpOrCidr(v)) {
+      setError(t('settings.dnsResolvers.invalidEntry'));
+      return;
+    }
+    if (resolvers.includes(v)) {
+      setError(t('settings.dnsResolvers.duplicate'));
+      return;
+    }
+    setResolvers(prev => [...prev, v]);
+    setDraft('');
+    setDirty(true);
+  };
+
+  const handleRemove = (ip: string) => {
+    setResolvers(prev => prev.filter(x => x !== ip));
+    setDirty(true);
+    setInfo('');
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      await saveDnsResolvers({ resolvers });
+      setInfo(t('settings.dnsResolvers.saved'));
+      setDirty(false);
+    } catch (e) {
+      setError(t('settings.dnsResolvers.saveError', { message: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold text-slate-200">{t('settings.dnsResolvers.title')}</h2>
+
+      <p className="text-xs text-slate-400 leading-relaxed">{t('settings.dnsResolvers.intro')}</p>
+      <p className="text-[11px] text-slate-500 leading-relaxed italic">{t('settings.dnsResolvers.rationale')}</p>
+
+      <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-4 space-y-3">
+        <label className="text-xs font-medium text-slate-300 block">
+          {t('settings.dnsResolvers.addLabel')}
+        </label>
+        <div className="flex gap-2">
+          <input
+            className="cyjan-input flex-1"
+            placeholder={t('settings.dnsResolvers.addPlaceholder')}
+            value={draft}
+            onChange={e => { setDraft(e.target.value); setError(''); }}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
+          />
+          <button onClick={handleAdd} className="btn-primary text-xs whitespace-nowrap">
+            {t('settings.dnsResolvers.addBtn')}
+          </button>
+        </div>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <div className="space-y-1.5 mt-3">
+          {resolvers.length === 0 ? (
+            <p className="text-xs text-slate-500 italic">{t('settings.dnsResolvers.noEntries')}</p>
+          ) : (
+            resolvers.map(ip => (
+              <div key={ip} className="flex items-center justify-between bg-slate-900/60 border border-slate-700/40 rounded px-3 py-1.5">
+                <span className="font-mono text-xs text-slate-200">{ip}</span>
+                <button
+                  onClick={() => handleRemove(ip)}
+                  className="text-slate-500 hover:text-red-400 text-xs px-2 transition-colors"
+                  title={t('common.delete')}
+                >
+                  ✕
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800">
+          <span className="text-[10px] text-slate-600">{t('settings.dnsResolvers.applyHint')}</span>
+          <div className="flex items-center gap-2">
+            {info && <span className="text-[11px] text-green-400">{info}</span>}
+            <button
+              onClick={handleSave}
+              disabled={!dirty || saving}
+              className="btn-primary text-xs disabled:opacity-50 whitespace-nowrap"
+            >
+              {saving ? '…' : t('settings.dnsResolvers.save')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'interfaces' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
+type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -3577,6 +3718,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'system-health',  icon: <Activity  {...ICON_PROPS} /> },
       { id: 'interfaces',     icon: <Network   {...ICON_PROPS} /> },
+      { id: 'dns-resolvers',  icon: <Server    {...ICON_PROPS} /> },
       { id: 'ssl',            icon: <Lock      {...ICON_PROPS} /> },
       { id: 'syslog',         icon: <FileText  {...ICON_PROPS} /> },
       { id: 'update',         icon: <Upload    {...ICON_PROPS} /> },
@@ -3693,6 +3835,7 @@ export function SettingsPage() {
             {active === 'system-health'  && <SystemHealth />}
             {active === 'db-maintenance' && <DatabaseMaintenance />}
             {active === 'interfaces'    && <NetworkInterfaces />}
+            {active === 'dns-resolvers' && <DnsResolverSettings />}
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}
             {active === 'irma'          && <IrmaSettings />}

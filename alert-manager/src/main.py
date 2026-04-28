@@ -32,6 +32,7 @@ from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 from config import Config
 from db import AlertWriter
 from dedup import DedupCache
+from dns_filter import DnsResolverFilter
 from scorer import enrich_score
 from self_filter import SelfFilter
 from suppression import SuppressionCache
@@ -78,7 +79,9 @@ def run(cfg: Config) -> None:
     writer       = AlertWriter(cfg.postgres_dsn)
     suppression  = SuppressionCache(cfg.postgres_dsn)
     self_filter  = SelfFilter()
+    dns_filter   = DnsResolverFilter(cfg.postgres_dsn)
     suppression.refresh()  # initiales Laden
+    dns_filter.refresh()
 
     consumer = _make_consumer(cfg.kafka_brokers)
     producer  = _make_producer(cfg.kafka_brokers)
@@ -95,6 +98,7 @@ def run(cfg: Config) -> None:
     total_in       = 0
     total_self     = 0
     total_deduped  = 0
+    total_dns      = 0
     total_out      = 0
     last_flush_log = time.monotonic()
 
@@ -114,9 +118,10 @@ def run(cfg: Config) -> None:
             now_mono = time.monotonic()
             if now_mono - last_flush_log > 60:
                 writer.flush()
+                dns_filter.maybe_refresh()
                 log.info(
-                    "Stats | in=%d self=%d deduped=%d out=%d",
-                    total_in, total_self, total_deduped, total_out,
+                    "Stats | in=%d self=%d deduped=%d dns_allowlisted=%d out=%d",
+                    total_in, total_self, total_deduped, total_dns, total_out,
                 )
                 last_flush_log = now_mono
 
@@ -163,6 +168,16 @@ def run(cfg: Config) -> None:
                 alert.get("src_ip"), alert.get("dst_ip"),
             ):
                 total_self += 1
+                continue
+
+            # 0b. DNS-Resolver-Allowlist: medium/low-Alerts mit konfiguriertem
+            #     Resolver als src oder dst werden verworfen. Hintergrund: der
+            #     unidirektionale Flow-Aggregator macht aus jeder Resolver-
+            #     Antwort ein Pseudo-Scan-Ereignis (viele unique dst_ports auf
+            #     ephemeral Ports der Clients). High/critical bleibt durch
+            #     für echte DNS-Angriffe (Tunnel/DGA).
+            if not alert.get("is_test") and dns_filter.should_drop(alert):
+                total_dns += 1
                 continue
 
             # 1. Deduplication (Test-Alerts immer durchlassen)
