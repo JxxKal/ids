@@ -24,6 +24,30 @@ from models import FlowRecord, PacketEvent
 type FlowKey = tuple[str, str, str, Optional[int], Optional[int]]
 
 
+def _is_private_ip(ip_str: str) -> bool:
+    """RFC1918, Loopback, Link-Local, CGNAT — typisch nicht-öffentlich.
+
+    Wir nutzen das in der Direction-Heuristik: wenn eine Seite privat ist und
+    die andere public, ist die private Seite mit hoher Sicherheit der Client
+    (NAT-Outbound). Greift IPv4 + IPv6.
+    """
+    if not ip_str:
+        return False
+    try:
+        from ipaddress import ip_address
+        ip = ip_address(ip_str)
+        return (
+            ip.is_private        # 10/8, 172.16/12, 192.168/16, fc00::/7, fe80::/10
+            or ip.is_loopback    # 127/8, ::1
+            or ip.is_link_local
+            # CGNAT 100.64.0.0/10 ist NICHT in is_private von Python <3.12
+            # → manuell prüfen für Carrier-NAT-Umgebungen.
+            or (ip.version == 4 and 0x64400000 <= int(ip) <= 0x647FFFFF)
+        )
+    except (ValueError, ImportError):
+        return False
+
+
 def _canonical_key(proto: str, src_ip: str, src_port: Optional[int],
                    dst_ip: str, dst_port: Optional[int]) -> FlowKey:
     """Sortiert die Endpunkte so, dass A→B und B→A denselben Key liefern."""
@@ -160,36 +184,50 @@ class FlowState:
     def _decide_direction(self, pkt: PacketEvent) -> None:
         """Entscheidet beim ersten Paket wer Client und wer Server ist.
 
-        Heuristik (in dieser Reihenfolge):
-          1. TCP SYN-only      → src ist Client (klassischer 3WHS-Init)
-          2. TCP SYN+ACK       → src ist Server (mid-capture, sehen Antwort)
-          3. Port-Heuristik    → niedriger Port = Server, hoher Port = Client
-          4. Fallback          → src bleibt Client (best guess)
+        Heuristik in dieser Reihenfolge (definitiv → wahrscheinlich):
+          1. TCP SYN-only           → src=Client (3WHS-Init)
+          2. TCP SYN+ACK            → src=Server (mid-capture sieht Antwort)
+          3. RFC1918/Loopback vs Public → private Seite = Client (NAT-Default:
+             ohne Port-Forwarding kann nur die private Seite Outbound init)
+          4. Port-Heuristik (low<high) → niedrigerer Port = Server
+          5. Default                → src bleibt Client (first-packet-Annahme)
 
-        Wichtig für NAT-Setups: ohne diese Heuristik landeten Server-Antwort-
-        Pakete in einem eigenen Flow mit "vertauschter" src/dst. Bidirektionale
-        Aggregation + Initiator-Heuristik liefert pro Konversation EINEN Flow
-        mit konventioneller Client→Server-Richtung.
+        Damit ist der typische NAT-Outbound-Fall (192.168.x.y → public IP)
+        deterministisch: schon bei jedem Paket nach dem ersten weiß der
+        Aggregator, dass die private Seite der Client ist – egal ob das
+        erste sichtbare Paket eine Server-Antwort war (Mid-Stream-Capture).
         """
         sip   = pkt.ip.src
         dip   = pkt.ip.dst
         sport = pkt.transport.src_port if pkt.transport else None
         dport = pkt.transport.dst_port if pkt.transport else None
 
-        client_first = True   # Default: src ist Client
+        decided = False
+        client_first = True
 
         if pkt.transport and pkt.transport.tcp:
             flags = set(pkt.transport.tcp.flags)
             if "SYN" in flags and "ACK" not in flags:
-                client_first = True              # echter SYN → src=Client
+                client_first = True              # SYN-only → src=Client
+                decided = True
             elif "SYN" in flags and "ACK" in flags:
-                client_first = False             # SYN-ACK → src=Server
-            else:
-                # Mid-stream ohne SYN: Port-Heuristik
-                if sport is not None and dport is not None and sport < dport:
-                    client_first = False         # niedrigerer Port = Server
-        else:
-            # UDP/ICMP: Port-Heuristik
+                client_first = False             # SYN+ACK → src=Server
+                decided = True
+
+        if not decided:
+            # NAT-Heuristik: private Seite ist Client wenn andere Seite public.
+            sip_priv = _is_private_ip(sip)
+            dip_priv = _is_private_ip(dip)
+            if sip_priv and not dip_priv:
+                client_first = True              # private (src) → public (dst)
+                decided = True
+            elif dip_priv and not sip_priv:
+                client_first = False             # public (src) → private (dst)
+                decided = True
+
+        if not decided:
+            # Port-Heuristik nur greift wenn beide Endpunkte gleichartig
+            # (beide privat oder beide public). Niedrigerer Port = Server.
             if sport is not None and dport is not None and sport < dport:
                 client_first = False
 
