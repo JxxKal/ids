@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { fetchConnectionGraph } from '../api';
 import type { ConnectionGraphData, ConnectionSummary } from '../api';
 import type { Alert } from '../types';
@@ -55,12 +57,13 @@ function Markers() {
 
 // ── One connection row ────────────────────────────────────────────────────────
 function ConnectionRow({
-  conn, alertSrcIp, rowIdx, y,
+  conn, alertSrcIp, rowIdx, y, t,
 }: {
   conn:       ConnectionSummary;
   alertSrcIp: string;
   rowIdx:     number;
   y:          number;  // center y of this row
+  t:          TFunction;
 }) {
   const leftToRight = conn.src_ip === alertSrcIp;
   const color       = protoColor(conn.proto);
@@ -69,7 +72,8 @@ function ConnectionRow({
   const x1          = leftToRight ? ARW_X1 : ARW_X2;
   const x2          = leftToRight ? ARW_X2 : ARW_X1;
   const label       = conn.dst_port ? `${conn.proto}:${conn.dst_port}` : conn.proto;
-  const sub         = `${conn.flow_count} Flow${conn.flow_count !== 1 ? 's' : ''} · ${fmtBytes(conn.byte_count)}`;
+  const flowWord    = conn.flow_count !== 1 ? t('connectionGraph.flowPlural') : t('connectionGraph.flowSingular');
+  const sub         = `${conn.flow_count} ${flowWord} · ${fmtBytes(conn.byte_count)}`;
 
   return (
     <g>
@@ -129,13 +133,14 @@ function HostBox({
 
 // ── Main component ────────────────────────────────────────────────────────────
 export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () => void }) {
+  const { t } = useTranslation();
   const [data, setData]       = useState<ConnectionGraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
 
   useEffect(() => {
     if (!alert.src_ip || !alert.dst_ip) {
-      setError('Alert hat keine Quell- oder Ziel-IP.');
+      setError(t('connectionGraph.noIp'));
       setLoading(false);
       return;
     }
@@ -144,7 +149,7 @@ export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () 
       .then(setData)
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [alert]);
+  }, [alert, t]);
 
   // SVG dimensions
   const rowCount = Math.max(1, data?.connections.length ?? 3);
@@ -170,10 +175,10 @@ export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () 
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
           <div>
-            <span className="font-semibold text-slate-100 text-sm">Verbindungsgraph</span>
+            <span className="font-semibold text-slate-100 text-sm">{t('connectionGraph.title')}</span>
             <span className="text-slate-500 text-xs ml-2">
               {fmtTime(tsFrom)} – {fmtTime(tsTo)}
-              {' '}(±{windowMin} min um Alert-Zeitpunkt)
+              {' '}{t('connectionGraph.windowLabel', { minutes: windowMin })}
             </span>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-200 text-lg leading-none">×</button>
@@ -182,7 +187,7 @@ export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () 
         <div className="px-4 pt-3 pb-4">
           {loading && (
             <div className="text-slate-400 text-sm py-10 text-center">
-              Lade Verbindungen…
+              {t('connectionGraph.loading')}
             </div>
           )}
           {error && (
@@ -192,9 +197,9 @@ export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () 
             <>
               {/* Stats row */}
               <div className="flex gap-4 mb-3 text-xs text-slate-500">
-                <span>{data.total_flows} Flows gesamt</span>
+                <span>{t('connectionGraph.totalFlows', { count: data.total_flows })}</span>
                 <span>·</span>
-                <span>{data.connections.length} Verbindungsgruppen</span>
+                <span>{t('connectionGraph.connectionGroups', { count: data.connections.length })}</span>
                 <span>·</span>
                 <span className="text-slate-600">
                   {alert.src_ip} ↔ {alert.dst_ip}
@@ -213,13 +218,13 @@ export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () 
                 <HostBox
                   x={0} ip={alert.src_ip!}
                   hostname={alert.enrichment?.src_hostname}
-                  label="Quelle"
+                  label={t('connectionGraph.source')}
                   boxY={boxY} boxH={contentH}
                 />
                 <HostBox
                   x={NODE_X_R} ip={alert.dst_ip!}
                   hostname={alert.enrichment?.dst_hostname}
-                  label="Ziel"
+                  label={t('connectionGraph.destination')}
                   boxY={boxY} boxH={contentH}
                 />
 
@@ -227,7 +232,7 @@ export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () 
                 {data.connections.length === 0 ? (
                   <text x={W / 2} y={svgH / 2} textAnchor="middle"
                     fill="#475569" fontSize="13" fontFamily="sans-serif">
-                    Keine Flows im Zeitfenster gefunden
+                    {t('connectionGraph.noFlows')}
                   </text>
                 ) : (
                   data.connections.map((conn, i) => (
@@ -237,6 +242,7 @@ export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () 
                       alertSrcIp={alert.src_ip!}
                       rowIdx={i}
                       y={boxY + i * ROW_H + ROW_H / 2}
+                      t={t}
                     />
                   ))
                 )}
@@ -244,14 +250,14 @@ export function ConnectionGraph({ alert, onClose }: { alert: Alert; onClose: () 
 
               {/* Legend */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 px-0.5">
-                {[['TCP','#38bdf8'],['UDP','#fb923c'],['ICMP','#a78bfa'],['Sonstige','#94a3b8']].map(([p, c]) => (
+                {[['TCP','#38bdf8'],['UDP','#fb923c'],['ICMP','#a78bfa'],[t('connectionGraph.legendOther'),'#94a3b8']].map(([p, c]) => (
                   <div key={p} className="flex items-center gap-1.5">
                     <div className="w-4 h-px" style={{ backgroundColor: c, borderTop: `2px solid ${c}` }} />
                     <span className="text-xs text-slate-500">{p}</span>
                   </div>
                 ))}
                 <span className="text-xs text-slate-600 ml-auto">
-                  → Quelle initiiert &nbsp;·&nbsp; ← Ziel initiiert
+                  → {t('connectionGraph.legendSourceInit')} &nbsp;·&nbsp; ← {t('connectionGraph.legendDestInit')}
                 </span>
               </div>
             </>

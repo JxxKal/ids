@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchConnectionGraph, type ConnectionGraphData, type ConnectionSummary } from '../api';
 import type { Alert } from '../types';
 
@@ -72,6 +73,7 @@ function hostMeta(alert: Alert, which: 'a' | 'b') {
 }
 
 export function AlertFlowPopup({ alert, onClose }: Props) {
+  const { t } = useTranslation();
   const [data, setData] = useState<ConnectionGraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
@@ -82,7 +84,7 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
   // Fetch graph data
   useEffect(() => {
     if (!alert.src_ip || !alert.dst_ip) {
-      setError('Alert hat keine src/dst IP – kein Flow-Graph verfügbar.');
+      setError(t('flowPopup.noIp'));
       setLoading(false);
       return;
     }
@@ -93,9 +95,9 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
         setData(d);
         setError('');
       })
-      .catch(e => setError(e instanceof Error ? e.message : 'Fetch-Fehler'))
+      .catch(e => setError(e instanceof Error ? e.message : t('flowPopup.fetchError')))
       .finally(() => setLoading(false));
-  }, [alert.alert_id, alert.src_ip, alert.dst_ip, alert.ts]);
+  }, [alert.alert_id, alert.src_ip, alert.dst_ip, alert.ts, t]);
 
   // Mark alert-matching connection as threat
   const connections = useMemo(() => {
@@ -229,7 +231,7 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
           <MetaCell label="Alert ID"   value={alert.alert_id.slice(0, 12) + '…'} cyan />
           <MetaCell label="First seen" value={new Date(alert.ts).toLocaleString()} />
           <MetaCell label="Source"     value={alert.source} />
-          <MetaCell label="Window"     value={data ? `±${data.window_min} min · ${data.total_flows} flows` : '—'} />
+          <MetaCell label="Window"     value={data ? t('flowPopup.windowValue', { minutes: data.window_min, flows: data.total_flows }) : '—'} />
         </div>
 
         {/* Stage */}
@@ -260,7 +262,7 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
                 animation: 'cyjan-flow-pulse 1.4s ease-in-out infinite',
               }}
             />
-            {loading ? 'lade…' : `${active.filter(c => !c.dying).length} conns`}
+            {loading ? t('common.loading') : t('flowPopup.connsCount', { count: active.filter(c => !c.dying).length })}
           </div>
 
           <HostCard side="left"  host={hostA} isAlert={true} />
@@ -287,7 +289,7 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
 
           {!loading && connections.length === 0 && !error && (
             <div className="absolute inset-0 flex items-center justify-center text-slate-500 text-xs">
-              Keine Flows im ±5-min-Fenster zwischen diesen Hosts.
+              {t('flowPopup.noFlows')}
             </div>
           )}
           {error && (
@@ -306,14 +308,14 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
             <LegendDot color="#38bdf8" label="TCP"  />
             <LegendDot color="#fb923c" label="UDP"  />
             <LegendDot color="#a78bfa" label="ICMP" />
-            <LegendDot color="#ef4444" label="Alert" />
-            <span className="text-slate-600">→ Richtung = src → dst</span>
+            <LegendDot color="#ef4444" label={t('flowPopup.alertLegend')} />
+            <span className="text-slate-600">{t('flowPopup.directionHint')}</span>
           </div>
           <button
             onClick={onClose}
             className="px-2.5 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors text-[10px]"
           >
-            Schließen
+            {t('common.close')}
           </button>
         </div>
       </div>

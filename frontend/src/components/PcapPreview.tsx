@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { getToken, pcapUrl } from '../api';
 
@@ -304,6 +305,7 @@ const OVERSCAN = 30;
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PcapPreview({ alertId, filename, onClose }: { alertId:string; filename?:string; onClose:()=>void }) {
+  const { t } = useTranslation();
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string|null>(null);
   const [packets, setPackets]     = useState<PcapPacket[]>([]);
@@ -341,7 +343,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
       .then(buf=>{
         if (!alive) return;
         const pkts=parsePcap(buf);
-        if (!pkts) throw new Error('Kein gültiges PCAP-Format');
+        if (!pkts) throw new Error(t('pcap.invalidFormat'));
         setRawBuf(buf); setPackets(pkts); setLoading(false);
       })
       .catch(e=>{ if(alive){ setError(e.message); setLoading(false); } });
@@ -396,7 +398,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
             <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
           </svg>
           <span className="text-slate-300 font-mono text-sm truncate">
-            PCAP Vorschau — <span className="text-cyan-400">{fn}</span>
+            {t('pcap.preview')} — <span className="text-cyan-400">{fn}</span>
           </span>
           <div className="flex-1"/>
 
@@ -405,7 +407,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
               aus pcap-store für nachträgliche Forensik. */}
           <label
             className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none whitespace-nowrap"
-            title="Default: nur Pakete des Alert-Flows (server-seitig gefiltert). Aktivieren: das volle ±60-s-Capture-Fenster."
+            title={t('pcap.fullWindowTitle')}
           >
             <input
               type="checkbox"
@@ -414,16 +416,16 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
               disabled={loading}
               className="cursor-pointer accent-cyan-500"
             />
-            Vollständiges Fenster
+            {t('pcap.fullWindow')}
           </label>
 
           {rawBuf && (
             <button onClick={download} disabled={dl}
               className="px-3 py-1 text-xs rounded border border-cyan-700/50 text-cyan-400 bg-cyan-950/30 hover:bg-cyan-900/40 transition-colors disabled:opacity-50 whitespace-nowrap">
-              {dl?'…':'↓ Download'}
+              {dl?'…':t('pcap.download')}
             </button>
           )}
-          <button onClick={onClose} title="Schließen"
+          <button onClick={onClose} title={t('common.close')}
             className="text-[11px] px-3 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors">
             ESC · ✕
           </button>
@@ -432,7 +434,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
         {/* Filter bar */}
         {!loading && !error && (
           <div className="flex items-center gap-2 px-4 py-2 border-b border-slate-700/50 shrink-0">
-            <span className="text-[11px] text-slate-500 whitespace-nowrap font-mono">Filter</span>
+            <span className="text-[11px] text-slate-500 whitespace-nowrap font-mono">{t('pcap.filter')}</span>
             <input
               type="text" value={filter} spellCheck={false}
               onChange={e=>setFilter(e.target.value)}
@@ -445,7 +447,7 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
               <button onClick={()=>setFilter('')} className="text-slate-500 hover:text-slate-300 text-xs px-1">✕</button>
             )}
             <span className="text-[11px] text-slate-500 font-mono whitespace-nowrap">
-              {filtered.length} / {packets.length} Pakete
+              {t('pcap.packetsCount', { filtered: filtered.length, total: packets.length })}
             </span>
           </div>
         )}
@@ -453,11 +455,11 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
         {/* Body */}
         <div className="flex-1 overflow-hidden flex flex-col min-h-0">
           {loading ? (
-            <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">Lade PCAP…</div>
+            <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">{t('pcap.loading')}</div>
           ) : error ? (
-            <div className="flex-1 flex items-center justify-center text-red-400 text-sm">Fehler: {error}</div>
+            <div className="flex-1 flex items-center justify-center text-red-400 text-sm">{t('common.error', { message: error })}</div>
           ) : packets.length===0 ? (
-            <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">Keine Pakete im PCAP</div>
+            <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">{t('pcap.empty')}</div>
           ) : (
             <>
               {/* Packet list — virtual scroll */}
@@ -465,18 +467,18 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
                 <table className="w-full border-collapse text-xs font-mono">
                   <thead className="sticky top-0 bg-slate-900/95 backdrop-blur-sm z-10">
                     <tr className="text-left text-slate-500 border-b border-slate-700 text-[11px]">
-                      <th className="px-2 py-1.5 w-10">#</th>
-                      <th className="px-2 py-1.5 w-24">Zeit (s)</th>
-                      <th className="px-2 py-1.5">Quelle</th>
-                      <th className="px-2 py-1.5">Ziel</th>
-                      <th className="px-2 py-1.5 w-16">Proto</th>
-                      <th className="px-2 py-1.5 w-12">Len</th>
-                      <th className="px-2 py-1.5">Info</th>
+                      <th className="px-2 py-1.5 w-10">{t('pcap.columns.num')}</th>
+                      <th className="px-2 py-1.5 w-24">{t('pcap.columns.time')}</th>
+                      <th className="px-2 py-1.5">{t('pcap.columns.source')}</th>
+                      <th className="px-2 py-1.5">{t('pcap.columns.destination')}</th>
+                      <th className="px-2 py-1.5 w-16">{t('pcap.columns.proto')}</th>
+                      <th className="px-2 py-1.5 w-12">{t('pcap.columns.len')}</th>
+                      <th className="px-2 py-1.5">{t('pcap.columns.info')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.length===0 ? (
-                      <tr><td colSpan={7} className="text-center text-slate-600 py-10">Kein Paket entspricht dem Filter</td></tr>
+                      <tr><td colSpan={7} className="text-center text-slate-600 py-10">{t('pcap.noFilterMatch')}</td></tr>
                     ) : (
                       <>
                         {topPad > 0 && <tr style={{height: topPad}}><td colSpan={7}/></tr>}
@@ -510,18 +512,18 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
                 <div className="shrink-0 border-t border-slate-700 bg-slate-950/80 px-4 py-3 max-h-40 overflow-y-auto">
                   <div className="text-xs font-mono space-y-1.5">
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-slate-400">
-                      <span>Paket <span className="text-slate-200">#{selPkt.num}</span></span>
-                      <span>Proto <span className={PROTO_CLS[selPkt.proto]??'text-slate-200'}>{selPkt.proto}</span></span>
-                      {selPkt.srcIp&&<span>Von <span className="text-slate-200">{selPkt.srcIp}{selPkt.srcPort!=null?`:${selPkt.srcPort}`:''}</span></span>}
-                      {selPkt.dstIp&&<span>Nach <span className="text-slate-200">{selPkt.dstIp}{selPkt.dstPort!=null?`:${selPkt.dstPort}`:''}</span></span>}
-                      <span>Captured <span className="text-slate-200">{selPkt.capLen}</span> / Original <span className="text-slate-200">{selPkt.origLen}</span> B</span>
-                      {selPkt.tcpFlags!==0&&<span>Flags <span className="text-slate-200">{tcpFlagsStr(selPkt.tcpFlags)}</span></span>}
+                      <span>{t('pcap.detail.packet')} <span className="text-slate-200">#{selPkt.num}</span></span>
+                      <span>{t('pcap.detail.proto')} <span className={PROTO_CLS[selPkt.proto]??'text-slate-200'}>{selPkt.proto}</span></span>
+                      {selPkt.srcIp&&<span>{t('pcap.detail.from')} <span className="text-slate-200">{selPkt.srcIp}{selPkt.srcPort!=null?`:${selPkt.srcPort}`:''}</span></span>}
+                      {selPkt.dstIp&&<span>{t('pcap.detail.to')} <span className="text-slate-200">{selPkt.dstIp}{selPkt.dstPort!=null?`:${selPkt.dstPort}`:''}</span></span>}
+                      <span>{t('pcap.detail.captured')} <span className="text-slate-200">{selPkt.capLen}</span> / {t('pcap.detail.original')} <span className="text-slate-200">{selPkt.origLen}</span> B</span>
+                      {selPkt.tcpFlags!==0&&<span>{t('pcap.detail.flags')} <span className="text-slate-200">{tcpFlagsStr(selPkt.tcpFlags)}</span></span>}
                     </div>
                     {selPkt.info&&<div className="text-slate-300">{selPkt.info}</div>}
                     <div className="text-slate-600 leading-relaxed break-all">
-                      <span className="text-slate-700">hex: </span>
+                      <span className="text-slate-700">{t('pcap.detail.hex')} </span>
                       <span className="text-slate-500">{hexLine(selPkt.raw)}</span>
-                      {selPkt.raw.length>=128&&<span className="text-slate-700"> … [snaplen 128B]</span>}
+                      {selPkt.raw.length>=128&&<span className="text-slate-700"> {t('pcap.detail.snaplen')}</span>}
                     </div>
                   </div>
                 </div>
