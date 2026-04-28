@@ -63,6 +63,71 @@ class EnrichmentDB:
             (orjson.dumps(enrichment).decode(), alert_id),
         )
 
+    def update_alert_boundary(
+        self,
+        alert_id:        str,
+        net_known:       bool | None,
+        src_known:       bool | None,
+        dst_known:       bool | None,
+        priority:        str | None,
+    ) -> None:
+        """Schreibt die Egress-Boundary-Felder auf den Alert-Record.
+
+        priority darf P0/P1/P2/P3 oder NULL sein. NULL = nicht in Egress-View
+        (z.B. ✓✓✓-Konstellation oder fehlende Klassifikation).
+        """
+        self._execute(
+            """
+            UPDATE alerts
+            SET boundary_net_known = %s,
+                boundary_src_known = %s,
+                boundary_dst_known = %s,
+                boundary_priority  = %s
+            WHERE alert_id = %s
+            """,
+            (net_known, src_known, dst_known, priority, alert_id),
+        )
+
+    def is_known_network(self, ip: str | None) -> bool:
+        """True wenn die IP in einem konfigurierten known_networks-CIDR liegt."""
+        if not ip:
+            return False
+        try:
+            self._connect()
+            with self._conn.cursor() as cur:  # type: ignore[union-attr]
+                cur.execute(
+                    "SELECT 1 FROM known_networks WHERE %s::inet <<= cidr LIMIT 1",
+                    (ip,),
+                )
+                row = cur.fetchone()
+            return row is not None
+        except Exception as exc:
+            log.debug("is_known_network(%s): %s", ip, exc)
+            self._conn = None
+            return False
+
+    def get_boundary_priority_map(self) -> dict | None:
+        """Liest die system_config-Konfiguration für boundary_priority_map.
+
+        Gibt None zurück wenn der Key nicht existiert oder nicht parsebar ist
+        – Caller fällt dann auf den In-Code-Default zurück.
+        """
+        try:
+            self._connect()
+            with self._conn.cursor() as cur:  # type: ignore[union-attr]
+                cur.execute(
+                    "SELECT value FROM system_config WHERE key = %s",
+                    ("boundary_priority_map",),
+                )
+                row = cur.fetchone()
+            if row and isinstance(row[0], dict):
+                return row[0]
+            return None
+        except Exception as exc:
+            log.debug("get_boundary_priority_map: %s", exc)
+            self._conn = None
+            return None
+
     def upsert_host_info(self, ip: str, info: dict) -> None:
         """
         Schreibt DNS/Ping/Geo-Daten.

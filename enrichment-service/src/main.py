@@ -28,6 +28,8 @@ import time
 import orjson
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 
+from boundary import classify as classify_boundary
+from boundary import parse_priority_map
 from cache import EnrichmentCache
 from config import Config
 from db import EnrichmentDB
@@ -226,6 +228,25 @@ def run(cfg: Config) -> None:
             }
 
             db.update_alert_enrichment(alert_id, enrichment)
+
+            # ── Egress-Boundary-Klassifikation ────────────────────────
+            # net_known = dst in known_networks
+            # src_known = host_info.trusted für src
+            # dst_known = host_info.trusted für dst
+            # Priority aus system_config-Map (Cache 60s).
+            net_known = db.is_known_network(dst_ip) if dst_ip else False
+            src_known = bool(_f(src_info, "trusted"))
+            dst_known = bool(_f(dst_info, "trusted"))
+            pmap_raw  = db.get_boundary_priority_map()
+            pmap      = parse_priority_map(pmap_raw) if pmap_raw else None
+            priority  = classify_boundary(net_known, src_known, dst_known, pmap)
+            db.update_alert_boundary(alert_id, net_known, src_known, dst_known, priority)
+            enrichment["boundary"] = {
+                "net_known": net_known,
+                "src_known": src_known,
+                "dst_known": dst_known,
+                "priority":  priority,
+            }
 
             # Enrichment-Update an API-WebSocket pushen
             try:

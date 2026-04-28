@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Alert, Enrichment } from '../types';
-import { alertsExportUrl } from '../api';
+import { alertsExportUrl, createEgressWhitelist } from '../api';
 import { AlertDetail } from './AlertDetail';
 import { SeverityBadge } from './SeverityBadge';
 import { PcapPreview } from './PcapPreview';
@@ -153,6 +153,157 @@ function appProto(proto: string | undefined, dstPort: number | null | undefined,
   return p || '–';
 }
 
+// ── Egress-Boundary-Badges ────────────────────────────────────────────────────
+
+const PRIORITY_COLOR: Record<string, string> = {
+  P0: 'bg-red-900/50 text-red-300 border-red-700/50',
+  P1: 'bg-orange-900/50 text-orange-300 border-orange-700/50',
+  P2: 'bg-amber-900/40 text-amber-300 border-amber-700/40',
+  P3: 'bg-slate-700/50 text-slate-400 border-slate-600/40',
+};
+
+function BoundaryCell({ alert }: { alert: Alert }) {
+  const { t } = useTranslation();
+  if (!alert.boundary_priority) return <span className="text-slate-700">–</span>;
+
+  const Pill = ({ ok, label }: { ok: boolean | null | undefined; label: string }) => (
+    <span
+      className={`inline-block px-1 text-[9px] font-mono rounded border ${
+        ok ? 'bg-green-950/40 text-green-400 border-green-800/40' : 'bg-red-950/40 text-red-400 border-red-800/40'
+      }`}
+      title={`${label}: ${ok ? t('alertFeed.boundary.known') : t('alertFeed.boundary.unknown')}`}
+    >
+      {label}{ok ? '✓' : '✗'}
+    </span>
+  );
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className={`px-1.5 py-0.5 text-[10px] font-mono rounded border w-fit ${PRIORITY_COLOR[alert.boundary_priority] ?? ''}`}>
+        {alert.boundary_priority}
+        {alert.boundary_whitelisted && <span className="ml-1 opacity-70">·WL</span>}
+      </span>
+      <span className="flex gap-0.5">
+        <Pill ok={alert.boundary_net_known} label="N" />
+        <Pill ok={alert.boundary_src_known} label="S" />
+        <Pill ok={alert.boundary_dst_known} label="D" />
+      </span>
+    </div>
+  );
+}
+
+// ── Whitelist-Modal ───────────────────────────────────────────────────────────
+
+function WhitelistModal({
+  alert, onClose, onCreated,
+}: {
+  alert:     Alert;
+  onClose:   () => void;
+  onCreated: () => void;
+}) {
+  const { t } = useTranslation();
+  const [scope, setScope] = useState<'src' | 'src+dst' | 'src+net' | 'src+port' | 'src+dst+port'>('src+dst');
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState('');
+
+  const buildBody = () => {
+    const body: { src_ip: string; reason: string; dst_ip?: string; dst_net?: string; dst_port?: number; proto?: 'TCP' | 'UDP' | 'ICMP' } = {
+      src_ip: alert.src_ip ?? '',
+      reason: reason.trim(),
+    };
+    if (scope === 'src+dst' || scope === 'src+dst+port') body.dst_ip = alert.dst_ip ?? undefined;
+    if (scope === 'src+net' && alert.dst_ip) {
+      // Triviale /24 ableiten (kein vollständiger CIDR-Picker im v1).
+      const parts = alert.dst_ip.split('.');
+      if (parts.length === 4) body.dst_net = `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
+    }
+    if (scope === 'src+port' || scope === 'src+dst+port') body.dst_port = alert.dst_port ?? undefined;
+    if (alert.proto && (alert.proto === 'TCP' || alert.proto === 'UDP' || alert.proto === 'ICMP')) {
+      body.proto = alert.proto;
+    }
+    return body;
+  };
+
+  const handleSave = async () => {
+    setError('');
+    if (!alert.src_ip) {
+      setError(t('alertFeed.whitelistModal.noSrcIp'));
+      return;
+    }
+    if (reason.trim().length < 3) {
+      setError(t('alertFeed.whitelistModal.reasonRequired'));
+      return;
+    }
+    setSaving(true);
+    try {
+      await createEgressWhitelist(buildBody());
+      onCreated();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/70 flex items-center justify-center z-[55] p-4"
+      onClick={onClose}
+    >
+      <div className="cyjan-card w-full max-w-md p-5 rounded-xl space-y-4" onClick={e => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-slate-200">{t('alertFeed.whitelistModal.title')}</h3>
+
+        <div className="text-xs text-slate-400 space-y-1 font-mono">
+          <div>{t('alertFeed.whitelistModal.srcLabel')}: <span className="text-slate-200">{alert.src_ip ?? '–'}</span></div>
+          <div>{t('alertFeed.whitelistModal.dstLabel')}: <span className="text-slate-200">{alert.dst_ip ?? '–'}{alert.dst_port ? `:${alert.dst_port}` : ''}</span></div>
+          <div>{t('alertFeed.whitelistModal.protoLabel')}: <span className="text-slate-200">{alert.proto ?? '–'}</span></div>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-slate-300 block mb-1">{t('alertFeed.whitelistModal.scopeLabel')}</label>
+          <select
+            className="cyjan-input w-full text-xs"
+            value={scope}
+            onChange={e => setScope(e.target.value as typeof scope)}
+          >
+            <option value="src">{t('alertFeed.whitelistModal.scopeSrc')}</option>
+            <option value="src+dst">{t('alertFeed.whitelistModal.scopeSrcDst')}</option>
+            <option value="src+net">{t('alertFeed.whitelistModal.scopeSrcNet')}</option>
+            <option value="src+port">{t('alertFeed.whitelistModal.scopeSrcPort')}</option>
+            <option value="src+dst+port">{t('alertFeed.whitelistModal.scopeSrcDstPort')}</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="text-xs font-medium text-slate-300 block mb-1">{t('alertFeed.whitelistModal.reasonLabel')}</label>
+          <textarea
+            className="cyjan-input w-full text-xs"
+            rows={3}
+            placeholder={t('alertFeed.whitelistModal.reasonPlaceholder')}
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+          />
+        </div>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+          <button onClick={onClose} className="btn-ghost text-xs" disabled={saving}>{t('common.cancel')}</button>
+          <button
+            onClick={handleSave}
+            disabled={saving || reason.trim().length < 3}
+            className="btn-primary text-xs disabled:opacity-50"
+          >
+            {saving ? '…' : t('alertFeed.whitelistModal.save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FeedbackBadge({ feedback }: { feedback: 'fp' | 'tp' }) {
   const { t } = useTranslation();
   return feedback === 'fp'
@@ -255,10 +406,17 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
   const [search,            setSearch]            = useState('');
   const [grouped,           setGrouped]           = useState(true);
   const [suppressIrmaAsset, setSuppressIrmaAsset] = useState(false);
+  // Egress-Boundary: 'off' (Default), 'on' (nur Egress, ohne Whitelisted),
+  // 'on+wl' (Egress inklusive Whitelisted für Audit-View).
+  const [egressMode,        setEgressMode]        = useState<'off' | 'on' | 'on+wl'>('off');
+  const [sortByPriority,    setSortByPriority]    = useState(false);
+  const [whitelistFor,      setWhitelistFor]      = useState<Alert | null>(null);
+  const [whitelistedNotice, setWhitelistedNotice] = useState<string>('');
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return alerts.filter(a => {
+    const PRIORITY_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+    const filteredArr = alerts.filter(a => {
       if (!showTest && a.is_test) return false;
       if (mlOnly && a.source !== 'ml') return false;
       if (suppressIrmaAsset && a.source === 'external' && a.rule_id?.startsWith('ASSET::')) return false;
@@ -267,6 +425,12 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
       if (feedbackF === 'none' && a.feedback)     return false;
       if (feedbackF === 'fp'   && a.feedback !== 'fp') return false;
       if (feedbackF === 'tp'   && a.feedback !== 'tp') return false;
+      // Egress-Filter: nur Alerts mit gesetzter Boundary-Priority. Whitelisted
+      // werden je nach Modus ein- oder ausgeblendet (Audit-Pfad).
+      if (egressMode !== 'off') {
+        if (!a.boundary_priority) return false;
+        if (egressMode === 'on' && a.boundary_whitelisted) return false;
+      }
       if (q) {
         // Auch Hostnamen + Display-Names durchsuchen — die IpCell rendert
         // `displayName ?? hostname ?? ip`, also sollen User auch genau das
@@ -287,7 +451,16 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
       }
       return true;
     });
-  }, [alerts, showTest, mlOnly, suppressIrmaAsset, severityF, sourceF, feedbackF, search]);
+    if (sortByPriority) {
+      filteredArr.sort((a, b) => {
+        const pa = PRIORITY_ORDER[a.boundary_priority ?? ''] ?? 99;
+        const pb = PRIORITY_ORDER[b.boundary_priority ?? ''] ?? 99;
+        if (pa !== pb) return pa - pb;
+        return new Date(b.ts).getTime() - new Date(a.ts).getTime();
+      });
+    }
+    return filteredArr;
+  }, [alerts, showTest, mlOnly, suppressIrmaAsset, severityF, sourceF, feedbackF, search, egressMode, sortByPriority]);
 
   // Export-URL passend zu aktiven Filtern aufbauen
   const exportUrl = alertsExportUrl({
@@ -352,6 +525,40 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           {grouped ? t('alertFeed.groupedToggle.grouped') : t('alertFeed.groupedToggle.single')}
         </button>
 
+        {/* Egress-Boundary 3-State-Toggle */}
+        <button
+          onClick={() => setEgressMode(m => m === 'off' ? 'on' : m === 'on' ? 'on+wl' : 'off')}
+          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border font-mono ${
+            egressMode === 'off'
+              ? 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
+              : egressMode === 'on'
+                ? 'bg-rose-500/15 text-rose-200 border-rose-500/50'
+                : 'bg-amber-500/15 text-amber-200 border-amber-500/50'
+          }`}
+          title={t('alertFeed.egressToggle.title')}
+        >
+          {egressMode === 'off' ? t('alertFeed.egressToggle.off')
+            : egressMode === 'on' ? t('alertFeed.egressToggle.on')
+            : t('alertFeed.egressToggle.onWl')}
+        </button>
+
+        {/* Sort by Boundary-Priority */}
+        <button
+          onClick={() => setSortByPriority(p => !p)}
+          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border font-mono ${
+            sortByPriority
+              ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/50'
+              : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
+          }`}
+          title={t('alertFeed.priorityToggle.title')}
+        >
+          {sortByPriority ? t('alertFeed.priorityToggle.on') : t('alertFeed.priorityToggle.off')}
+        </button>
+
+        {whitelistedNotice && (
+          <span className="text-[11px] text-green-400 font-mono">{whitelistedNotice}</span>
+        )}
+
         {/* IRMA Asset-Warnungen unterdrücken */}
         <button
           onClick={() => setSuppressIrmaAsset(s => !s)}
@@ -389,6 +596,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
               <tr className="text-left">
                 <th className="px-3 py-2">{t('alertFeed.columns.lastSeen')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>
+                {egressMode !== 'off' && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
                 <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>
@@ -401,7 +609,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             </thead>
             <tbody>
               {groups!.length === 0 && (
-                <tr><td colSpan={10} className="text-center text-slate-600 py-12">{t('alertFeed.noAlerts')}</td></tr>
+                <tr><td colSpan={11} className="text-center text-slate-600 py-12">{t('alertFeed.noAlerts')}</td></tr>
               )}
               {groups!.map(g => (
                 <tr
@@ -420,6 +628,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   <td className="px-3 py-2">
                     <SeverityBadge severity={g.severity} />
                   </td>
+                  {egressMode !== 'off' && (
+                    <td className="px-3 py-2"><BoundaryCell alert={g.latest} /></td>
+                  )}
                   <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
                     {g.rule_id ?? '–'}
                     {g.latest.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
@@ -457,7 +668,18 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     </div>
                   </td>
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
-                    <PcapButton alertId={g.latest.alert_id} available={g.latest.pcap_available} />
+                    <div className="flex items-center gap-1.5">
+                      <PcapButton alertId={g.latest.alert_id} available={g.latest.pcap_available} />
+                      {egressMode !== 'off' && g.latest.boundary_priority && (
+                        <button
+                          onClick={() => setWhitelistFor(g.latest)}
+                          title={t('alertFeed.whitelistRowAction')}
+                          className="px-1.5 py-0.5 rounded text-[11px] border whitespace-nowrap transition-colors border-amber-700/50 text-amber-400 bg-amber-950/30 hover:bg-amber-900/50 hover:text-amber-300"
+                        >
+                          + WL
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -470,6 +692,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
               <tr className="text-left">
                 <th className="px-3 py-2">{t('alertFeed.columns.time')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>
+                {egressMode !== 'off' && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
                 <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>
@@ -482,7 +705,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={10} className="text-center text-slate-600 py-12">{t('alertFeed.noAlerts')}</td></tr>
+                <tr><td colSpan={11} className="text-center text-slate-600 py-12">{t('alertFeed.noAlerts')}</td></tr>
               )}
               {filtered.map(a => (
                 <tr
@@ -494,6 +717,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     {fmtTime(a.ts)}
                   </td>
                   <td className="px-3 py-2"><SeverityBadge severity={a.severity} /></td>
+                  {egressMode !== 'off' && (
+                    <td className="px-3 py-2"><BoundaryCell alert={a} /></td>
+                  )}
                   <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
                     {a.rule_id}
                     {a.is_test && <span className="ml-1 text-blue-400 text-xs">[TEST]</span>}
@@ -521,6 +747,15 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     <div className="flex items-center gap-1.5">
                       {a.feedback && <FeedbackBadge feedback={a.feedback} />}
                       <PcapButton alertId={a.alert_id} available={a.pcap_available} />
+                      {egressMode !== 'off' && a.boundary_priority && (
+                        <button
+                          onClick={() => setWhitelistFor(a)}
+                          title={t('alertFeed.whitelistRowAction')}
+                          className="px-1.5 py-0.5 rounded text-[11px] border whitespace-nowrap transition-colors border-amber-700/50 text-amber-400 bg-amber-950/30 hover:bg-amber-900/50 hover:text-amber-300"
+                        >
+                          + WL
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -532,6 +767,17 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
 
       {selected && (
         <AlertDetail alert={selected} onClose={() => setSelected(null)} onUpdate={handleUpdate} />
+      )}
+
+      {whitelistFor && (
+        <WhitelistModal
+          alert={whitelistFor}
+          onClose={() => setWhitelistFor(null)}
+          onCreated={() => {
+            setWhitelistedNotice(t('alertFeed.whitelistModal.created'));
+            window.setTimeout(() => setWhitelistedNotice(''), 4000);
+          }}
+        />
       )}
     </div>
   );

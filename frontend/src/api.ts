@@ -86,6 +86,11 @@ export interface AlertFilters {
   ts_from?: number;   // Unix-Timestamp (Sekunden)
   ts_to?: number;
   is_test?: boolean | null;  // null = alle (kein Filter)
+  // Egress-Boundary
+  egress_only?: boolean;
+  show_whitelisted?: boolean;
+  boundary_priority?: 'P0' | 'P1' | 'P2' | 'P3';
+  sort_by?: 'ts' | 'priority';
   limit?: number;
   offset?: number;
 }
@@ -104,6 +109,10 @@ export async function fetchAlerts(filters: AlertFilters = {}): Promise<{
   if (filters.ts_to   !== undefined) params.set('ts_to',    String(filters.ts_to));
   if (filters.is_test !== null && filters.is_test !== undefined)
     params.set('is_test', String(filters.is_test));
+  if (filters.egress_only)        params.set('egress_only',      'true');
+  if (filters.show_whitelisted)   params.set('show_whitelisted', 'true');
+  if (filters.boundary_priority)  params.set('boundary_priority', filters.boundary_priority);
+  if (filters.sort_by)            params.set('sort_by',           filters.sort_by);
   params.set('limit',   String(filters.limit  ?? 100));
   params.set('offset',  String(filters.offset ?? 0));
   return req(`/api/alerts?${params}`);
@@ -691,6 +700,74 @@ export async function saveSuricataOverrides(
     method: 'PUT',
     body: JSON.stringify({ overrides }),
   });
+}
+
+// ── Egress-Whitelist ──────────────────────────────────────────────────────────
+
+export interface EgressWhitelistEntry {
+  id:             string;
+  src_ip:         string;
+  dst_ip:         string | null;
+  dst_net:        string | null;
+  dst_port:       number | null;
+  proto:          string | null;
+  reason:         string;
+  created_by:     string | null;
+  created_at:     string;
+  expires_at:     string | null;
+  active:         boolean;
+  deactivated_at: string | null;
+}
+
+export interface EgressWhitelistCreate {
+  src_ip:     string;
+  dst_ip?:    string | null;
+  dst_net?:   string | null;
+  dst_port?:  number | null;
+  proto?:     'TCP' | 'UDP' | 'ICMP' | null;
+  reason:     string;
+  expires_at?: string | null;
+}
+
+export async function fetchEgressWhitelist(includeInactive = false): Promise<EgressWhitelistEntry[]> {
+  if (isDemoMode()) return [];
+  const qs = includeInactive ? '?include_inactive=true' : '';
+  return req<EgressWhitelistEntry[]>(`/api/egress-whitelist${qs}`);
+}
+
+export async function createEgressWhitelist(body: EgressWhitelistCreate): Promise<EgressWhitelistEntry> {
+  if (isDemoMode()) return Promise.reject(new Error('Demo mode'));
+  return req<EgressWhitelistEntry>('/api/egress-whitelist', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deactivateEgressWhitelist(id: string): Promise<EgressWhitelistEntry> {
+  if (isDemoMode()) return Promise.reject(new Error('Demo mode'));
+  return req<EgressWhitelistEntry>(`/api/egress-whitelist/${encodeURIComponent(id)}/deactivate`, {
+    method: 'PATCH',
+  });
+}
+
+// ── Boundary-Priority-Map (system_config) ─────────────────────────────────────
+
+export type BoundaryPriorityMap = Record<string, string | null>;
+
+export async function fetchBoundaryPriorityMap(): Promise<BoundaryPriorityMap | null> {
+  if (isDemoMode()) return null;
+  try {
+    const r = await req<{ key: string; value: BoundaryPriorityMap }>('/api/config/boundary_priority_map');
+    return r.value && typeof r.value === 'object' ? r.value : null;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) return null;
+    throw e;
+  }
+}
+
+export async function saveBoundaryPriorityMap(value: BoundaryPriorityMap): Promise<void> {
+  if (isDemoMode()) return;
+  await req('/api/config/boundary_priority_map', { method: 'PATCH', body: JSON.stringify({ value }) });
 }
 
 // ── iTop CMDB ─────────────────────────────────────────────────────────────────

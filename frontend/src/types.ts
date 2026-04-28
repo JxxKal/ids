@@ -72,6 +72,12 @@ export interface Alert {
   feedback_ts?: string;
   feedback_note?: string;
   is_test: boolean;
+  // Egress-Boundary (vom enrichment-service annotiert; alte Alerts haben null)
+  boundary_net_known?: boolean | null;
+  boundary_src_known?: boolean | null;
+  boundary_dst_known?: boolean | null;
+  boundary_priority?:  'P0' | 'P1' | 'P2' | 'P3' | null;
+  boundary_whitelisted?: boolean;
 }
 
 export interface ThreatLevel {

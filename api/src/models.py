@@ -32,6 +32,16 @@ class AlertResponse(BaseModel):
     feedback_ts:    datetime | None = None
     feedback_note:  str | None = None
     is_test:        bool = False
+    # Egress-Boundary-Klassifikation (vom enrichment-service annotiert).
+    # Alle vier Felder sind nullable; alte Alerts (vor Migration 010) haben
+    # boundary_priority=None und sind im Egress-Filter nicht sichtbar.
+    boundary_net_known:    bool | None = None
+    boundary_src_known:    bool | None = None
+    boundary_dst_known:    bool | None = None
+    boundary_priority:     str | None  = None   # P0/P1/P2/P3
+    # boundary_whitelisted wird zur Query-Zeit per JOIN auf egress_whitelist
+    # berechnet, NICHT in der DB denormalisiert.
+    boundary_whitelisted:  bool = False
 
 
 class AlertListResponse(BaseModel):

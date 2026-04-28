@@ -352,10 +352,45 @@
       "source": "Quelle",
       "destination": "Ziel",
       "hits": "Treffer",
-      "score": "Score"
+      "score": "Score",
+      "boundary": "Boundary"
     },
     "noAlerts": "Keine Alerts",
     "bidirectional": "Bidirektional (Request + Response in Session)",
+    "egressToggle": {
+      "title": "Egress-Boundary-Filter: Off → nur Egress (ohne Whitelisted) → Egress + Whitelisted (Audit-View)",
+      "off": "↘ Egress: Off",
+      "on": "↘ Egress: On",
+      "onWl": "↘ Egress + WL"
+    },
+    "priorityToggle": {
+      "title": "Sortierung nach Boundary-Priorität (P0 zuerst), sonst nach Zeit absteigend",
+      "off": "≡ Sort: Time",
+      "on": "≡ Sort: Priority"
+    },
+    "whitelistRowAction": "Diesen Flow zur Egress-Whitelist hinzufügen",
+    "boundary": {
+      "known": "bekannt",
+      "unknown": "unbekannt"
+    },
+    "whitelistModal": {
+      "title": "Egress-Whitelist-Eintrag",
+      "srcLabel": "Quelle",
+      "dstLabel": "Ziel",
+      "protoLabel": "Protokoll",
+      "scopeLabel": "Scope",
+      "scopeSrc": "Nur Quelle (alle Ziele)",
+      "scopeSrcDst": "Quelle + Ziel-IP",
+      "scopeSrcNet": "Quelle + Ziel-/24",
+      "scopeSrcPort": "Quelle + Ziel-Port",
+      "scopeSrcDstPort": "Quelle + Ziel-IP + Port",
+      "reasonLabel": "Begründung (Audit, mind. 3 Zeichen)",
+      "reasonPlaceholder": "z.B. Bewusster Outbound-Sync zu HQ-VPN-Endpoint",
+      "save": "Eintragen",
+      "created": "✓ Whitelist-Eintrag erstellt",
+      "noSrcIp": "Alert hat keine Quell-IP – kein Whitelist-Match möglich.",
+      "reasonRequired": "Begründung ist Pflicht (mind. 3 Zeichen)."
+    },
     "pcap": {
       "open": "PCAP Vorschau öffnen",
       "unavailable": "Kein PCAP – Sniffer läuft nicht oder kein Paketpuffer für diesen Alert"
@@ -389,6 +424,7 @@
       "system-health": "Systemauslastung",
       "interfaces": "Interfaces",
       "dns-resolvers": "DNS-Resolver",
+      "egress-priorities": "Egress-Prioritäten",
       "ssl": "SSL-Zertifikat",
       "syslog": "Syslog / SIEM",
       "update": "System-Update",
@@ -396,6 +432,28 @@
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "thorsten": "Für Thorsten"
+    },
+    "egressPriorities": {
+      "title": "Egress-Prioritäten",
+      "intro": "Mapping aus dem Klassifikations-Tupel (Netz bekannt? Quelle bekannt? Ziel bekannt?) auf eine Priority P0–P3, die im AlertFeed-Egress-Filter zur Sortierung dient. Die Tabelle zeigt alle 7 Egress-relevanten Tupel (das achte – ✓✓✓ – fällt grundsätzlich aus der Egress-View heraus). Persistiert in system_config-Key 'boundary_priority_map' und wird vom enrichment-service binnen 60s ohne Restart übernommen.",
+      "applyHint": "Änderungen wirken nur auf neue Alerts ab Speicher-Zeitpunkt; bestehende Datensätze werden nicht zurückklassifiziert.",
+      "saved": "Mapping gespeichert.",
+      "saveError": "Speichern fehlgeschlagen: {{message}}",
+      "reset": "Default wiederherstellen",
+      "colNet": "Netz bekannt",
+      "colSrc": "Quelle bekannt",
+      "colDst": "Ziel bekannt",
+      "colPriority": "Priority",
+      "colMeaning": "Bedeutung",
+      "tuples": {
+        "000": "Vollständig unbekannter Egress",
+        "010": "Bekannter Host → Unbekannt (C2/Exfil-Verdacht)",
+        "001": "Unbekannte Quelle → bekanntes externes Ziel",
+        "100": "Rogue Device im Managed-Netz nach draußen",
+        "011": "Routing-/VPN-Anomalie zwischen bekannten Hosts",
+        "101": "Inventory-Lücke intern",
+        "110": "Bekannter Host → unbekanntes lokales Ziel"
+      }
     },
     "dnsResolvers": {
       "title": "DNS-Resolver-Allowlist",

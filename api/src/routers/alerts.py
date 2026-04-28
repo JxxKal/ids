@@ -55,58 +55,101 @@ def _row_to_alert(row: asyncpg.Record) -> AlertResponse:
         feedback_ts=row["feedback_ts"],
         feedback_note=row["feedback_note"],
         is_test=row["is_test"],
+        boundary_net_known=row.get("boundary_net_known") if hasattr(row, "get") else (row["boundary_net_known"] if "boundary_net_known" in row.keys() else None),
+        boundary_src_known=row.get("boundary_src_known") if hasattr(row, "get") else (row["boundary_src_known"] if "boundary_src_known" in row.keys() else None),
+        boundary_dst_known=row.get("boundary_dst_known") if hasattr(row, "get") else (row["boundary_dst_known"] if "boundary_dst_known" in row.keys() else None),
+        boundary_priority=row["boundary_priority"] if "boundary_priority" in row.keys() else None,
+        boundary_whitelisted=bool(row["boundary_whitelisted"]) if "boundary_whitelisted" in row.keys() else False,
     )
+
+
+# SQL-Snippet: berechnet boundary_whitelisted via Korrelation auf
+# egress_whitelist (active=true + Match auf src/dst/port/proto). Wird in die
+# SELECT-Liste eingehängt und von _row_to_alert erwartet.
+_BOUNDARY_WHITELIST_SQL = """\
+EXISTS (
+    SELECT 1 FROM egress_whitelist w
+    WHERE w.active = true
+      AND (w.expires_at IS NULL OR w.expires_at > now())
+      AND w.src_ip = a.src_ip
+      AND (
+        (w.dst_ip  IS NULL AND w.dst_net IS NULL) OR
+        (w.dst_ip  IS NOT NULL AND w.dst_ip  = a.dst_ip) OR
+        (w.dst_net IS NOT NULL AND a.dst_ip <<= w.dst_net)
+      )
+      AND (w.dst_port IS NULL OR w.dst_port = a.dst_port)
+      AND (w.proto    IS NULL OR w.proto    = a.proto)
+) AS boundary_whitelisted"""
 
 
 @router.get("", response_model=AlertListResponse)
 async def list_alerts(
-    severity: str | None   = None,
-    source:   str | None   = None,
-    rule_id:  str | None   = None,
-    src_ip:   str | None   = None,
-    ts_from:  float | None = None,
-    ts_to:    float | None = None,
-    is_test:  bool | None = None,
-    limit:    Annotated[int, Query(ge=1, le=500)] = 50,
-    offset:   Annotated[int, Query(ge=0)]         = 0,
-    pool:     asyncpg.Pool = Depends(get_pool),
+    severity:           str | None   = None,
+    source:             str | None   = None,
+    rule_id:            str | None   = None,
+    src_ip:             str | None   = None,
+    ts_from:            float | None = None,
+    ts_to:              float | None = None,
+    is_test:            bool | None = None,
+    egress_only:        bool         = False,
+    show_whitelisted:   bool         = False,
+    boundary_priority:  str | None   = None,
+    sort_by:            str          = "ts",   # 'ts' | 'priority'
+    limit:              Annotated[int, Query(ge=1, le=500)] = 50,
+    offset:             Annotated[int, Query(ge=0)]         = 0,
+    pool:               asyncpg.Pool = Depends(get_pool),
 ) -> AlertListResponse:
     filters: list[str] = []
     params:  list = []
     idx = 1
 
     if is_test is not None:
-        filters.append(f"is_test = ${idx}")
+        filters.append(f"a.is_test = ${idx}")
         params.append(is_test); idx += 1
 
     if severity:
-        filters.append(f"severity = ${idx}")
+        filters.append(f"a.severity = ${idx}")
         params.append(severity); idx += 1
     if source:
-        filters.append(f"source = ${idx}")
+        filters.append(f"a.source = ${idx}")
         params.append(source); idx += 1
     if rule_id:
-        filters.append(f"rule_id = ${idx}")
+        filters.append(f"a.rule_id = ${idx}")
         params.append(rule_id); idx += 1
     if src_ip:
-        filters.append(f"src_ip = ${idx}::inet")
+        filters.append(f"a.src_ip = ${idx}::inet")
         params.append(src_ip); idx += 1
     if ts_from is not None:
-        filters.append(f"ts >= ${idx}")
+        filters.append(f"a.ts >= ${idx}")
         params.append(datetime.fromtimestamp(ts_from, tz=timezone.utc)); idx += 1
     if ts_to is not None:
-        filters.append(f"ts <= ${idx}")
+        filters.append(f"a.ts <= ${idx}")
         params.append(datetime.fromtimestamp(ts_to, tz=timezone.utc)); idx += 1
+    if boundary_priority:
+        filters.append(f"a.boundary_priority = ${idx}")
+        params.append(boundary_priority); idx += 1
+    if egress_only:
+        # Egress-View: Alerts mit gesetzter Boundary-Priority. Whitelisted-
+        # Alerts werden standardmäßig ausgeblendet, mit show_whitelisted=true
+        # gezeigt (Audit-Pfad).
+        filters.append("a.boundary_priority IS NOT NULL")
+        if not show_whitelisted:
+            filters.append(f"NOT ({_BOUNDARY_WHITELIST_SQL.split(' AS ')[0]})")
 
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
 
+    # Sort: bei sort_by='priority' nach (boundary_priority ASC, ts DESC),
+    # damit P0 oben steht (P0 < P1 < ... lexikografisch). Sonst ts DESC.
+    order = "a.boundary_priority ASC NULLS LAST, a.ts DESC" if sort_by == "priority" else "a.ts DESC"
+
     async with pool.acquire() as conn:
-        total = await conn.fetchval(f"SELECT COUNT(*) FROM alerts {where}", *params)
+        total = await conn.fetchval(f"SELECT COUNT(*) FROM alerts a {where}", *params)
         rows  = await conn.fetch(
             f"""
-            SELECT * FROM alerts
+            SELECT a.*, {_BOUNDARY_WHITELIST_SQL}
+            FROM alerts a
             {where}
-            ORDER BY ts DESC
+            ORDER BY {order}
             LIMIT ${idx} OFFSET ${idx+1}
             """,
             *params, limit, offset,

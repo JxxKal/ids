@@ -21,6 +21,7 @@ import {
   type SigRuleEntry, type SigRuleOverride,
   fetchSuricataOverrides, saveSuricataOverrides,
   type SuricataOverrideEntry,
+  fetchBoundaryPriorityMap, saveBoundaryPriorityMap,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
@@ -3909,6 +3910,143 @@ function RuleOverridesSettings() {
   );
 }
 
+// ── EgressPrioritySettings ───────────────────────────────────────────────────
+
+// 7 echte Klassifikations-Tupel für die Egress-View (✓✓✓ ist nicht-egress).
+const BOUNDARY_TUPLES: { key: string; net: boolean; src: boolean; dst: boolean }[] = [
+  { key: '000', net: false, src: false, dst: false },
+  { key: '010', net: false, src: true,  dst: false },
+  { key: '001', net: false, src: false, dst: true  },
+  { key: '100', net: true,  src: false, dst: false },
+  { key: '011', net: false, src: true,  dst: true  },
+  { key: '101', net: true,  src: false, dst: true  },
+  { key: '110', net: true,  src: true,  dst: false },
+];
+
+const DEFAULT_PRIORITY_MAP: Record<string, string | null> = {
+  '000': 'P0',
+  '010': 'P1',
+  '001': 'P1',
+  '100': 'P2',
+  '011': 'P2',
+  '101': 'P3',
+  '110': 'P3',
+};
+
+function EgressPrioritySettings() {
+  const { t } = useTranslation();
+  const [map, setMap]               = useState<Record<string, string | null>>(DEFAULT_PRIORITY_MAP);
+  const [originalMap, setOriginal]  = useState<Record<string, string | null>>(DEFAULT_PRIORITY_MAP);
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [error, setError]           = useState('');
+  const [info, setInfo]             = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    fetchBoundaryPriorityMap()
+      .then(value => {
+        if (!alive) return;
+        if (value) {
+          const merged = { ...DEFAULT_PRIORITY_MAP };
+          for (const tup of BOUNDARY_TUPLES) {
+            if (tup.key in value) merged[tup.key] = value[tup.key];
+          }
+          setMap(merged);
+          setOriginal(merged);
+        }
+      })
+      .catch(() => { /* erste Nutzung – Default bleibt */ })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const dirty = useMemo(() => JSON.stringify(map) !== JSON.stringify(originalMap), [map, originalMap]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      await saveBoundaryPriorityMap(map);
+      setOriginal(map);
+      setInfo(t('settings.egressPriorities.saved'));
+    } catch (e) {
+      setError(t('settings.egressPriorities.saveError', { message: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-sm font-semibold text-slate-200">{t('settings.egressPriorities.title')}</h2>
+      <p className="text-xs text-slate-500 leading-relaxed">{t('settings.egressPriorities.intro')}</p>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-900/60 border-b border-slate-700/50">
+            <tr className="text-left text-slate-500">
+              <th className="px-3 py-2">{t('settings.egressPriorities.colNet')}</th>
+              <th className="px-3 py-2">{t('settings.egressPriorities.colSrc')}</th>
+              <th className="px-3 py-2">{t('settings.egressPriorities.colDst')}</th>
+              <th className="px-3 py-2 w-32">{t('settings.egressPriorities.colPriority')}</th>
+              <th className="px-3 py-2">{t('settings.egressPriorities.colMeaning')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {BOUNDARY_TUPLES.map(tup => {
+              const cur = map[tup.key];
+              const def = DEFAULT_PRIORITY_MAP[tup.key];
+              const changed = cur !== def;
+              return (
+                <tr key={tup.key} className="border-b border-slate-800/40">
+                  <td className="px-3 py-2 font-mono">{tup.net ? <span className="text-green-400">✓</span> : <span className="text-red-400">✗</span>}</td>
+                  <td className="px-3 py-2 font-mono">{tup.src ? <span className="text-green-400">✓</span> : <span className="text-red-400">✗</span>}</td>
+                  <td className="px-3 py-2 font-mono">{tup.dst ? <span className="text-green-400">✓</span> : <span className="text-red-400">✗</span>}</td>
+                  <td className="px-3 py-2">
+                    <select
+                      className={`input text-xs w-24 ${changed ? 'border-amber-600 text-amber-200' : ''}`}
+                      value={cur ?? ''}
+                      onChange={e => setMap(p => ({ ...p, [tup.key]: e.target.value || null }))}
+                    >
+                      <option value="">—</option>
+                      <option value="P0">P0</option>
+                      <option value="P1">P1</option>
+                      <option value="P2">P2</option>
+                      <option value="P3">P3</option>
+                    </select>
+                  </td>
+                  <td className="px-3 py-2 text-slate-400">{t(`settings.egressPriorities.tuples.${tup.key}`)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[10px] text-slate-600">{t('settings.egressPriorities.applyHint')}</span>
+        <div className="flex items-center gap-2">
+          {info && <span className="text-[11px] text-green-400">{info}</span>}
+          <button onClick={() => { setMap(DEFAULT_PRIORITY_MAP); setInfo(''); }}
+            className="btn-ghost text-xs">
+            {t('settings.egressPriorities.reset')}
+          </button>
+          <button onClick={handleSave} disabled={!dirty || saving}
+            className="btn-primary text-xs disabled:opacity-50">
+            {saving ? '…' : t('common.save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── DnsResolverSettings ─────────────────────────────────────────────────────
 
 // Akzeptiert IPv4, IPv6 und CIDR-Notation (kein vollständiger Validator – nur
@@ -4051,7 +4189,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
+type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -4098,6 +4236,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'system-health',  icon: <Activity  {...ICON_PROPS} /> },
       { id: 'interfaces',     icon: <Network   {...ICON_PROPS} /> },
       { id: 'dns-resolvers',  icon: <Server    {...ICON_PROPS} /> },
+      { id: 'egress-priorities', icon: <Sliders {...ICON_PROPS} /> },
       { id: 'ssl',            icon: <Lock      {...ICON_PROPS} /> },
       { id: 'syslog',         icon: <FileText  {...ICON_PROPS} /> },
       { id: 'update',         icon: <Upload    {...ICON_PROPS} /> },
@@ -4216,6 +4355,7 @@ export function SettingsPage() {
             {active === 'db-maintenance' && <DatabaseMaintenance />}
             {active === 'interfaces'    && <NetworkInterfaces />}
             {active === 'dns-resolvers' && <DnsResolverSettings />}
+            {active === 'egress-priorities' && <EgressPrioritySettings />}
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}
             {active === 'irma'          && <IrmaSettings />}

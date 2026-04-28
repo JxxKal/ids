@@ -352,10 +352,45 @@
       "source": "Source",
       "destination": "Destination",
       "hits": "Hits",
-      "score": "Score"
+      "score": "Score",
+      "boundary": "Boundary"
     },
     "noAlerts": "No alerts",
     "bidirectional": "Bidirectional (request + response in session)",
+    "egressToggle": {
+      "title": "Egress boundary filter: Off → egress only (no whitelisted) → egress + whitelisted (audit view)",
+      "off": "↘ Egress: Off",
+      "on": "↘ Egress: On",
+      "onWl": "↘ Egress + WL"
+    },
+    "priorityToggle": {
+      "title": "Sort by boundary priority (P0 first); otherwise time descending",
+      "off": "≡ Sort: Time",
+      "on": "≡ Sort: Priority"
+    },
+    "whitelistRowAction": "Whitelist this flow as legitimate egress",
+    "boundary": {
+      "known": "known",
+      "unknown": "unknown"
+    },
+    "whitelistModal": {
+      "title": "Egress whitelist entry",
+      "srcLabel": "Source",
+      "dstLabel": "Destination",
+      "protoLabel": "Protocol",
+      "scopeLabel": "Scope",
+      "scopeSrc": "Source only (all destinations)",
+      "scopeSrcDst": "Source + dst IP",
+      "scopeSrcNet": "Source + dst /24",
+      "scopeSrcPort": "Source + dst port",
+      "scopeSrcDstPort": "Source + dst IP + port",
+      "reasonLabel": "Reason (audit, min. 3 chars)",
+      "reasonPlaceholder": "e.g. Deliberate outbound sync to HQ VPN endpoint",
+      "save": "Add entry",
+      "created": "✓ Whitelist entry created",
+      "noSrcIp": "Alert has no source IP – no whitelist match possible.",
+      "reasonRequired": "Reason is required (min. 3 chars)."
+    },
     "pcap": {
       "open": "Open PCAP preview",
       "unavailable": "No PCAP – sniffer not running or no packet buffer for this alert"
@@ -389,6 +424,7 @@
       "system-health": "System load",
       "interfaces": "Interfaces",
       "dns-resolvers": "DNS resolvers",
+      "egress-priorities": "Egress priorities",
       "ssl": "SSL certificate",
       "syslog": "Syslog / SIEM",
       "update": "System update",
@@ -396,6 +432,28 @@
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "thorsten": "For Thorsten"
+    },
+    "egressPriorities": {
+      "title": "Egress priorities",
+      "intro": "Mapping from the classification tuple (network known? source known? destination known?) to a priority P0–P3 used to sort the AlertFeed egress filter. The table shows all 7 egress-relevant tuples (the eighth – ✓✓✓ – falls out of the egress view by definition). Persisted in system_config key 'boundary_priority_map'; the enrichment-service picks it up within 60 s without restart.",
+      "applyHint": "Changes apply only to new alerts from save time onwards; existing records are not retroactively reclassified.",
+      "saved": "Mapping saved.",
+      "saveError": "Save failed: {{message}}",
+      "reset": "Restore default",
+      "colNet": "Net known",
+      "colSrc": "Source known",
+      "colDst": "Dest known",
+      "colPriority": "Priority",
+      "colMeaning": "Meaning",
+      "tuples": {
+        "000": "Completely unknown egress",
+        "010": "Known host → unknown (C2/exfil suspicion)",
+        "001": "Unknown source → known external destination",
+        "100": "Rogue device in managed network heading out",
+        "011": "Routing/VPN anomaly between known hosts",
+        "101": "Inventory gap internal",
+        "110": "Known host → unknown local destination"
+      }
     },
     "dnsResolvers": {
       "title": "DNS resolver allowlist",
