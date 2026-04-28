@@ -13,6 +13,52 @@
     "delete": "Delete",
     "add": "Add"
   },
+  "errorBoundary": {
+    "title": "Rendering error",
+    "reload": "Reload"
+  },
+  "tests": {
+    "title": "Test scenarios",
+    "deleteFailed": "Delete failed",
+    "running": "Running…",
+    "start": "Start",
+    "logTitle": "Log",
+    "refreshHint": "Refresh every 5 s",
+    "deleteAll": "Delete all",
+    "deleteAllTitle": "Delete all entries",
+    "deleteEntryTitle": "Delete entry",
+    "noRuns": "No tests yet",
+    "columns": {
+      "time": "Time",
+      "scenario": "Scenario",
+      "status": "Status",
+      "expected": "Expected",
+      "triggered": "Triggered",
+      "latency": "Latency"
+    },
+    "scenarios": {
+      "TEST_001": {
+        "label": "IDS test signature",
+        "desc": "EICAR equivalent: TCP SYN+FIN+URG+PSH on port 65535"
+      },
+      "SCAN_001": {
+        "label": "TCP SYN port scan",
+        "desc": "55 SYN flows to various ports"
+      },
+      "DOS_SYN_001": {
+        "label": "SYN flood",
+        "desc": "510 SYN flows → syn_count > 500 in 10 s"
+      },
+      "RECON_003": {
+        "label": "RST connection flood",
+        "desc": "55 TCP RST flows → flow_rate > 50 in 60 s"
+      },
+      "DNS_DGA_001": {
+        "label": "DNS high-entropy (DGA)",
+        "desc": "UDP/53 with high IAT entropy"
+      }
+    }
+  },
   "hosts": {
     "addHost": "Add host",
     "exampleCsv": "Example CSV",
