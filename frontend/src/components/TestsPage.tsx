@@ -1,14 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { deleteAllTestRuns, deleteTestRun, fetchTestRuns, runTest } from '../api';
 import type { TestRun } from '../types';
 
-const SCENARIOS = [
-  { id: 'TEST_001',    label: 'IDS Test Signature',   desc: 'EICAR-Äquivalent: TCP SYN+FIN+URG+PSH an Port 65535' },
-  { id: 'SCAN_001',   label: 'TCP SYN Port Scan',     desc: '55 SYN-Flows an verschiedene Ports' },
-  { id: 'DOS_SYN_001',label: 'SYN Flood',             desc: '510 SYN-Flows → syn_count > 500 in 10s' },
-  { id: 'RECON_003',  label: 'RST-Verbindungsflut',   desc: '55 TCP-RST-Flows → flow_rate > 50 in 60s' },
-  { id: 'DNS_DGA_001',label: 'DNS High-Entropy (DGA)', desc: 'UDP/53 mit hoher IAT-Entropie' },
-];
+const SCENARIO_IDS = ['TEST_001', 'SCAN_001', 'DOS_SYN_001', 'RECON_003', 'DNS_DGA_001'] as const;
 
 function statusColor(status: string) {
   switch (status) {
@@ -19,6 +14,7 @@ function statusColor(status: string) {
 }
 
 export function TestsPage() {
+  const { t } = useTranslation();
   const [runs, setRuns]             = useState<TestRun[]>([]);
   const [running, setRunning]       = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -42,7 +38,7 @@ export function TestsPage() {
       await runTest(scenarioId);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler');
+      setError(err instanceof Error ? err.message : t('common.errorGeneric'));
     } finally {
       setRunning(null);
     }
@@ -54,7 +50,7 @@ export function TestsPage() {
       await deleteTestRun(runId);
       setRuns(prev => prev.filter(r => r.id !== runId));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Löschen fehlgeschlagen');
+      setError(err instanceof Error ? err.message : t('tests.deleteFailed'));
     } finally {
       setDeletingId(null);
     }
@@ -65,7 +61,7 @@ export function TestsPage() {
       await deleteAllTestRuns();
       setRuns([]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Löschen fehlgeschlagen');
+      setError(err instanceof Error ? err.message : t('tests.deleteFailed'));
     }
   };
 
@@ -73,22 +69,22 @@ export function TestsPage() {
     <div className="space-y-4">
       {/* Scenarios */}
       <div className="card p-4">
-        <h2 className="text-sm font-semibold text-slate-300 mb-3">Test-Szenarien</h2>
+        <h2 className="text-sm font-semibold text-slate-300 mb-3">{t('tests.title')}</h2>
         {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {SCENARIOS.map(s => (
-            <div key={s.id} className="bg-slate-800/50 border border-slate-700 rounded p-3 flex flex-col gap-2">
+          {SCENARIO_IDS.map(id => (
+            <div key={id} className="bg-slate-800/50 border border-slate-700 rounded p-3 flex flex-col gap-2">
               <div>
-                <p className="text-slate-200 text-xs font-medium">{s.label}</p>
-                <p className="text-slate-500 text-xs mt-0.5">{s.desc}</p>
-                <p className="text-blue-500 text-xs font-mono mt-1">{s.id}</p>
+                <p className="text-slate-200 text-xs font-medium">{t(`tests.scenarios.${id}.label`)}</p>
+                <p className="text-slate-500 text-xs mt-0.5">{t(`tests.scenarios.${id}.desc`)}</p>
+                <p className="text-blue-500 text-xs font-mono mt-1">{id}</p>
               </div>
               <button
-                onClick={() => trigger(s.id)}
+                onClick={() => trigger(id)}
                 disabled={running !== null}
                 className="btn-primary self-start mt-auto"
               >
-                {running === s.id ? 'Läuft…' : 'Starten'}
+                {running === id ? t('tests.running') : t('tests.start')}
               </button>
             </div>
           ))}
@@ -98,16 +94,16 @@ export function TestsPage() {
       {/* Run Log */}
       <div className="card overflow-hidden">
         <div className="px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-          <h2 className="text-sm font-semibold text-slate-300">Protokoll</h2>
+          <h2 className="text-sm font-semibold text-slate-300">{t('tests.logTitle')}</h2>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500">Aktualisierung alle 5s</span>
+            <span className="text-xs text-slate-500">{t('tests.refreshHint')}</span>
             {runs.length > 0 && (
               <button
                 onClick={handleDeleteAll}
                 className="text-xs text-slate-500 hover:text-red-400 transition-colors"
-                title="Alle Einträge löschen"
+                title={t('tests.deleteAllTitle')}
               >
-                Alle löschen
+                {t('tests.deleteAll')}
               </button>
             )}
           </div>
@@ -115,19 +111,19 @@ export function TestsPage() {
         <table className="w-full text-xs">
           <thead className="cyjan-table-head text-left">
             <tr>
-              <th>Zeit</th>
-              <th>Szenario</th>
-              <th>Status</th>
-              <th>Erwartet</th>
-              <th>Ausgelöst</th>
-              <th>Latenz</th>
+              <th>{t('tests.columns.time')}</th>
+              <th>{t('tests.columns.scenario')}</th>
+              <th>{t('tests.columns.status')}</th>
+              <th>{t('tests.columns.expected')}</th>
+              <th>{t('tests.columns.triggered')}</th>
+              <th>{t('tests.columns.latency')}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {runs.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-slate-600 py-8">Noch keine Tests</td>
+                <td colSpan={7} className="text-center text-slate-600 py-8">{t('tests.noRuns')}</td>
               </tr>
             )}
             {runs.map(r => (
@@ -152,7 +148,7 @@ export function TestsPage() {
                     onClick={() => handleDelete(r.id)}
                     disabled={deletingId === r.id}
                     className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40"
-                    title="Eintrag löschen"
+                    title={t('tests.deleteEntryTitle')}
                   >
                     ✕
                   </button>

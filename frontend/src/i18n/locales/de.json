@@ -13,6 +13,52 @@
     "delete": "Löschen",
     "add": "Hinzufügen"
   },
+  "errorBoundary": {
+    "title": "Rendering-Fehler",
+    "reload": "Neu laden"
+  },
+  "tests": {
+    "title": "Test-Szenarien",
+    "deleteFailed": "Löschen fehlgeschlagen",
+    "running": "Läuft…",
+    "start": "Starten",
+    "logTitle": "Protokoll",
+    "refreshHint": "Aktualisierung alle 5s",
+    "deleteAll": "Alle löschen",
+    "deleteAllTitle": "Alle Einträge löschen",
+    "deleteEntryTitle": "Eintrag löschen",
+    "noRuns": "Noch keine Tests",
+    "columns": {
+      "time": "Zeit",
+      "scenario": "Szenario",
+      "status": "Status",
+      "expected": "Erwartet",
+      "triggered": "Ausgelöst",
+      "latency": "Latenz"
+    },
+    "scenarios": {
+      "TEST_001": {
+        "label": "IDS Test Signature",
+        "desc": "EICAR-Äquivalent: TCP SYN+FIN+URG+PSH an Port 65535"
+      },
+      "SCAN_001": {
+        "label": "TCP SYN Port Scan",
+        "desc": "55 SYN-Flows an verschiedene Ports"
+      },
+      "DOS_SYN_001": {
+        "label": "SYN Flood",
+        "desc": "510 SYN-Flows → syn_count > 500 in 10s"
+      },
+      "RECON_003": {
+        "label": "RST-Verbindungsflut",
+        "desc": "55 TCP-RST-Flows → flow_rate > 50 in 60s"
+      },
+      "DNS_DGA_001": {
+        "label": "DNS High-Entropy (DGA)",
+        "desc": "UDP/53 mit hoher IAT-Entropie"
+      }
+    }
+  },
   "hosts": {
     "addHost": "Host hinzufügen",
     "exampleCsv": "Beispiel-CSV",
