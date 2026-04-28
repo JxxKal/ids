@@ -268,12 +268,21 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
       if (feedbackF === 'fp'   && a.feedback !== 'fp') return false;
       if (feedbackF === 'tp'   && a.feedback !== 'tp') return false;
       if (q) {
+        // Auch Hostnamen + Display-Names durchsuchen — die IpCell rendert
+        // `displayName ?? hostname ?? ip`, also sollen User auch genau das
+        // suchen können was sie sehen (manuell vergebene Namen, iTop-CMDB-
+        // Assignments, rDNS-Hostnames).
+        const e = a.enrichment;
         return (
           a.src_ip?.includes(q) ||
           a.dst_ip?.includes(q) ||
           a.rule_id?.toLowerCase().includes(q) ||
           a.description?.toLowerCase().includes(q) ||
-          a.tags.some(t => t.toLowerCase().includes(q))
+          a.tags.some(t => t.toLowerCase().includes(q)) ||
+          e?.src_display_name?.toLowerCase().includes(q) ||
+          e?.dst_display_name?.toLowerCase().includes(q) ||
+          e?.src_hostname?.toLowerCase().includes(q) ||
+          e?.dst_hostname?.toLowerCase().includes(q)
         );
       }
       return true;
