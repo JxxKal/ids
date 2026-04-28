@@ -16,6 +16,7 @@
  *   • Peer-Liste mit Direction, Bytes, Top-Ports und Alert-Count.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
 import { X, ArrowRight, ArrowLeft, ArrowLeftRight, AlertTriangle } from 'lucide-react';
 import { fetchHostConnections } from '../api';
@@ -48,6 +49,7 @@ const fmtBytes = (b: number): string => {
 };
 
 export function HostConnectionDrawer() {
+  const { t } = useTranslation();
   const [ip,     setIp]     = useState<string | null>(null);
   const [windowSel, setWindowSel] = useState<HostConnectionWindow>('1h');
   const [data,   setData]   = useState<HostConnectionsResponse | null>(null);
@@ -113,13 +115,13 @@ export function HostConnectionDrawer() {
         <header className="flex-none border-b border-slate-800 px-5 py-3
                            bg-slate-950/95 backdrop-blur flex items-center gap-3">
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] uppercase tracking-widest text-slate-500">Host-Verbindungen</p>
+            <p className="text-[10px] uppercase tracking-widest text-slate-500">{t('hostConnDrawer.title')}</p>
             <h2 className="font-mono text-base text-slate-100 truncate">{ip}</h2>
           </div>
           <button
             type="button"
             onClick={() => setIp(null)}
-            title="Schließen"
+            title={t('common.close')}
             className="text-[11px] px-3 py-1 rounded border border-slate-600/30
                        text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300
                        transition-colors inline-flex items-center gap-1.5"
@@ -167,11 +169,11 @@ export function HostConnectionDrawer() {
 
           {/* Radial-Graph */}
           {loading && !data && (
-            <p className="text-xs text-slate-500 text-center py-8">Lade Verbindungen …</p>
+            <p className="text-xs text-slate-500 text-center py-8">{t('hostConnDrawer.loading')}</p>
           )}
           {data && data.peers.length === 0 && !loading && (
             <p className="text-xs text-slate-500 text-center py-8 italic">
-              Keine Flows zu diesem Host im gewählten Zeitfenster.
+              {t('hostConnDrawer.noFlows')}
             </p>
           )}
           {data && data.peers.length > 0 && (
@@ -191,6 +193,7 @@ export function HostConnectionDrawer() {
 
 // ── Sparkline (Flow-Histogramm über das Fenster) ─────────────────────────────
 function Sparkline({ data }: { data: HostConnectionsResponse }) {
+  const { t } = useTranslation();
   const W = 680;
   const H = 56;
   const pad = 2;
@@ -216,8 +219,8 @@ function Sparkline({ data }: { data: HostConnectionsResponse }) {
   return (
     <div className="rounded border border-slate-800 bg-slate-900/40 p-2">
       <div className="flex items-baseline justify-between mb-1">
-        <span className="text-[10px] uppercase tracking-widest text-slate-500">Flows pro {fmtBucket(data.bucket_sec)}</span>
-        <span className="text-[10px] text-slate-500 font-mono">max {max}</span>
+        <span className="text-[10px] uppercase tracking-widest text-slate-500">{t('hostConnDrawer.flowsPerBucket', { bucket: fmtBucket(data.bucket_sec) })}</span>
+        <span className="text-[10px] text-slate-500 font-mono">{t('hostConnDrawer.max', { value: max })}</span>
       </div>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: 'block' }}>
         {filled.map((b, i) => {
@@ -247,6 +250,7 @@ function fmtBucket(sec: number): string {
 
 // ── Radial-SVG-Plot ──────────────────────────────────────────────────────────
 function RadialGraph({ host, peers }: { host: string; peers: HostConnectionPeer[] }) {
+  const { t } = useTranslation();
   const W = 680;
   const H = 380;
   const cx = W / 2;
@@ -262,7 +266,7 @@ function RadialGraph({ host, peers }: { host: string; peers: HostConnectionPeer[
 
   return (
     <div className="rounded border border-slate-800 bg-slate-900/40 p-2">
-      <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Verbindungen von ${host}`}>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={t('hostConnDrawer.graphAriaLabel', { host })}>
         {/* Edges first (under the nodes) */}
         {top.map((p, i) => {
           const angle = (i / top.length) * 2 * Math.PI - Math.PI / 2;
@@ -342,7 +346,7 @@ function RadialGraph({ host, peers }: { host: string; peers: HostConnectionPeer[
       </svg>
       {truncated && (
         <p className="text-[10px] text-amber-400 italic mt-1 px-2">
-          Top 30 von {peers.length} Peers (nach Bytes). Rest in der Liste unten.
+          {t('hostConnDrawer.topPeersHint', { count: peers.length })}
         </p>
       )}
     </div>
@@ -351,9 +355,10 @@ function RadialGraph({ host, peers }: { host: string; peers: HostConnectionPeer[
 
 // ── Peer-Liste mit Details ───────────────────────────────────────────────────
 function PeerList({ peers, truncated }: { peers: HostConnectionPeer[]; truncated: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1">
-      <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Peers ({peers.length})</p>
+      <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-1">{t('hostConnDrawer.peers', { count: peers.length })}</p>
       {peers.map(p => {
         const dirIcon = p.direction === 'both' ? <ArrowLeftRight size={11} /> :
                         p.direction === 'out'  ? <ArrowRight     size={11} /> :
@@ -388,7 +393,7 @@ function PeerList({ peers, truncated }: { peers: HostConnectionPeer[]; truncated
                 )}
               </div>
               <div className="text-slate-500 text-[10px] flex items-center gap-3 mt-0.5 flex-wrap">
-                <span>{p.flow_count} flows</span>
+                <span>{t('hostConnDrawer.peerFlows', { count: p.flow_count })}</span>
                 <span className="font-mono">{fmtBytes(p.total_bytes)}</span>
                 {p.top_ports.length > 0 && (
                   <span className="font-mono text-slate-400">
@@ -407,7 +412,7 @@ function PeerList({ peers, truncated }: { peers: HostConnectionPeer[]; truncated
       })}
       {truncated && (
         <p className="text-[10px] italic text-slate-500 mt-2">
-          Nur 100 Peers angezeigt – API-Limit. Bei dichtem Traffic Zeitfenster verkleinern.
+          {t('hostConnDrawer.truncated')}
         </p>
       )}
     </div>

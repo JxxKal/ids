@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { Network } from 'lucide-react';
 import {
   createHost,
@@ -16,6 +17,7 @@ import { TrustBadge } from './TrustBadge';
 type EditState = { ip: string; display_name: string; trusted: boolean } | null;
 
 export function HostsPage() {
+  const { t } = useTranslation();
   const [confirmIp, setConfirmIp] = useState<string | null>(null);
   const [hosts, setHosts]       = useState<Host[]>([]);
   const [search, setSearch]     = useState('');
@@ -47,7 +49,7 @@ export function HostsPage() {
       setNewIp(''); setNewName('');
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler');
+      setError(err instanceof Error ? err.message : t('common.errorGeneric'));
     } finally {
       setLoading(false);
     }
@@ -63,7 +65,7 @@ export function HostsPage() {
       setEdit(null);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Fehler');
+      setError(err instanceof Error ? err.message : t('common.errorGeneric'));
     }
   };
 
@@ -78,13 +80,14 @@ export function HostsPage() {
     setImportResult('');
     try {
       const result = await importHostsCsv(file);
-      setImportResult(
-        `Importiert: ${result.imported} | Übersprungen: ${result.skipped}` +
-        (result.errors.length ? ` | Fehler: ${result.errors.slice(0, 3).join('; ')}` : '')
-      );
+      let msg = t('hosts.importResult', { imported: result.imported, skipped: result.skipped });
+      if (result.errors.length) {
+        msg += t('hosts.importErrors', { errors: result.errors.slice(0, 3).join('; ') });
+      }
+      setImportResult(msg);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Import-Fehler');
+      setError(err instanceof Error ? err.message : t('hosts.importError'));
     }
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -94,17 +97,17 @@ export function HostsPage() {
       {/* Add host + CSV import */}
       <div className="card p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-300">Host hinzufügen</h2>
+          <h2 className="text-sm font-semibold text-slate-300">{t('hosts.addHost')}</h2>
           <div className="flex items-center gap-2">
             <button
               onClick={() => downloadHostsExampleCsv().catch(() => {})}
               className="btn-ghost text-xs text-slate-500 hover:text-slate-300"
-              title="Beispiel-CSV herunterladen"
+              title={t('hosts.exampleCsvTitle')}
             >
-              Beispiel-CSV
+              {t('hosts.exampleCsv')}
             </button>
             <label className="btn-ghost cursor-pointer text-xs">
-              CSV importieren
+              {t('hosts.importCsv')}
               <input
                 ref={fileRef}
                 type="file"
@@ -121,7 +124,7 @@ export function HostsPage() {
 
         <form onSubmit={addHost} className="flex flex-wrap gap-2 items-end">
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">IP-Adresse *</span>
+            <span className="text-xs text-slate-500">{t('hosts.ipRequired')}</span>
             <input
               required
               className="input w-40"
@@ -131,22 +134,25 @@ export function HostsPage() {
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-slate-500">Anzeigename</span>
+            <span className="text-xs text-slate-500">{t('hosts.displayName')}</span>
             <input
               className="input w-48"
-              placeholder="z.B. Router, Drucker …"
+              placeholder={t('hosts.displayNamePlaceholder')}
               value={newName}
               onChange={e => setNewName(e.target.value)}
             />
           </label>
           <button type="submit" disabled={loading} className="btn-primary self-end">
-            {loading ? '…' : 'Hinzufügen'}
+            {loading ? '…' : t('common.add')}
           </button>
           {error && <span className="text-red-400 text-xs self-end">{error}</span>}
         </form>
 
         <p className="text-xs text-slate-600">
-          CSV-Format: <code className="text-slate-500">Hostname;IP-Adresse</code> oder <code className="text-slate-500">IP-Adresse;Hostname</code> – Semikolon oder Komma als Trennzeichen.
+          <Trans
+            i18nKey="hosts.csvFormatHint"
+            components={{ code: <code className="text-slate-500" /> }}
+          />
         </p>
       </div>
 
@@ -154,7 +160,7 @@ export function HostsPage() {
       <div className="flex gap-2 items-center">
         <input
           className="input flex-1 max-w-xs"
-          placeholder="IP oder Name suchen…"
+          placeholder={t('hosts.searchPlaceholder')}
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
@@ -168,10 +174,10 @@ export function HostsPage() {
                 : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
             }`}
           >
-            {{ all: 'Alle', trusted: 'Bekannt', unknown: 'Unbekannt' }[f]}
+            {t(`hosts.filter${f.charAt(0).toUpperCase() + f.slice(1)}`)}
           </button>
         ))}
-        <span className="text-xs text-slate-500 ml-auto">{hosts.length} Hosts</span>
+        <span className="text-xs text-slate-500 ml-auto">{t('hosts.count', { count: hosts.length })}</span>
       </div>
 
       {/* Table */}
@@ -179,19 +185,19 @@ export function HostsPage() {
         <table className="w-full text-xs">
           <thead className="cyjan-table-head text-left">
             <tr>
-              <th>IP</th>
-              <th>Anzeigename / Hostname</th>
-              <th>Trust</th>
-              <th>Geo / ASN</th>
-              <th>Ping</th>
-              <th>Zuletzt gesehen</th>
+              <th>{t('hosts.columns.ip')}</th>
+              <th>{t('hosts.columns.displayHostname')}</th>
+              <th>{t('hosts.columns.trust')}</th>
+              <th>{t('hosts.columns.geoAsn')}</th>
+              <th>{t('hosts.columns.ping')}</th>
+              <th>{t('hosts.columns.lastSeen')}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {hosts.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-slate-600 py-8">Keine Hosts</td>
+                <td colSpan={7} className="text-center text-slate-600 py-8">{t('hosts.noHosts')}</td>
               </tr>
             )}
             {hosts.map(h => (
@@ -200,7 +206,7 @@ export function HostsPage() {
                   <button
                     type="button"
                     onClick={() => showHostConnections(h.ip)}
-                    title="Verbindungs-Übersicht für diesen Host anzeigen"
+                    title={t('hosts.showConnectionsTitle')}
                     className="group inline-flex items-center gap-1.5 hover:text-cyan-300 transition-colors"
                   >
                     <Network size={11} className="text-slate-500 group-hover:text-cyan-400 transition-colors" />
@@ -231,7 +237,7 @@ export function HostsPage() {
                         checked={editState.trusted}
                         onChange={e => setEdit({ ...editState, trusted: e.target.checked })}
                       />
-                      <span className="text-slate-400">Trusted</span>
+                      <span className="text-slate-400">{t('hosts.trustedToggle')}</span>
                     </label>
                   ) : (
                     <TrustBadge trusted={h.trusted} source={h.trust_source} />
@@ -251,8 +257,8 @@ export function HostsPage() {
                 <td className="px-4 py-2 text-right">
                   {editState?.ip === h.ip ? (
                     <div className="flex gap-1 justify-end">
-                      <button onClick={saveEdit}   className="btn-primary">Speichern</button>
-                      <button onClick={() => setEdit(null)} className="btn-ghost">Abbrechen</button>
+                      <button onClick={saveEdit}   className="btn-primary">{t('common.save')}</button>
+                      <button onClick={() => setEdit(null)} className="btn-ghost">{t('common.cancel')}</button>
                     </div>
                   ) : (
                     <div className="flex gap-1 justify-end">
@@ -260,10 +266,10 @@ export function HostsPage() {
                         onClick={() => setEdit({ ip: h.ip, display_name: h.display_name ?? '', trusted: h.trusted })}
                         className="btn-ghost"
                       >
-                        Bearbeiten
+                        {t('common.edit')}
                       </button>
                       <button onClick={() => setConfirmIp(h.ip)} className="btn-ghost text-red-500">
-                        Löschen
+                        {t('common.delete')}
                       </button>
                     </div>
                   )}
@@ -276,7 +282,7 @@ export function HostsPage() {
 
       {confirmIp && (
         <ConfirmDialog
-          message={`Host ${confirmIp} löschen?`}
+          message={t('hosts.deleteConfirm', { ip: confirmIp })}
           onConfirm={() => { setConfirmIp(null); remove(confirmIp); }}
           onCancel={() => setConfirmIp(null)}
         />
