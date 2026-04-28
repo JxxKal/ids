@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import {
   Activity, Database, FileText, Globe, HardDrive, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Server, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
@@ -3683,6 +3683,14 @@ function RuleOverridesSettings() {
       </div>
 
       <p className="text-xs text-slate-500 leading-relaxed">{t('settings.ruleOverrides.intro')}</p>
+
+      <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-900/40 border border-slate-700/40 rounded px-3 py-2">
+        <Trans
+          i18nKey="settings.ruleOverrides.scopeNote"
+          values={{ count: rules.length }}
+          components={{ strong: <strong className="text-slate-200" />, em: <em className="text-cyan-400 not-italic" /> }}
+        />
+      </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 

@@ -597,6 +597,7 @@
     "ruleOverrides": {
       "title": "Regel-Anpassungen",
       "intro": "Pro Signature-Engine-Regel kannst du den Severity-Wert anpassen oder die Regel komplett deaktivieren. Die Anpassungen werden in /sig-rules/custom/_overrides.json gespeichert und vom signature-engine ohne Restart binnen Sekunden übernommen.",
+      "scopeNote": "Hier siehst du nur die <strong>YAML-Regeln der Signature-Engine</strong> ({{count}} insgesamt) – das sind die flow-basierten Heuristiken wie SCAN_002, DNS_AMP_001, ANOMALY_FRAGMENT_001 etc. Die deutlich größere Sammlung der <strong>Suricata-Regeln</strong> (Tausende, .rules-Format) liegt unter <em>Regelwerk → Aktive Regeln</em> bzw. <em>Eigene Signaturen</em> und wird dort separat gepflegt.",
       "search": "Filter: ID, Name, Beschreibung, Tag",
       "filterAll": "Alle",
       "filterEnabled": "Aktiv",

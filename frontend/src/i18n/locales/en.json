@@ -597,6 +597,7 @@
     "ruleOverrides": {
       "title": "Rule adjustments",
       "intro": "Per signature-engine rule you can override the severity or disable the rule entirely. The adjustments are stored in /sig-rules/custom/_overrides.json and picked up by the signature-engine within seconds, without a restart.",
+      "scopeNote": "This page lists only the <strong>signature-engine YAML rules</strong> ({{count}} total) – the flow-based heuristics such as SCAN_002, DNS_AMP_001, ANOMALY_FRAGMENT_001, etc. The much larger collection of <strong>Suricata rules</strong> (thousands, .rules format) lives under <em>Rule set → Active rules</em> and <em>Custom signatures</em> and is managed there separately.",
       "search": "Filter: ID, name, description, tag",
       "filterAll": "All",
       "filterEnabled": "Enabled",
