@@ -385,6 +385,7 @@
       "rules-sources": "Rule sources",
       "rules-list": "Active rules",
       "rules-editor": "Custom signatures",
+      "rules-overrides": "Rule adjustments",
       "system-health": "System load",
       "interfaces": "Interfaces",
       "dns-resolvers": "DNS resolvers",
@@ -592,6 +593,35 @@
       "manualTitle": "User marked an alert of this connection as FP",
       "learnedTitle": "Automatically learned from traffic behaviour",
       "refreshFooter": "Alert manager refresh: 60 s · UI refresh: 30 s · ENV: SUPPRESSION_LEARN_WINDOW_D, SUPPRESSION_MIN_HOURS, SUPPRESSION_Z_THRESHOLD"
+    },
+    "ruleOverrides": {
+      "title": "Rule adjustments",
+      "intro": "Per signature-engine rule you can override the severity or disable the rule entirely. The adjustments are stored in /sig-rules/custom/_overrides.json and picked up by the signature-engine within seconds, without a restart.",
+      "search": "Filter: ID, name, description, tag",
+      "filterAll": "All",
+      "filterEnabled": "Enabled",
+      "filterDisabled": "Disabled",
+      "filterChanged": "Changed",
+      "noRules": "No rules found.",
+      "loadError": "Could not load rules: {{message}}",
+      "saveError": "Save failed: {{message}}",
+      "saved": "Saved.",
+      "save": "Save",
+      "reset": "Discard",
+      "resetAll": "Reset all overrides",
+      "resetAllConfirm": "Really reset all overrides? YAML defaults will take effect again.",
+      "columns": {
+        "id": "ID",
+        "name": "Name",
+        "default": "YAML default",
+        "severity": "Effective severity",
+        "enabled": "Enabled",
+        "file": "File"
+      },
+      "showCondition": "Show condition",
+      "hideCondition": "Hide condition",
+      "tagsLabel": "Tags:",
+      "applyHint": "Changes take effect within ~5 seconds without restarting the service."
     },
     "rules": {
       "sourcesTitle": "Rule sources",

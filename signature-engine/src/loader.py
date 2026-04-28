@@ -15,6 +15,7 @@ Verfügbare Variablen in condition:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -27,6 +28,14 @@ import yaml
 log = logging.getLogger(__name__)
 
 VALID_SEVERITIES = {"critical", "high", "medium", "low"}
+
+# Override-Datei für Per-Regel Disable + Severity-Override.
+# Format:
+#   { "DNS_AMP_001": {"enabled": false, "severity": null},
+#     "SCAN_002":    {"enabled": true,  "severity": "low"} }
+# Liegt im custom/-Volume, damit GUI-Edits persistieren und der Loader sie via
+# inotify-mtime aufpickt.
+OVERRIDES_FILENAME = "_overrides.json"
 
 
 @dataclass
@@ -121,6 +130,10 @@ class RuleLoader:
         self.rules: list[Rule] = []
         # {path: mtime}
         self._mtimes: dict[Path, float] = {}
+        # Override-Tracking (separat von YAML-Files, aber gleicher Reload-Trigger)
+        self._overrides_path: Path | None = None
+        self._overrides_mtime: float = 0.0
+        self._overrides: dict[str, dict] = {}
 
     def load(self) -> None:
         """Erstes vollständiges Laden aller Regeln."""
@@ -141,13 +154,25 @@ class RuleLoader:
     # ── Interne Hilfsmethoden ─────────────────────────────────────────────────
 
     def _yaml_files(self) -> list[Path]:
-        """Gibt alle .yml-Dateien im rules_dir zurück, plus die eingebaute test.yml."""
+        """Gibt alle .yml-Dateien im rules_dir zurück, plus die eingebaute test.yml.
+
+        Sortier-Priorität: custom/ vor builtin/. Damit gewinnen Custom-Dateien
+        bei doppelten Rule-IDs gegen die Builtin-Variante – und der User kann
+        eine builtin-Regel "überschreiben", indem er ihre ID in einer eigenen
+        Datei unter custom/ mit anderen Schwellwerten erneut definiert. Der
+        Loader skippt dann beim zweiten Auftauchen den builtin-Eintrag.
+        """
         files: list[Path] = []
         if self._rules_dir.is_dir():
             # rglob durchsucht auch Unterverzeichnisse (builtin/, custom/, …)
-            files = sorted(self._rules_dir.rglob("*.yml"))
+            files = list(self._rules_dir.rglob("*.yml"))
         else:
             log.warning("Rules dir not found: %s", self._rules_dir)
+
+        # custom/-Pfade kriegen Vorrang vor builtin/-Pfaden, dann alphabetisch.
+        def _priority(p: Path) -> tuple[int, str]:
+            return (0 if "custom" in p.parts else 1, str(p))
+        files.sort(key=_priority)
 
         # Eingebaute Test-Signatur immer einschließen (falls nicht schon drin)
         if self._BUILTIN_FILE.exists() and self._BUILTIN_FILE not in files:
@@ -173,7 +198,94 @@ class RuleLoader:
             if self._mtimes.get(f) != mtime:
                 return True
 
+        # Auch _overrides.json triggert Reload
+        op = self._find_overrides_file()
+        try:
+            new_om = op.stat().st_mtime if op and op.exists() else 0.0
+        except OSError:
+            new_om = 0.0
+        if new_om != self._overrides_mtime:
+            return True
+
         return False
+
+    def _find_overrides_file(self) -> Path | None:
+        """_overrides.json bevorzugt im custom/-Subdir suchen, fallback auf rules_dir."""
+        if not self._rules_dir.is_dir():
+            return None
+        candidates = [
+            self._rules_dir / "custom" / OVERRIDES_FILENAME,
+            self._rules_dir / OVERRIDES_FILENAME,
+        ]
+        for c in candidates:
+            if c.exists():
+                return c
+        # Default: custom/_overrides.json (auch wenn noch nicht existiert),
+        # damit der Pfad fürs spätere Schreiben deterministisch ist.
+        return candidates[0]
+
+    def _load_overrides(self) -> dict[str, dict]:
+        op = self._find_overrides_file()
+        try:
+            mtime = op.stat().st_mtime if op and op.exists() else 0.0
+        except OSError:
+            mtime = 0.0
+        self._overrides_mtime = mtime
+
+        if not op or not op.exists():
+            return {}
+
+        try:
+            data = json.loads(op.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            log.warning("_overrides.json konnte nicht gelesen werden (%s): %s", op, exc)
+            return {}
+
+        if not isinstance(data, dict):
+            log.warning("_overrides.json hat unerwartetes Format (kein Objekt): %s", op)
+            return {}
+
+        cleaned: dict[str, dict] = {}
+        for rule_id, ov in data.items():
+            if not isinstance(ov, dict):
+                continue
+            entry: dict = {}
+            if "enabled" in ov and isinstance(ov["enabled"], bool):
+                entry["enabled"] = ov["enabled"]
+            sev = ov.get("severity")
+            if isinstance(sev, str) and sev.lower() in VALID_SEVERITIES:
+                entry["severity"] = sev.lower()
+            if entry:
+                cleaned[rule_id] = entry
+        return cleaned
+
+    def _apply_overrides(self, rules: list[Rule]) -> list[Rule]:
+        if not self._overrides:
+            return rules
+        out: list[Rule] = []
+        suppressed = 0
+        adjusted = 0
+        for r in rules:
+            ov = self._overrides.get(r.id)
+            if ov is None:
+                out.append(r)
+                continue
+            if ov.get("enabled") is False:
+                suppressed += 1
+                continue
+            sev_override = ov.get("severity")
+            if sev_override and sev_override != r.severity:
+                r = Rule(
+                    id=r.id, name=r.name, description=r.description,
+                    severity=sev_override, tags=r.tags,
+                    condition_src=r.condition_src, condition_code=r.condition_code,
+                    cooldown_s=r.cooldown_s,
+                )
+                adjusted += 1
+            out.append(r)
+        if suppressed or adjusted:
+            log.info("Overrides angewendet: %d disabled, %d severity-override", suppressed, adjusted)
+        return out
 
     def _load_all(self) -> list[Rule]:
         files = self._yaml_files()
@@ -196,4 +308,9 @@ class RuleLoader:
                 rules.append(rule)
 
         self._mtimes = new_mtimes
-        return rules
+
+        # Overrides aus _overrides.json einlesen + anwenden (disabled raus,
+        # severity-override patcht das Rule-Objekt). Mtime wird in
+        # _load_overrides gesetzt, damit _has_changed() den File-Touch erkennt.
+        self._overrides = self._load_overrides()
+        return self._apply_overrides(rules)

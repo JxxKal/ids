@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Activity, Database, FileText, Globe, HardDrive, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Server, Sliders, Sparkles, Upload, Users,
@@ -17,6 +17,8 @@ import {
   fetchLearnedPatterns,
   fetchDbStats, cleanupDb, vacuumDb, setRetentionPolicy, backupDbUrl, restoreDb, fetchMaintenanceAudit,
   fetchDnsResolvers, saveDnsResolvers,
+  fetchSigRules, fetchSigRulesOverrides, saveSigRulesOverrides,
+  type SigRuleEntry, type SigRuleOverride,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
@@ -3531,6 +3533,260 @@ function SystemHealth() {
   );
 }
 
+// ── RuleOverridesSettings ───────────────────────────────────────────────────
+
+const SEVERITY_OPTIONS: ('default' | 'critical' | 'high' | 'medium' | 'low')[] =
+  ['default', 'critical', 'high', 'medium', 'low'];
+
+function SeverityCell({
+  rule, override, onChange,
+}: {
+  rule: SigRuleEntry;
+  override: SigRuleOverride;
+  onChange: (sev: SigRuleOverride['severity']) => void;
+}) {
+  const value = override.severity ?? 'default';
+  const hasChange = override.severity != null;
+  return (
+    <select
+      className={`input text-xs w-32 ${hasChange ? 'border-amber-600 text-amber-200' : ''}`}
+      value={value}
+      onChange={e => {
+        const v = e.target.value;
+        onChange(v === 'default' ? null : (v as SigRuleOverride['severity']));
+      }}
+    >
+      {SEVERITY_OPTIONS.map(s => (
+        <option key={s} value={s}>
+          {s === 'default' ? `${rule.severity_default} (default)` : s}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function RuleOverridesSettings() {
+  const { t } = useTranslation();
+  const [rules, setRules]               = useState<SigRuleEntry[]>([]);
+  const [overrides, setOverrides]       = useState<Record<string, SigRuleOverride>>({});
+  const [originalOverrides, setOriginal] = useState<Record<string, SigRuleOverride>>({});
+  const [search, setSearch]             = useState('');
+  const [filter, setFilter]             = useState<'all' | 'enabled' | 'disabled' | 'changed'>('all');
+  const [expanded, setExpanded]         = useState<Record<string, boolean>>({});
+  const [error, setError]               = useState('');
+  const [info, setInfo]                 = useState('');
+  const [loading, setLoading]           = useState(true);
+  const [saving, setSaving]             = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    Promise.all([fetchSigRules(), fetchSigRulesOverrides()])
+      .then(([rs, ov]) => {
+        setRules(rs);
+        setOverrides(ov.overrides);
+        setOriginal(ov.overrides);
+      })
+      .catch(e => setError(t('settings.ruleOverrides.loadError', { message: e instanceof Error ? e.message : String(e) })))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const dirty = useMemo(() => {
+    return JSON.stringify(overrides) !== JSON.stringify(originalOverrides);
+  }, [overrides, originalOverrides]);
+
+  const updateOverride = (rid: string, patch: Partial<SigRuleOverride>) => {
+    setOverrides(prev => {
+      const cur = prev[rid] ?? {};
+      const next: SigRuleOverride = { ...cur, ...patch };
+      // Clean: wenn beide Felder leer/default sind, Eintrag ganz raus
+      const out = { ...prev };
+      if ((next.enabled === true || next.enabled == null) && next.severity == null) {
+        delete out[rid];
+      } else {
+        out[rid] = next;
+      }
+      return out;
+    });
+    setInfo('');
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      const r = await saveSigRulesOverrides(overrides);
+      setOverrides(r.overrides);
+      setOriginal(r.overrides);
+      setInfo(t('settings.ruleOverrides.saved'));
+      // Reload rule list damit "Effective Severity"-Spalte stimmt
+      const rs = await fetchSigRules();
+      setRules(rs);
+    } catch (e) {
+      setError(t('settings.ruleOverrides.saveError', { message: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleResetAll = () => {
+    if (!confirm(t('settings.ruleOverrides.resetAllConfirm'))) return;
+    setOverrides({});
+  };
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rules.filter(r => {
+      const ov = overrides[r.id] ?? {};
+      const isDisabled = ov.enabled === false;
+      const hasChange  = ov.enabled === false || (ov.severity != null);
+      if (filter === 'enabled'  && isDisabled) return false;
+      if (filter === 'disabled' && !isDisabled) return false;
+      if (filter === 'changed'  && !hasChange) return false;
+      if (q) {
+        const hay = `${r.id} ${r.name} ${r.description} ${r.tags.join(' ')}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [rules, overrides, search, filter]);
+
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-sm font-semibold text-slate-200">
+          {t('settings.ruleOverrides.title')}
+          <span className="ml-2 text-slate-500 font-normal">{rules.length}</span>
+        </h2>
+        <div className="flex items-center gap-2">
+          <input
+            className="input text-xs w-64"
+            placeholder={t('settings.ruleOverrides.search')}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          <select
+            className="input text-xs w-32"
+            value={filter}
+            onChange={e => setFilter(e.target.value as typeof filter)}
+          >
+            <option value="all">{t('settings.ruleOverrides.filterAll')}</option>
+            <option value="enabled">{t('settings.ruleOverrides.filterEnabled')}</option>
+            <option value="disabled">{t('settings.ruleOverrides.filterDisabled')}</option>
+            <option value="changed">{t('settings.ruleOverrides.filterChanged')}</option>
+          </select>
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-500 leading-relaxed">{t('settings.ruleOverrides.intro')}</p>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      <div className="overflow-x-auto rounded-lg border border-slate-700/50">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-900/60 border-b border-slate-700/50">
+            <tr className="text-left text-slate-500">
+              <th className="px-3 py-2">{t('settings.ruleOverrides.columns.id')}</th>
+              <th className="px-3 py-2">{t('settings.ruleOverrides.columns.name')}</th>
+              <th className="px-3 py-2 w-32">{t('settings.ruleOverrides.columns.default')}</th>
+              <th className="px-3 py-2 w-40">{t('settings.ruleOverrides.columns.severity')}</th>
+              <th className="px-3 py-2 w-16 text-center">{t('settings.ruleOverrides.columns.enabled')}</th>
+              <th className="px-3 py-2">{t('settings.ruleOverrides.columns.file')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr><td colSpan={6} className="text-center text-slate-600 py-6">{t('settings.ruleOverrides.noRules')}</td></tr>
+            ) : filtered.map(r => {
+              const ov = overrides[r.id] ?? {};
+              const isOpen = !!expanded[r.id];
+              return (
+                <Fragment key={r.id}>
+                  <tr
+                    className={`border-b border-slate-800/40 cursor-pointer hover:bg-slate-800/20 ${ov.enabled === false ? 'opacity-50' : ''}`}
+                    onClick={() => setExpanded(p => ({ ...p, [r.id]: !p[r.id] }))}
+                  >
+                    <td className="px-3 py-2 font-mono text-slate-300 whitespace-nowrap">
+                      <span className="text-slate-600 mr-1">{isOpen ? '▾' : '▸'}</span>
+                      {r.id}
+                      {!r.builtin && <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-700/40">CUSTOM</span>}
+                    </td>
+                    <td className="px-3 py-2 text-slate-300">{r.name}</td>
+                    <td className="px-3 py-2 text-slate-500 font-mono">{r.severity_default}</td>
+                    <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                      <SeverityCell
+                        rule={r}
+                        override={ov}
+                        onChange={sev => updateOverride(r.id, { severity: sev })}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-center" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="accent-cyan-500"
+                        checked={ov.enabled !== false}
+                        onChange={e => updateOverride(r.id, { enabled: e.target.checked ? null : false })}
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-mono text-slate-600 text-[10px] truncate max-w-xs">{r.file}</td>
+                  </tr>
+                  {isOpen && (
+                    <tr className="bg-slate-900/40 border-b border-slate-800/40">
+                      <td colSpan={6} className="px-3 py-2 text-xs">
+                        <p className="text-slate-400 mb-1">{r.description || '–'}</p>
+                        {r.tags.length > 0 && (
+                          <p className="text-[10px] text-slate-500">
+                            <span className="text-slate-600">{t('settings.ruleOverrides.tagsLabel')}</span>{' '}
+                            {r.tags.map(tg => (
+                              <span key={tg} className="inline-block px-1.5 py-0.5 mr-1 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">{tg}</span>
+                            ))}
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 pt-2">
+        <span className="text-[10px] text-slate-600">{t('settings.ruleOverrides.applyHint')}</span>
+        <div className="flex items-center gap-2">
+          {info && <span className="text-[11px] text-green-400">{info}</span>}
+          <button
+            onClick={handleResetAll}
+            disabled={Object.keys(overrides).length === 0}
+            className="btn-ghost text-xs disabled:opacity-30"
+          >
+            {t('settings.ruleOverrides.resetAll')}
+          </button>
+          <button
+            onClick={() => { setOverrides(originalOverrides); setInfo(''); }}
+            disabled={!dirty || saving}
+            className="btn-ghost text-xs disabled:opacity-30"
+          >
+            {t('settings.ruleOverrides.reset')}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saving}
+            className="btn-primary text-xs disabled:opacity-50 whitespace-nowrap"
+          >
+            {saving ? '…' : t('settings.ruleOverrides.save')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── DnsResolverSettings ─────────────────────────────────────────────────────
 
 // Akzeptiert IPv4, IPv6 und CIDR-Notation (kein vollständiger Validator – nur
@@ -3673,7 +3929,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
+type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -3708,9 +3964,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'rules',
     items: [
-      { id: 'rules-sources', icon: <Database {...ICON_PROPS} /> },
-      { id: 'rules-list',    icon: <ListTree {...ICON_PROPS} /> },
-      { id: 'rules-editor',  icon: <FileText {...ICON_PROPS} /> },
+      { id: 'rules-sources',   icon: <Database {...ICON_PROPS} /> },
+      { id: 'rules-list',      icon: <ListTree {...ICON_PROPS} /> },
+      { id: 'rules-editor',    icon: <FileText {...ICON_PROPS} /> },
+      { id: 'rules-overrides', icon: <Sliders  {...ICON_PROPS} /> },
     ],
   },
   {
@@ -3832,6 +4089,7 @@ export function SettingsPage() {
             {active === 'rules-sources' && <RuleSources />}
             {active === 'rules-list'    && <RulesList />}
             {active === 'rules-editor'  && <RuleFileEditor />}
+            {active === 'rules-overrides' && <RuleOverridesSettings />}
             {active === 'system-health'  && <SystemHealth />}
             {active === 'db-maintenance' && <DatabaseMaintenance />}
             {active === 'interfaces'    && <NetworkInterfaces />}

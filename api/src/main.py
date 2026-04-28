@@ -45,6 +45,7 @@ from routers import hosts as hosts_router
 from routers import networks as networks_router
 from routers import ml as ml_router
 from routers import rules as rules_router
+from routers import sig_rules as sig_rules_router
 from routers import ssl as ssl_router
 from routers import system as system_router
 from routers import update as update_router
@@ -155,6 +156,7 @@ app.include_router(hosts_router.router,    dependencies=_auth)
 app.include_router(networks_router.router, dependencies=_auth)
 app.include_router(ml_router.router,       dependencies=_auth)
 app.include_router(rules_router.router,    dependencies=_auth)
+app.include_router(sig_rules_router.router, dependencies=_auth)
 app.include_router(system_router.router,   dependencies=_auth)
 app.include_router(tests_router.router,    dependencies=_auth)
 app.include_router(users_router.router,    dependencies=_auth)

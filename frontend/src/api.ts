@@ -623,6 +623,50 @@ export async function saveDnsResolvers(value: DnsResolversConfig): Promise<void>
   await req('/api/config/dns_resolvers', { method: 'PATCH', body: JSON.stringify({ value }) });
 }
 
+// ── Signature-Engine YAML-Regeln + Per-Regel-Overrides ───────────────────────
+
+export interface SigRuleEntry {
+  id:                string;
+  name:              string;
+  description:       string;
+  severity:          string;
+  severity_default:  string;
+  tags:              string[];
+  file:              string;
+  builtin:           boolean;
+  enabled:           boolean;
+  severity_override: string | null;
+}
+
+export interface SigRuleOverride {
+  enabled?:  boolean | null;
+  severity?: 'critical' | 'high' | 'medium' | 'low' | null;
+}
+
+export interface SigRulesOverridesResponse {
+  overrides: Record<string, SigRuleOverride>;
+}
+
+export async function fetchSigRules(): Promise<SigRuleEntry[]> {
+  if (isDemoMode()) return [];
+  return req<SigRuleEntry[]>('/api/sig-rules/list');
+}
+
+export async function fetchSigRulesOverrides(): Promise<SigRulesOverridesResponse> {
+  if (isDemoMode()) return { overrides: {} };
+  return req<SigRulesOverridesResponse>('/api/sig-rules/overrides');
+}
+
+export async function saveSigRulesOverrides(
+  overrides: Record<string, SigRuleOverride>,
+): Promise<SigRulesOverridesResponse> {
+  if (isDemoMode()) return { overrides: {} };
+  return req<SigRulesOverridesResponse>('/api/sig-rules/overrides', {
+    method: 'PUT',
+    body: JSON.stringify({ overrides }),
+  });
+}
+
 // ── iTop CMDB ─────────────────────────────────────────────────────────────────
 
 const ITOP_DEFAULT: import('./types').ItopConfig = {

@@ -343,6 +343,10 @@ services:
       MANAGEMENT_IFACE: ${MANAGEMENT_IFACE:-}
     volumes:
       - snort-rules:/rules
+      # signature-rules-Volume für Per-Regel Overrides + Custom-YAML.
+      # signature-engine schreibt nichts hier rein, api übernimmt die GUI-
+      # Schreib-Pfade (Settings → Rule-Anpassungen).
+      - signature-rules:/sig-rules
       - ml-models:/models
       - ids-certs:/certs
       - /var/run/docker.sock:/var/run/docker.sock

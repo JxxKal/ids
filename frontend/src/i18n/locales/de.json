@@ -385,6 +385,7 @@
       "rules-sources": "Rule-Quellen",
       "rules-list": "Aktive Regeln",
       "rules-editor": "Eigene Signaturen",
+      "rules-overrides": "Regel-Anpassungen",
       "system-health": "Systemauslastung",
       "interfaces": "Interfaces",
       "dns-resolvers": "DNS-Resolver",
@@ -592,6 +593,35 @@
       "manualTitle": "User hat Alert dieser Verbindung als FP markiert",
       "learnedTitle": "Aus dem Traffic-Verhalten automatisch gelernt",
       "refreshFooter": "Alert-Manager-Refresh: 60 s · UI-Refresh: 30 s · ENV: SUPPRESSION_LEARN_WINDOW_D, SUPPRESSION_MIN_HOURS, SUPPRESSION_Z_THRESHOLD"
+    },
+    "ruleOverrides": {
+      "title": "Regel-Anpassungen",
+      "intro": "Pro Signature-Engine-Regel kannst du den Severity-Wert anpassen oder die Regel komplett deaktivieren. Die Anpassungen werden in /sig-rules/custom/_overrides.json gespeichert und vom signature-engine ohne Restart binnen Sekunden übernommen.",
+      "search": "Filter: ID, Name, Beschreibung, Tag",
+      "filterAll": "Alle",
+      "filterEnabled": "Aktiv",
+      "filterDisabled": "Deaktiviert",
+      "filterChanged": "Geändert",
+      "noRules": "Keine Regeln gefunden.",
+      "loadError": "Konnte Regeln nicht laden: {{message}}",
+      "saveError": "Speichern fehlgeschlagen: {{message}}",
+      "saved": "Gespeichert.",
+      "save": "Speichern",
+      "reset": "Verwerfen",
+      "resetAll": "Alle Anpassungen zurücksetzen",
+      "resetAllConfirm": "Wirklich alle Overrides zurücksetzen? Damit greifen wieder die YAML-Defaults.",
+      "columns": {
+        "id": "ID",
+        "name": "Name",
+        "default": "YAML-Default",
+        "severity": "Effektive Severity",
+        "enabled": "Aktiv",
+        "file": "Datei"
+      },
+      "showCondition": "Bedingung anzeigen",
+      "hideCondition": "Bedingung ausblenden",
+      "tagsLabel": "Tags:",
+      "applyHint": "Änderungen wirken nach max. ~5 Sekunden ohne Service-Restart."
     },
     "rules": {
       "sourcesTitle": "Rule-Quellen",
