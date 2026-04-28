@@ -29,9 +29,10 @@ import { FuerThorsten } from './FuerThorsten';
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function SourceBadge({ source }: { source: string }) {
+  const { t } = useTranslation();
   return source === 'saml'
     ? <span className="px-1.5 py-0.5 text-[10px] rounded bg-purple-900/50 text-purple-300 border border-purple-700/40">SAML</span>
-    : <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">Lokal</span>;
+    : <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">{t('settings.users.sourceLocal')}</span>;
 }
 
 function RoleBadge({ role }: { role: string }) {
@@ -48,6 +49,7 @@ const EMPTY_FORM: NewUserForm = { username: '', email: '', display_name: '', rol
 // ── UserManagement ────────────────────────────────────────────────────────────
 
 function UserManagement() {
+  const { t } = useTranslation();
   const [users,   setUsers]   = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
@@ -63,9 +65,9 @@ function UserManagement() {
   useEffect(() => {
     fetchUsers()
       .then(setUsers)
-      .catch(() => setError('Benutzer konnten nicht geladen werden'))
+      .catch(() => setError(t('settings.users.loadError')))
       .finally(() => setLoading(false));
-  }, []);
+  }, [t]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -75,7 +77,7 @@ function UserManagement() {
     const pw = isApi
       ? crypto.getRandomValues(new Uint8Array(16)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '')
       : form.password;
-    if (!isApi && form.password !== form.password2) { setFormErr('Passwörter stimmen nicht überein'); return; }
+    if (!isApi && form.password !== form.password2) { setFormErr(t('settings.users.passwordMismatch')); return; }
     setSaving(true);
     try {
       const u = await createUser({
@@ -90,11 +92,11 @@ function UserManagement() {
       setShowNew(false);
       // Direkt Token generieren für neuen API-User
       if (isApi) {
-        const t = await generateApiToken(u.id);
-        setApiToken({ userId: u.id, token: t.token });
+        const tok = await generateApiToken(u.id);
+        setApiToken({ userId: u.id, token: tok.token });
       }
     } catch (err: unknown) {
-      setFormErr(err instanceof Error ? err.message : 'Fehler beim Erstellen');
+      setFormErr(err instanceof Error ? err.message : t('settings.users.createError'));
     } finally {
       setSaving(false);
     }
@@ -102,10 +104,10 @@ function UserManagement() {
 
   async function handleGenerateToken(userId: string) {
     try {
-      const t = await generateApiToken(userId);
-      setApiToken({ userId, token: t.token });
+      const tok = await generateApiToken(userId);
+      setApiToken({ userId, token: tok.token });
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Fehler beim Token-Generieren');
+      alert(err instanceof Error ? err.message : t('settings.users.tokenError'));
     }
   }
 
@@ -117,7 +119,7 @@ function UserManagement() {
       if (editData.display_name !== undefined) payload.display_name = editData.display_name;
       if (editData.role         !== undefined) payload.role         = editData.role as 'admin' | 'viewer' | 'api';
       if (editData.password) {
-        if (editData.password !== editData.password2) { setFormErr('Passwörter stimmen nicht überein'); setSaving(false); return; }
+        if (editData.password !== editData.password2) { setFormErr(t('settings.users.passwordMismatch')); setSaving(false); return; }
         payload.password = editData.password;
       }
       const u = await updateUser(id, payload);
@@ -126,7 +128,7 @@ function UserManagement() {
       setEditData({});
       setFormErr('');
     } catch (err: unknown) {
-      setFormErr(err instanceof Error ? err.message : 'Fehler beim Speichern');
+      setFormErr(err instanceof Error ? err.message : t('settings.users.saveError'));
     } finally {
       setSaving(false);
     }
@@ -144,11 +146,11 @@ function UserManagement() {
       await deleteUser(user.id);
       setUsers(prev => prev.filter(x => x.id !== user.id));
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Fehler beim Löschen');
+      alert(err instanceof Error ? err.message : t('settings.users.deleteError'));
     }
   }
 
-  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
   if (error)   return <p className="text-red-400 text-sm">{error}</p>;
 
   return (
@@ -157,7 +159,7 @@ function UserManagement() {
       {apiToken && (
         <div className="mb-4 p-3 rounded border border-indigo-700/50 bg-indigo-950/40 text-xs">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-indigo-300 font-semibold">API-Token generiert (nur einmal sichtbar!)</span>
+            <span className="text-indigo-300 font-semibold">{t('settings.users.tokenGenerated')}</span>
             <button className="text-slate-500 hover:text-slate-300 text-base leading-none" onClick={() => setApiToken(null)}>✕</button>
           </div>
           <div className="flex gap-2 items-center">
@@ -168,17 +170,17 @@ function UserManagement() {
               className="btn-ghost text-xs shrink-0"
               onClick={() => navigator.clipboard.writeText(apiToken.token)}
             >
-              Kopieren
+              {t('settings.users.copy')}
             </button>
           </div>
-          <p className="mt-1 text-slate-500">Speichere den Token sicher – er kann nicht erneut abgerufen werden.</p>
+          <p className="mt-1 text-slate-500">{t('settings.users.tokenSaveHint')}</p>
         </div>
       )}
 
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-slate-200">Benutzer</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.users.title')}</h2>
         <button className="btn-primary text-xs" onClick={() => { setShowNew(v => !v); setFormErr(''); }}>
-          {showNew ? 'Abbrechen' : '+ Neuer Benutzer'}
+          {showNew ? t('common.cancel') : t('settings.users.newUser')}
         </button>
       </div>
 
@@ -186,51 +188,51 @@ function UserManagement() {
       {showNew && (
         <form onSubmit={handleCreate} className="card p-4 mb-4 grid grid-cols-2 gap-3 text-xs">
           <div className="flex flex-col gap-1">
-            <label htmlFor="new-username" className="text-slate-400">Benutzername *</label>
+            <label htmlFor="new-username" className="text-slate-400">{t('settings.users.usernameRequired')}</label>
             <input id="new-username" name="new-username" className="input" required
               value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor="new-email" className="text-slate-400">E-Mail</label>
+            <label htmlFor="new-email" className="text-slate-400">{t('settings.users.email')}</label>
             <input id="new-email" name="new-email" type="email" className="input"
               value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor="new-displayname" className="text-slate-400">Anzeigename</label>
+            <label htmlFor="new-displayname" className="text-slate-400">{t('settings.users.displayName')}</label>
             <input id="new-displayname" name="new-displayname" className="input"
               value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor="new-role" className="text-slate-400">Rolle</label>
+            <label htmlFor="new-role" className="text-slate-400">{t('settings.users.role')}</label>
             <select id="new-role" name="new-role" className="input"
               value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as 'admin' | 'viewer' | 'api' }))}>
               <option value="viewer">Viewer</option>
               <option value="admin">Admin</option>
-              <option value="api">API (Service-Account)</option>
+              <option value="api">{t('settings.users.roleApiServiceAccount')}</option>
             </select>
           </div>
           {form.role !== 'api' && <>
             <div className="flex flex-col gap-1">
-              <label htmlFor="new-pw" className="text-slate-400">Passwort * (min. 8 Zeichen)</label>
+              <label htmlFor="new-pw" className="text-slate-400">{t('settings.users.passwordRequired')}</label>
               <input id="new-pw" name="new-pw" type="password" className="input" required minLength={8}
                 value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
             </div>
             <div className="flex flex-col gap-1">
-              <label htmlFor="new-pw2" className="text-slate-400">Passwort wiederholen *</label>
+              <label htmlFor="new-pw2" className="text-slate-400">{t('settings.users.passwordRepeatRequired')}</label>
               <input id="new-pw2" name="new-pw2" type="password" className="input" required
                 value={form.password2} onChange={e => setForm(f => ({ ...f, password2: e.target.value }))} />
             </div>
           </>}
           {form.role === 'api' && (
             <p className="col-span-2 text-indigo-400/80 text-xs bg-indigo-950/30 rounded px-3 py-2 border border-indigo-800/40">
-              API-User nutzen langlebige JWT-Token (365 Tage) statt Passwörter. Nach dem Anlegen wird der Token einmalig angezeigt.
+              {t('settings.users.apiUserHint')}
             </p>
           )}
           {formErr && <p className="col-span-2 text-red-400 text-xs">{formErr}</p>}
           <div className="col-span-2 flex justify-end gap-2">
-            <button type="button" className="btn-ghost text-xs" onClick={() => setShowNew(false)}>Abbrechen</button>
+            <button type="button" className="btn-ghost text-xs" onClick={() => setShowNew(false)}>{t('common.cancel')}</button>
             <button type="submit" className="btn-primary text-xs" disabled={saving}>
-              {saving ? 'Speichern…' : 'Benutzer anlegen'}
+              {saving ? t('settings.users.savingShort') : t('settings.users.createUser')}
             </button>
           </div>
         </form>
@@ -241,12 +243,12 @@ function UserManagement() {
       <table className="w-full text-xs">
         <thead className="cyjan-table-head">
           <tr className="text-left">
-            <th>Benutzer</th>
-            <th>E-Mail</th>
-            <th>Rolle</th>
-            <th>Quelle</th>
-            <th>Letzter Login</th>
-            <th>Aktiv</th>
+            <th>{t('settings.users.colUser')}</th>
+            <th>{t('settings.users.email')}</th>
+            <th>{t('settings.users.role')}</th>
+            <th>{t('settings.users.colSource')}</th>
+            <th>{t('settings.users.colLastLogin')}</th>
+            <th>{t('settings.users.colActive')}</th>
             <th></th>
           </tr>
         </thead>
@@ -260,17 +262,17 @@ function UserManagement() {
                     <span className="text-slate-300 font-medium">{u.username}</span>
                     {u.source === 'local' && (
                       <div className="mt-1 flex flex-col gap-1">
-                        <input className="input w-full" placeholder="Neues Passwort" type="password"
+                        <input className="input w-full" placeholder={t('settings.users.newPasswordPlaceholder')} type="password"
                           value={editData.password ?? ''}
                           onChange={e => setEditData(d => ({ ...d, password: e.target.value }))} />
-                        <input className="input w-full" placeholder="Wiederholen" type="password"
+                        <input className="input w-full" placeholder={t('settings.users.repeatPlaceholder')} type="password"
                           value={editData.password2 ?? ''}
                           onChange={e => setEditData(d => ({ ...d, password2: e.target.value }))} />
                       </div>
                     )}
                   </td>
                   <td className="py-2 pr-3">
-                    <input className="input w-full" placeholder="E-Mail" type="email"
+                    <input className="input w-full" placeholder={t('settings.users.email')} type="email"
                       value={editData.email ?? u.email ?? ''}
                       onChange={e => setEditData(d => ({ ...d, email: e.target.value }))} />
                   </td>
@@ -289,9 +291,9 @@ function UserManagement() {
                   <td className="py-2 text-right">
                     {formErr && <p className="text-red-400 mb-1">{formErr}</p>}
                     <div className="flex gap-1.5 justify-end">
-                      <button className="btn-ghost text-xs" onClick={() => { setEditId(null); setEditData({}); setFormErr(''); }}>Abbrechen</button>
+                      <button className="btn-ghost text-xs" onClick={() => { setEditId(null); setEditData({}); setFormErr(''); }}>{t('common.cancel')}</button>
                       <button className="btn-primary text-xs" disabled={saving} onClick={() => handleUpdate(u.id)}>
-                        {saving ? '…' : 'Speichern'}
+                        {saving ? '…' : t('common.save')}
                       </button>
                     </div>
                   </td>
@@ -313,7 +315,7 @@ function UserManagement() {
                     <button
                       onClick={() => handleToggleActive(u)}
                       className={`w-8 h-4 rounded-full transition-colors relative ${u.active ? 'bg-green-600' : 'bg-slate-700'}`}
-                      title={u.active ? 'Aktiv – klicken zum Deaktivieren' : 'Inaktiv – klicken zum Aktivieren'}
+                      title={u.active ? t('settings.users.activeToggleOn') : t('settings.users.activeToggleOff')}
                     >
                       <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${u.active ? 'left-4' : 'left-0.5'}`} />
                     </button>
@@ -324,18 +326,18 @@ function UserManagement() {
                         <button
                           className="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1 rounded hover:bg-indigo-950/30 transition-colors"
                           onClick={() => handleGenerateToken(u.id)}
-                          title="Neues API-Token generieren (invalidiert vorheriges Token nicht)"
+                          title={t('settings.users.tokenButtonTitle')}
                         >
                           Token
                         </button>
                       )}
                       <button className="btn-ghost text-xs"
                         onClick={() => { setEditId(u.id); setEditData({}); setFormErr(''); }}>
-                        Bearbeiten
+                        {t('common.edit')}
                       </button>
                       <button className="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded hover:bg-red-950/30 transition-colors"
                         onClick={() => setConfirmUser(u)}>
-                        Löschen
+                        {t('common.delete')}
                       </button>
                     </div>
                   </td>
@@ -349,7 +351,7 @@ function UserManagement() {
 
       {confirmUser && (
         <ConfirmDialog
-          message={`Benutzer "${confirmUser.username}" wirklich löschen?`}
+          message={t('settings.users.deleteConfirm', { username: confirmUser.username })}
           onConfirm={() => { const u = confirmUser; setConfirmUser(null); handleDelete(u); }}
           onCancel={() => setConfirmUser(null)}
         />
@@ -390,12 +392,13 @@ function parseIdpMetadataXml(xml: string): Partial<SamlConfig> {
 }
 
 function CopyButton({ value }: { value: string }) {
+  const { t } = useTranslation();
   const [done, setDone] = useState(false);
   return (
     <button type="button"
       className="text-[10px] px-1.5 py-0.5 rounded border border-slate-700 text-slate-500 hover:text-slate-300 transition-colors"
       onClick={() => { navigator.clipboard.writeText(value); setDone(true); setTimeout(() => setDone(false), 2000); }}>
-      {done ? 'Kopiert' : 'Kopieren'}
+      {done ? t('settings.users.copied') : t('settings.users.copy')}
     </button>
   );
 }
@@ -409,6 +412,7 @@ const SAML_DEFAULTS: SamlConfig = {
 };
 
 function SamlSettings() {
+  const { t } = useTranslation();
   const [cfg,       setCfg]       = useState<SamlConfig>(SAML_DEFAULTS);
   const [loading,   setLoading]   = useState(true);
   const [saving,    setSaving]    = useState(false);
@@ -435,17 +439,17 @@ function SamlSettings() {
       const parsed = parseIdpMetadataXml(xmlInput);
       setCfg(c => ({ ...c, ...parsed }));
       setXmlInput('');
-      flash('ok', 'IdP-Metadaten importiert ✓');
+      flash('ok', t('settings.saml.importedOk'));
     } catch (e: unknown) {
-      setXmlError(e instanceof Error ? e.message : 'Parse-Fehler');
+      setXmlError(e instanceof Error ? e.message : t('settings.saml.parseError'));
     }
   }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    try { await saveSamlConfig(cfg); flash('ok', 'Gespeichert ✓'); }
-    catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Fehler'); }
+    try { await saveSamlConfig(cfg); flash('ok', t('settings.saml.savedOk')); }
+    catch (err: unknown) { flash('err', err instanceof Error ? err.message : t('common.errorGeneric')); }
     finally { setSaving(false); }
   }
 
@@ -458,7 +462,7 @@ function SamlSettings() {
     </div>
   );
 
-  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
@@ -469,16 +473,16 @@ function SamlSettings() {
             checked={cfg.enabled}
             onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
           <span className={cfg.enabled ? 'text-purple-300 font-medium' : 'text-slate-500'}>
-            SAML aktiviert
+            {t('settings.saml.enabled')}
           </span>
         </label>
       </div>
 
       {/* ── IdP-Metadaten XML importieren ────────────────────────────────────── */}
       <div className="rounded border border-slate-700/60 bg-slate-900/50 p-3 space-y-2">
-        <p className="text-xs font-medium text-slate-300">IdP-Metadaten importieren</p>
+        <p className="text-xs font-medium text-slate-300">{t('settings.saml.importIdpMetadata')}</p>
         <p className="text-[11px] text-slate-500">
-          XML aus dem FortiAuthenticator herunterladen und hier einfügen — füllt die IdP-Felder automatisch.
+          {t('settings.saml.importIdpHint')}
         </p>
         <textarea
           className="input text-[11px] font-mono w-full h-24 resize-none"
@@ -490,7 +494,7 @@ function SamlSettings() {
         <button type="button" className="btn-ghost text-xs"
           disabled={!xmlInput.trim()}
           onClick={handleImportXml}>
-          XML parsen &amp; Felder befüllen
+          {t('settings.saml.parseXml')}
         </button>
       </div>
 
@@ -498,18 +502,18 @@ function SamlSettings() {
 
         {/* ── IdP-Felder ───────────────────────────────────────────────────── */}
         <div>
-          <p className="text-xs text-slate-400 font-medium mb-2">Identity Provider (IdP)</p>
+          <p className="text-xs text-slate-400 font-medium mb-2">{t('settings.saml.idpHeading')}</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {inp('Entity-ID des IdP',   'idp_entity_id', 'http://10.180.18.66/saml-idp/…')}
-            {inp('SSO-URL (HTTP-Redirect)', 'idp_sso_url', 'http://10.180.18.66/…/login/')}
-            {inp('SLO-URL (Logout)',    'idp_slo_url',  'http://10.180.18.66/…/logout/')}
+            {inp(t('settings.saml.idpEntityId'),   'idp_entity_id', 'http://10.180.18.66/saml-idp/…')}
+            {inp(t('settings.saml.idpSsoUrl'), 'idp_sso_url', 'http://10.180.18.66/…/login/')}
+            {inp(t('settings.saml.idpSloUrl'),    'idp_slo_url',  'http://10.180.18.66/…/logout/')}
           </div>
           <div className="mt-3 flex flex-col gap-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-400">X.509-Zertifikat des IdP (Base64, ohne PEM-Header)</label>
+              <label className="text-xs text-slate-400">{t('settings.saml.idpCert')}</label>
               <button type="button" className="text-[10px] text-slate-500 hover:text-slate-300"
                 onClick={() => setShowCert(v => !v)}>
-                {showCert ? 'Verbergen' : 'Zeigen'}
+                {showCert ? t('settings.saml.hide') : t('settings.saml.show')}
               </button>
             </div>
             {showCert
@@ -517,7 +521,7 @@ function SamlSettings() {
                   value={cfg.idp_x509_cert}
                   onChange={e => setCfg(c => ({ ...c, idp_x509_cert: e.target.value }))} />
               : <p className="text-[11px] text-slate-600 font-mono truncate">
-                  {cfg.idp_x509_cert ? `${cfg.idp_x509_cert.slice(0, 60)}…` : '(nicht gesetzt)'}
+                  {cfg.idp_x509_cert ? `${cfg.idp_x509_cert.slice(0, 60)}…` : t('settings.saml.notSet')}
                 </p>
             }
           </div>
@@ -525,10 +529,10 @@ function SamlSettings() {
 
         {/* ── SP-Felder ────────────────────────────────────────────────────── */}
         <div>
-          <p className="text-xs text-slate-400 font-medium mb-2">Service Provider (SP) – diese Werte beim FortiAuthenticator eintragen</p>
+          <p className="text-xs text-slate-400 font-medium mb-2">{t('settings.saml.spHeading')}</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-slate-400">SP Entity-ID</label>
+              <label className="text-xs text-slate-400">{t('settings.saml.spEntityId')}</label>
               <input className="input text-xs font-mono" type="text" placeholder="http://192.168.1.230"
                 value={cfg.sp_entity_id}
                 onChange={e => {
@@ -541,17 +545,17 @@ function SamlSettings() {
                   }));
                 }} />
             </div>
-            {inp('ACS-URL (Login)',  'acs_url',  'http://192.168.1.230/api/auth/saml/acs')}
-            {inp('SLS-URL (Logout)', 'slo_url',  'http://192.168.1.230/api/auth/saml/sls')}
+            {inp(t('settings.saml.acsUrl'),  'acs_url',  'http://192.168.1.230/api/auth/saml/acs')}
+            {inp(t('settings.saml.slsUrl'), 'slo_url',  'http://192.168.1.230/api/auth/saml/sls')}
           </div>
 
           {/* SP-Info-Box mit Copy-Buttons */}
           {cfg.sp_entity_id && (
             <div className="mt-3 rounded border border-slate-700/40 bg-slate-900/60 divide-y divide-slate-800 text-[11px] font-mono">
               {[
-                ['SP Entity-ID',    cfg.sp_entity_id],
-                ['ACS-URL (Login)', cfg.acs_url],
-                ['SLS-URL (Logout)', cfg.slo_url],
+                [t('settings.saml.spEntityId'),    cfg.sp_entity_id],
+                [t('settings.saml.acsUrl'), cfg.acs_url],
+                [t('settings.saml.slsUrl'), cfg.slo_url],
               ].map(([label, val]) => (
                 <div key={label} className="flex items-center justify-between px-3 py-1.5 gap-2">
                   <span className="text-slate-500 shrink-0 w-32">{label}</span>
@@ -569,7 +573,7 @@ function SamlSettings() {
               download="sp-metadata.xml"
               className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 border border-slate-700 rounded px-2.5 py-1 transition-colors"
             >
-              ↓ SP-Metadata XML herunterladen
+              {t('settings.saml.downloadSpMetadata')}
             </a>
           )}
         </div>
@@ -577,18 +581,17 @@ function SamlSettings() {
         {/* ── Attribut-Mapping ─────────────────────────────────────────────── */}
         <div>
           <p className="text-xs text-slate-500 mb-2">
-            Attribut-Mapping — SAML-Assertion-Attributname, der den jeweiligen Wert liefert.
-            FortiAuthenticator sendet je nach Konfiguration z.B. <span className="font-mono text-slate-400">username</span> oder <span className="font-mono text-slate-400">uid</span>.
+            {t('settings.saml.attrMappingHint')}
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {inp('Benutzername-Attribut',  'attribute_username',     'uid')}
-            {inp('E-Mail-Attribut',        'attribute_email',        'email')}
-            {inp('Anzeigename-Attribut',   'attribute_display_name', 'displayName')}
+            {inp(t('settings.saml.attrUsername'),  'attribute_username',     'uid')}
+            {inp(t('settings.saml.attrEmail'),        'attribute_email',        'email')}
+            {inp(t('settings.saml.attrDisplayName'),   'attribute_display_name', 'displayName')}
           </div>
         </div>
 
         <div className="flex flex-col gap-1 max-w-xs">
-          <label className="text-xs text-slate-400">Standard-Rolle für neue SAML-User</label>
+          <label className="text-xs text-slate-400">{t('settings.saml.defaultRole')}</label>
           <select className="input text-xs"
             value={cfg.default_role}
             onChange={e => setCfg(c => ({ ...c, default_role: e.target.value as 'admin'|'viewer' }))}>
@@ -604,7 +607,7 @@ function SamlSettings() {
           {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
         </div>
         <button type="submit" className="btn-primary text-xs" disabled={saving}>
-          {saving ? 'Speichern…' : 'SAML-Konfiguration speichern'}
+          {saving ? t('settings.users.savingShort') : t('settings.saml.saveButton')}
         </button>
       </div>
     </form>
@@ -613,11 +616,11 @@ function SamlSettings() {
 
 // ── MLStatusSection ───────────────────────────────────────────────────────────
 
-function fmtDuration(secs: number): string {
-  if (secs < 60)    return `${secs} Sek.`;
-  if (secs < 3600)  return `${Math.round(secs / 60)} Min.`;
-  if (secs < 86400) return `${Math.round(secs / 3600)} Std.`;
-  return `${Math.round(secs / 86400)} Tage`;
+function fmtDuration(secs: number, t: (k: string, v?: Record<string, unknown>) => string): string {
+  if (secs < 60)    return t('settings.mlStatus.durSec', { n: secs });
+  if (secs < 3600)  return t('settings.mlStatus.durMin', { n: Math.round(secs / 60) });
+  if (secs < 86400) return t('settings.mlStatus.durHour', { n: Math.round(secs / 3600) });
+  return t('settings.mlStatus.durDay', { n: Math.round(secs / 86400) });
 }
 
 function fmtTs(ts: number): string {
@@ -625,10 +628,11 @@ function fmtTs(ts: number): string {
 }
 
 function PhaseIndicator({ phase }: { phase: MLStatus['phase'] }) {
+  const { t } = useTranslation();
   const cfg = {
-    passthrough: { dot: 'bg-slate-500',  text: 'text-slate-400',  label: 'Datensammlung' },
-    learning:    { dot: 'bg-yellow-500 animate-pulse', text: 'text-yellow-400', label: 'Lernphase' },
-    active:      { dot: 'bg-green-500',  text: 'text-green-400',  label: 'Aktiv' },
+    passthrough: { dot: 'bg-slate-500',  text: 'text-slate-400',  label: t('settings.mlStatus.phasePassthrough') },
+    learning:    { dot: 'bg-yellow-500 animate-pulse', text: 'text-yellow-400', label: t('settings.mlStatus.phaseLearning') },
+    active:      { dot: 'bg-green-500',  text: 'text-green-400',  label: t('settings.mlStatus.phaseActive') },
   }[phase];
   return (
     <span className={`flex items-center gap-1.5 font-medium ${cfg.text}`}>
@@ -638,61 +642,66 @@ function PhaseIndicator({ phase }: { phase: MLStatus['phase'] }) {
   );
 }
 
-const PARAM_DOCS = [
-  {
-    key: 'alert_threshold' as const,
-    label: 'Alert-Schwellwert',
-    min: 0.50, max: 0.95, step: 0.01,
-    fmt: (v: number) => v.toFixed(2),
-    hint: 'Score ab dem ein Flow als Anomalie gilt (0.50–0.95). Höher = weniger, aber konfidentere Alerts. Für große Umgebungen mit viel Hintergrundrauschen empfohlen: 0.75–0.85.',
-    presets: [
-      { label: 'Sensibel',     value: 0.60, desc: 'Viele Alerts, frühe Erkennung' },
-      { label: 'Ausgewogen',   value: 0.65, desc: 'Standard' },
-      { label: 'Präzise',     value: 0.75, desc: 'Weniger Alerts, höhere Konfidenz' },
-      { label: 'Konservativ', value: 0.85, desc: 'Nur eindeutige Anomalien' },
-    ],
-  },
-  {
-    key: 'contamination' as const,
-    label: 'Contamination',
-    min: 0.001, max: 0.2, step: 0.001,
-    fmt: (v: number) => `${(v * 100).toFixed(1)} %`,
-    hint: 'Erwarteter Anteil anomaler Flows im Trainingsdatensatz (0.1 %–20 %). Änderung löst automatisch einen Retrain aus. OT/SCADA mit stabilem Traffic: 0.5–1 %. Große IT-Netze: 2–5 %.',
-    presets: [
-      { label: 'OT/SCADA',  value: 0.005, desc: 'Sehr stabiles Protokollbild' },
-      { label: 'Standard',  value: 0.010, desc: 'Ausgewogen' },
-      { label: 'Gemischtes Netz', value: 0.030, desc: 'IT + OT kombiniert' },
-      { label: 'Große IT',  value: 0.050, desc: 'Viel diverser Verkehr' },
-    ],
-  },
-  {
-    key: 'bootstrap_min_samples' as const,
-    label: 'Mindest-Flows für Training',
-    min: 100, max: 50000, step: 100,
-    fmt: (v: number) => v.toLocaleString(),
-    hint: 'Anzahl Flows die gesammelt werden müssen bevor das erste Modell trainiert wird. Für große Netze mit breitem Traffic-Profil: 2.000–10.000.',
-    presets: [
-      { label: 'Klein',   value: 500,   desc: 'Schneller Start' },
-      { label: 'Mittel',  value: 2000,  desc: 'Ausgewogen' },
-      { label: 'Groß',    value: 10000, desc: 'Breites Traffic-Profil' },
-      { label: 'Sehr groß', value: 50000, desc: 'Großes Rechenzentrum' },
-    ],
-  },
-  {
-    key: 'partial_fit_interval' as const,
-    label: 'Scaler-Update-Intervall',
-    min: 50, max: 5000, step: 50,
-    fmt: (v: number) => `alle ${v.toLocaleString()} Flows`,
-    hint: 'Wie oft der Feature-Normalisierer (StandardScaler) inkrementell angepasst wird. Kleinerer Wert = schnellere Adaption an neue Traffic-Muster, höhere CPU-Last.',
-    presets: [
-      { label: 'Reaktiv',   value: 100,  desc: 'Schnelle Adaption' },
-      { label: 'Standard',  value: 200,  desc: '' },
-      { label: 'Stabil',    value: 1000, desc: 'Weniger CPU-Last' },
-    ],
-  },
-];
+type TFn = (k: string, v?: Record<string, unknown>) => string;
+
+function buildParamDocs(t: TFn) {
+  return [
+    {
+      key: 'alert_threshold' as const,
+      label: t('settings.mlConfig.params.alertThreshold.label'),
+      min: 0.50, max: 0.95, step: 0.01,
+      fmt: (v: number) => v.toFixed(2),
+      hint: t('settings.mlConfig.params.alertThreshold.hint'),
+      presets: [
+        { label: t('settings.mlConfig.params.alertThreshold.presets.sensitive.label'),     value: 0.60, desc: t('settings.mlConfig.params.alertThreshold.presets.sensitive.desc') },
+        { label: t('settings.mlConfig.params.alertThreshold.presets.balanced.label'),   value: 0.65, desc: t('settings.mlConfig.params.alertThreshold.presets.balanced.desc') },
+        { label: t('settings.mlConfig.params.alertThreshold.presets.precise.label'),     value: 0.75, desc: t('settings.mlConfig.params.alertThreshold.presets.precise.desc') },
+        { label: t('settings.mlConfig.params.alertThreshold.presets.conservative.label'), value: 0.85, desc: t('settings.mlConfig.params.alertThreshold.presets.conservative.desc') },
+      ],
+    },
+    {
+      key: 'contamination' as const,
+      label: 'Contamination',
+      min: 0.001, max: 0.2, step: 0.001,
+      fmt: (v: number) => `${(v * 100).toFixed(1)} %`,
+      hint: t('settings.mlConfig.params.contamination.hint'),
+      presets: [
+        { label: 'OT/SCADA',  value: 0.005, desc: t('settings.mlConfig.params.contamination.presets.otScada.desc') },
+        { label: t('settings.mlConfig.params.contamination.presets.standard.label'),  value: 0.010, desc: t('settings.mlConfig.params.contamination.presets.standard.desc') },
+        { label: t('settings.mlConfig.params.contamination.presets.mixed.label'), value: 0.030, desc: t('settings.mlConfig.params.contamination.presets.mixed.desc') },
+        { label: t('settings.mlConfig.params.contamination.presets.largeIt.label'),  value: 0.050, desc: t('settings.mlConfig.params.contamination.presets.largeIt.desc') },
+      ],
+    },
+    {
+      key: 'bootstrap_min_samples' as const,
+      label: t('settings.mlConfig.params.bootstrap.label'),
+      min: 100, max: 50000, step: 100,
+      fmt: (v: number) => v.toLocaleString(),
+      hint: t('settings.mlConfig.params.bootstrap.hint'),
+      presets: [
+        { label: t('settings.mlConfig.params.bootstrap.presets.small.label'),   value: 500,   desc: t('settings.mlConfig.params.bootstrap.presets.small.desc') },
+        { label: t('settings.mlConfig.params.bootstrap.presets.medium.label'),  value: 2000,  desc: t('settings.mlConfig.params.bootstrap.presets.medium.desc') },
+        { label: t('settings.mlConfig.params.bootstrap.presets.large.label'),    value: 10000, desc: t('settings.mlConfig.params.bootstrap.presets.large.desc') },
+        { label: t('settings.mlConfig.params.bootstrap.presets.veryLarge.label'), value: 50000, desc: t('settings.mlConfig.params.bootstrap.presets.veryLarge.desc') },
+      ],
+    },
+    {
+      key: 'partial_fit_interval' as const,
+      label: t('settings.mlConfig.params.partialFit.label'),
+      min: 50, max: 5000, step: 50,
+      fmt: (v: number) => t('settings.mlConfig.params.partialFit.fmt', { n: v.toLocaleString() }),
+      hint: t('settings.mlConfig.params.partialFit.hint'),
+      presets: [
+        { label: t('settings.mlConfig.params.partialFit.presets.reactive.label'),   value: 100,  desc: t('settings.mlConfig.params.partialFit.presets.reactive.desc') },
+        { label: t('settings.mlConfig.params.partialFit.presets.standard.label'),  value: 200,  desc: '' },
+        { label: t('settings.mlConfig.params.partialFit.presets.stable.label'),    value: 1000, desc: t('settings.mlConfig.params.partialFit.presets.stable.desc') },
+      ],
+    },
+  ];
+}
 
 function MLStatusDisplay() {
+  const { t } = useTranslation();
   const [status,  setStatus]  = useState<MLStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
@@ -700,11 +709,11 @@ function MLStatusDisplay() {
   useEffect(() => {
     fetchMLStatus()
       .then(setStatus)
-      .catch(() => setError('ML-Status konnte nicht geladen werden'))
+      .catch(() => setError(t('settings.mlStatus.loadError')))
       .finally(() => setLoading(false));
-  }, []);
+  }, [t]);
 
-  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
   if (error)   return <p className="text-red-400 text-sm">{error}</p>;
   if (!status) return null;
 
@@ -713,7 +722,7 @@ function MLStatusDisplay() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">KI/ML-Engine</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.mlStatus.title')}</h2>
         <PhaseIndicator phase={phase} />
       </div>
 
@@ -727,13 +736,13 @@ function MLStatusDisplay() {
       }`}>
         <p className="font-medium mb-1">{phase_label}</p>
         {phase === 'passthrough' && (
-          <p>Das Modell wartet auf ausreichend Netzwerkdaten. Noch kein ML-Filtering aktiv – alle Flows werden durchgelassen.</p>
+          <p>{t('settings.mlStatus.bannerPassthrough')}</p>
         )}
         {phase === 'learning' && (
-          <p>Das Modell wurde initial trainiert und verfeinert sich kontinuierlich. ML-Filtering ist bereits aktiv, aber noch nicht vollständig kalibriert.</p>
+          <p>{t('settings.mlStatus.bannerLearning')}</p>
         )}
         {phase === 'active' && (
-          <p>Das Modell ist vollständig trainiert. Anomaler Verkehr wird automatisch erkannt und als ML-Alert markiert.</p>
+          <p>{t('settings.mlStatus.bannerActive')}</p>
         )}
       </div>
 
@@ -741,8 +750,8 @@ function MLStatusDisplay() {
       {phase === 'passthrough' && (
         <div>
           <div className="flex justify-between text-xs text-slate-400 mb-1.5">
-            <span>Datensammlung</span>
-            <span>{bootstrap.current_flows.toLocaleString()} / {bootstrap.required.toLocaleString()} Flows</span>
+            <span>{t('settings.mlStatus.phasePassthrough')}</span>
+            <span>{t('settings.mlStatus.flowsProgress', { current: bootstrap.current_flows.toLocaleString(), required: bootstrap.required.toLocaleString() })}</span>
           </div>
           <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
             <div
@@ -751,12 +760,12 @@ function MLStatusDisplay() {
             />
           </div>
           <div className="flex justify-between text-[10px] text-slate-600 mt-1">
-            <span>{bootstrap.progress_pct}% abgeschlossen</span>
+            <span>{t('settings.mlStatus.percentComplete', { pct: bootstrap.progress_pct })}</span>
             {bootstrap.estimated_remaining_s != null && (
-              <span>ca. {fmtDuration(bootstrap.estimated_remaining_s)} verbleibend</span>
+              <span>{t('settings.mlStatus.remaining', { duration: fmtDuration(bootstrap.estimated_remaining_s, t) })}</span>
             )}
             {bootstrap.estimated_remaining_s == null && (
-              <span>Schätzung nicht verfügbar (kein Netzwerkverkehr)</span>
+              <span>{t('settings.mlStatus.estimateUnavailable')}</span>
             )}
           </div>
         </div>
@@ -765,10 +774,10 @@ function MLStatusDisplay() {
       {/* ── Modell-Details ───────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
         {[
-          { label: 'Trainings-Samples',  value: model.n_samples.toLocaleString() },
-          { label: 'Davon Angriffe',     value: model.n_attack > 0 ? model.n_attack.toLocaleString() : '—' },
+          { label: t('settings.mlStatus.trainingSamples'),  value: model.n_samples.toLocaleString() },
+          { label: t('settings.mlStatus.attackSamples'),     value: model.n_attack > 0 ? model.n_attack.toLocaleString() : '—' },
           { label: 'Contamination',      value: `${(model.contamination * 100).toFixed(1)} %` },
-          { label: 'Letztes Training',   value: model.trained_at ? fmtTs(model.trained_at) : '—' },
+          { label: t('settings.mlStatus.lastTraining'),   value: model.trained_at ? fmtTs(model.trained_at) : '—' },
         ].map(({ label, value }) => (
           <div key={label} className="bg-slate-800/40 rounded-lg px-3 py-2 border border-slate-700/40">
             <div className="text-slate-500 mb-0.5">{label}</div>
@@ -780,18 +789,18 @@ function MLStatusDisplay() {
       {/* ── 24h-Statistik (nur im aktiven Modus) ─────────────────────── */}
       {phase === 'active' && (
         <div>
-          <p className="text-xs font-medium text-slate-400 mb-2">Letzte 24 Stunden</p>
+          <p className="text-xs font-medium text-slate-400 mb-2">{t('settings.mlStatus.last24h')}</p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
             {[
-              { label: 'Analysierte Flows',  value: stats_24h.flows_total.toLocaleString() },
-              { label: 'ML-Alerts',          value: stats_24h.ml_alerts.toLocaleString() },
+              { label: t('settings.mlStatus.flowsAnalyzed'),  value: stats_24h.flows_total.toLocaleString() },
+              { label: t('settings.mlStatus.mlAlerts'),          value: stats_24h.ml_alerts.toLocaleString() },
               {
-                label: 'Filter-Rate',
+                label: t('settings.mlStatus.filterRate'),
                 value: stats_24h.flows_total > 0
                   ? `${stats_24h.filter_rate_pct.toFixed(3)} %`
                   : '—',
               },
-              { label: 'Score-Schwellwert',  value: stats_24h.alert_threshold.toFixed(2) },
+              { label: t('settings.mlStatus.scoreThreshold'),  value: stats_24h.alert_threshold.toFixed(2) },
             ].map(({ label, value }) => (
               <div key={label} className="bg-slate-800/40 rounded-lg px-3 py-2 border border-slate-700/40">
                 <div className="text-slate-500 mb-0.5">{label}</div>
@@ -806,7 +815,7 @@ function MLStatusDisplay() {
       {top_anomaly_features.length > 0 && (
         <div>
           <p className="text-xs font-medium text-slate-400 mb-2">
-            Warum werden Flows als anomal erkannt? <span className="font-normal text-slate-600">(Merkmal-Abweichungen in ML-Alerts vs. normaler Verkehr)</span>
+            {t('settings.mlStatus.featureDeviationsTitle')} <span className="font-normal text-slate-600">{t('settings.mlStatus.featureDeviationsSubtitle')}</span>
           </p>
           <div className="space-y-2">
             {top_anomaly_features.map(f => {
@@ -828,8 +837,8 @@ function MLStatusDisplay() {
                     />
                   </div>
                   <div className="flex justify-between text-[10px] text-slate-600 mt-0.5">
-                    <span>Normal: {f.avg_normal.toFixed(3)} {f.unit}</span>
-                    <span>In ML-Alerts: {f.avg_in_alerts.toFixed(3)} {f.unit}</span>
+                    <span>{t('settings.mlStatus.normalLabel')}: {f.avg_normal.toFixed(3)} {f.unit}</span>
+                    <span>{t('settings.mlStatus.inAlerts')}: {f.avg_in_alerts.toFixed(3)} {f.unit}</span>
                   </div>
                 </div>
               );
@@ -840,7 +849,7 @@ function MLStatusDisplay() {
 
       {phase === 'active' && stats_24h.ml_alerts === 0 && (
         <p className="text-xs text-slate-600 italic">
-          In den letzten 24 Stunden keine ML-Alerts – kein anomaler Verkehr erkannt oder ML-Filter zu lax konfiguriert.
+          {t('settings.mlStatus.noAlerts24h')}
         </p>
       )}
     </div>
@@ -872,15 +881,16 @@ function ActionCard({ title, children }: { title: string; children: React.ReactN
   );
 }
 
-function PasswordInput({ value, onChange, placeholder = 'Admin-Passwort bestätigen' }: {
+function PasswordInput({ value, onChange, placeholder }: {
   value: string; onChange: (v: string) => void; placeholder?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <input
       type="password"
       value={value}
       onChange={e => onChange(e.target.value)}
-      placeholder={placeholder}
+      placeholder={placeholder ?? t('settings.dbMaint.adminPasswordPlaceholder')}
       autoComplete="off"
       className="cyjan-input text-xs w-full"
     />
@@ -888,6 +898,7 @@ function PasswordInput({ value, onChange, placeholder = 'Admin-Passwort bestäti
 }
 
 function DatabaseMaintenance() {
+  const { t } = useTranslation();
   const [stats,       setStats]       = useState<DbStatsResponse | null>(null);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState('');
@@ -900,45 +911,44 @@ function DatabaseMaintenance() {
 
   useEffect(() => {
     reload();
-    const t = setInterval(reload, 30_000);
-    return () => clearInterval(t);
+    const ti = setInterval(reload, 30_000);
+    return () => clearInterval(ti);
   }, []);
 
-  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
-  if (error)   return <p className="text-red-400 text-sm">Fehler: {error}</p>;
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
+  if (error)   return <p className="text-red-400 text-sm">{t('common.error', { message: error })}</p>;
   if (!stats)  return null;
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-sm font-semibold text-slate-200">Datenbank-Wartung</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.dbMaint.title')}</h2>
         <p className="text-xs text-slate-500 mt-1">
-          Destruktive Aktionen erfordern zusätzlich die Eingabe des Admin-Passworts
-          und werden im Audit-Log protokolliert.
+          {t('settings.dbMaint.intro')}
         </p>
       </div>
 
       {/* ── 1. Übersicht ─────────────────────────────────────────────────── */}
-      <ActionCard title={`DB-Größe gesamt: ${fmtSize(stats.db_size_bytes)}`}>
+      <ActionCard title={t('settings.dbMaint.dbSizeTotal', { size: fmtSize(stats.db_size_bytes) })}>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="text-[10px] text-slate-500 uppercase">
               <tr className="text-left">
-                <th className="px-2 py-1.5">Tabelle</th>
-                <th className="px-2 py-1.5 text-right">Zeilen</th>
-                <th className="px-2 py-1.5 text-right">Größe</th>
-                <th className="px-2 py-1.5">Ältester</th>
-                <th className="px-2 py-1.5">Neuester</th>
+                <th className="px-2 py-1.5">{t('settings.dbMaint.colTable')}</th>
+                <th className="px-2 py-1.5 text-right">{t('settings.dbMaint.colRows')}</th>
+                <th className="px-2 py-1.5 text-right">{t('settings.dbMaint.colSize')}</th>
+                <th className="px-2 py-1.5">{t('settings.dbMaint.colOldest')}</th>
+                <th className="px-2 py-1.5">{t('settings.dbMaint.colNewest')}</th>
               </tr>
             </thead>
             <tbody>
-              {stats.tables.map(t => (
-                <tr key={t.name} className="border-t border-slate-800/50">
-                  <td className="px-2 py-1.5 font-mono text-slate-300">{t.name}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">{t.rows.toLocaleString('de-DE')}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{fmtSize(t.size_bytes)}</td>
-                  <td className="px-2 py-1.5 text-slate-600 font-mono">{fmtDate(t.oldest)}</td>
-                  <td className="px-2 py-1.5 text-slate-600 font-mono">{fmtDate(t.newest)}</td>
+              {stats.tables.map(tbl => (
+                <tr key={tbl.name} className="border-t border-slate-800/50">
+                  <td className="px-2 py-1.5 font-mono text-slate-300">{tbl.name}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-300">{tbl.rows.toLocaleString('de-DE')}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{fmtSize(tbl.size_bytes)}</td>
+                  <td className="px-2 py-1.5 text-slate-600 font-mono">{fmtDate(tbl.oldest)}</td>
+                  <td className="px-2 py-1.5 text-slate-600 font-mono">{fmtDate(tbl.newest)}</td>
                 </tr>
               ))}
             </tbody>
@@ -946,7 +956,7 @@ function DatabaseMaintenance() {
         </div>
         {stats.hypertables.length > 0 && (
           <p className="text-[11px] text-slate-600 font-mono">
-            Hypertables: {stats.hypertables.map(h => `${h.name} (${h.chunks} Chunks, ${fmtSize(h.size_bytes)})`).join(' · ')}
+            {t('settings.dbMaint.hypertablesLabel')}: {stats.hypertables.map(h => t('settings.dbMaint.hypertableEntry', { name: h.name, chunks: h.chunks, size: fmtSize(h.size_bytes) })).join(' · ')}
           </p>
         )}
       </ActionCard>
@@ -964,19 +974,19 @@ function DatabaseMaintenance() {
       <BackupRestoreSection onDone={reload} />
 
       {/* ── 6. Audit-Log ─────────────────────────────────────────────────── */}
-      <ActionCard title="Wartungs-Audit-Log (letzte 30)">
+      <ActionCard title={t('settings.dbMaint.auditTitle')}>
         {!audit || audit.length === 0 ? (
-          <p className="text-slate-600 text-xs">Noch keine Aktionen protokolliert</p>
+          <p className="text-slate-600 text-xs">{t('settings.dbMaint.noAudit')}</p>
         ) : (
           <div className="overflow-x-auto max-h-64 overflow-y-auto">
             <table className="w-full text-xs">
               <thead className="text-[10px] text-slate-500 uppercase sticky top-0 bg-slate-900/90">
                 <tr className="text-left">
-                  <th className="px-2 py-1.5">Zeit</th>
+                  <th className="px-2 py-1.5">{t('settings.dbMaint.colTime')}</th>
                   <th className="px-2 py-1.5">User</th>
-                  <th className="px-2 py-1.5">Aktion</th>
-                  <th className="px-2 py-1.5">Status</th>
-                  <th className="px-2 py-1.5 text-right">Dauer</th>
+                  <th className="px-2 py-1.5">{t('settings.dbMaint.colAction')}</th>
+                  <th className="px-2 py-1.5">{t('settings.dbMaint.colStatus')}</th>
+                  <th className="px-2 py-1.5 text-right">{t('settings.dbMaint.colDuration')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1007,6 +1017,7 @@ function DatabaseMaintenance() {
 // ── Cleanup-Sektion ───────────────────────────────────────────────────────────
 
 function CleanupSection({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
   const [target,   setTarget]   = useState<'alerts' | 'flows' | 'training_samples' | 'test_runs' | 'all'>('alerts');
   const [days,     setDays]     = useState('30');
   const [onlyTest, setOnlyTest] = useState(false);
@@ -1026,7 +1037,7 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
       if (onlyTest && target === 'alerts') body.only_test = true;
       const r = await cleanupDb(body);
       setMsgType('ok');
-      setMsg(`${r.deleted.toLocaleString('de-DE')} Zeilen gelöscht (${r.duration_ms} ms)`);
+      setMsg(t('settings.dbMaint.cleanupResult', { rows: r.deleted.toLocaleString('de-DE'), ms: r.duration_ms }));
       setPassword(''); setConfirmText('');
       onDone();
     } catch (e) {
@@ -1040,28 +1051,28 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
   const canRun = password.length > 0 && !busy && (!needsConfirm || confirmText === 'DELETE CYJAN');
 
   return (
-    <ActionCard title="Daten aufräumen">
+    <ActionCard title={t('settings.dbMaint.cleanupTitle')}>
       <p className="text-xs text-slate-500">
-        Löscht Datensätze nach Kriterien. Fließt in Audit-Log.
+        {t('settings.dbMaint.cleanupHint')}
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <label className="text-[10px] text-slate-500 uppercase">Ziel</label>
+          <label className="text-[10px] text-slate-500 uppercase">{t('settings.dbMaint.target')}</label>
           <select value={target} onChange={e => setTarget(e.target.value as typeof target)}
                   className="cyjan-input text-xs block mt-1">
             <option value="alerts">Alerts</option>
             <option value="flows">Flows</option>
-            <option value="training_samples">Training-Samples</option>
-            <option value="test_runs">Test-Runs</option>
-            <option value="all">ALLE DATEN (Factory-Reset)</option>
+            <option value="training_samples">{t('settings.dbMaint.targetTraining')}</option>
+            <option value="test_runs">{t('settings.dbMaint.targetTestRuns')}</option>
+            <option value="all">{t('settings.dbMaint.targetAll')}</option>
           </select>
         </div>
         {target !== 'all' && (
           <div>
-            <label className="text-[10px] text-slate-500 uppercase">Älter als (Tage)</label>
+            <label className="text-[10px] text-slate-500 uppercase">{t('settings.dbMaint.olderThanDays')}</label>
             <input type="number" value={days} onChange={e => setDays(e.target.value)}
                    min="0" max="36500"
-                   placeholder="leer = alle"
+                   placeholder={t('settings.dbMaint.olderThanPlaceholder')}
                    className="cyjan-input text-xs block mt-1 w-28" />
           </div>
         )}
@@ -1069,7 +1080,7 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
           <label className="flex items-center gap-1.5 text-xs text-slate-400 pb-1.5">
             <input type="checkbox" checked={onlyTest} onChange={e => setOnlyTest(e.target.checked)}
                    className="accent-cyan-500" />
-            nur is_test = true
+            {t('settings.dbMaint.onlyTest')}
           </label>
         )}
       </div>
@@ -1077,8 +1088,7 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
       {needsConfirm && (
         <div className="rounded border border-red-800/50 bg-red-950/30 px-3 py-2">
           <p className="text-xs text-red-300 mb-2">
-            ⚠ Factory-Reset löscht <strong>alle</strong> Alerts, Flows, Training-Samples, Test-Runs.
-            Config und User bleiben erhalten. Zur Bestätigung "<code className="text-red-200">DELETE CYJAN</code>" eintippen:
+            {t('settings.dbMaint.factoryResetWarn1')} <strong>{t('settings.dbMaint.factoryResetAll')}</strong> {t('settings.dbMaint.factoryResetWarn2')}
           </p>
           <input type="text" value={confirmText} onChange={e => setConfirmText(e.target.value)}
                  placeholder="DELETE CYJAN"
@@ -1090,7 +1100,7 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
         <PasswordInput value={password} onChange={setPassword} />
         <button disabled={!canRun} onClick={run}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">
-          {busy ? '…' : 'Löschen'}
+          {busy ? '…' : t('common.delete')}
         </button>
       </div>
 
@@ -1104,6 +1114,7 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
 // ── Vacuum-Sektion ────────────────────────────────────────────────────────────
 
 function VacuumSection({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
   const [full,     setFull]     = useState(false);
   const [password, setPassword] = useState('');
   const [busy,     setBusy]     = useState(false);
@@ -1114,7 +1125,7 @@ function VacuumSection({ onDone }: { onDone: () => void }) {
     setBusy(true); setMsg('');
     try {
       const r = await vacuumDb({ password, full, analyze: true });
-      setMsgType('ok'); setMsg(`${r.sql} abgeschlossen (${r.duration_ms} ms)`);
+      setMsgType('ok'); setMsg(t('settings.dbMaint.vacuumDone', { sql: r.sql, ms: r.duration_ms }));
       setPassword(''); onDone();
     } catch (e) {
       setMsgType('err'); setMsg(String((e as Error).message));
@@ -1126,19 +1137,18 @@ function VacuumSection({ onDone }: { onDone: () => void }) {
   return (
     <ActionCard title="VACUUM / ANALYZE">
       <p className="text-xs text-slate-500">
-        Räumt tote Rows ab und aktualisiert Statistiken. <code>FULL</code> schreibt
-        die Tabelle komplett neu und sperrt sie dabei — nur bei Bedarf.
+        {t('settings.dbMaint.vacuumHint')}
       </p>
       <label className="flex items-center gap-1.5 text-xs text-slate-400">
         <input type="checkbox" checked={full} onChange={e => setFull(e.target.checked)}
                className="accent-cyan-500" />
-        VACUUM FULL (sperrend!)
+        {t('settings.dbMaint.vacuumFull')}
       </label>
       <div className="flex items-center gap-2">
         <PasswordInput value={password} onChange={setPassword} />
         <button disabled={!password || busy} onClick={run}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">
-          {busy ? '…' : 'Ausführen'}
+          {busy ? '…' : t('settings.dbMaint.run')}
         </button>
       </div>
       {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
@@ -1149,6 +1159,7 @@ function VacuumSection({ onDone }: { onDone: () => void }) {
 // ── Retention-Sektion ─────────────────────────────────────────────────────────
 
 function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: () => void }) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState(stats.hypertables[0]?.name ?? '');
   const [days,     setDays]     = useState('90');
   const [password, setPassword] = useState('');
@@ -1174,10 +1185,9 @@ function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: (
   }
 
   return (
-    <ActionCard title="Automatische Retention (TimescaleDB)">
+    <ActionCard title={t('settings.dbMaint.retentionTitle')}>
       <p className="text-xs text-slate-500">
-        Alte Daten können automatisch per Hypertable-Policy gelöscht werden.
-        Aktuell aktiv: {stats.retention.length === 0 ? 'keine' : stats.retention.map(p => p.hypertable).join(', ')}.
+        {t('settings.dbMaint.retentionHint', { active: stats.retention.length === 0 ? t('settings.dbMaint.retentionNone') : stats.retention.map(p => p.hypertable).join(', ') })}
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div>
@@ -1190,7 +1200,7 @@ function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: (
           </select>
         </div>
         <div>
-          <label className="text-[10px] text-slate-500 uppercase">Tage</label>
+          <label className="text-[10px] text-slate-500 uppercase">{t('settings.dbMaint.days')}</label>
           <input type="number" value={days} onChange={e => setDays(e.target.value)}
                  min="1" max="36500"
                  className="cyjan-input text-xs block mt-1 w-24" />
@@ -1200,11 +1210,11 @@ function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: (
         <PasswordInput value={password} onChange={setPassword} />
         <button disabled={!password || !selected || busy} onClick={() => apply(false)}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40">
-          Policy setzen
+          {t('settings.dbMaint.setPolicy')}
         </button>
         <button disabled={!password || !selected || busy} onClick={() => apply(true)}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-40">
-          Entfernen
+          {t('settings.dbMaint.remove')}
         </button>
       </div>
       {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
@@ -1215,6 +1225,7 @@ function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: (
 // ── Backup / Restore-Sektion ──────────────────────────────────────────────────
 
 function BackupRestoreSection({ onDone }: { onDone: () => void }) {
+  const { t } = useTranslation();
   const [restorePw,   setRestorePw]   = useState('');
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [busy,        setBusy]        = useState(false);
@@ -1236,7 +1247,7 @@ function BackupRestoreSection({ onDone }: { onDone: () => void }) {
       link.download = fn;
       link.click();
       URL.revokeObjectURL(link.href);
-      setMsgType('ok'); setMsg(`Backup heruntergeladen: ${fn}`);
+      setMsgType('ok'); setMsg(t('settings.dbMaint.backupDownloaded', { filename: fn }));
     } catch (e) {
       setMsgType('err'); setMsg(String((e as Error).message));
     }
@@ -1247,7 +1258,7 @@ function BackupRestoreSection({ onDone }: { onDone: () => void }) {
     setBusy(true); setMsg('');
     try {
       const r = await restoreDb(restorePw, restoreFile);
-      setMsgType('ok'); setMsg(`Restore erfolgreich (${(r.bytes/1024/1024).toFixed(1)} MB in ${r.duration_ms} ms)`);
+      setMsgType('ok'); setMsg(t('settings.dbMaint.restoreSuccess', { mb: (r.bytes/1024/1024).toFixed(1), ms: r.duration_ms }));
       setRestorePw(''); setRestoreFile(null); onDone();
     } catch (e) {
       setMsgType('err'); setMsg(String((e as Error).message));
@@ -1259,18 +1270,17 @@ function BackupRestoreSection({ onDone }: { onDone: () => void }) {
   return (
     <ActionCard title="Backup / Restore">
       <p className="text-xs text-slate-500">
-        Komplettes <code>pg_dump</code> als gzip. Der Dump enthält Schema + Daten
-        und kann mit dem Restore-Button an gleicher Stelle wieder eingespielt werden.
-        <strong className="text-amber-300"> Restore überschreibt die laufende DB.</strong>
+        {t('settings.dbMaint.backupHint1')}
+        <strong className="text-amber-300"> {t('settings.dbMaint.backupHintWarn')}</strong>
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <button onClick={downloadBackup}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white">
-          ↓ Backup herunterladen
+          {t('settings.dbMaint.downloadBackup')}
         </button>
       </div>
       <div className="border-t border-slate-800 pt-3 space-y-2">
-        <p className="text-xs text-slate-400">Restore:</p>
+        <p className="text-xs text-slate-400">{t('settings.dbMaint.restoreLabel')}</p>
         <div className="flex flex-wrap items-center gap-2">
           <input type="file" accept=".sql,.sql.gz,.gz"
                  onChange={e => setRestoreFile(e.target.files?.[0] ?? null)}
@@ -1278,7 +1288,7 @@ function BackupRestoreSection({ onDone }: { onDone: () => void }) {
           <PasswordInput value={restorePw} onChange={setRestorePw} />
           <button disabled={!restoreFile || !restorePw || busy} onClick={doRestore}
                   className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40">
-            {busy ? '…' : '↑ Importieren'}
+            {busy ? '…' : t('settings.dbMaint.import')}
           </button>
         </div>
       </div>
@@ -1288,6 +1298,7 @@ function BackupRestoreSection({ onDone }: { onDone: () => void }) {
 }
 
 function MLLearnedPatterns() {
+  const { t } = useTranslation();
   const [patterns, setPatterns] = useState<LearnedPattern[] | null>(null);
   const [cfg,      setCfg]      = useState<{ window_days: number; min_hours: number; z_threshold: number } | null>(null);
   const [loading,  setLoading]  = useState(true);
@@ -1297,13 +1308,13 @@ function MLLearnedPatterns() {
     let alive = true;
     const load = () => fetchLearnedPatterns()
       .then(r => { if (alive) { setPatterns(r.patterns); setCfg(r.config); setLoading(false); } })
-      .catch(() => { if (alive) { setError('Daten konnten nicht geladen werden'); setLoading(false); } });
+      .catch(() => { if (alive) { setError(t('settings.mlLearned.loadError')); setLoading(false); } });
     load();
-    const t = setInterval(load, 30_000);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
+    const ti = setInterval(load, 30_000);
+    return () => { alive = false; clearInterval(ti); };
+  }, [t]);
 
-  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
   if (error)   return <p className="text-red-400 text-sm">{error}</p>;
 
   const activeCount = patterns?.filter(p => p.suppressed).length ?? 0;
@@ -1312,21 +1323,16 @@ function MLLearnedPatterns() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-sm font-semibold text-slate-200">Adaptive ML-Suppression</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.mlLearned.title')}</h2>
         <p className="text-xs text-slate-500 mt-1">
-          Pro (rule_id + Quell/Ziel-Paar) wird aus den letzten{' '}
-          <span className="text-slate-300">{cfg?.window_days} Tagen</span> eine
-          stündliche Baseline (Mittelwert + StdDev) gelernt. Suppression greift nur
-          wenn die aktuelle Rate statistisch unauffällig ist
+          {t('settings.mlLearned.intro1')}{' '}
+          <span className="text-slate-300">{t('settings.mlLearned.daysSpan', { days: cfg?.window_days })}</span>{' '}
+          {t('settings.mlLearned.intro2')}{' '}
           (z-Score &lt; <span className="text-slate-300">{cfg?.z_threshold}</span>).
         </p>
         <p className="text-xs text-slate-600 mt-1">
-          Spikes gegenüber der Baseline durchbrechen die Suppression automatisch —
-          das Muster bleibt gelernt, aber der Burst wird wieder sichtbar weil
-          er eben NICHT mehr normal ist. <strong>Auch manuelle FP-Markierungen</strong>{' '}
-          werden bei Spike aufgehoben: eine früher als FP markierte Verbindung kann
-          später zum Angriffspfad werden (C2, Exfil) — ein plötzlicher Anstieg
-          muss der Analyst dann sehen. TP-Feedback entfernt das Muster sofort.
+          {t('settings.mlLearned.spikeIntro1')} <strong>{t('settings.mlLearned.spikeFpStrong')}</strong>{' '}
+          {t('settings.mlLearned.spikeIntro2')}
         </p>
       </div>
 
@@ -1334,23 +1340,23 @@ function MLLearnedPatterns() {
       {patterns && patterns.length > 0 && (
         <div className="flex gap-3 text-xs">
           <div className="flex-1 rounded-lg border border-green-800/40 bg-green-950/20 px-3 py-2">
-            <div className="text-green-400 text-[11px] uppercase tracking-wider font-mono">Aktiv suppressed</div>
+            <div className="text-green-400 text-[11px] uppercase tracking-wider font-mono">{t('settings.mlLearned.activeSuppressed')}</div>
             <div className="text-green-300 text-lg font-semibold tabular-nums">{activeCount}</div>
-            <div className="text-slate-600 text-[10px]">unauffällige Muster unterdrückt</div>
+            <div className="text-slate-600 text-[10px]">{t('settings.mlLearned.activeSuppressedSub')}</div>
           </div>
           <div className="flex-1 rounded-lg border border-amber-800/40 bg-amber-950/20 px-3 py-2">
-            <div className="text-amber-400 text-[11px] uppercase tracking-wider font-mono">Spike-Durchbruch</div>
+            <div className="text-amber-400 text-[11px] uppercase tracking-wider font-mono">{t('settings.mlLearned.spikeBreak')}</div>
             <div className="text-amber-300 text-lg font-semibold tabular-nums">{spikeCount}</div>
-            <div className="text-slate-600 text-[10px]">aktuell über Baseline, werden gezeigt</div>
+            <div className="text-slate-600 text-[10px]">{t('settings.mlLearned.spikeBreakSub')}</div>
           </div>
         </div>
       )}
 
       {!patterns || patterns.length === 0 ? (
         <div className="rounded-lg border border-slate-700/50 bg-slate-800/30 px-4 py-6 text-center">
-          <p className="text-slate-500 text-sm">Noch keine Baselines gelernt</p>
+          <p className="text-slate-500 text-sm">{t('settings.mlLearned.noBaselines')}</p>
           <p className="text-slate-600 text-xs mt-1">
-            Erscheinen automatisch nach mindestens {cfg?.min_hours} h Datenpunkten pro Muster
+            {t('settings.mlLearned.noBaselinesHint', { hours: cfg?.min_hours })}
           </p>
         </div>
       ) : (
@@ -1358,14 +1364,14 @@ function MLLearnedPatterns() {
           <table className="w-full text-xs">
             <thead className="bg-slate-800/50">
               <tr className="text-left text-[11px] text-slate-500">
-                <th className="px-3 py-2">Status</th>
-                <th className="px-3 py-2" title="manual = User hat FP markiert · learned = automatisch gelernt">Quelle</th>
-                <th className="px-3 py-2">Regel</th>
-                <th className="px-3 py-2">Quelle → Ziel</th>
-                <th className="px-3 py-2 text-right" title="Baseline: mittlere Alerts/Stunde ± StdDev">Baseline /h</th>
-                <th className="px-3 py-2 text-right" title="Stunden in denen das Muster bisher auftrat">Daten</th>
-                <th className="px-3 py-2 text-right" title="Alerts in der letzten Stunde">Aktuell /h</th>
-                <th className="px-3 py-2 text-right" title="Statistische Abweichung: (aktuell - mittelwert) / stddev">z-Score</th>
+                <th className="px-3 py-2">{t('settings.mlLearned.colStatus')}</th>
+                <th className="px-3 py-2" title={t('settings.mlLearned.sourceColTitle')}>{t('settings.mlLearned.colSource')}</th>
+                <th className="px-3 py-2">{t('settings.mlLearned.colRule')}</th>
+                <th className="px-3 py-2">{t('settings.mlLearned.colSrcDst')}</th>
+                <th className="px-3 py-2 text-right" title={t('settings.mlLearned.baselineColTitle')}>{t('settings.mlLearned.colBaseline')}</th>
+                <th className="px-3 py-2 text-right" title={t('settings.mlLearned.dataColTitle')}>{t('settings.mlLearned.colData')}</th>
+                <th className="px-3 py-2 text-right" title={t('settings.mlLearned.recentColTitle')}>{t('settings.mlLearned.colRecent')}</th>
+                <th className="px-3 py-2 text-right" title={t('settings.mlLearned.zColTitle')}>z-Score</th>
               </tr>
             </thead>
             <tbody>
@@ -1391,12 +1397,12 @@ function MLLearnedPatterns() {
                     <td className="px-3 py-2">
                       {p.source === 'manual' ? (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-blue-950/60 text-blue-300 border border-blue-800/50 font-mono"
-                              title="User hat Alert dieser Verbindung als FP markiert">
+                              title={t('settings.mlLearned.manualTitle')}>
                           manual
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-slate-800/60 text-slate-400 border border-slate-700/50 font-mono"
-                              title="Aus dem Traffic-Verhalten automatisch gelernt">
+                              title={t('settings.mlLearned.learnedTitle')}>
                           learned
                         </span>
                       )}
@@ -1426,19 +1432,20 @@ function MLLearnedPatterns() {
         </div>
       )}
       <p className="text-[10px] text-slate-700 font-mono">
-        Alert-Manager-Refresh: 60 s · UI-Refresh: 30 s · ENV:
-        SUPPRESSION_LEARN_WINDOW_D, SUPPRESSION_MIN_HOURS, SUPPRESSION_Z_THRESHOLD
+        {t('settings.mlLearned.refreshFooter')}
       </p>
     </div>
   );
 }
 
 function MLFilterConfig() {
+  const { t } = useTranslation();
   const [cfg,      setCfg]      = useState<MLConfig | null>(null);
   const [cfgDraft, setCfgDraft] = useState<MLConfig | null>(null);
   const [saving,   setSaving]   = useState(false);
   const [saveMsg,  setSaveMsg]  = useState('');
   const [retraining, setRetraining] = useState(false);
+  const PARAM_DOCS = buildParamDocs(t);
 
   useEffect(() => {
     fetchMLConfig()
@@ -1455,7 +1462,7 @@ function MLFilterConfig() {
       setSaveMsg('ok');
       setTimeout(() => setSaveMsg(''), 3000);
     } catch (err: unknown) {
-      setSaveMsg('err:' + (err instanceof Error ? err.message : 'Fehler'));
+      setSaveMsg('err:' + (err instanceof Error ? err.message : t('common.errorGeneric')));
     } finally {
       setSaving(false);
     }
@@ -1468,31 +1475,31 @@ function MLFilterConfig() {
       setSaveMsg('retrain');
       setTimeout(() => setSaveMsg(''), 5000);
     } catch (err: unknown) {
-      setSaveMsg('err:' + (err instanceof Error ? err.message : 'Fehler'));
+      setSaveMsg('err:' + (err instanceof Error ? err.message : t('common.errorGeneric')));
     } finally {
       setRetraining(false);
     }
   }
 
-  if (!cfgDraft) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (!cfgDraft) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Filter-Konfiguration</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.mlConfig.title')}</h2>
         <div className="flex items-center gap-2">
-          {saveMsg === 'ok'          && <span className="text-xs text-green-400">Gespeichert ✓</span>}
-          {saveMsg === 'retrain'     && <span className="text-xs text-blue-400">Retrain ausgelöst ✓</span>}
+          {saveMsg === 'ok'          && <span className="text-xs text-green-400">{t('settings.saml.savedOk')}</span>}
+          {saveMsg === 'retrain'     && <span className="text-xs text-blue-400">{t('settings.mlConfig.retrainTriggered')}</span>}
           {saveMsg.startsWith('err:')&& <span className="text-xs text-red-400">{saveMsg.slice(4)}</span>}
           <button className="btn-ghost text-xs" disabled={retraining} onClick={handleRetrain}>
-            {retraining ? 'Wird ausgelöst…' : '↺ Retrain jetzt starten'}
+            {retraining ? t('settings.mlConfig.triggering') : t('settings.mlConfig.retrainNow')}
           </button>
           <button
             className="btn-primary text-xs"
             disabled={saving || !cfg || JSON.stringify(cfgDraft) === JSON.stringify(cfg)}
             onClick={handleSaveConfig}
           >
-            {saving ? 'Speichern…' : 'Speichern'}
+            {saving ? t('settings.users.savingShort') : t('common.save')}
           </button>
         </div>
       </div>
@@ -1562,6 +1569,7 @@ function TagBadges({ tags }: { tags: string[] }) {
 }
 
 function RuleSources() {
+  const { t } = useTranslation();
   const [sources,   setSources]   = useState<RuleSource[]>([]);
   const [status,    setStatus]    = useState<UpdateStatus | null>(null);
   const [updating,  setUpdating]  = useState(false);
@@ -1605,7 +1613,7 @@ function RuleSources() {
       setSources(prev => [...prev, src]);
       setNewName(''); setNewUrl(''); setShowAdd(false);
     } catch (err: unknown) {
-      setNewErr(err instanceof Error ? err.message : 'Fehler');
+      setNewErr(err instanceof Error ? err.message : t('common.errorGeneric'));
     }
   }
 
@@ -1622,13 +1630,13 @@ function RuleSources() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Rule-Quellen</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.rules.sourcesTitle')}</h2>
         <div className="flex items-center gap-2">
           <button onClick={handleTriggerUpdate} disabled={updating || !!status?.requested} className="btn-primary text-xs">
-            {status?.requested ? '⏳ Update läuft…' : updating ? '…' : '↻ Update starten'}
+            {status?.requested ? t('settings.rules.updateRunning') : updating ? '…' : t('settings.rules.startUpdate')}
           </button>
           <button className="btn-ghost text-xs" onClick={() => { setShowAdd(v => !v); setNewErr(''); }}>
-            {showAdd ? 'Abbrechen' : '+ Quelle'}
+            {showAdd ? t('common.cancel') : t('settings.rules.addSource')}
           </button>
         </div>
       </div>
@@ -1636,25 +1644,25 @@ function RuleSources() {
       {status && (
         <p className="text-xs text-slate-500">
           {status.requested
-            ? `Update angefordert um ${fmtTs(status.requested_at)} – Suricata lädt gerade neu…`
+            ? t('settings.rules.updateRequested', { ts: fmtTs(status.requested_at) })
             : status.last_updated
-              ? `Letzte Aktualisierung: ${fmtTs(status.last_updated)}`
-              : 'Noch kein Update durchgeführt'}
+              ? t('settings.rules.lastUpdated', { ts: fmtTs(status.last_updated) })
+              : t('settings.rules.noUpdateYet')}
         </p>
       )}
 
       {showAdd && (
         <form onSubmit={handleAddSource} className="card p-3 flex flex-wrap gap-2 items-end text-xs">
           <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
-            <label className="text-slate-400">Name</label>
-            <input className="input" required value={newName} onChange={e => setNewName(e.target.value)} placeholder="Meine Custom Rules" />
+            <label className="text-slate-400">{t('settings.rules.fieldName')}</label>
+            <input className="input" required value={newName} onChange={e => setNewName(e.target.value)} placeholder={t('settings.rules.namePlaceholder')} />
           </div>
           <div className="flex flex-col gap-1 flex-[2] min-w-[260px]">
-            <label className="text-slate-400">URL (.rules oder .tar.gz)</label>
+            <label className="text-slate-400">{t('settings.rules.fieldUrl')}</label>
             <input className="input" required type="url" value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://example.com/my.rules" />
           </div>
           {newErr && <p className="w-full text-red-400">{newErr}</p>}
-          <button type="submit" className="btn-primary text-xs">Hinzufügen</button>
+          <button type="submit" className="btn-primary text-xs">{t('common.add')}</button>
         </form>
       )}
 
@@ -1666,7 +1674,7 @@ function RuleSources() {
             <button
               onClick={() => handleToggleSource(src)}
               className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${src.enabled ? 'bg-green-600' : 'bg-slate-700'}`}
-              title={src.enabled ? 'Aktiviert' : 'Deaktiviert'}
+              title={src.enabled ? t('settings.rules.enabled') : t('settings.rules.disabled')}
             >
               <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${src.enabled ? 'left-4' : 'left-0.5'}`} />
             </button>
@@ -1681,7 +1689,7 @@ function RuleSources() {
             {!src.builtin && (
               <button onClick={() => setConfirmSrc(src)}
                 className="text-red-500 hover:text-red-400 px-1.5 py-1 rounded hover:bg-red-950/30 transition-colors flex-shrink-0"
-                title="Quelle entfernen">✕</button>
+                title={t('settings.rules.removeSource')}>✕</button>
             )}
           </div>
         ))}
@@ -1689,8 +1697,8 @@ function RuleSources() {
 
       {confirmSrc && (
         <ConfirmDialog
-          message={`Quelle "${confirmSrc.name}" entfernen?`}
-          confirmLabel="Entfernen"
+          message={t('settings.rules.removeSourceConfirm', { name: confirmSrc.name })}
+          confirmLabel={t('settings.rules.removeLabel')}
           onConfirm={() => { const s = confirmSrc; setConfirmSrc(null); handleDeleteSource(s); }}
           onCancel={() => setConfirmSrc(null)}
         />
@@ -1703,6 +1711,7 @@ function RuleSources() {
 
 // ── Offline-Import (für Maschinen ohne Internet) ──────────────────────────────
 function SuricataOfflineImport() {
+  const { t } = useTranslation();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy,    setBusy]    = useState(false);
   const [result,  setResult]  = useState<{ ok: boolean; msg: string; files?: string[]; rules?: number } | null>(null);
@@ -1713,10 +1722,10 @@ function SuricataOfflineImport() {
     setResult(null);
     try {
       const r = await importSuricataRules(f);
-      const main = `${r.rules_count.toLocaleString('de-DE')} Regeln aus ${r.files_imported.length} Datei(en) importiert.`;
+      const main = t('settings.rules.offlineImportResult', { rules: r.rules_count.toLocaleString('de-DE'), files: r.files_imported.length });
       setResult({
         ok:    true,
-        msg:   r.note ? `${main} ${r.note}` : `${main} Suricata-Reload: ${r.reload}.`,
+        msg:   r.note ? `${main} ${r.note}` : `${main} ${t('settings.rules.suricataReload', { reload: r.reload })}`,
         files: r.files_imported,
         rules: r.rules_count,
       });
@@ -1732,11 +1741,9 @@ function SuricataOfflineImport() {
     <div className="card p-3 space-y-2 mt-4 border-cyan-700/40 bg-cyan-950/10">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="text-xs font-semibold text-slate-200">Offline-Import</h3>
+          <h3 className="text-xs font-semibold text-slate-200">{t('settings.rules.offlineImportTitle')}</h3>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Für Maschinen ohne Internet: ETOpen-Tarball oder eigene <code className="font-mono">*.rules</code>-Datei
-            hochladen. Die Datei landet im snort-rules-Volume und Suricata erhält
-            ein <code className="font-mono">SIGUSR2</code> für den Live-Reload.
+            {t('settings.rules.offlineImportHint1')} <code className="font-mono">*.rules</code>{t('settings.rules.offlineImportHint2')} <code className="font-mono">SIGUSR2</code> {t('settings.rules.offlineImportHint3')}
           </p>
         </div>
         <input
@@ -1750,7 +1757,7 @@ function SuricataOfflineImport() {
       </div>
 
       {busy && (
-        <p className="text-[11px] text-slate-400">⏳ Übertrage und entpacke …</p>
+        <p className="text-[11px] text-slate-400">{t('settings.rules.uploading')}</p>
       )}
 
       {result && (
@@ -1766,7 +1773,7 @@ function SuricataOfflineImport() {
                 <li key={f} className="font-mono text-[10px]">{f}</li>
               ))}
               {result.files.length > 12 && (
-                <li className="text-slate-500 text-[10px]">… und {result.files.length - 12} weitere</li>
+                <li className="text-slate-500 text-[10px]">{t('settings.rules.andMore', { n: result.files.length - 12 })}</li>
               )}
             </ul>
           )}
@@ -1782,6 +1789,7 @@ function SuricataOfflineImport() {
 // `suricata -T`; bei Syntax-Fehler kommt 422 mit dem Suricata-Diagnose-Tail
 // zurück und das Frontend zeigt's rot über dem Editor an.
 function RuleFileEditor() {
+  const { t } = useTranslation();
   const [files,    setFiles]    = useState<RuleFileMeta[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [content,  setContent]  = useState<string>('');
@@ -1805,7 +1813,7 @@ function RuleFileEditor() {
   useEffect(() => { refresh(); }, []);
 
   async function open(name: string) {
-    if (dirty && !confirm('Ungespeicherte Änderungen verwerfen?')) return;
+    if (dirty && !confirm(t('settings.rules.discardChanges'))) return;
     setError(null); setInfo(null);
     setBusy(true);
     try {
@@ -1827,9 +1835,11 @@ function RuleFileEditor() {
       const r = await saveRuleFile(selected, content);
       setOrig(content);
       setInfo(
-        `${r.rules_count.toLocaleString('de-DE')} Regeln gespeichert · ` +
-        `suricata -T: ${r.test_ok ? '✓' : '⚠ skipped'} · Reload: ${r.reload}` +
-        (r.note ? ` · ${r.note}` : '')
+        t('settings.rules.editorSaved', {
+          rules: r.rules_count.toLocaleString('de-DE'),
+          test: r.test_ok ? '✓' : t('settings.rules.testSkipped'),
+          reload: r.reload,
+        }) + (r.note ? ` · ${r.note}` : '')
       );
       await refresh();
     } catch (e) {
@@ -1839,7 +1849,7 @@ function RuleFileEditor() {
       if (m) {
         try {
           const detail = JSON.parse(m[1]).detail;
-          setError(`${detail?.message ?? 'Validation fehlgeschlagen'}\n\n${detail?.test_output ?? ''}`);
+          setError(`${detail?.message ?? t('settings.rules.validationFailed')}\n\n${detail?.test_output ?? ''}`);
         } catch { setError(raw); }
       } else { setError(raw); }
     } finally {
@@ -1854,7 +1864,7 @@ function RuleFileEditor() {
       if (selected === meta.name) {
         setSelected(null); setContent(''); setOrig('');
       }
-      setInfo(`'${meta.name}' gelöscht.`);
+      setInfo(t('settings.rules.fileDeleted', { name: meta.name }));
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1864,7 +1874,7 @@ function RuleFileEditor() {
   }
 
   function startCreate() {
-    if (dirty && !confirm('Ungespeicherte Änderungen verwerfen?')) return;
+    if (dirty && !confirm(t('settings.rules.discardChanges'))) return;
     setCreating(true); setNewName(''); setError(null); setInfo(null);
   }
   function cancelCreate() {
@@ -1874,11 +1884,11 @@ function RuleFileEditor() {
     const trimmed = newName.trim();
     const name = trimmed.endsWith('.rules') ? trimmed : `${trimmed}.rules`;
     if (!/^[A-Za-z0-9._-]+\.rules$/.test(name)) {
-      setError('Ungültiger Dateiname. Erlaubt: A-Z, a-z, 0-9, ".", "_", "-".');
+      setError(t('settings.rules.invalidFilename'));
       return;
     }
     setSelected(name);
-    setContent(`# ${name}\n# Eigene Suricata-Signaturen – mit "Speichern" wird automatisch\n# suricata -T gegen den ganzen Rules-Stack laufen.\n\n`);
+    setContent(`# ${name}\n# ${t('settings.rules.newFileHeader1')}\n# ${t('settings.rules.newFileHeader2')}\n\n`);
     setOrig('');
     setCreating(false); setNewName('');
   }
@@ -1889,27 +1899,21 @@ function RuleFileEditor() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Eigene Signaturen</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.rules.editorTitle')}</h2>
         <div className="flex items-center gap-2">
-          <button className="btn-ghost text-xs" onClick={refresh} disabled={busy}>↻ Aktualisieren</button>
-          <button className="btn-primary text-xs" onClick={startCreate} disabled={busy || creating}>+ Neue Datei</button>
+          <button className="btn-ghost text-xs" onClick={refresh} disabled={busy}>{t('settings.rules.refresh')}</button>
+          <button className="btn-primary text-xs" onClick={startCreate} disabled={busy || creating}>{t('settings.rules.newFile')}</button>
         </div>
       </div>
 
       <p className="text-[11px] text-slate-500">
-        Editor für eigene <code className="font-mono">*.rules</code>-Dateien im
-        snort-rules-Volume. Beim Speichern läuft serverseitig{' '}
-        <code className="font-mono">suricata -T</code> gegen den gesamten
-        Regel-Stack – Syntaxfehler werden abgewiesen, Live-Reload via{' '}
-        <code className="font-mono">SIGUSR2</code> ist transparent. Built-in-
-        Dateien (von URL-Quellen gepullt) sind read-only zum Schutz vor
-        Überschreiben durch das nächste Update.
+        {t('settings.rules.editorIntro')}
       </p>
 
       {creating && (
         <div className="card p-3 flex items-end gap-2">
           <div className="flex-1">
-            <label className="text-[11px] text-slate-400">Dateiname (.rules wird angehängt falls fehlend)</label>
+            <label className="text-[11px] text-slate-400">{t('settings.rules.filenameLabel')}</label>
             <input
               className="input w-full text-xs"
               autoFocus
@@ -1919,8 +1923,8 @@ function RuleFileEditor() {
               onKeyDown={e => { if (e.key === 'Enter') commitCreate(); if (e.key === 'Escape') cancelCreate(); }}
             />
           </div>
-          <button className="btn-primary text-xs" onClick={commitCreate}>Anlegen</button>
-          <button className="btn-ghost text-xs"   onClick={cancelCreate}>Abbrechen</button>
+          <button className="btn-primary text-xs" onClick={commitCreate}>{t('settings.rules.create')}</button>
+          <button className="btn-ghost text-xs"   onClick={cancelCreate}>{t('common.cancel')}</button>
         </div>
       )}
 
@@ -1928,7 +1932,7 @@ function RuleFileEditor() {
         {/* Datei-Liste */}
         <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1">
           {files.length === 0 && !busy && (
-            <p className="text-[11px] text-slate-500 italic px-2 py-3">Keine .rules-Dateien</p>
+            <p className="text-[11px] text-slate-500 italic px-2 py-3">{t('settings.rules.noFiles')}</p>
           )}
           {files.map(f => (
             <button
@@ -1948,7 +1952,7 @@ function RuleFileEditor() {
                 {f.builtin && <span className="px-1 py-0.5 text-[9px] rounded bg-slate-700/40 text-slate-500 border border-slate-600/30">built-in</span>}
               </div>
               <div className="flex items-center gap-3 text-[10px] text-slate-500 mt-0.5">
-                <span>{f.rules.toLocaleString('de-DE')} Regeln</span>
+                <span>{t('settings.rules.rulesCount', { n: f.rules.toLocaleString('de-DE') })}</span>
                 <span>{fmtSize(f.size)}</span>
                 <span className="ml-auto">{fmtTs(f.modified)}</span>
               </div>
@@ -1960,13 +1964,13 @@ function RuleFileEditor() {
         <div className="space-y-2">
           {!selected ? (
             <p className="text-[11px] text-slate-500 italic px-3 py-6 text-center">
-              Datei links auswählen oder „+ Neue Datei" oben anlegen.
+              {t('settings.rules.selectFileHint')}
             </p>
           ) : (
             <>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-xs text-slate-200">{selected}</span>
-                {dirty && <span className="text-[10px] text-amber-400">● ungespeichert</span>}
+                {dirty && <span className="text-[10px] text-amber-400">{t('settings.rules.unsaved')}</span>}
                 <div className="ml-auto flex items-center gap-2">
                   <button
                     type="button"
@@ -1974,7 +1978,7 @@ function RuleFileEditor() {
                     disabled={!dirty || busy || files.find(f => f.name === selected)?.builtin}
                     onClick={save}
                   >
-                    {busy ? '…' : 'Speichern'}
+                    {busy ? '…' : t('common.save')}
                   </button>
                   <button
                     type="button"
@@ -1985,7 +1989,7 @@ function RuleFileEditor() {
                       if (f) setConfirmDel(f);
                     }}
                   >
-                    Löschen
+                    {t('common.delete')}
                   </button>
                 </div>
               </div>
@@ -2003,13 +2007,12 @@ function RuleFileEditor() {
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 disabled={files.find(f => f.name === selected)?.builtin}
-                placeholder='alert tcp any any -> any 80 (msg:"Beispiel"; sid:1000001; rev:1;)'
+                placeholder='alert tcp any any -> any 80 (msg:"Example"; sid:1000001; rev:1;)'
               />
 
               {files.find(f => f.name === selected)?.builtin && (
                 <p className="text-[11px] text-amber-400 italic">
-                  Built-in-Datei – nur lesbar. Eigene Anpassungen in einer separaten Datei ablegen,
-                  damit das nächste Update sie nicht überschreibt.
+                  {t('settings.rules.builtinReadonly')}
                 </p>
               )}
             </>
@@ -2019,8 +2022,8 @@ function RuleFileEditor() {
 
       {confirmDel && (
         <ConfirmDialog
-          message={`Datei "${confirmDel.name}" mit ${confirmDel.rules.toLocaleString('de-DE')} Regeln löschen?`}
-          confirmLabel="Löschen"
+          message={t('settings.rules.deleteFileConfirm', { name: confirmDel.name, rules: confirmDel.rules.toLocaleString('de-DE') })}
+          confirmLabel={t('common.delete')}
           onConfirm={() => { const m = confirmDel; setConfirmDel(null); doDelete(m); }}
           onCancel={() => setConfirmDel(null)}
         />
@@ -2030,6 +2033,7 @@ function RuleFileEditor() {
 }
 
 function RulesList() {
+  const { t } = useTranslation();
   const [rules,    setRules]    = useState<Rule[]>([]);
   const [total,    setTotal]    = useState(0);
   const [search,   setSearch]   = useState('');
@@ -2052,22 +2056,22 @@ function RulesList() {
     <div className="space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-sm font-semibold text-slate-200">
-          Aktive Regeln
+          {t('settings.rules.activeRules')}
           {total > 0 && <span className="ml-2 text-slate-500 font-normal">{total.toLocaleString()}</span>}
         </h2>
         <input
           className="input text-xs w-56"
-          placeholder="Suche nach msg, sid, classtype…"
+          placeholder={t('settings.rules.searchPlaceholder')}
           value={search}
           onChange={e => { setSearch(e.target.value); setOffset(0); }}
         />
       </div>
 
       {loading ? (
-        <p className="text-slate-500 text-xs">Lade…</p>
+        <p className="text-slate-500 text-xs">{t('common.loading')}</p>
       ) : rules.length === 0 ? (
         <p className="text-slate-600 text-xs">
-          {total === 0 ? 'Keine Regeln geladen – bitte ein Update starten.' : 'Keine Treffer.'}
+          {total === 0 ? t('settings.rules.noRulesLoaded') : t('settings.rules.noResults')}
         </p>
       ) : (
         <>
@@ -2076,11 +2080,11 @@ function RulesList() {
               <thead className="border-b border-slate-800">
                 <tr className="text-left text-slate-500">
                   <th className="pb-2 pr-3 w-20">SID</th>
-                  <th className="pb-2 pr-3">Beschreibung (msg)</th>
+                  <th className="pb-2 pr-3">{t('settings.rules.colDescription')}</th>
                   <th className="pb-2 pr-3 w-28">Classtype</th>
-                  <th className="pb-2 pr-3 w-16">Aktion</th>
-                  <th className="pb-2 pr-3 w-16">Status</th>
-                  <th className="pb-2 w-40">Datei</th>
+                  <th className="pb-2 pr-3 w-16">{t('settings.rules.colAction')}</th>
+                  <th className="pb-2 pr-3 w-16">{t('settings.rules.colStatus')}</th>
+                  <th className="pb-2 w-40">{t('settings.rules.colFile')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -2098,7 +2102,7 @@ function RulesList() {
                     </td>
                     <td className="py-1.5 pr-3">
                       <span className={`text-[10px] ${r.enabled ? 'text-green-500' : 'text-slate-600'}`}>
-                        {r.enabled ? '● aktiv' : '○ aus'}
+                        {r.enabled ? t('settings.rules.statusActive') : t('settings.rules.statusOff')}
                       </span>
                     </td>
                     <td className="py-1.5 font-mono text-slate-600 text-[10px] truncate">{r.file}</td>
@@ -2110,10 +2114,10 @@ function RulesList() {
           {pages > 1 && (
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <button className="btn-ghost text-xs disabled:opacity-30" disabled={page === 0}
-                onClick={() => setOffset(Math.max(0, offset - LIMIT))}>← Zurück</button>
+                onClick={() => setOffset(Math.max(0, offset - LIMIT))}>{t('settings.rules.prev')}</button>
               <span>{page + 1} / {pages}</span>
               <button className="btn-ghost text-xs disabled:opacity-30" disabled={page >= pages - 1}
-                onClick={() => setOffset(offset + LIMIT)}>Weiter →</button>
+                onClick={() => setOffset(offset + LIMIT)}>{t('settings.rules.next')}</button>
             </div>
           )}
         </>
@@ -2128,8 +2132,9 @@ type SslMode = 'upload' | 'self-signed' | 'acme';
 type UploadFormat = 'pem' | 'pfx';
 
 function SslStatusBadge({ status }: { status: SslStatus }) {
+  const { t } = useTranslation();
   if (!status.active || status.mode === 'none')
-    return <span className="px-2 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">Kein TLS</span>;
+    return <span className="px-2 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">{t('settings.ssl.noTls')}</span>;
   const expiry = status.not_after ? new Date(status.not_after) : null;
   const daysLeft = expiry ? Math.ceil((expiry.getTime() - Date.now()) / 86400000) : null;
   const color = daysLeft == null ? 'green' : daysLeft < 14 ? 'red' : daysLeft < 30 ? 'yellow' : 'green';
@@ -2139,12 +2144,13 @@ function SslStatusBadge({ status }: { status: SslStatus }) {
       color === 'yellow' ? 'bg-yellow-950/40 text-yellow-300 border-yellow-700/40' :
       'bg-red-950/40 text-red-300 border-red-700/40'
     }`}>
-      TLS aktiv {daysLeft != null ? `· ${daysLeft}d` : ''}
+      {t('settings.ssl.tlsActive')} {daysLeft != null ? `· ${daysLeft}d` : ''}
     </span>
   );
 }
 
 function SslSettings() {
+  const { t } = useTranslation();
   const [status,  setStatus]  = useState<SslStatus | null>(null);
   const [mode,    setMode]    = useState<SslMode>('self-signed');
   const [saving,  setSaving]  = useState(false);
@@ -2192,9 +2198,9 @@ function SslSettings() {
     setHostnameSaving(true);
     try {
       await setSslHostname(hostname);
-      flash('ok', 'Hostname gespeichert – nginx beim nächsten Neustart aktiv ✓');
+      flash('ok', t('settings.ssl.hostnameSaved'));
     } catch (err: unknown) {
-      flash('err', err instanceof Error ? err.message : 'Fehler');
+      flash('err', err instanceof Error ? err.message : t('common.errorGeneric'));
     } finally {
       setHostnameSaving(false);
     }
@@ -2206,59 +2212,58 @@ function SslSettings() {
       let s: SslStatus;
       if (mode === 'upload') {
         if (uploadFormat === 'pfx') {
-          if (!pfxFile) { flash('err', 'PFX-Datei ist erforderlich'); setSaving(false); return; }
+          if (!pfxFile) { flash('err', t('settings.ssl.pfxRequired')); setSaving(false); return; }
           s = await uploadSslPfx(pfxFile, pfxPassword);
         } else {
-          if (!certFile || !keyFile) { flash('err', 'Zertifikat und Schlüssel sind erforderlich'); setSaving(false); return; }
+          if (!certFile || !keyFile) { flash('err', t('settings.ssl.certKeyRequired')); setSaving(false); return; }
           s = await uploadSslCert(certFile, keyFile, caFile ?? undefined);
         }
       } else if (mode === 'self-signed') {
-        if (!ss.common_name) { flash('err', 'Common Name ist erforderlich'); setSaving(false); return; }
+        if (!ss.common_name) { flash('err', t('settings.ssl.cnRequired')); setSaving(false); return; }
         s = await applySslSelfSigned(ss);
       } else {
-        if (!acme.email || acme.domains.length === 0) { flash('err', 'E-Mail und mindestens eine Domain erforderlich'); setSaving(false); return; }
+        if (!acme.email || acme.domains.length === 0) { flash('err', t('settings.ssl.emailDomainRequired')); setSaving(false); return; }
         s = await applySslAcme(acme);
       }
       setStatus(s);
-      flash('ok', 'SSL-Konfiguration gespeichert ✓');
+      flash('ok', t('settings.ssl.savedOk'));
     } catch (err: unknown) {
-      flash('err', err instanceof Error ? err.message : 'Fehler');
+      flash('err', err instanceof Error ? err.message : t('common.errorGeneric'));
     } finally {
       setSaving(false);
     }
   }
 
   const TAB_LABEL: Record<SslMode, string> = {
-    'upload':      'Zertifikat hochladen',
-    'self-signed': 'Self-Signed generieren',
-    'acme':        'ACME / Let\'s Encrypt',
+    'upload':      t('settings.ssl.tabUpload'),
+    'self-signed': t('settings.ssl.tabSelfSigned'),
+    'acme':        t('settings.ssl.tabAcme'),
   };
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">SSL / TLS-Zertifikat</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.ssl.title')}</h2>
         {status && <SslStatusBadge status={status} />}
       </div>
 
       {/* Hostname */}
       <div className="rounded border border-slate-700/60 bg-slate-900/40 p-3 space-y-2">
-        <p className="text-xs font-medium text-slate-300">Server-Hostname</p>
+        <p className="text-xs font-medium text-slate-300">{t('settings.ssl.serverHostname')}</p>
         <p className="text-[11px] text-slate-500">
-          nginx <code className="font-mono text-slate-400">server_name</code> – Hostname oder IP auf die der Webserver hört.
-          Wird beim nächsten Container-Neustart aktiv.
+          nginx <code className="font-mono text-slate-400">server_name</code> – {t('settings.ssl.serverHostnameHint')}
         </p>
         <div className="flex gap-2">
           <input
             className="input text-xs font-mono flex-1"
-            placeholder="ids.firma.de oder 192.168.1.230"
+            placeholder={t('settings.ssl.hostnamePlaceholder')}
             value={hostname}
             onChange={e => setHostname(e.target.value)}
           />
           <button type="button" className="btn-ghost text-xs shrink-0"
             disabled={hostnameSaving}
             onClick={handleSaveHostname}>
-            {hostnameSaving ? 'Speichern…' : 'Speichern'}
+            {hostnameSaving ? t('settings.users.savingShort') : t('common.save')}
           </button>
         </div>
       </div>
@@ -2266,10 +2271,10 @@ function SslSettings() {
       {/* Aktuelles Zertifikat */}
       {status?.active && status.mode !== 'none' && (
         <div className="rounded-lg border border-slate-700/60 bg-slate-800/30 px-4 py-3 text-xs space-y-1">
-          <p className="text-slate-400 font-medium">Aktives Zertifikat</p>
+          <p className="text-slate-400 font-medium">{t('settings.ssl.activeCert')}</p>
           {status.subject  && <p className="text-slate-300">Subject: <span className="font-mono">{status.subject}</span></p>}
           {status.issuer   && <p className="text-slate-500">Issuer: <span className="font-mono">{status.issuer}</span></p>}
-          {status.not_after && <p className="text-slate-500">Gültig bis: {new Date(status.not_after).toLocaleDateString('de-DE')}</p>}
+          {status.not_after && <p className="text-slate-500">{t('settings.ssl.validUntil')}: {new Date(status.not_after).toLocaleDateString('de-DE')}</p>}
           {status.domains?.length ? <p className="text-slate-500">Domains: {status.domains.join(', ')}</p> : null}
         </div>
       )}
@@ -2302,18 +2307,18 @@ function SslSettings() {
                     ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/40'
                     : 'text-slate-500 hover:text-slate-300'
                 }`}>
-                {f === 'pem' ? 'PEM-Dateien' : 'PFX / PKCS#12'}
+                {f === 'pem' ? t('settings.ssl.pemFiles') : 'PFX / PKCS#12'}
               </button>
             ))}
           </div>
 
           {uploadFormat === 'pem' ? (
             <>
-              <p className="text-slate-500">Lade ein bestehendes PEM-Zertifikat und den zugehörigen privaten Schlüssel hoch.</p>
+              <p className="text-slate-500">{t('settings.ssl.pemHint')}</p>
               {[
-                { label: 'Zertifikat (cert.pem) *', set: setCertFile, accept: '.pem,.crt,.cer' },
-                { label: 'Privater Schlüssel (key.pem) *', set: setKeyFile, accept: '.pem,.key' },
-                { label: 'CA-Chain (optional)', set: setCaFile, accept: '.pem,.crt,.cer' },
+                { label: t('settings.ssl.certFile'), set: setCertFile, accept: '.pem,.crt,.cer' },
+                { label: t('settings.ssl.keyFile'), set: setKeyFile, accept: '.pem,.key' },
+                { label: t('settings.ssl.caChain'), set: setCaFile, accept: '.pem,.crt,.cer' },
               ].map(({ label, set, accept }) => (
                 <div key={label} className="flex flex-col gap-1">
                   <label className="text-slate-400">{label}</label>
@@ -2326,18 +2331,18 @@ function SslSettings() {
           ) : (
             <>
               <p className="text-slate-500">
-                Importiert eine PFX/PKCS#12-Datei (z.B. aus Windows CA exportiert). Zertifikat und privater Schlüssel werden automatisch extrahiert.
+                {t('settings.ssl.pfxHint')}
               </p>
               <div className="flex flex-col gap-1">
-                <label className="text-slate-400">PFX-Datei *</label>
+                <label className="text-slate-400">{t('settings.ssl.pfxFile')}</label>
                 <input type="file" accept=".pfx,.p12"
                   className="block text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-slate-700 file:text-slate-200 hover:file:bg-slate-600 cursor-pointer"
                   onChange={e => setPfxFile(e.target.files?.[0] ?? null)} />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-slate-400">Passwort für privaten Schlüssel</label>
+                <label className="text-slate-400">{t('settings.ssl.pfxPassword')}</label>
                 <input className="input font-mono" type="password"
-                  placeholder="Leer lassen wenn kein Passwort gesetzt"
+                  placeholder={t('settings.ssl.pfxPasswordPlaceholder')}
                   value={pfxPassword}
                   onChange={e => setPfxPassword(e.target.value)} />
               </div>
@@ -2349,25 +2354,25 @@ function SslSettings() {
       {/* Self-Signed */}
       {mode === 'self-signed' && (
         <div className="space-y-3 text-xs">
-          <p className="text-slate-500">Generiert ein selbstsigniertes Zertifikat direkt auf dem Server. Geeignet für interne Deployments ohne öffentliche Domain.</p>
+          <p className="text-slate-500">{t('settings.ssl.selfSignedHint')}</p>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1 col-span-2">
-              <label className="text-slate-400">Common Name (CN) / Hostname *</label>
+              <label className="text-slate-400">{t('settings.ssl.commonName')}</label>
               <input className="input" placeholder="ids.local oder 192.168.1.79"
                 value={ss.common_name} onChange={e => setSs(s => ({ ...s, common_name: e.target.value }))} />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400">Gültigkeit (Tage)</label>
+              <label className="text-slate-400">{t('settings.ssl.validityDays')}</label>
               <input className="input" type="number" min={1} max={3650}
                 value={ss.days} onChange={e => setSs(s => ({ ...s, days: parseInt(e.target.value) || 365 }))} />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-slate-400">Land (2-stellig)</label>
+              <label className="text-slate-400">{t('settings.ssl.country')}</label>
               <input className="input" maxLength={2} placeholder="DE"
                 value={ss.country ?? ''} onChange={e => setSs(s => ({ ...s, country: e.target.value }))} />
             </div>
             <div className="flex flex-col gap-1 col-span-2">
-              <label className="text-slate-400">Organisation</label>
+              <label className="text-slate-400">{t('settings.ssl.organization')}</label>
               <input className="input" placeholder="Cyjan IDS"
                 value={ss.org ?? ''} onChange={e => setSs(s => ({ ...s, org: e.target.value }))} />
             </div>
@@ -2378,14 +2383,14 @@ function SslSettings() {
       {/* ACME */}
       {mode === 'acme' && (
         <div className="space-y-3 text-xs">
-          <p className="text-slate-500">Automatische Zertifikatsvergabe via ACME (z.B. Let's Encrypt). Der Server muss über Port 80/443 erreichbar sein.</p>
+          <p className="text-slate-500">{t('settings.ssl.acmeHint')}</p>
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">E-Mail-Adresse *</label>
+            <label className="text-slate-400">{t('settings.ssl.emailRequired')}</label>
             <input className="input" type="email" placeholder="admin@example.com"
               value={acme.email} onChange={e => setAcme(a => ({ ...a, email: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Domains *</label>
+            <label className="text-slate-400">{t('settings.ssl.domainsRequired')}</label>
             <div className="flex gap-2">
               <input className="input flex-1" placeholder="ids.example.com"
                 value={acmeDomainInput}
@@ -2400,7 +2405,7 @@ function SslSettings() {
               />
               <button type="button" className="btn-ghost text-xs"
                 onClick={() => { if (acmeDomainInput.trim()) { setAcme(a => ({ ...a, domains: [...a.domains, acmeDomainInput.trim()] })); setAcmeDomainInput(''); } }}>
-                + Hinzufügen
+                {t('common.add')}
               </button>
             </div>
             {acme.domains.length > 0 && (
@@ -2416,7 +2421,7 @@ function SslSettings() {
             )}
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">ACME-Verzeichnis-URL</label>
+            <label className="text-slate-400">{t('settings.ssl.acmeDirUrl')}</label>
             <div className="flex gap-2 flex-wrap">
               {[
                 { label: 'Let\'s Encrypt (Prod)',    url: 'https://acme-v02.api.letsencrypt.org/directory' },
@@ -2444,7 +2449,7 @@ function SslSettings() {
           {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
         </div>
         <button className="btn-primary text-xs" disabled={saving} onClick={handleApply}>
-          {saving ? 'Wird angewendet…' : 'Anwenden'}
+          {saving ? t('settings.ssl.applying') : t('settings.ssl.apply')}
         </button>
       </div>
     </div>
@@ -2458,6 +2463,7 @@ const SYSLOG_DEFAULT: SyslogConfig = {
 };
 
 function SyslogSettings() {
+  const { t } = useTranslation();
   const [cfg,     setCfg]     = useState<SyslogConfig>(SYSLOG_DEFAULT);
   const [saving,  setSaving]  = useState(false);
   const [testing, setTesting] = useState(false);
@@ -2475,53 +2481,53 @@ function SyslogSettings() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    try { await saveSyslogConfig(cfg); flash('ok', 'Gespeichert ✓'); }
-    catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Fehler'); }
+    try { await saveSyslogConfig(cfg); flash('ok', t('settings.saml.savedOk')); }
+    catch (err: unknown) { flash('err', err instanceof Error ? err.message : t('common.errorGeneric')); }
     finally { setSaving(false); }
   }
 
   async function handleTest() {
-    if (!cfg.host) { flash('err', 'Bitte zuerst einen Syslog-Host eingeben'); return; }
+    if (!cfg.host) { flash('err', t('settings.syslog.enterHostFirst')); return; }
     setTesting(true);
     try {
       const r = await testSyslog({ host: cfg.host, port: cfg.port, protocol: cfg.protocol, format: cfg.format });
       flash('ok', r.message);
-    } catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Test fehlgeschlagen'); }
+    } catch (err: unknown) { flash('err', err instanceof Error ? err.message : t('settings.syslog.testFailed')); }
     finally { setTesting(false); }
   }
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Syslog / SIEM-Export</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.syslog.title')}</h2>
         <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
           <input type="checkbox" className="accent-cyan-500"
             checked={cfg.enabled}
             onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
           <span className={cfg.enabled ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
-            Export aktiviert
+            {t('settings.syslog.exportEnabled')}
           </span>
         </label>
       </div>
 
       <p className="text-xs text-slate-500">
-        Leitet neue Alerts alle 30 Sekunden an einen Syslog-Server weiter. Unterstützt RFC 5424, CEF (ArcSight, QRadar) und LEEF (IBM QRadar).
+        {t('settings.syslog.intro')}
       </p>
 
       <div className={`space-y-4 ${!cfg.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
           <div className="flex flex-col gap-1 col-span-2">
-            <label className="text-slate-400">Syslog-Host / IP *</label>
-            <input className="input" placeholder="192.168.1.100 oder siem.firma.de"
+            <label className="text-slate-400">{t('settings.syslog.hostLabel')}</label>
+            <input className="input" placeholder={t('settings.syslog.hostPlaceholder')}
               value={cfg.host} onChange={e => setCfg(c => ({ ...c, host: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Port</label>
+            <label className="text-slate-400">{t('settings.syslog.port')}</label>
             <input className="input" type="number" min={1} max={65535}
               value={cfg.port} onChange={e => setCfg(c => ({ ...c, port: parseInt(e.target.value) || 514 }))} />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Protokoll</label>
+            <label className="text-slate-400">{t('settings.syslog.protocol')}</label>
             <select className="input" value={cfg.protocol}
               onChange={e => setCfg(c => ({ ...c, protocol: e.target.value as 'udp' | 'tcp' }))}>
               <option value="udp">UDP</option>
@@ -2532,22 +2538,22 @@ function SyslogSettings() {
 
         <div className="grid grid-cols-2 gap-3 text-xs">
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Format</label>
+            <label className="text-slate-400">{t('settings.syslog.format')}</label>
             <select className="input" value={cfg.format}
               onChange={e => setCfg(c => ({ ...c, format: e.target.value as SyslogConfig['format'] }))}>
-              <option value="rfc5424">RFC 5424 (Standard)</option>
+              <option value="rfc5424">{t('settings.syslog.formatRfc')}</option>
               <option value="cef">CEF (ArcSight / QRadar)</option>
               <option value="leef">LEEF (IBM QRadar)</option>
             </select>
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Mindest-Schweregrad</label>
+            <label className="text-slate-400">{t('settings.syslog.minSeverity')}</label>
             <select className="input" value={cfg.min_severity}
               onChange={e => setCfg(c => ({ ...c, min_severity: e.target.value as SyslogConfig['min_severity'] }))}>
-              <option value="low">Low und höher (alle)</option>
-              <option value="medium">Medium und höher</option>
-              <option value="high">High und höher</option>
-              <option value="critical">Nur Critical</option>
+              <option value="low">{t('settings.syslog.sevLow')}</option>
+              <option value="medium">{t('settings.syslog.sevMedium')}</option>
+              <option value="high">{t('settings.syslog.sevHigh')}</option>
+              <option value="critical">{t('settings.syslog.sevCritical')}</option>
             </select>
           </div>
         </div>
@@ -2560,10 +2566,10 @@ function SyslogSettings() {
         </div>
         <div className="flex gap-2">
           <button type="button" className="btn-ghost text-xs" disabled={testing || !cfg.host} onClick={handleTest}>
-            {testing ? 'Teste…' : 'Verbindung testen'}
+            {testing ? t('settings.syslog.testing') : t('settings.syslog.testConnection')}
           </button>
           <button type="submit" className="btn-primary text-xs" disabled={saving}>
-            {saving ? 'Speichern…' : 'Speichern'}
+            {saving ? t('settings.users.savingShort') : t('common.save')}
           </button>
         </div>
       </div>
@@ -2578,6 +2584,7 @@ const ITOP_DEFAULT: ItopConfig = {
 };
 
 function ItopSettings() {
+  const { t } = useTranslation();
   const [cfg,     setCfg]     = useState<ItopConfig>(ITOP_DEFAULT);
   const [saving,  setSaving]  = useState(false);
   const [testing, setTesting] = useState(false);
@@ -2616,8 +2623,8 @@ function ItopSettings() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    try { await saveItopConfig(cfg); flash('ok', 'Gespeichert ✓'); }
-    catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Fehler'); }
+    try { await saveItopConfig(cfg); flash('ok', t('settings.saml.savedOk')); }
+    catch (err: unknown) { flash('err', err instanceof Error ? err.message : t('common.errorGeneric')); }
     finally { setSaving(false); }
   }
 
@@ -2625,9 +2632,9 @@ function ItopSettings() {
     setTesting(true);
     try {
       const r = await testItopConnection();
-      flash('ok', `Verbunden ✓  –  Organisationen: ${r.organisations.join(', ') || '(keine)'}`);
+      flash('ok', t('settings.itop.connectedOk', { orgs: r.organisations.join(', ') || t('settings.itop.noneParens') }));
     } catch (err: unknown) {
-      flash('err', err instanceof Error ? err.message : 'Verbindung fehlgeschlagen');
+      flash('err', err instanceof Error ? err.message : t('settings.itop.connectionFailed'));
     } finally { setTesting(false); }
   }
 
@@ -2638,7 +2645,7 @@ function ItopSettings() {
       await triggerItopSync();
       startPolling();
     } catch (err: unknown) {
-      flash('err', err instanceof Error ? err.message : 'Fehler beim Starten');
+      flash('err', err instanceof Error ? err.message : t('settings.itop.startError'));
       setSyncing(false);
     }
   }
@@ -2653,66 +2660,64 @@ function ItopSettings() {
   return (
     <form onSubmit={handleSave} className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">iTop CMDB-Integration</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.itop.title')}</h2>
         <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
           <input type="checkbox" className="accent-cyan-500"
             checked={cfg.enabled}
             onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
-          <span className={cfg.enabled ? 'text-cyan-300 font-medium' : 'text-slate-500'}>Aktiv</span>
+          <span className={cfg.enabled ? 'text-cyan-300 font-medium' : 'text-slate-500'}>{t('settings.itop.active')}</span>
         </label>
       </div>
 
       <p className="text-xs text-slate-500">
-        Importiert Subnets in <span className="text-slate-300 font-mono">Bekannte Netzwerke</span> und
-        Server/Geräte in <span className="text-slate-300 font-mono">Hosts</span> aus einer iTop-Instanz.
-        Hosts erhalten <span className="text-slate-300 font-mono">trust_source = cmdb</span>.
+        {t('settings.itop.intro1')} <span className="text-slate-300 font-mono">{t('settings.itop.knownNetworks')}</span> {t('settings.itop.intro2')} <span className="text-slate-300 font-mono">{t('settings.itop.hosts')}</span> {t('settings.itop.intro3')} <span className="text-slate-300 font-mono">trust_source = cmdb</span>.
       </p>
 
       <div className={`space-y-4 ${!cfg.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
 
           <div className="flex flex-col gap-1 sm:col-span-3">
-            <label className="text-slate-400">iTop-URL</label>
+            <label className="text-slate-400">{t('settings.itop.itopUrl')}</label>
             <input className="input font-mono"
               placeholder="https://itop.firma.de"
               value={cfg.base_url}
               onChange={e => setCfg(c => ({ ...c, base_url: e.target.value }))} />
             <span className="text-[10px] text-slate-600">
-              Basis-URL der iTop-Instanz (ohne /webservices/rest.php).
+              {t('settings.itop.baseUrlHint')}
             </span>
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Benutzer *</label>
+            <label className="text-slate-400">{t('settings.itop.userRequired')}</label>
             <input className="input font-mono" autoComplete="off"
               value={cfg.user}
               onChange={e => setCfg(c => ({ ...c, user: e.target.value }))} />
           </div>
 
           <div className="flex flex-col gap-1 sm:col-span-2">
-            <label className="text-slate-400">Passwort *</label>
+            <label className="text-slate-400">{t('settings.itop.passwordRequired')}</label>
             <div className="flex gap-2">
               <input className="input font-mono flex-1"
                 type={showPw ? 'text' : 'password'}
                 autoComplete="new-password"
-                placeholder={cfg.password ? '••••••••' : 'leer'}
+                placeholder={cfg.password ? '••••••••' : t('settings.itop.empty')}
                 value={cfg.password}
                 onChange={e => setCfg(c => ({ ...c, password: e.target.value }))} />
               <button type="button" className="btn-ghost text-xs"
                 onClick={() => setShowPw(v => !v)}>
-                {showPw ? 'Verbergen' : 'Zeigen'}
+                {showPw ? t('settings.saml.hide') : t('settings.saml.show')}
               </button>
             </div>
           </div>
 
           <div className="flex flex-col gap-1 sm:col-span-2">
-            <label className="text-slate-400">Organisations-Filter</label>
+            <label className="text-slate-400">{t('settings.itop.orgFilter')}</label>
             <input className="input font-mono"
-              placeholder="z.B. My Company (leer = alle)"
+              placeholder={t('settings.itop.orgFilterPlaceholder')}
               value={cfg.org_filter}
               onChange={e => setCfg(c => ({ ...c, org_filter: e.target.value }))} />
             <span className="text-[10px] text-slate-600">
-              Exakter iTop-Organisationsname – filtert Subnets und CIs auf eine Org.
+              {t('settings.itop.orgFilterHint')}
             </span>
           </div>
 
@@ -2722,7 +2727,7 @@ function ItopSettings() {
                 checked={cfg.ssl_verify}
                 onChange={e => setCfg(c => ({ ...c, ssl_verify: e.target.checked }))} />
               <span className={cfg.ssl_verify ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
-                SSL prüfen
+                {t('settings.itop.verifySsl')}
               </span>
             </label>
           </div>
@@ -2734,19 +2739,19 @@ function ItopSettings() {
           <button type="button" className="btn-ghost text-xs"
             disabled={testing || !cfg.enabled}
             onClick={handleTest}>
-            {testing ? 'Teste…' : 'Verbindung testen'}
+            {testing ? t('settings.syslog.testing') : t('settings.syslog.testConnection')}
           </button>
           <button type="button" className="btn-ghost text-xs"
             disabled={syncing || !cfg.enabled}
             onClick={handleSync}>
-            {syncing ? 'Synchronisiert…' : 'Jetzt synchronisieren'}
+            {syncing ? t('settings.itop.syncing') : t('settings.itop.syncNow')}
           </button>
         </div>
         <div className="flex items-center gap-3">
           {msg?.type === 'ok'  && <span className="text-xs text-green-400">{msg.text}</span>}
           {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
           <button type="submit" className="btn-primary text-xs" disabled={saving}>
-            {saving ? 'Speichern…' : 'Speichern'}
+            {saving ? t('settings.users.savingShort') : t('common.save')}
           </button>
         </div>
       </div>
@@ -2756,7 +2761,7 @@ function ItopSettings() {
         <div className="mt-2 rounded border border-slate-700 bg-slate-900/60 p-3 space-y-2">
           <div className="flex items-center justify-between text-xs">
             <span className={`font-mono font-medium ${phaseColor[sync.phase] ?? 'text-slate-400'}`}>
-              {sync.phase === 'running' ? 'Läuft…' : sync.phase === 'done' ? 'Fertig' : sync.phase === 'error' ? 'Fehler' : sync.phase}
+              {sync.phase === 'running' ? t('settings.itop.phaseRunning') : sync.phase === 'done' ? t('settings.itop.phaseDone') : sync.phase === 'error' ? t('common.errorGeneric') : sync.phase}
             </span>
             {sync.finished_at && (
               <span className="text-slate-600">{new Date(sync.finished_at).toLocaleTimeString()}</span>
@@ -2765,11 +2770,11 @@ function ItopSettings() {
 
           {sync.phase === 'done' && sync.stats && (
             <div className="flex gap-4 text-xs text-slate-400">
-              <span>Netzwerke: <span className="text-slate-200">{sync.stats.networks_upserted ?? 0}</span></span>
-              <span>Hosts: <span className="text-slate-200">{sync.stats.hosts_upserted ?? 0}</span></span>
+              <span>{t('settings.itop.networks')}: <span className="text-slate-200">{sync.stats.networks_upserted ?? 0}</span></span>
+              <span>{t('settings.itop.hostsLabel')}: <span className="text-slate-200">{sync.stats.hosts_upserted ?? 0}</span></span>
               {(sync.stats.networks_errors ?? 0) + (sync.stats.hosts_errors ?? 0) > 0 && (
                 <span className="text-amber-400">
-                  Fehler: {(sync.stats.networks_errors ?? 0) + (sync.stats.hosts_errors ?? 0)}
+                  {t('common.errorGeneric')}: {(sync.stats.networks_errors ?? 0) + (sync.stats.hosts_errors ?? 0)}
                 </span>
               )}
             </div>
@@ -2796,6 +2801,7 @@ const IRMA_DEFAULT: IrmaConfig = {
 };
 
 function IrmaSettings() {
+  const { t } = useTranslation();
   const [cfg,    setCfg]    = useState<IrmaConfig>(IRMA_DEFAULT);
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -2813,67 +2819,67 @@ function IrmaSettings() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    try { await saveIrmaConfig(cfg); flash('ok', 'Gespeichert ✓ – IRMA-Bridge lädt die Änderungen automatisch beim nächsten Poll.'); }
-    catch (err: unknown) { flash('err', err instanceof Error ? err.message : 'Fehler'); }
+    try { await saveIrmaConfig(cfg); flash('ok', t('settings.irma.savedOk')); }
+    catch (err: unknown) { flash('err', err instanceof Error ? err.message : t('common.errorGeneric')); }
     finally { setSaving(false); }
   }
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">IRMA-Integration</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.irma.title')}</h2>
         <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
           <input type="checkbox" className="accent-cyan-500"
             checked={cfg.enabled}
             onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
           <span className={cfg.enabled ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
-            Aktiv
+            {t('settings.itop.active')}
           </span>
         </label>
       </div>
 
       <p className="text-xs text-slate-500">
-        Pollt die REST-API einer IRMA-IDS-Appliance und importiert deren Alarme als <span className="text-violet-300 font-mono">external</span>-Quelle in das Cyjan-Dashboard. Änderungen an Credentials greifen automatisch beim nächsten Poll-Cycle – kein Neustart nötig.
+        {t('settings.irma.intro1')} <span className="text-violet-300 font-mono">external</span>{t('settings.irma.intro2')}
       </p>
 
       <div className={`space-y-4 ${!cfg.enabled ? 'opacity-50' : ''}`}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
           <div className="flex flex-col gap-1 sm:col-span-3">
-            <label className="text-slate-400">IRMA-Basis-URL</label>
+            <label className="text-slate-400">{t('settings.irma.baseUrl')}</label>
             <input className="input font-mono"
               placeholder="https://10.133.168.115/rest"
               value={cfg.base_url}
               onChange={e => setCfg(c => ({ ...c, base_url: e.target.value }))} />
-            <span className="text-[10px] text-slate-600">Volle URL inkl. Schema und /rest-Pfad.</span>
+            <span className="text-[10px] text-slate-600">{t('settings.irma.baseUrlHint')}</span>
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Benutzer *</label>
+            <label className="text-slate-400">{t('settings.itop.userRequired')}</label>
             <input className="input font-mono" autoComplete="off"
               value={cfg.user}
               onChange={e => setCfg(c => ({ ...c, user: e.target.value }))} />
           </div>
           <div className="flex flex-col gap-1 sm:col-span-2">
-            <label className="text-slate-400">Passwort *</label>
+            <label className="text-slate-400">{t('settings.itop.passwordRequired')}</label>
             <div className="flex gap-2">
               <input
                 className="input font-mono flex-1"
                 type={showPw ? 'text' : 'password'}
                 autoComplete="new-password"
-                placeholder={cfg.password ? '••••••••' : 'leer'}
+                placeholder={cfg.password ? '••••••••' : t('settings.itop.empty')}
                 value={cfg.password}
                 onChange={e => setCfg(c => ({ ...c, password: e.target.value }))}
               />
               <button type="button"
                 onClick={() => setShowPw(v => !v)}
                 className="btn-ghost text-xs">
-                {showPw ? 'Verbergen' : 'Zeigen'}
+                {showPw ? t('settings.saml.hide') : t('settings.saml.show')}
               </button>
             </div>
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Poll-Intervall (Sek.)</label>
+            <label className="text-slate-400">{t('settings.irma.pollInterval')}</label>
             <input className="input" type="number" min={10} max={600}
               value={cfg.poll_interval}
               onChange={e => setCfg(c => ({ ...c, poll_interval: parseInt(e.target.value) || 30 }))} />
@@ -2884,7 +2890,7 @@ function IrmaSettings() {
                 checked={cfg.ssl_verify}
                 onChange={e => setCfg(c => ({ ...c, ssl_verify: e.target.checked }))} />
               <span className={cfg.ssl_verify ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
-                SSL-Zertifikat prüfen
+                {t('settings.irma.verifyCert')}
               </span>
             </label>
           </div>
@@ -2898,7 +2904,7 @@ function IrmaSettings() {
         </div>
         <div className="flex gap-2">
           <button type="submit" className="btn-primary text-xs" disabled={saving}>
-            {saving ? 'Speichern…' : 'Speichern'}
+            {saving ? t('settings.users.savingShort') : t('common.save')}
           </button>
         </div>
       </div>
@@ -2918,17 +2924,17 @@ function StateDot({ state }: { state: string }) {
   );
 }
 
-const ROLE_LABEL: Record<NonNullable<InterfaceInfo['role']>, string> = {
-  management: 'Management',
-  sniffer:    'Sniffer / Mirror',
-};
-
 const ROLE_COLOR: Record<NonNullable<InterfaceInfo['role']>, string> = {
   management: 'bg-blue-900/40 text-blue-300 border-blue-700/50',
   sniffer:    'bg-purple-900/40 text-purple-300 border-purple-700/50',
 };
 
 function NetworkInterfaces() {
+  const { t } = useTranslation();
+  const ROLE_LABEL: Record<NonNullable<InterfaceInfo['role']>, string> = {
+    management: t('settings.interfaces.roleManagement'),
+    sniffer:    t('settings.interfaces.roleSniffer'),
+  };
   const [ifaces,    setIfaces]    = useState<InterfaceInfo[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [applying,  setApplying]  = useState<string | null>(null); // iface name being applied
@@ -2953,11 +2959,11 @@ function NetworkInterfaces() {
     try {
       const res = await setInterfaceRole(role, iface);
       if (role === 'sniffer') {
-        setNotice({ type: 'ok', msg: `Sniffer wird auf ${iface} umgestellt – kurze Unterbrechung (~5 s).` });
+        setNotice({ type: 'ok', msg: t('settings.interfaces.snifferSwitched', { iface }) });
         // Nach 6 s neu laden damit UI aktuellen Stand zeigt
         setTimeout(() => { load(); setNotice(null); }, 6000);
       } else {
-        setNotice({ type: 'warn', msg: res.note ?? `Management-Interface auf ${iface} gespeichert. Stack-Neustart erforderlich.` });
+        setNotice({ type: 'warn', msg: res.note ?? t('settings.interfaces.mgmtSaved', { iface }) });
         load();
       }
     } catch (e) {
@@ -2970,9 +2976,9 @@ function NetworkInterfaces() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Netzwerk-Interfaces</h2>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.interfaces.title')}</h2>
         <button type="button" onClick={load} className="cyjan-btn-secondary text-xs px-2 py-1" disabled={loading}>
-          {loading ? 'Lädt …' : 'Aktualisieren'}
+          {loading ? t('settings.interfaces.loadingShort') : t('settings.rules.refreshLabel')}
         </button>
       </div>
 
@@ -2985,7 +2991,7 @@ function NetworkInterfaces() {
       )}
       {error && <p className="text-xs text-red-400">{error}</p>}
       {!loading && ifaces.length === 0 && !error && (
-        <p className="text-xs text-slate-500">Keine Interfaces gefunden.</p>
+        <p className="text-xs text-slate-500">{t('settings.interfaces.noneFound')}</p>
       )}
 
       <div className="space-y-2">
@@ -3030,7 +3036,7 @@ function NetworkInterfaces() {
                       <span key={a} className="font-mono text-slate-200 mr-2">{a}</span>
                     ))
                   : <span className="italic text-slate-600">
-                      {isSniffer && !isManagement ? 'keine (erwartet)' : 'keine'}
+                      {isSniffer && !isManagement ? t('settings.interfaces.noneExpected') : t('settings.interfaces.none')}
                     </span>
                 }
               </div>
@@ -3041,8 +3047,8 @@ function NetworkInterfaces() {
               <div className="flex items-center gap-2 pt-2 border-t border-slate-700/50">
                 <span className="text-slate-400 flex-1">
                   {confirm.role === 'sniffer'
-                    ? `Sniffer-Interface auf ${iface.name} setzen und Sniffer neu starten?`
-                    : `Management-Interface auf ${iface.name} setzen (Stack-Neustart nötig)?`
+                    ? t('settings.interfaces.confirmSniffer', { iface: iface.name })
+                    : t('settings.interfaces.confirmMgmt', { iface: iface.name })
                   }
                 </span>
                 <button
@@ -3051,14 +3057,14 @@ function NetworkInterfaces() {
                   className="cyjan-btn text-xs px-3 py-1"
                   disabled={!!applying}
                 >
-                  {applying === iface.name ? 'Lädt …' : 'Ja, setzen'}
+                  {applying === iface.name ? t('settings.interfaces.loadingShort') : t('settings.interfaces.yesSet')}
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirm(null)}
                   className="cyjan-btn-secondary text-xs px-3 py-1"
                 >
-                  Abbrechen
+                  {t('common.cancel')}
                 </button>
               </div>
             ) : (
@@ -3069,7 +3075,7 @@ function NetworkInterfaces() {
                   onClick={() => setConfirm({ role: 'sniffer', iface: iface.name })}
                   className="cyjan-btn-secondary text-[11px] px-2 py-1 disabled:opacity-40 disabled:cursor-default"
                 >
-                  Als Sniffer setzen
+                  {t('settings.interfaces.setAsSniffer')}
                 </button>
                 <button
                   type="button"
@@ -3077,7 +3083,7 @@ function NetworkInterfaces() {
                   onClick={() => setConfirm({ role: 'management', iface: iface.name })}
                   className="cyjan-btn-secondary text-[11px] px-2 py-1 disabled:opacity-40 disabled:cursor-default"
                 >
-                  Als Management setzen
+                  {t('settings.interfaces.setAsMgmt')}
                 </button>
               </div>
             )}
@@ -3087,8 +3093,7 @@ function NetworkInterfaces() {
       </div>
 
       <p className="text-[11px] text-slate-600">
-        Sniffer: Interface wird beim Start automatisch aktiviert (ip&nbsp;link&nbsp;set&nbsp;up).
-        Management-Interface-Änderungen erfordern einen Stack-Neustart.
+        {t('settings.interfaces.footerHint')}
       </p>
     </div>
   );
@@ -3096,15 +3101,6 @@ function NetworkInterfaces() {
 
 // ── SystemUpdate ──────────────────────────────────────────────────────────────
 
-const PHASE_LABEL: Record<SystemUpdateStatus['phase'], string> = {
-  idle:       'Bereit',
-  extracting: 'Entpacke ZIP …',
-  loading:    'Lade Images …',
-  building:   'Baue Images …',
-  restarting: 'Starte Services neu …',
-  done:       'Abgeschlossen',
-  error:      'Fehler',
-};
 const PHASE_COLOR: Record<SystemUpdateStatus['phase'], string> = {
   idle:       'text-slate-400',
   extracting: 'text-cyan-400',
@@ -3116,6 +3112,16 @@ const PHASE_COLOR: Record<SystemUpdateStatus['phase'], string> = {
 };
 
 function SystemUpdate() {
+  const { t } = useTranslation();
+  const PHASE_LABEL: Record<SystemUpdateStatus['phase'], string> = {
+    idle:       t('settings.update.phaseIdle'),
+    extracting: t('settings.update.phaseExtracting'),
+    loading:    t('settings.update.phaseLoading'),
+    building:   t('settings.update.phaseBuilding'),
+    restarting: t('settings.update.phaseRestarting'),
+    done:       t('settings.update.phaseDone'),
+    error:      t('common.errorGeneric'),
+  };
   const [file,        setFile]        = useState<File | null>(null);
   const [pullImages,  setPullImages]  = useState(false);
   const [uploading,   setUploading]   = useState(false);
@@ -3191,11 +3197,11 @@ function SystemUpdate() {
     <div>
       <div className="flex items-start justify-between mb-5">
         <div>
-          <h2 className="text-base font-semibold text-slate-100 mb-1">System-Update</h2>
+          <h2 className="text-base font-semibold text-slate-100 mb-1">{t('settings.update.title')}</h2>
           <p className="text-sm text-slate-400">
-            Laden Sie die aktuelle Version als ZIP von GitHub herunter und importieren Sie sie hier.
-            Konfiguration (<code className="text-xs bg-slate-800 px-1 rounded">.env</code>),
-            Zertifikate und Datenbank bleiben erhalten.
+            {t('settings.update.intro1')}
+            <code className="text-xs bg-slate-800 px-1 rounded">.env</code>
+            {t('settings.update.intro2')}
           </p>
         </div>
         {status.version && (
@@ -3204,9 +3210,9 @@ function SystemUpdate() {
             target="_blank"
             rel="noreferrer"
             className="ml-6 shrink-0 flex flex-col items-end gap-0.5 group"
-            title="GitHub Releases öffnen"
+            title={t('settings.update.openReleases')}
           >
-            <span className="text-[10px] uppercase tracking-wide text-slate-500">Installierte Version</span>
+            <span className="text-[10px] uppercase tracking-wide text-slate-500">{t('settings.update.installedVersion')}</span>
             <span className="text-sm font-mono font-semibold text-cyan-400 group-hover:text-cyan-300 transition-colors">
               {status.version}
             </span>
@@ -3224,7 +3230,7 @@ function SystemUpdate() {
             onChange={e => { setFile(e.target.files?.[0] ?? null); setError(null); }}
           />
           <span className="btn text-sm px-3 py-1.5 border border-slate-600 rounded bg-slate-800 hover:bg-slate-700 text-slate-300">
-            {file ? file.name : 'ZIP auswählen …'}
+            {file ? file.name : t('settings.update.chooseZip')}
           </span>
         </label>
 
@@ -3237,7 +3243,7 @@ function SystemUpdate() {
                      disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <Upload size={14} />
-          {uploading ? 'Wird hochgeladen …' : 'Update starten'}
+          {uploading ? t('settings.update.uploading') : t('settings.update.startUpdate')}
         </button>
       </div>
 
@@ -3250,8 +3256,8 @@ function SystemUpdate() {
           className="accent-cyan-500"
         />
         <span className="text-sm text-slate-400">
-          Basis-Images aktualisieren
-          <span className="ml-1 text-slate-600 text-xs">(benötigt Internetzugang)</span>
+          {t('settings.update.pullImages')}
+          <span className="ml-1 text-slate-600 text-xs">{t('settings.update.pullImagesHint')}</span>
         </span>
       </label>
 
@@ -3263,27 +3269,27 @@ function SystemUpdate() {
       <div className="mt-6 pt-5 border-t border-slate-700/60">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <p className="text-sm font-medium text-slate-200">Stack neu starten</p>
+            <p className="text-sm font-medium text-slate-200">{t('settings.update.restartStack')}</p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Startet alle Services neu (~20 Sek. Unterbrechung). Konfiguration und Daten bleiben erhalten.
+              {t('settings.update.restartHint')}
             </p>
           </div>
           {confirmRestart ? (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-amber-300">Wirklich neu starten?</span>
+              <span className="text-xs text-amber-300">{t('settings.update.confirmRestart')}</span>
               <button
                 type="button"
                 onClick={handleRestart}
                 className="px-3 py-1 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white transition-colors"
               >
-                Ja, neu starten
+                {t('settings.update.yesRestart')}
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmRestart(false)}
                 className="px-3 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
               >
-                Abbrechen
+                {t('common.cancel')}
               </button>
             </div>
           ) : (
@@ -3296,7 +3302,7 @@ function SystemUpdate() {
                          disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <RotateCcw size={14} />
-              Neu starten
+              {t('settings.update.restart')}
             </button>
           )}
         </div>
@@ -3307,7 +3313,7 @@ function SystemUpdate() {
         <div className="mt-4 flex items-center gap-2 rounded border border-amber-700/40 bg-amber-950/30 px-3 py-2">
           <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
           <span className="text-xs text-amber-300">
-            API-Container wird neu gestartet — bitte warten (~15 Sek.) …
+            {t('settings.update.apiRestarting')}
           </span>
         </div>
       )}
@@ -3377,7 +3383,8 @@ function fmtBytes(bps: number | null): string {
 }
 
 function GaugeBar({ pct, warn = 70, crit = 85 }: { pct: number | null; warn?: number; crit?: number }) {
-  if (pct === null) return <span className="text-slate-600 text-xs font-mono">Berechne…</span>;
+  const { t } = useTranslation();
+  if (pct === null) return <span className="text-slate-600 text-xs font-mono">{t('settings.systemHealth.calculating')}</span>;
   const bar = pct >= crit ? 'bg-red-500' : pct >= warn ? 'bg-amber-500' : 'bg-green-500';
   const txt = pct >= crit ? 'text-red-300' : pct >= warn ? 'text-amber-300' : 'text-green-300';
   return (
@@ -3400,6 +3407,7 @@ function StatRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 function SystemHealth() {
+  const { t } = useTranslation();
   const [stats,   setStats]   = useState<SystemStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
@@ -3409,14 +3417,14 @@ function SystemHealth() {
     const load = () => {
       fetchSystemStats()
         .then(d => { if (alive) { setStats(d); setError(''); setLoading(false); } })
-        .catch(() => { if (alive) { setError('Systemdaten nicht verfügbar'); setLoading(false); } });
+        .catch(() => { if (alive) { setError(t('settings.systemHealth.unavailable')); setLoading(false); } });
     };
     load();
-    const t = setInterval(load, 5000);
-    return () => { alive = false; clearInterval(t); };
-  }, []);
+    const ti = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(ti); };
+  }, [t]);
 
-  if (loading) return <p className="text-slate-500 text-sm">Lade…</p>;
+  if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
   if (error)   return <p className="text-red-400 text-sm">{error}</p>;
   if (!stats)  return null;
 
@@ -3426,7 +3434,7 @@ function SystemHealth() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-sm font-semibold text-slate-200">Systemauslastung</h2>
+      <h2 className="text-sm font-semibold text-slate-200">{t('settings.systemHealth.title')}</h2>
 
       {/* Warnbanner bei Paketverlusten */}
       {dropWarn && (
@@ -3436,11 +3444,10 @@ function SystemHealth() {
             : 'bg-amber-950/40 border-amber-700/50 text-amber-300'
         }`}>
           <p className="font-semibold mb-0.5">
-            {dropCrit ? '⚠ Kritischer Paketverlust am Sniffer-Interface' : '⚠ Erhöhter Paketverlust am Sniffer-Interface'}
+            {dropCrit ? t('settings.systemHealth.dropCritBanner') : t('settings.systemHealth.dropWarnBanner')}
           </p>
           <p className="text-slate-400">
-            Drop-Rate {sniffer.drop_pct?.toFixed(2)} % — mögliche Ursachen: Mirror-Port überlastet,
-            Sniffer-CPU zu langsam oder Kafka-Backpressure. Pakete fehlen in der Analyse.
+            {t('settings.systemHealth.dropRateMsg', { pct: sniffer.drop_pct?.toFixed(2) })}
           </p>
         </div>
       )}
@@ -3464,53 +3471,53 @@ function SystemHealth() {
       {/* Sniffer-Interface */}
       <section>
         <p className="text-[11px] text-slate-500 uppercase tracking-wider font-mono mb-3">
-          Sniffer-Interface {iface && <span className="text-cyan-600 normal-case">({iface})</span>}
+          {t('settings.systemHealth.snifferInterface')} {iface && <span className="text-cyan-600 normal-case">({iface})</span>}
         </p>
         {net ? (
           <div className="space-y-1">
-            <StatRow label="RX-Rate">
+            <StatRow label={t('settings.systemHealth.rxRate')}>
               <span className="text-slate-200 text-xs font-mono">{fmtBytes(net.rx_bps)}</span>
             </StatRow>
-            <StatRow label="TX-Rate">
+            <StatRow label={t('settings.systemHealth.txRate')}>
               <span className="text-slate-200 text-xs font-mono">{fmtBytes(net.tx_bps)}</span>
             </StatRow>
-            <StatRow label="RX Pakete/s">
+            <StatRow label={t('settings.systemHealth.rxPackets')}>
               <span className="text-slate-200 text-xs font-mono">{net.rx_pps !== null ? net.rx_pps.toLocaleString() : '…'} pps</span>
             </StatRow>
-            <StatRow label="IF Drops kum.">
+            <StatRow label={t('settings.systemHealth.ifDropsCum')}>
               <span className={`text-xs font-mono ${net.rx_dropped > 0 ? 'text-amber-300' : 'text-slate-400'}`}>
                 {net.rx_dropped.toLocaleString()}
               </span>
             </StatRow>
           </div>
         ) : (
-          <p className="text-slate-600 text-xs">Kein Sniffer-Interface konfiguriert</p>
+          <p className="text-slate-600 text-xs">{t('settings.systemHealth.noSnifferIface')}</p>
         )}
       </section>
 
       {/* Sniffer-Prozess */}
       <section>
-        <p className="text-[11px] text-slate-500 uppercase tracking-wider font-mono mb-3">Sniffer-Prozess</p>
+        <p className="text-[11px] text-slate-500 uppercase tracking-wider font-mono mb-3">{t('settings.systemHealth.snifferProcess')}</p>
         <div className="space-y-1">
-          <StatRow label="Erfasst/s">
+          <StatRow label={t('settings.systemHealth.captured')}>
             <span className="text-slate-200 text-xs font-mono">{sniffer.pps !== null ? `${sniffer.pps.toFixed(0)} pps` : '…'}</span>
           </StatRow>
-          <StatRow label="Drop-Rate">
+          <StatRow label={t('settings.systemHealth.dropRate')}>
             <span className={`text-xs font-mono font-semibold ${
               dropCrit ? 'text-red-300' : dropWarn ? 'text-amber-300' : 'text-green-400'
             }`}>
               {sniffer.drop_pct !== null ? `${sniffer.drop_pct.toFixed(2)} %` : '…'}
             </span>
           </StatRow>
-          <StatRow label="Gesamt erfasst">
+          <StatRow label={t('settings.systemHealth.totalCaptured')}>
             <span className="text-slate-400 text-xs font-mono">{sniffer.total_captured.toLocaleString()}</span>
           </StatRow>
-          <StatRow label="Gesamt verworfen">
+          <StatRow label={t('settings.systemHealth.totalDropped')}>
             <span className={`text-xs font-mono ${sniffer.total_dropped > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
               {sniffer.total_dropped.toLocaleString()}
             </span>
           </StatRow>
-          <StatRow label="Kafka-Fehler">
+          <StatRow label={t('settings.systemHealth.kafkaErrors')}>
             <span className={`text-xs font-mono ${sniffer.kafka_errors > 0 ? 'text-red-400' : 'text-slate-400'}`}>
               {sniffer.kafka_errors}
             </span>
@@ -3518,7 +3525,7 @@ function SystemHealth() {
         </div>
       </section>
 
-      <p className="text-[10px] text-slate-700 font-mono">Aktualisierung alle 5 s</p>
+      <p className="text-[10px] text-slate-700 font-mono">{t('settings.systemHealth.refreshFooter')}</p>
     </div>
   );
 }
