@@ -266,7 +266,13 @@ services:
       IDS_SELF_IPS: ${IDS_SELF_IPS:-${MANAGEMENT_IP:-127.0.0.1},172.28.0.0/16,127.0.0.0/8}
       # Adaptive Suppression Thresholds (siehe docs/ML_ENGINE.md §7)
       SUPPRESSION_LEARN_WINDOW_D: ${SUPPRESSION_LEARN_WINDOW_D:-14}
-      SUPPRESSION_MIN_HOURS:      ${SUPPRESSION_MIN_HOURS:-24}
+      # Default 8h ≈ 1 Business-Tag: ein Muster braucht 8 distinkte Stunden
+      # über die 14d-Window für eine Baseline. Vorher 24h – das war zu strikt;
+      # reale Deployments zeigen, dass viele FP-Muster in 14–20 Stunden feuern
+      # und damit nie für Suppression qualifiziert haben (siehe Telegram-
+      # Diskussion 2026-04-29). 8h ist genug Daten für eine brauchbare
+      # Mean/Std-Schätzung und passt zu typischen Office-Workloads.
+      SUPPRESSION_MIN_HOURS:      ${SUPPRESSION_MIN_HOURS:-8}
       SUPPRESSION_Z_THRESHOLD:    ${SUPPRESSION_Z_THRESHOLD:-2.0}
 
   enrichment-service:

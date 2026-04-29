@@ -46,7 +46,7 @@ REFRESH_INTERVAL_S = 60.0
 
 # ── Adaptive Thresholds (ENV-konfigurierbar) ─────────────────────────────────
 LEARN_WINDOW_D      = int(os.environ.get("SUPPRESSION_LEARN_WINDOW_D", "14"))
-MIN_HOURS_WITH_DATA = int(os.environ.get("SUPPRESSION_MIN_HOURS",      "24"))
+MIN_HOURS_WITH_DATA = int(os.environ.get("SUPPRESSION_MIN_HOURS",      "8"))
 Z_THRESHOLD         = float(os.environ.get("SUPPRESSION_Z_THRESHOLD",  "2.0"))
 
 
