@@ -23,12 +23,13 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timedelta
-from typing import Optional
+import uuid
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import asyncpg
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -137,7 +138,7 @@ async def create_pairing_token(
     """Erzeugt einen Bootstrap-Token. Klartext ist ausschließlich im
     Response sichtbar – wir speichern nur den sha256-Hash in der DB."""
     token = secrets.token_urlsafe(32)
-    expires = datetime.utcnow() + timedelta(minutes=body.ttl_min)
+    expires = datetime.now(timezone.utc) + timedelta(minutes=body.ttl_min)
 
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -196,7 +197,7 @@ async def pair_tap(body: PairRequest) -> PairResponse:
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                SELECT id, tap_name, tap_site, expires_at, used_at
+                SELECT id, tap_name, tap_site, expires_at, used_at, created_by
                   FROM tap_pairing_tokens
                  WHERE token_hash=$1
                  FOR UPDATE
@@ -207,13 +208,12 @@ async def pair_tap(body: PairRequest) -> PairResponse:
                 raise HTTPException(401, "Token ungültig")
             if row["used_at"] is not None:
                 raise HTTPException(409, "Token wurde bereits verwendet")
-            if row["expires_at"] < datetime.utcnow():
+            if row["expires_at"] < datetime.now(timezone.utc):
                 raise HTTPException(401, "Token abgelaufen")
 
             # Tap-Datensatz vorbereiten – id wird hier generiert, damit die
             # CSR bereits mit dem korrekten Subject CN signiert werden kann.
-            tap_id_row = await conn.fetchrow("SELECT uuid_generate_v4() AS id")
-            tap_id = tap_id_row["id"]
+            tap_id = uuid.uuid4()
 
             try:
                 ca = master_ca.get_master_ca()
@@ -225,7 +225,6 @@ async def pair_tap(body: PairRequest) -> PairResponse:
             except ValueError as exc:
                 raise HTTPException(400, f"CSR ungültig: {exc}")
 
-            from cryptography.hazmat.primitives import hashes
             fingerprint = cert.fingerprint(hashes.SHA256()).hex()
 
             await conn.execute(
@@ -236,8 +235,10 @@ async def pair_tap(body: PairRequest) -> PairResponse:
                 VALUES ($1, $2, $3, $4, $5, 'active', now(), $6)
                 """,
                 tap_id, row["tap_name"], row["tap_site"],
-                fingerprint, cert.not_valid_after,
-                "pairing-token",  # paired_by: kein User-Kontext beim Pair-Call
+                fingerprint, cert.not_valid_after_utc,
+                # paired_by = der Admin der das Token erzeugt hat – Audit-Trail
+                # bleibt erhalten, obwohl der Pair-Call selbst Token-authed ist.
+                row["created_by"],
             )
             await conn.execute(
                 """
@@ -255,5 +256,5 @@ async def pair_tap(body: PairRequest) -> PairResponse:
         tap_id=tap_id,
         cert_pem=cert_pem.decode(),
         master_ca_pem=ca.cert_pem.decode(),
-        expires_at=cert.not_valid_after,
+        expires_at=cert.not_valid_after_utc,
     )

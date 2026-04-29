@@ -127,8 +127,12 @@ async def api_config() -> JSONResponse:
 
 
 class PairBody(BaseModel):
-    master_url: str = Field(min_length=1)         # https://master:8000
-    token:      str = Field(min_length=10)
+    master_url:  str = Field(min_length=1)         # https://master:8000 oder http://...
+    token:       str = Field(min_length=10)
+    verify_ssl:  bool = Field(default=False)        # Default false: Master hat typisch
+                                                    # ein Self-Signed-Cert. Erst NACH
+                                                    # dem Pairing kennen wir die Master-CA
+                                                    # für ordentliche Validierung.
 
 
 @app.post("/api/pair")
@@ -161,10 +165,16 @@ async def api_pair(body: PairBody) -> JSONResponse:
     )
     csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
 
-    # 2) An Master posten
+    # 2) An Master posten. verify=False ist hier bewusst der Default: ohne
+    #    Master-CA-PEM (die wir GERADE erst beim Pairing bekommen) hat der
+    #    Tap kein Trust-Anchor für eine richtige Cert-Validierung. Der Token
+    #    selbst ist die Authentifizierung des Calls; eine MITM-Attacke
+    #    bekäme zwar das Token, aber der Master bekommt sofort die CSR
+    #    und legt einen Tap an – der echte Tap würde beim eigenen Pair-
+    #    Versuch ein 'Token bereits verwendet'-409 sehen und Alarm schlagen.
     url = body.master_url.rstrip("/") + "/api/taps/pair"
     try:
-        async with httpx.AsyncClient(timeout=30.0, verify=True) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=body.verify_ssl) as client:
             resp = await client.post(url, json={"token": body.token, "csr_pem": csr_pem})
     except httpx.HTTPError as exc:
         raise HTTPException(502, f"Master nicht erreichbar: {exc}")

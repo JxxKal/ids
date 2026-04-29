@@ -44,9 +44,12 @@ services:
     environment:
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: controller,broker
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      # PLAINTEXT (intern, zwischen Containern) + EXTERNAL (für den Sniffer
+      # der mit network_mode:host läuft und nur über localhost:9094 zu uns
+      # findet). CONTROLLER ist der KRaft-Quorum-Listener.
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
@@ -55,6 +58,8 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       KAFKA_CLUSTER_ID: "Q3lqYW5UYXBLYWZrYUNsdXM"
+    ports:
+      - "127.0.0.1:9094:9094"   # nur localhost – host-network-Sniffer reicht
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
       interval: 10s
@@ -88,8 +93,14 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      KAFKA_BROKERS: localhost:9092           # host-network → kafka über localhost:9094
-      INTERFACE: ${MIRROR_INTERFACE:-eth0}
+      # network_mode: host → Sniffer ist auf der Host-Loopback und erreicht
+      # Kafka über den EXTERNAL-Listener auf 9094. MIRROR_IFACE-Env muss
+      # exakt den Namen treffen den der Rust-Code liest.
+      KAFKA_BROKERS: localhost:9094
+      MIRROR_IFACE: ${MIRROR_INTERFACE:?MIRROR_INTERFACE muss in /etc/cyjan/profile gesetzt sein}
+      CAPTURE_SNAPLEN: ${CAPTURE_SNAPLEN:-128}
+      CAPTURE_RING_BUFFER_MB: ${CAPTURE_RING_BUFFER_MB:-64}
+      TEST_MODE: "false"
       RUST_LOG: info
     volumes:
       - /sys:/host/sys:ro

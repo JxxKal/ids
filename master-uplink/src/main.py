@@ -196,7 +196,18 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
     st = asyncio.create_task(stats_loop())
 
     try:
-        async for raw in ws:
+        # Read-Timeout: wenn länger als HEARTBEAT_TIMEOUT_S kein Frame ankommt
+        # (auch kein pong), gehen wir davon aus dass die Verbindung tot ist und
+        # schließen. Sonst kann ein hängender Tap mit halb-offenem TCP ewig
+        # einen Slot belegen ohne dass Daten fließen.
+        while True:
+            try:
+                raw = await asyncio.wait_for(ws.recv(), timeout=HEARTBEAT_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                log.warning("Tap %s timeout – kein Frame seit %.0fs, schließe",
+                            tap_name, HEARTBEAT_TIMEOUT_S)
+                await ws.close(code=4408, reason="receive timeout")
+                break
             try:
                 msg = orjson.loads(raw)
             except Exception as exc:

@@ -76,7 +76,7 @@ def _has_pairing() -> bool:
 def _cert_expires_at() -> float | None:
     try:
         cert = x509.load_pem_x509_certificate(Path(TAP_CERT).read_bytes())
-        return cert.not_valid_after.timestamp()
+        return cert.not_valid_after_utc.timestamp()
     except Exception:
         return None
 
@@ -233,7 +233,6 @@ class Uplink:
     async def _receive_loop(self, ws) -> None:
         """Empfängt ping/pong vom Master. Aktuell nur Heartbeat – der
         Reverse-Channel (Rule-Sync) läuft über REST-Pull, nicht hier."""
-        last_seen = time.time()
         while True:
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=HEARTBEAT_TO)
@@ -247,8 +246,6 @@ class Uplink:
                 continue
             if msg.get("type") == "ping":
                 await ws.send(orjson.dumps({"type": "pong"}).decode())
-                last_seen = time.time()
-            _ = last_seen  # nur zur Klarheit
 
 
 async def amain() -> None:

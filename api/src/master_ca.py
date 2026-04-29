@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime as _dt
 import logging
 import os
+from datetime import timezone as _tz
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -66,7 +67,9 @@ class MasterCA:
         if not csr.is_signature_valid:
             raise ValueError("CSR-Signatur ist ungültig")
 
-        now = _dt.datetime.utcnow()
+        # Wir verwenden timezone-aware UTC-Datetimes durchgängig; das wirft
+        # in Python 3.12 keine DeprecationWarnings mehr.
+        now = _dt.datetime.now(_tz.utc)
         builder = (
             x509.CertificateBuilder()
             .subject_name(x509.Name([
@@ -127,7 +130,7 @@ def _read_existing(key_path: Path, cert_path: Path) -> MasterCA:
 
 def _generate_new(key_path: Path, cert_path: Path) -> MasterCA:
     key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
-    now = _dt.datetime.utcnow()
+    now = _dt.datetime.now(_tz.utc)
     subject = issuer = x509.Name([
         x509.NameAttribute(NameOID.COMMON_NAME, "Cyjan IDS Master CA"),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Cyjan IDS"),
