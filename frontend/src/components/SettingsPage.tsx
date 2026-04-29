@@ -3701,8 +3701,15 @@ function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
     fetchMlStatus()
       .then(s => {
         setStatus(s);
-        // beim ersten Load Felder vorbefüllen
-        setWindowH(prev => prev === '10' ? String(Math.round((s.config.window_s ?? 36000) / 3600)) : prev);
+        // Beim ersten Load die Felder aus der Config vorbefüllen.
+        // window_s sind Sekunden; in Stunden anzeigen mit max. 2 Nachkommastellen,
+        // damit Sub-Stunden-Werte (z.B. 60s aus einem Test) nicht zu '0' gerundet
+        // werden und der User nicht denkt, das Feld sei kaputt.
+        setWindowH(prev => {
+          if (prev !== '10') return prev;  // user hat schon getippt — nicht überschreiben
+          const hrs = (s.config.window_s ?? 36000) / 3600;
+          return hrs >= 1 ? String(Math.round(hrs)) : hrs.toFixed(2);
+        });
         setBlacklist(prev => prev === '' ? (s.config.blacklist ?? []).join(',') : prev);
       })
       .catch(e => setError(e instanceof Error ? e.message : String(e)));
