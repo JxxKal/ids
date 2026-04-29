@@ -213,6 +213,13 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      # api schreibt _known_networks.json im Startup (ins signature-rules-
+      # Volume, das wir hier ebenfalls mounten). Auf service_healthy zu
+      # warten garantiert, dass der CIDR-Cache beim Engine-Initial-Load
+      # bereits da ist — sonst 30s lang scope=external für alle Quellen
+      # bis der nächste Hot-Reload-Tick die Datei aufpickt.
+      api:
+        condition: service_healthy
     volumes:
       - signature-rules:/rules/custom
       - ./signature-engine/rules:/rules/builtin:ro
@@ -386,6 +393,18 @@ services:
       - /proc:/host/proc:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
+    # Healthcheck deckt das gesamte FastAPI-startup() ab — inkl. CA-Init,
+    # known_networks-Sync ins sig-rules-Volume und Streamer-Start. /health
+    # antwortet erst nach Abschluss aller startup-Hooks (FastAPI serviert
+    # vorher keine Requests). signature-engine hängt sich darauf, damit der
+    # Loader beim Initial-Load das _known_networks.json garantiert sieht
+    # (sonst Race: 30s lang Records mit scope=external für interne IPs).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   # ───────────────────────────────────────────────────────────────────────
   # MASTER-UPLINK – mTLS-WebSocket-Endpunkt für Remote-Taps. Hört separat
