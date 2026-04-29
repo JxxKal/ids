@@ -23,9 +23,14 @@ on:
   workflow_dispatch:
     inputs:
       build_iso:
-        description: 'ISO mit bauen? (Default: nur Update-Paket)'
+        description: 'ISO(s) mit bauen? (Default: nur Update-Paket)'
         type: boolean
         default: false
+      image_kind:
+        description: 'Welche ISO-Variante? (master, tap, both) – wirkt nur bei build_iso=true. Tag-Push baut immer beide.'
+        type: choice
+        default: both
+        options: [master, tap, both]
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
@@ -60,16 +65,23 @@ jobs:
           COMPOSE_PROJECT_NAME: ids
           POSTGRES_PASSWORD: build-placeholder
           MIRROR_IFACE: eth1
+          MIRROR_INTERFACE: eth1
+          MASTER_URL: wss://placeholder.example/uplink
         run: |
           set -euo pipefail
 
-          # Alle profile-relevanten Custom-Images bauen (prod + snort).
+          # 1) Alle Master-Profile-Custom-Images bauen (prod + snort).
           docker compose --profile prod --profile snort build \
             --build-arg BUILDKIT_INLINE_CACHE=1
 
-          # Externe Runtime-Images, die compose sonst aus der Registry zieht.
-          # Ohne die ist Offline-First-Boot nicht möglich.
-          EXTERNALS=(
+          # 2) Tap-spezifische Custom-Images bauen. Geteilte Services (sniffer,
+          #    flow-aggregator, signature-engine) sind aus Schritt 1 schon
+          #    da; tap-uplink + tap-api kommen jetzt dazu.
+          docker compose -f docker-compose.tap.yml build \
+            --build-arg BUILDKIT_INLINE_CACHE=1
+
+          # Externe Runtime-Images für den Master.
+          EXTERNALS_MASTER=(
             timescale/timescaledb:latest-pg16
             redis:7-alpine
             apache/kafka:latest
@@ -77,48 +89,73 @@ jobs:
             minio/mc:latest
             provectuslabs/kafka-ui:latest
           )
-          for img in "${EXTERNALS[@]}"; do
+          # Externe Runtime-Images für den Tap. Nur Kafka – keine DB, kein Redis,
+          # kein MinIO, keine Web-UI – am Tap läuft alles in-memory + lokal.
+          EXTERNALS_TAP=(
+            apache/kafka:latest
+          )
+
+          for img in "${EXTERNALS_MASTER[@]}"; do
             docker pull "$img"
           done
 
-          # Liste aller zu bündelnden Images (Custom + Externe).
-          # `snort` ist entscheidend: sobald der User Suricata bejaht, aktiviert
-          # der Wizard `--profile snort` und compose-up versucht ohne Internet
-          # `FROM debian:bookworm-slim` zu pullen, weil das Image fehlt.
-          CUSTOM=(api frontend flow-aggregator signature-engine ml-engine \
-                  alert-manager enrichment-service pcap-store training-loop \
-                  sniffer irma-bridge snort snort-bridge)
+          # Master-Bundle (Custom + Externe Master).
+          CUSTOM_MASTER=(api frontend flow-aggregator signature-engine ml-engine \
+                         alert-manager enrichment-service pcap-store training-loop \
+                         sniffer irma-bridge snort snort-bridge master-uplink)
 
-          IMAGES=()
-          for svc in "${CUSTOM[@]}"; do
+          IMAGES_MASTER=()
+          for svc in "${CUSTOM_MASTER[@]}"; do
             img="ids-${svc}"
             if docker image inspect "$img" >/dev/null 2>&1; then
-              IMAGES+=("$img")
-              echo "  ✓ $img ($(docker image inspect "$img" --format '{{.Size}}' | numfmt --to=iec))"
+              IMAGES_MASTER+=("$img")
+              echo "  master ✓ $img"
             else
-              echo "  · $img nicht gebaut (z.B. snort-bridge ohne snort-Profil) – übersprungen"
+              echo "  master · $img nicht gebaut – übersprungen"
             fi
           done
-          IMAGES+=("${EXTERNALS[@]}")
+          IMAGES_MASTER+=("${EXTERNALS_MASTER[@]}")
 
-          echo "Bundle enthält ${#IMAGES[@]} Images:"
-          printf '  - %s\n' "${IMAGES[@]}"
+          echo "Master-Bundle: ${#IMAGES_MASTER[@]} Images"
+          docker save "${IMAGES_MASTER[@]}" \
+            | zstd -19 -T0 --long=27 -o images-master.tar.zst
+          echo "  → $(du -sh images-master.tar.zst | cut -f1)"
 
-          # zstd statt gzip: bessere Kompressionsrate auf docker-save-Streams
-          # (Layer-Metadata, Manifeste, Configs sind nicht-komprimierter Inhalt
-          # innerhalb des tar). gzip-1-Bundles haben das 2-GiB-GitHub-Release-
-          # Limit gerissen; zstd -19 -T0 spart ~25–30 % bei vergleichbarer Zeit.
-          # --long=27 erlaubt einen 128 MiB-Window – nützlich bei mehreren
-          # Images mit identischen Base-Layern (python-slim teilt sich mehrfach).
-          docker save "${IMAGES[@]}" \
-            | zstd -19 -T0 --long=27 -o images.tar.zst
-          echo "Bundle: $(du -sh images.tar.zst | cut -f1)"
+          # Tap-Bundle (Custom-Tap + Externe Tap). Bewusst minimaler Image-Set
+          # damit das Tap-ISO unter ~600 MB bleibt. tap-uplink + tap-api +
+          # die Detection-Pipeline-Services + das einzige nötige externe Image
+          # (Kafka).
+          CUSTOM_TAP=(sniffer flow-aggregator signature-engine tap-uplink tap-api)
 
-      - name: Bundle als Artefakt hochladen
+          IMAGES_TAP=()
+          for svc in "${CUSTOM_TAP[@]}"; do
+            img="ids-${svc}"
+            if docker image inspect "$img" >/dev/null 2>&1; then
+              IMAGES_TAP+=("$img")
+              echo "  tap    ✓ $img"
+            else
+              echo "  tap    · $img nicht gebaut – übersprungen"
+            fi
+          done
+          IMAGES_TAP+=("${EXTERNALS_TAP[@]}")
+
+          echo "Tap-Bundle: ${#IMAGES_TAP[@]} Images"
+          docker save "${IMAGES_TAP[@]}" \
+            | zstd -19 -T0 --long=27 -o images-tap.tar.zst
+          echo "  → $(du -sh images-tap.tar.zst | cut -f1)"
+
+      - name: Master-Bundle hochladen
         uses: actions/upload-artifact@v4
         with:
-          name: docker-images
-          path: images.tar.zst
+          name: docker-images-master
+          path: images-master.tar.zst
+          retention-days: 7
+
+      - name: Tap-Bundle hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images-tap
+          path: images-tap.tar.zst
           retention-days: 7
 
   # ─────────────────────────────────────────────────────────────────────────
@@ -132,7 +169,7 @@ jobs:
   build-iso:
     needs: build-images
     if: |
-      (github.event_name == 'workflow_dispatch' && inputs.build_iso) ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_iso && inputs.image_kind != 'tap') ||
       (github.event_name == 'push' && endsWith(github.ref_name, '.0.0'))
     runs-on: ubuntu-24.04
     # Debian Bookworm Container: live-build unterstützt hier alle Optionen.
@@ -164,7 +201,7 @@ jobs:
       - name: Image-Bundle aus build-images-Job herunterladen
         uses: actions/download-artifact@v4
         with:
-          name: docker-images
+          name: docker-images-master
           path: artifacts/
 
       - name: Bundle in includes.chroot legen
@@ -175,7 +212,7 @@ jobs:
           # später `git clone` und bricht ab, wenn das Verzeichnis nicht leer ist.
           DST="${GITHUB_WORKSPACE}/distro/config/includes.chroot/opt/cyjan-offline"
           mkdir -p "$DST"
-          mv artifacts/images.tar.zst "$DST/"
+          mv artifacts/images-master.tar.zst "$DST/images.tar.zst"
           ls -lh "$DST/images.tar.zst"
 
       - name: Konfigurieren, Bauen und ISO sichern
@@ -313,6 +350,169 @@ jobs:
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
 
   # ─────────────────────────────────────────────────────────────────────────
+  # Tap-ISO: gleiche Live-Build-Basis wie Master, aber kleineres Image-Bundle
+  # (nur Tap-Services + Kafka) und /etc/cyjan/mode=tap als Marker, damit der
+  # Wizard beim ersten Boot direkt Tap als Default vorschlägt.
+  #
+  # Hostname: cyjan-tap (statt cyjan-ids beim Master) – macht im DHCP-Lease
+  # und auf der Konsole sofort sichtbar dass es ein Tap ist.
+  # ─────────────────────────────────────────────────────────────────────────
+  build-iso-tap:
+    needs: build-images
+    if: |
+      (github.event_name == 'workflow_dispatch' && inputs.build_iso && inputs.image_kind != 'master') ||
+      (github.event_name == 'push' && endsWith(github.ref_name, '.0.0'))
+    runs-on: ubuntu-24.04
+    container:
+      image: debian:bookworm
+      options: --privileged
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: System-Abhängigkeiten installieren
+        shell: bash
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            live-build debootstrap squashfs-tools xorriso \
+            isolinux syslinux-common grub-efi-amd64-bin grub-pc-bin \
+            mtools dosfstools ca-certificates git curl
+          echo "live-build: $(lb --version)"
+          df -h /
+
+      - name: Tap-Image-Bundle herunterladen
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images-tap
+          path: artifacts/
+
+      - name: Tap-Bundle + Mode-Marker in chroot legen
+        shell: bash
+        run: |
+          set -euo pipefail
+          DST="${GITHUB_WORKSPACE}/distro/config/includes.chroot/opt/cyjan-offline"
+          mkdir -p "$DST"
+          # Bundle bewusst unter dem gleichen Dateinamen ablegen wie das
+          # Master-Bundle. ids-setup sucht /opt/cyjan-offline/images.tar.zst
+          # – wir nehmen den Tap-Inhalt und stellen ihn als 'images.tar.zst'
+          # bereit, damit der Wizard-Code identisch bleibt.
+          mv artifacts/images-tap.tar.zst "$DST/images.tar.zst"
+          ls -lh "$DST/images.tar.zst"
+
+          # /etc/cyjan/mode=tap → cyjan-stack-up startet docker-compose.tap.yml,
+          # ids-setup defaultet auf Rolle 'tap' beim ersten Lauf.
+          ETC="${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc/cyjan"
+          mkdir -p "$ETC"
+          echo "tap" > "$ETC/mode"
+          echo "tap" > "$ETC/iso-kind"
+
+          # Hostname für eine Tap-ISO – beim Master heißt es 'cyjan-ids'.
+          echo "cyjan-tap" > "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc/hostname"
+
+      - name: Konfigurieren, Bauen und ISO sichern
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          LOG="${GITHUB_WORKSPACE}/build.log"
+          touch "$LOG"
+          log() { echo "$*" | tee -a "$LOG"; }
+
+          log "=== Version-Marker schreiben (Tap-Variante) ==="
+          VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
+          BUILD_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          BUILD_COMMIT=$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD 2>/dev/null || echo "?")
+          mkdir -p "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc"
+          {
+            echo "VERSION=${VERSION}"
+            echo "BUILD_TS=${BUILD_TS}"
+            echo "BUILD_COMMIT=${BUILD_COMMIT}"
+            echo "ISO_KIND=tap"
+          } > "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc/cyjan-version"
+          cat "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc/cyjan-version" | tee -a "$LOG"
+
+          log "=== lb config (Tap) ==="
+          cd "${GITHUB_WORKSPACE}/distro"
+          lb config 2>&1 | tee -a "$LOG"
+
+          log "=== lb build (Tap) ==="
+          lb build 2>&1 | tee -a "$LOG"
+
+          ISO=$(ls live-image-amd64.hybrid.iso *.iso 2>/dev/null | head -1 || true)
+          if [ -z "$ISO" ]; then
+            log "FEHLER: Keine Tap-ISO-Datei gefunden"
+            ls -la | tee -a "$LOG"
+            exit 1
+          fi
+
+          ISO_NAME="cyjan-ids-tap-${VERSION}.iso"
+          ISO_LATEST="cyjan-ids-tap-latest.iso"
+          cp "$ISO" "${GITHUB_WORKSPACE}/${ISO_NAME}"
+          cp "$ISO" "${GITHUB_WORKSPACE}/${ISO_LATEST}"
+          echo "iso_name=${ISO_NAME}" >> "$GITHUB_OUTPUT"
+          echo "iso_latest=${ISO_LATEST}" >> "$GITHUB_OUTPUT"
+          log "Tap-ISO: ${ISO_NAME} ($(du -sh "${GITHUB_WORKSPACE}/${ISO_NAME}" | cut -f1))"
+
+      - name: Tap-Build-Log hochladen
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-tap
+          path: build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Tap-ISO als Artefakt hochladen
+        if: steps.build.outputs.iso_name != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyjan-ids-tap-iso
+          path: ${{ steps.build.outputs.iso_name }}
+          retention-days: 30
+
+      - name: Tap-ISO an Release anhängen (bei Tag-Push)
+        if: startsWith(github.ref, 'refs/tags/v') && steps.build.outputs.iso_name != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.build.outputs.iso_name }}
+            ${{ steps.build.outputs.iso_latest }}
+          append_body: true
+          body: |
+
+            ---
+
+            ## Cyjan IDS Tap-ISO ${{ github.ref_name }}
+
+            Schmaler Live-ISO-Build für **Remote-Capture-Knoten**. Enthält nur
+            die Tap-Pipeline (sniffer + flow-aggregator + signature-engine +
+            tap-uplink + tap-api + Kafka) – kein Postgres, kein MinIO, kein
+            Frontend.
+
+            Das ISO setzt `/etc/cyjan/mode=tap` voraus, der Wizard defaultet
+            damit auf die Tap-Rolle. User wird beim ersten Boot abgefragt:
+            • Master-API-URL (https://master.lan:8001)
+            • Mirror-Interface (vom physischen NIC)
+            • Pairing-Token (vorher im Master-Frontend unter Settings →
+              Remote Taps generiert; einmalig 60min gültig)
+
+            Nach Wizard-Abschluss baut sich der Tap automatisch eine eigene
+            mTLS-Identität mit dem Master-CA, hält einen WebSocket auf
+            wss://master:8443 und schickt erkannte Alerts persistent dorthin.
+
+            Größenordnung: ~600 MB ISO (vs. ~1.5 GB Master). VM-Profil:
+            2 vCPU, 2 GB RAM, 16 GB Disk reichen.
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
+
+  # ─────────────────────────────────────────────────────────────────────────
   # Update-Paket: gleiches Bundle + compose.yml + infra/, ohne ISO drumrum.
   # Wird über Settings → System-Update eingespielt.
   # ─────────────────────────────────────────────────────────────────────────
@@ -325,10 +525,10 @@ jobs:
       - name: Repository auschecken
         uses: actions/checkout@v4
 
-      - name: Image-Bundle aus build-images-Job herunterladen
+      - name: Master-Bundle herunterladen
         uses: actions/download-artifact@v4
         with:
-          name: docker-images
+          name: docker-images-master
 
       - name: Update-Paket zusammenstellen
         shell: bash
@@ -346,7 +546,9 @@ jobs:
           cp .env.example        "$PKG/"
           cp -r infra/           "$PKG/infra/"
 
-          mv images.tar.zst "$PKG/"
+          # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
+          # Pipeline der API erwartet genau diesen Dateinamen.
+          mv images-master.tar.zst "$PKG/images.tar.zst"
 
           cat > "$PKG/UPDATE.md" << 'EOF'
           # Cyjan IDS Update-Paket
