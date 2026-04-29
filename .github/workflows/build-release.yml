@@ -170,7 +170,7 @@ jobs:
     needs: build-images
     if: |
       (github.event_name == 'workflow_dispatch' && inputs.build_iso && inputs.image_kind != 'tap') ||
-      (github.event_name == 'push' && endsWith(github.ref_name, '.0.0'))
+      (github.event_name == 'push' && (endsWith(github.ref_name, '.0.0') || contains(github.ref_name, '-iso')))
     runs-on: ubuntu-24.04
     # Debian Bookworm Container: live-build unterstützt hier alle Optionen.
     # --privileged ist zwingend – lb build mountet Filesysteme im Chroot.
@@ -361,7 +361,7 @@ jobs:
     needs: build-images
     if: |
       (github.event_name == 'workflow_dispatch' && inputs.build_iso && inputs.image_kind != 'master') ||
-      (github.event_name == 'push' && endsWith(github.ref_name, '.0.0'))
+      (github.event_name == 'push' && (endsWith(github.ref_name, '.0.0') || contains(github.ref_name, '-iso')))
     runs-on: ubuntu-24.04
     container:
       image: debian:bookworm
