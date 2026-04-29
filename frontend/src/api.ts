@@ -640,6 +640,17 @@ export interface SigRuleParamSchema {
   min:     number | null;
   max:     number | null;
   label:   string;
+  // Phase 2: symbolischer Name der Counting-Funktion (unique_dst_ports etc.).
+  // Frontend nutzt das nur als Marker "ML-tunbar".
+  metric:  string | null;
+}
+
+// Phase 1+ Object-Form mit Provenance + scope-Split.
+export interface SigRuleParamOverride {
+  value:           number;
+  value_internal:  number | null;
+  source:          'manual' | 'ml' | null;
+  ml:              Record<string, unknown> | null;
 }
 
 export interface SigRuleEntry {
@@ -655,18 +666,104 @@ export interface SigRuleEntry {
   severity_override:   string | null;
   parameters_schema:   Record<string, SigRuleParamSchema>;
   parameters_default:  Record<string, number>;
-  parameters:          Record<string, number>;          // effektiv (default ⊕ override)
+  parameters:          Record<string, number>;          // effektiv (default ⊕ override, Skalar)
   parameters_override: Record<string, number>;
+  // Object-Form mit Provenance — gefüllt für Params mit value_internal/source/ml.
+  parameters_full?:    Record<string, SigRuleParamOverride>;
 }
 
 export interface SigRuleOverride {
   enabled?:    boolean | null;
   severity?:   'critical' | 'high' | 'medium' | 'low' | null;
-  parameters?: Record<string, number> | null;
+  // Backwards-compat: Skalar = manueller Override. Object = Provenance + scope.
+  parameters?: Record<string, number | SigRuleParamOverride> | null;
 }
 
 export interface SigRulesOverridesResponse {
   overrides: Record<string, SigRuleOverride>;
+}
+
+// ── ML-Tuning (Phase 3+4) ───────────────────────────────────────────────────
+
+export interface MlTuningStateBlock {
+  state:           'idle' | 'training' | 'tuning' | 'paused';
+  started_at:      string | null;
+  training_until:  string | null;
+  last_tuning_at:  string | null;
+  paused_from:     'idle' | 'training' | 'tuning' | null;
+}
+
+export interface MlTuningConfigBlock {
+  window_s:                    number;
+  target_alert_rate_per_hour:  number;
+  scope_split_enabled:         boolean;
+  quantile:                    number;
+  max_change_per_cycle:        number;
+  blacklist:                   string[];
+}
+
+export interface MlTuningStatus {
+  state:          MlTuningStateBlock;
+  config:         MlTuningConfigBlock;
+  total_samples:  number;
+}
+
+export interface MlBaselineEntry {
+  rule_id:       string;
+  param_name:    string;
+  scope:         'internal' | 'external' | 'global';
+  p50:           number | null;
+  p99:           number | null;
+  p995:          number | null;
+  p999:          number | null;
+  sample_count:  number;
+  updated_at:    string;
+}
+
+export async function fetchMlStatus(): Promise<MlTuningStatus> {
+  if (isDemoMode()) {
+    return {
+      state: { state: 'idle', started_at: null, training_until: null, last_tuning_at: null, paused_from: null },
+      config: { window_s: 36000, target_alert_rate_per_hour: 0.5, scope_split_enabled: true, quantile: 0.995, max_change_per_cycle: 0.20, blacklist: [] },
+      total_samples: 0,
+    };
+  }
+  return req<MlTuningStatus>('/api/sig-rules/ml/status');
+}
+
+export interface MlStartTrainingPayload {
+  window_s?:                    number;
+  target_alert_rate_per_hour?:  number;
+  scope_split_enabled?:         boolean;
+  quantile?:                    number;
+  max_change_per_cycle?:        number;
+  blacklist?:                   string[];
+}
+
+export async function startMlTraining(body: MlStartTrainingPayload): Promise<MlTuningStatus> {
+  if (isDemoMode()) return fetchMlStatus();
+  return req<MlTuningStatus>('/api/sig-rules/ml/start-training', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function pauseMlTuning(): Promise<MlTuningStatus> {
+  if (isDemoMode()) return fetchMlStatus();
+  return req<MlTuningStatus>('/api/sig-rules/ml/pause', { method: 'POST' });
+}
+
+export async function resumeMlTuning(): Promise<MlTuningStatus> {
+  if (isDemoMode()) return fetchMlStatus();
+  return req<MlTuningStatus>('/api/sig-rules/ml/resume', { method: 'POST' });
+}
+
+export async function fetchMlBaselines(ruleId?: string): Promise<MlBaselineEntry[]> {
+  if (isDemoMode()) return [];
+  const path = ruleId
+    ? `/api/sig-rules/ml/baselines?rule_id=${encodeURIComponent(ruleId)}`
+    : '/api/sig-rules/ml/baselines';
+  return req<MlBaselineEntry[]>(path);
 }
 
 export async function fetchSigRules(): Promise<SigRuleEntry[]> {

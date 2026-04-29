@@ -18,7 +18,9 @@ import {
   fetchDbStats, cleanupDb, vacuumDb, setRetentionPolicy, backupDbUrl, restoreDb, fetchMaintenanceAudit,
   fetchDnsResolvers, saveDnsResolvers,
   fetchSigRules, fetchSigRulesOverrides, saveSigRulesOverrides,
-  type SigRuleEntry, type SigRuleOverride,
+  fetchMlStatus, startMlTraining, pauseMlTuning, resumeMlTuning,
+  type SigRuleEntry, type SigRuleOverride, type SigRuleParamOverride,
+  type MlTuningStatus,
   fetchSuricataOverrides, saveSuricataOverrides,
   type SuricataOverrideEntry,
   fetchBoundaryPriorityMap, saveBoundaryPriorityMap,
@@ -3681,6 +3683,184 @@ function SeverityCell({
   );
 }
 
+// ── ML-Tuning-Card (Phase 5) ──────────────────────────────────────────────
+//
+// Status (state, Restzeit, sample-count) + Start/Pause/Resume + minimale
+// Trainings-Konfig (window_s, blacklist). Wird oben in der RuleOverrides-
+// Settings-Section gerendert. Polling alle 15s damit der State live mitwandert,
+// sobald rule-tuner den training→tuning-Übergang macht.
+function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
+  const [status, setStatus] = useState<MlTuningStatus | null>(null);
+  const [error, setError]   = useState<string>('');
+  const [busy, setBusy]     = useState(false);
+  // Eingabe-Felder (in Stunden für UX, intern Sekunden)
+  const [windowH, setWindowH] = useState<string>('10');
+  const [blacklist, setBlacklist] = useState<string>('');
+
+  const reload = () => {
+    fetchMlStatus()
+      .then(s => {
+        setStatus(s);
+        // beim ersten Load Felder vorbefüllen
+        setWindowH(prev => prev === '10' ? String(Math.round((s.config.window_s ?? 36000) / 3600)) : prev);
+        setBlacklist(prev => prev === '' ? (s.config.blacklist ?? []).join(',') : prev);
+      })
+      .catch(e => setError(e instanceof Error ? e.message : String(e)));
+  };
+
+  useEffect(() => {
+    reload();
+    const id = window.setInterval(reload, 15_000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!status) {
+    return (
+      <div className="bg-slate-900/40 border border-slate-700/40 rounded p-3 text-xs text-slate-500">
+        ML-Tuning-Status wird geladen{error ? ` … ${error}` : '…'}
+      </div>
+    );
+  }
+
+  const st = status.state.state;
+  const stColor =
+    st === 'training' ? 'text-cyan-300 bg-cyan-900/30 border-cyan-700/40'
+  : st === 'tuning'   ? 'text-emerald-300 bg-emerald-900/30 border-emerald-700/40'
+  : st === 'paused'   ? 'text-amber-300 bg-amber-900/30 border-amber-700/40'
+  :                     'text-slate-400 bg-slate-800/40 border-slate-700/40';
+
+  // Restzeit beim Training berechnen
+  let trainingRest = '';
+  if (st === 'training' && status.state.training_until) {
+    const ms = new Date(status.state.training_until).getTime() - Date.now();
+    if (ms > 0) {
+      const h = Math.floor(ms / 3_600_000);
+      const m = Math.floor((ms % 3_600_000) / 60_000);
+      trainingRest = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    } else {
+      trainingRest = 'gleich';
+    }
+  }
+
+  const lastTuning = status.state.last_tuning_at
+    ? new Date(status.state.last_tuning_at).toLocaleString('de-DE')
+    : '–';
+
+  const handleStart = async () => {
+    setBusy(true); setError('');
+    try {
+      const wh = parseFloat(windowH);
+      const blArr = blacklist.split(',').map(s => s.trim()).filter(Boolean);
+      const payload: Record<string, unknown> = {};
+      if (Number.isFinite(wh) && wh > 0) payload.window_s = Math.round(wh * 3600);
+      payload.blacklist = blArr;
+      const next = await startMlTraining(payload);
+      setStatus(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+
+  const handlePause  = async () => { setBusy(true); setError(''); try { setStatus(await pauseMlTuning()); } catch(e) { setError(String(e)); } finally { setBusy(false); } };
+  const handleResume = async () => { setBusy(true); setError(''); try { setStatus(await resumeMlTuning()); } catch(e) { setError(String(e)); } finally { setBusy(false); } };
+
+  return (
+    <div className="bg-slate-900/40 border border-slate-700/40 rounded p-3 space-y-2">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">ML-Tuning</span>
+        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${stColor}`}>
+          {st}
+          {trainingRest && ` · noch ${trainingRest}`}
+        </span>
+        <span className="text-[10px] text-slate-500">
+          Samples: <span className="text-slate-300 tabular-nums">{status.total_samples.toLocaleString('de-DE')}</span>
+        </span>
+        <span className="text-[10px] text-slate-500">
+          Letzter Tuner-Schreib: <span className="text-slate-400">{lastTuning}</span>
+        </span>
+      </div>
+
+      <p className="text-[10px] text-slate-500 leading-relaxed">
+        Der rule-tuner sammelt Verteilungen pro Rule+Param und setzt nach Trainings­ende
+        Schwellwerte automatisch. Manuell editierte Werte (Skalar-Form unten) werden nicht angefasst.
+      </p>
+
+      <div className="flex gap-2 items-end flex-wrap">
+        <label className="text-[10px] text-slate-400">
+          <div>Trainingsdauer (h)</div>
+          <input
+            type="number"
+            min={0.1}
+            step="0.5"
+            className="input text-xs w-20 font-mono"
+            value={windowH}
+            onChange={e => setWindowH(e.target.value)}
+            disabled={busy}
+          />
+        </label>
+        <label className="text-[10px] text-slate-400 flex-1 min-w-48">
+          <div>Blacklist (Rule-IDs, kommagetrennt)</div>
+          <input
+            type="text"
+            className="input text-xs w-full font-mono"
+            value={blacklist}
+            placeholder="z.B. DOS_SYN_001"
+            onChange={e => setBlacklist(e.target.value)}
+            disabled={busy}
+            list="ml-blacklist-rules"
+          />
+          <datalist id="ml-blacklist-rules">
+            {ruleIds.map(rid => <option key={rid} value={rid} />)}
+          </datalist>
+        </label>
+        <div className="flex gap-1">
+          {(st === 'idle' || st === 'paused' || st === 'tuning' || st === 'training') && (
+            <button className="btn-primary text-xs" onClick={handleStart} disabled={busy}>
+              {st === 'training' ? 'Training neu starten' : 'Training starten'}
+            </button>
+          )}
+          {(st === 'training' || st === 'tuning') && (
+            <button className="btn-ghost text-xs" onClick={handlePause} disabled={busy}>Pause</button>
+          )}
+          {st === 'paused' && (
+            <button className="btn-primary text-xs" onClick={handleResume} disabled={busy}>Resume</button>
+          )}
+        </div>
+      </div>
+      {error && <p className="text-[10px] text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+// Helper: Param-Override hat zwei Formen — Skalar (manueller Wert) ODER
+// Object {value, value_internal, source, ml} (vom rule-tuner gesetzt).
+// extractValue normalisiert auf eine Zahl für Anzeige+Edit.
+function extractParamValue(
+  ov: number | SigRuleParamOverride | null | undefined,
+): number | undefined {
+  if (ov == null) return undefined;
+  if (typeof ov === 'number') return ov;
+  if (typeof ov === 'object' && typeof ov.value === 'number') return ov.value;
+  return undefined;
+}
+
+function getParamSource(
+  ov: number | SigRuleParamOverride | null | undefined,
+): 'manual' | 'ml' | null {
+  if (ov == null) return null;
+  if (typeof ov === 'number') return 'manual';  // Skalar = impliziter manual-Lock
+  if (typeof ov === 'object' && (ov.source === 'manual' || ov.source === 'ml')) return ov.source;
+  return null;
+}
+
+function getParamValueInternal(
+  ov: number | SigRuleParamOverride | null | undefined,
+): number | null {
+  if (ov && typeof ov === 'object' && typeof ov.value_internal === 'number') return ov.value_internal;
+  return null;
+}
+
 function RuleOverridesSettings() {
   const { t } = useTranslation();
   const [rules, setRules]               = useState<SigRuleEntry[]>([]);
@@ -3837,6 +4017,8 @@ function RuleOverridesSettings() {
 
       <p className="text-xs text-slate-500 leading-relaxed">{t('settings.ruleOverrides.intro')}</p>
 
+      <MlTuningCard ruleIds={rules.map(r => r.id)} />
+
       <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-900/40 border border-slate-700/40 rounded px-3 py-2">
         <Trans
           i18nKey="settings.ruleOverrides.scopeNote"
@@ -3917,7 +4099,10 @@ function RuleOverridesSettings() {
                             </p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                               {Object.entries(r.parameters_schema).map(([pname, schema]) => {
-                                const ov = overrides[r.id]?.parameters?.[pname];
+                                const ovRaw = overrides[r.id]?.parameters?.[pname];
+                                const ov = extractParamValue(ovRaw);
+                                const ovSource = getParamSource(ovRaw);
+                                const ovInternal = getParamValueInternal(ovRaw);
                                 const eff = ov ?? r.parameters_default[pname] ?? schema.default;
                                 const isOverridden = ov != null;
                                 const rangeHint = schema.min != null && schema.max != null
@@ -3932,6 +4117,30 @@ function RuleOverridesSettings() {
                                   <div key={pname} className="bg-slate-900/60 border border-slate-700/40 rounded px-2 py-1.5">
                                     <label className="block text-[10px] text-slate-400 mb-1">
                                       <span className="font-mono text-slate-300">{pname}</span>
+                                      {schema.metric && (
+                                        <span
+                                          className="ml-1 inline-block text-[9px] px-1 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400"
+                                          title={`metric: ${schema.metric} — ML-tunbar`}
+                                        >
+                                          tunbar
+                                        </span>
+                                      )}
+                                      {ovSource === 'ml' && (
+                                        <span
+                                          className="ml-1 inline-block text-[9px] px-1 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/40 text-emerald-300"
+                                          title="vom rule-tuner gesetzt — manuelles Editieren überschreibt mit source=manual"
+                                        >
+                                          ML
+                                        </span>
+                                      )}
+                                      {ovSource === 'manual' && (
+                                        <span
+                                          className="ml-1 inline-block text-[9px] px-1 py-0.5 rounded bg-amber-900/40 border border-amber-700/40 text-amber-300"
+                                          title="manuell gesetzt — rule-tuner fasst diesen Param nicht an"
+                                        >
+                                          manuell
+                                        </span>
+                                      )}
                                       {schema.label && <span className="ml-1 text-slate-500">— {schema.label}</span>}
                                     </label>
                                     <div className="flex items-center gap-2">
@@ -3981,6 +4190,9 @@ function RuleOverridesSettings() {
                                     <p className="text-[9px] text-slate-600 mt-0.5 font-mono">
                                       default: {r.parameters_default[pname] ?? schema.default}
                                       {rangeHint && ` · range: ${rangeHint}`}
+                                      {ovInternal != null && (
+                                        <span className="ml-1 text-emerald-400">· intern: {ovInternal}</span>
+                                      )}
                                     </p>
                                   </div>
                                 );
