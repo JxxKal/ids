@@ -26,12 +26,14 @@ trotzdem hochkommen und das Pairing anbieten kann.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import ssl
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 import orjson
@@ -68,6 +70,8 @@ RECONNECT_MAX_S = 60.0
 RULES_DIR             = Path(os.environ.get("RULES_DIR", "/rules"))
 CONFIG_POLL_INTERVAL_S = float(os.environ.get("CONFIG_POLL_INTERVAL_S", "300"))   # 5 min
 CONFIG_POLL_TIMEOUT_S  = float(os.environ.get("CONFIG_POLL_TIMEOUT_S",  "30"))
+CONFIG_BUNDLE_MAX_BYTES = int(os.environ.get("CONFIG_BUNDLE_MAX_BYTES", str(50 * 1024 * 1024)))
+CONFIG_SCHEMA_VERSION   = "1"
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -101,6 +105,34 @@ def _build_ssl_context() -> ssl.SSLContext:
     # ist Hostname-Matching redundant. V2: separates Server-Cert mit
     # IP/DNS-SAN signieren.
     ctx.check_hostname = False
+    return ctx
+
+
+# Cache für SSL-Context. Bei jedem Reconnect / Config-Poll vermeidet das
+# unnötige Disk-Reads + Context-Aufbau. Invalidierung über mtime der drei
+# Cert-Dateien – wenn der Wizard rotiert, holt sich der nächste Aufruf den
+# frischen Context.
+_ssl_cache: dict = {"ctx": None, "mtime": None}
+
+
+def _cert_mtimes() -> tuple[float, float, float] | None:
+    try:
+        return (
+            Path(TAP_CERT).stat().st_mtime,
+            Path(TAP_KEY).stat().st_mtime,
+            Path(MASTER_CA).stat().st_mtime,
+        )
+    except FileNotFoundError:
+        return None
+
+
+def _get_ssl_context() -> ssl.SSLContext:
+    mt = _cert_mtimes()
+    if _ssl_cache["ctx"] is not None and _ssl_cache["mtime"] == mt:
+        return _ssl_cache["ctx"]
+    ctx = _build_ssl_context()
+    _ssl_cache["ctx"] = ctx
+    _ssl_cache["mtime"] = mt
     return ctx
 
 
@@ -186,7 +218,7 @@ class Uplink:
 
             self._write_state("reconnecting")
             try:
-                ssl_ctx = _build_ssl_context()
+                ssl_ctx = _get_ssl_context()
                 async with websockets.connect(
                     MASTER_URL,
                     ssl=ssl_ctx,
@@ -267,16 +299,10 @@ class Uplink:
 
 def _config_url() -> str:
     """Wandelt MASTER_URL (wss://host:port/uplink) in HTTPS-Variante mit
-    /config-Pfad um. Für ws:// → http:// (Test-Setup ohne TLS, eher selten)."""
-    u = MASTER_URL
-    if u.startswith("wss://"):
-        u = "https://" + u[len("wss://"):]
-    elif u.startswith("ws://"):
-        u = "http://" + u[len("ws://"):]
-    # Pfad ersetzen: /uplink → /config (oder direkt anhängen wenn keiner da)
-    head, _, _path = u.partition("?")
-    base = head.rsplit("/", 1)[0] if "/" in head[len("https://"):] else head
-    return base + "/config"
+    /config-Pfad um. ws:// → http:// (Test-Setup ohne TLS)."""
+    p = urlparse(MASTER_URL)
+    scheme = {"wss": "https", "ws": "http"}.get(p.scheme, p.scheme or "https")
+    return urlunparse((scheme, p.netloc, "/config", "", "", ""))
 
 
 def _atomic_write(path: Path, content: bytes) -> None:
@@ -289,9 +315,17 @@ def _atomic_write(path: Path, content: bytes) -> None:
 
 def _apply_config_bundle(bundle: dict) -> tuple[int, int]:
     """Schreibt das Bundle in den lokalen RULES_DIR. Liefert (rules_count,
-    side_files_count) für Logging."""
+    side_files_count) für Logging.
+
+    `complete=False` im Bundle (Master konnte mind. eine YAML nicht lesen)
+    → wir schreiben zwar die ausgelieferten Files, löschen aber KEINE
+    builtin-YAMLs, die nicht im Bundle stehen. Sonst würde ein transienter
+    Read-Fehler am Master eine Rule am Tap dauerhaft entfernen, bis der
+    nächste Poll sie wieder herstellt.
+    """
     builtin_dir = RULES_DIR / "builtin"
     custom_dir  = RULES_DIR / "custom"
+    complete = bool(bundle.get("complete", True))
 
     # Vorhandene Builtin-YAMLs aufräumen die nicht mehr im Bundle sind.
     # Custom-Files werden NICHT angefasst – das ist sonst-User-territory.
@@ -300,20 +334,24 @@ def _apply_config_bundle(bundle: dict) -> tuple[int, int]:
         # Aktuelle YAMLs schreiben.
         for fname, body in rules.items():
             # Schutz vor Path-Traversal: nur einfache Dateinamen erlauben
-            if "/" in fname or fname.startswith(".") or not fname.endswith(".yml"):
+            if Path(fname).name != fname or fname.startswith(".") or not fname.endswith(".yml"):
                 log.warning("Skip rule mit auffälligem Dateinamen: %s", fname)
                 continue
             _atomic_write(builtin_dir / fname, body.encode("utf-8"))
         # Veraltete YAMLs in builtin/ entfernen, die nicht mehr im Bundle sind.
-        if builtin_dir.is_dir():
+        # Nur wenn der Master das Bundle als vollständig markiert hat.
+        if complete and builtin_dir.is_dir():
             keep = set(rules.keys())
             for f in builtin_dir.glob("*.yml"):
                 if f.name not in keep:
                     try:
-                        f.unlink()
+                        f.unlink(missing_ok=True)
                         log.info("Veraltete Rule entfernt: %s", f.name)
                     except Exception as exc:
                         log.warning("Konnte %s nicht löschen: %s", f, exc)
+        elif not complete:
+            log.info("Bundle als incomplete markiert – Cleanup veralteter "
+                     "builtin-YAMLs übersprungen")
 
     side_files = 0
     ovr = bundle.get("rules_overrides")
@@ -334,9 +372,44 @@ def _apply_config_bundle(bundle: dict) -> tuple[int, int]:
     return len(rules), side_files
 
 
+async def _fetch_bundle(client: httpx.AsyncClient, url: str,
+                        last_etag: str | None) -> tuple[int, bytes, str | None]:
+    """HTTP GET mit If-None-Match. Streamt die Antwort und bricht bei
+    CONFIG_BUNDLE_MAX_BYTES ab, damit ein gross/böswilliger Master den Tap
+    nicht via OOM kippt. Liefert (status, body_bytes, etag)."""
+    headers = {"If-None-Match": last_etag} if last_etag else {}
+    async with client.stream("GET", url, headers=headers) as resp:
+        etag = resp.headers.get("ETag")
+        if resp.status_code == 304:
+            return 304, b"", etag
+        if resp.status_code != 200:
+            # Body trotzdem ein Stück lesen, damit das Logging informativ bleibt.
+            await resp.aread()
+            return resp.status_code, resp.content[:512], etag
+
+        cl = resp.headers.get("content-length")
+        if cl is not None and int(cl) > CONFIG_BUNDLE_MAX_BYTES:
+            raise RuntimeError(
+                f"Config-Bundle zu groß ({cl} > {CONFIG_BUNDLE_MAX_BYTES})"
+            )
+
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in resp.aiter_bytes():
+            total += len(chunk)
+            if total > CONFIG_BUNDLE_MAX_BYTES:
+                raise RuntimeError(
+                    f"Config-Bundle überschritt {CONFIG_BUNDLE_MAX_BYTES} bytes mid-stream"
+                )
+            chunks.append(chunk)
+        return 200, b"".join(chunks), etag
+
+
 async def config_poll_loop() -> None:
-    """Pollt MASTER /config alle 5 min mit mTLS-Cert. Liefert atomar in
-    den signature-rules-Volume; signature-engine zieht via inotify nach."""
+    """Pollt MASTER /config alle CONFIG_POLL_INTERVAL_S Sekunden mit mTLS-Cert.
+    Liefert atomar in den signature-rules-Volume; signature-engine zieht via
+    inotify nach. Skip-If-Unchanged via ETag (server-seitig) und sha256-Hash
+    (client-seitig als Backup, falls der Server keinen ETag setzt)."""
     url = _config_url()
     log.info("Config-Poll-Loop aktiv: alle %.0fs gegen %s",
              CONFIG_POLL_INTERVAL_S, url)
@@ -344,26 +417,58 @@ async def config_poll_loop() -> None:
     # konkurrieren die Verbindungen um den ersten Cert-Read).
     await asyncio.sleep(5)
 
+    last_etag: str | None = None
+    last_hash: str | None = None
+
     while True:
         if not _has_pairing():
             await asyncio.sleep(min(30, CONFIG_POLL_INTERVAL_S))
             continue
 
         try:
-            ssl_ctx = _build_ssl_context()
+            # SSL-Context enthält bereits den Client-Cert via load_cert_chain;
+            # cert=(...) zusätzlich zu setzen wäre redundant und in manchen
+            # httpx-Versionen mehrdeutig.
+            ssl_ctx = _get_ssl_context()
             async with httpx.AsyncClient(
                 timeout=CONFIG_POLL_TIMEOUT_S,
                 verify=ssl_ctx,
-                cert=(TAP_CERT, TAP_KEY),
             ) as client:
-                resp = await client.get(url)
-            if resp.status_code != 200:
-                log.warning("Config-Poll HTTP %d: %s", resp.status_code, resp.text[:200])
+                status, body, etag = await _fetch_bundle(client, url, last_etag)
+
+            if status == 304:
+                last_etag = etag or last_etag
+                log.debug("Config-Poll: 304 Not Modified")
+            elif status != 200:
+                log.warning("Config-Poll HTTP %d: %s", status, body[:200])
             else:
-                bundle = resp.json()
-                rc, sc = _apply_config_bundle(bundle)
-                log.info("Config-Poll erfolgreich: %d Rules + %d Side-Files (gen=%s)",
-                         rc, sc, bundle.get("generated_at"))
+                # Schema-Version checken; defensiv gegen V2-Master + V1-Tap.
+                try:
+                    bundle = orjson.loads(body)
+                except Exception as exc:
+                    log.warning("Config-Bundle nicht parsebar: %s", exc)
+                    await asyncio.sleep(CONFIG_POLL_INTERVAL_S)
+                    continue
+                ver = str(bundle.get("version", ""))
+                if ver != CONFIG_SCHEMA_VERSION:
+                    log.warning("Bundle-Schema %r unbekannt (erwartet %r) – Skip",
+                                ver, CONFIG_SCHEMA_VERSION)
+                    await asyncio.sleep(CONFIG_POLL_INTERVAL_S)
+                    continue
+
+                # Backup-Skip falls Server kein ETag setzt: Hash über Body.
+                bhash = hashlib.sha256(body).hexdigest()
+                if bhash == last_hash:
+                    log.debug("Config-Poll: Bundle inhaltlich unverändert – Skip Apply")
+                else:
+                    rc, sc = _apply_config_bundle(bundle)
+                    log.info("Config-Poll erfolgreich: %d Rules + %d Side-Files "
+                             "(complete=%s, gen=%s)",
+                             rc, sc, bundle.get("complete", True),
+                             bundle.get("generated_at"))
+                    last_hash = bhash
+
+                last_etag = etag or last_etag
         except Exception as exc:
             log.warning("Config-Poll fehlgeschlagen: %s", exc)
 
