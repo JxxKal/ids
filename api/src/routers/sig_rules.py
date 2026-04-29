@@ -618,28 +618,28 @@ class BaselineEntry(BaseModel):
     updated_at: str
 
 
+# Der api-Pool installiert in database._init_conn() einen json/jsonb-Codec
+# (json.dumps als encoder, json.loads als decoder). asyncpg wendet ihn bei
+# JSONB-Spalten *automatisch* an — Python-Dicts gehen direkt rein, gelesene
+# Werte kommen direkt als Dict zurück. Eigenes json.dumps/loads würde
+# doppelt kodieren (Object → JSON-String → JSONB-String).
+
 async def _read_state(conn: asyncpg.Connection) -> dict:
     row = await conn.fetchrow(
-        "SELECT value::text AS v FROM system_config WHERE key='ml_tuning_state'"
+        "SELECT value FROM system_config WHERE key='ml_tuning_state'"
     )
-    if not row:
+    if not row or not isinstance(row["value"], dict):
         return {"state": "idle"}
-    try:
-        return json.loads(row["v"])
-    except (TypeError, ValueError):
-        return {"state": "idle"}
+    return row["value"]
 
 
 async def _read_config(conn: asyncpg.Connection) -> dict:
     row = await conn.fetchrow(
-        "SELECT value::text AS v FROM system_config WHERE key='ml_tuning_config'"
+        "SELECT value FROM system_config WHERE key='ml_tuning_config'"
     )
-    if not row:
+    if not row or not isinstance(row["value"], dict):
         return {}
-    try:
-        return json.loads(row["v"])
-    except (TypeError, ValueError):
-        return {}
+    return row["value"]
 
 
 async def _write_state(conn: asyncpg.Connection, payload: dict) -> None:
@@ -649,7 +649,7 @@ async def _write_state(conn: asyncpg.Connection, payload: dict) -> None:
         VALUES ('ml_tuning_state', $1::jsonb)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
         """,
-        json.dumps(payload),
+        payload,
     )
 
 
@@ -660,7 +660,7 @@ async def _write_config(conn: asyncpg.Connection, payload: dict) -> None:
         VALUES ('ml_tuning_config', $1::jsonb)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
         """,
-        json.dumps(payload),
+        payload,
     )
 
 
