@@ -250,11 +250,11 @@
       "showTest": "Test-Alerts mit anzeigen. Standardmäßig versteckt, weil die Test-Szenarien-Seite hunderte produzieren kann.",
       "snapshotHint": "Hinweis: aktuell wird ein Schnappschuss angezeigt, neue Alerts erscheinen erst nach erneutem Laden oder Wechsel auf 'Live'.",
       "alertSearch": "Volltextsuche über Regel-ID, Beschreibung, Tags, IPs, Hostnamen und CMDB-Namen. Komma-getrennte Begriffe werden alle UND-verknüpft.",
-      "alertEgress": "Egress-Filter. 'Aus' = alles, 'An' = nur ausgehender Traffic mit Boundary-Klassifikation, 'An+WL' = inklusive bereits whitelisteter Verbindungen.",
-      "alertSortPriority": "Sortiert die Liste nach Egress-Priority (P0 oben) statt nach Zeit. Inaktiv = neueste zuerst.",
+      "alertEgress": "OT-Boundary-Filter. 'Off' = alles, 'On' = nur Verkehr über die OT-Grenze mit Boundary-Klassifikation, 'On+WL' = inklusive bereits whitelisteter Verbindungen.",
+      "alertSortPriority": "Sortiert die Liste nach OT-Boundary-Priorität (P0 oben) statt nach Zeit. Inaktiv = neueste zuerst.",
       "alertGroup": "Gruppiert identische Alerts (gleiche Regel + gleiche Endpunkte) zu einer Zeile mit Counter zusammen, statt jede Wiederholung einzeln zu zeigen.",
       "alertRow": "Eine Alert-Zeile: Klick öffnet die Detailansicht mit PCAP-Vorschau, Verbindungsgraph und True/False-Positive-Bewertung.",
-      "boundaryCell": "Egress-Boundary-Klassifikation für ausgehenden Verkehr. Drei Pillen: N = Zielnetz bekannt (CMDB-Eintrag), S = Quell-Host bekannt (Trust-Liste), D = Ziel-Host bekannt. Daraus folgt die Priorität: P0 = nichts bekannt (höchste Priorität), P1 = nur ein Endpunkt bekannt, P2 = beide Endpunkte oder Netz bekannt, P3 = Netz + ein Endpunkt bekannt. Alles drei bekannt = kein Egress-Alert. ·WL = bereits whitelisted."
+      "boundaryCell": "OT-Boundary-Klassifikation für Verkehr über die OT-Grenze. Drei Pillen: N = Zielnetz bekannt (CMDB-Eintrag), S = Quell-Host bekannt (Trust-Liste), D = Ziel-Host bekannt. Daraus folgt die Priorität: P0 = nichts bekannt (höchste Priorität), P1 = nur ein Endpunkt bekannt, P2 = beide Endpunkte oder Netz bekannt, P3 = Netz + ein Endpunkt bekannt. Alles drei bekannt = kein Boundary-Alert. ·WL = bereits whitelisted."
     }
   },
   "tabs": {
@@ -384,13 +384,13 @@
     "noAlerts": "Keine Alerts",
     "bidirectional": "Bidirektional (Request + Response in Session)",
     "egressToggle": {
-      "title": "Egress-Boundary-Filter: Off → nur Egress (ohne Whitelisted) → Egress + Whitelisted (Audit-View)",
-      "off": "↘ Egress: Off",
-      "on": "↘ Egress: On",
-      "onWl": "↘ Egress + WL"
+      "title": "OT-Boundary-Filter: Off → nur OT-Boundary (ohne Whitelisted) → OT-Boundary + Whitelisted (Audit-View)",
+      "off": "↘ OT-Boundary: Off",
+      "on": "↘ OT-Boundary: On",
+      "onWl": "↘ OT-Boundary + WL"
     },
     "priorityToggle": {
-      "title": "Sortierung nach Boundary-Priorität (P0 zuerst), sonst nach Zeit absteigend",
+      "title": "Sortierung nach OT-Boundary-Priorität (P0 zuerst), sonst nach Zeit absteigend",
       "off": "≡ Sort: Time",
       "on": "≡ Sort: Priority"
     },

@@ -250,11 +250,11 @@
       "showTest": "Include test alerts. Hidden by default because the test scenarios page can produce hundreds.",
       "snapshotHint": "Note: a snapshot is shown right now. New alerts appear only after reloading or switching back to 'Live'.",
       "alertSearch": "Full-text search across rule ID, description, tags, IPs, hostnames, and CMDB names. Comma-separated terms are AND-combined.",
-      "alertEgress": "Egress filter. 'Off' = all alerts, 'On' = outbound traffic with boundary classification only, 'On+WL' = also include already whitelisted connections.",
-      "alertSortPriority": "Sort by egress priority (P0 first) instead of time. Off = newest first.",
+      "alertEgress": "OT-Boundary filter. 'Off' = all alerts, 'On' = traffic crossing the OT boundary with boundary classification only, 'On+WL' = also include already whitelisted connections.",
+      "alertSortPriority": "Sort by OT-Boundary priority (P0 first) instead of time. Off = newest first.",
       "alertGroup": "Groups identical alerts (same rule + same endpoints) into one row with a counter, instead of listing every repetition separately.",
       "alertRow": "An alert row: click to open the detail view with PCAP preview, connection graph, and true/false-positive feedback.",
-      "boundaryCell": "Egress boundary classification for outbound traffic. Three pills: N = destination network known (CMDB entry), S = source host known (trust list), D = destination host known. Priority follows: P0 = nothing known (highest), P1 = only one endpoint known, P2 = both endpoints or network known, P3 = network + one endpoint known. All three known = no egress alert. ·WL = already whitelisted."
+      "boundaryCell": "OT-Boundary classification for traffic crossing the OT boundary. Three pills: N = destination network known (CMDB entry), S = source host known (trust list), D = destination host known. Priority follows: P0 = nothing known (highest), P1 = only one endpoint known, P2 = both endpoints or network known, P3 = network + one endpoint known. All three known = no boundary alert. ·WL = already whitelisted."
     }
   },
   "tabs": {
@@ -384,13 +384,13 @@
     "noAlerts": "No alerts",
     "bidirectional": "Bidirectional (request + response in session)",
     "egressToggle": {
-      "title": "Egress boundary filter: Off → egress only (no whitelisted) → egress + whitelisted (audit view)",
-      "off": "↘ Egress: Off",
-      "on": "↘ Egress: On",
-      "onWl": "↘ Egress + WL"
+      "title": "OT-Boundary filter: Off → OT-Boundary only (no whitelisted) → OT-Boundary + whitelisted (audit view)",
+      "off": "↘ OT-Boundary: Off",
+      "on": "↘ OT-Boundary: On",
+      "onWl": "↘ OT-Boundary + WL"
     },
     "priorityToggle": {
-      "title": "Sort by boundary priority (P0 first); otherwise time descending",
+      "title": "Sort by OT-Boundary priority (P0 first); otherwise time descending",
       "off": "≡ Sort: Time",
       "on": "≡ Sort: Priority"
     },
