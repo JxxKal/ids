@@ -39,6 +39,7 @@ from datetime import datetime, timezone
 
 from confluent_kafka import Producer
 
+from direction import normalize as normalize_direction
 from sid_overrides import SuricataOverrides
 
 # ── Konfiguration ─────────────────────────────────────────────────────────────
@@ -94,8 +95,12 @@ def _map_alert(rec: dict) -> dict | None:
     cat  = alert_obj.get("category", "")
     tags = ["suricata"] + ([cat.lower()] if cat else [])
 
-    dst_port_raw = rec.get("dest_port")
-    dst_port = int(dst_port_raw) if dst_port_raw else None
+    # Suricata feuert auf dem auslösenden Paket – src/dst sind dort die Paket-
+    # Endpoints, nicht zwingend Client/Server der Verbindung. Wir normalisieren
+    # auf Initiator-Richtung (Client zuerst), damit das Frontend für
+    # Suricata-Alerts dieselbe konsistente Sicht hat wie für eigene
+    # Signature-/ML-Alerts. Heuristik in direction.py.
+    src_ip, _src_port, dst_ip, dst_port = normalize_direction(rec)
 
     return {
         "alert_id":    str(uuid.uuid4()),
@@ -103,8 +108,8 @@ def _map_alert(rec: dict) -> dict | None:
         "source":      "suricata",
         "severity":    severity,
         "description": alert_obj.get("signature", ""),
-        "src_ip":      rec.get("src_ip"),
-        "dst_ip":      rec.get("dest_ip"),
+        "src_ip":      src_ip,
+        "dst_ip":      dst_ip,
         "dst_port":    dst_port,
         "proto":       (rec.get("proto") or "").upper() or None,
         "score":       score,
