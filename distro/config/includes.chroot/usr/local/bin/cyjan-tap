@@ -59,22 +59,25 @@ print_state() {
   else
     # Fallback ohne jq: kompaktes Python-Pretty-Print mit den wichtigsten
     # Feldern. Genauso lesbar, nur weniger ausgeschmückt.
-    python3 -c '
+    # Python-Pretty-Print ohne f-string-Tricks (Python 3.11-kompatibel,
+    # Debian Bookworm hat default 3.11). JSON kommt via stdin rein.
+    echo "$s" | python3 -c '
 import json, sys, time
 d = json.loads(sys.stdin.read())
 def rel(t):
     if not t: return "–"
-    return f"{int(time.time()-t)}s"
-print(f"Master-URL:        {d.get(\"master_url\") or \"–\"}")
-print(f"Verbindung:        {d.get(\"connection\")}")
-print(f"Letzter Connect:   {rel(d.get(\"last_connect_at\"))}")
-print(f"Letzter Send:      {rel(d.get(\"last_send_at\"))}")
-print(f"Gesendet (total):  {d.get(\"sent_total\", 0)}")
-print(f"Queue-Einträge:    {d.get(\"queue_count\", 0)}")
-print(f"Queue-Bytes:       {d.get(\"queue_bytes\", 0)}")
-print(f"Cert läuft ab:     {d.get(\"cert_expires_at\") or \"–\"}")
-print(f"Letzter Fehler:    {d.get(\"last_error\") or \"–\"}")
-' <<<"$s"
+    return str(int(time.time()-t)) + "s"
+def F(v): return v if v not in (None, "") else "–"
+print("Master-URL:       ", F(d.get("master_url")))
+print("Verbindung:       ", F(d.get("connection")))
+print("Letzter Connect:  ", rel(d.get("last_connect_at")))
+print("Letzter Send:     ", rel(d.get("last_send_at")))
+print("Gesendet (total): ", d.get("sent_total", 0))
+print("Queue-Einträge:   ", d.get("queue_count", 0))
+print("Queue-Bytes:      ", d.get("queue_bytes", 0))
+print("Cert läuft ab:    ", F(d.get("cert_expires_at")))
+print("Letzter Fehler:   ", F(d.get("last_error")))
+'
   fi
 }
 

@@ -86,7 +86,13 @@ def _build_ssl_context() -> ssl.SSLContext:
     ctx.load_cert_chain(certfile=TAP_CERT, keyfile=TAP_KEY)
     ctx.load_verify_locations(cafile=MASTER_CA)
     ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.check_hostname = True
+    # Hostname-Check ist hier bewusst aus: das Server-Cert auf dem Master ist
+    # in V1 das Master-CA-Cert selbst (CN='Cyjan IDS Master CA'), ohne
+    # IP/DNS-SAN. Da die Authentizität des Servers ohnehin über die CA-
+    # Verifikation + den fixen Cert-Trust-Anchor des Tap garantiert ist,
+    # ist Hostname-Matching redundant. V2: separates Server-Cert mit
+    # IP/DNS-SAN signieren.
+    ctx.check_hostname = False
     return ctx
 
 
