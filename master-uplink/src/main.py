@@ -51,15 +51,27 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-def _build_ssl_context() -> ssl.SSLContext:
+def _wait_for_ca() -> tuple[Path, Path]:
+    """api initialisiert die Master-CA beim Startup. master-uplink kann
+    schneller hochkommen als die api – statt zu crashen warten wir bis zu
+    5 min und retryn alle 2s."""
+    import time
     ca_cert = Path(MASTER_CA_DIR) / "master-ca.pem"
     ca_key  = Path(MASTER_CA_DIR) / "master-ca.key"
-    if not ca_cert.exists() or not ca_key.exists():
-        raise FileNotFoundError(
-            f"Master-CA fehlt unter {MASTER_CA_DIR}. Der api-Container "
-            "muss das Verzeichnis vorbereiten (CA-Bootstrap beim Startup)."
-        )
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    deadline = time.time() + 300
+    while time.time() < deadline:
+        if ca_cert.exists() and ca_key.exists():
+            return ca_cert, ca_key
+        log.info("Warte auf Master-CA unter %s ...", MASTER_CA_DIR)
+        time.sleep(2)
+    raise FileNotFoundError(
+        f"Master-CA fehlt nach 5 min unter {MASTER_CA_DIR}. "
+        "Läuft der api-Container? master_ca.init() im Startup-Hook erwartet."
+    )
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    ca_cert, ca_key = _wait_for_ca()
     # Master-Cert: wir benutzen das CA-Cert als Server-Cert. Funktional ist
     # das ungewöhnlich (CA als Server-Cert), in unserem Inter-Service-mTLS-
     # Szenario aber praktisch: der Tap kennt nur die Master-CA und vertraut

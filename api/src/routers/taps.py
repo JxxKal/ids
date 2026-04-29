@@ -31,6 +31,7 @@ import asyncpg
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 import master_ca
@@ -161,11 +162,11 @@ async def create_pairing_token(
     )
 
 
-@router.delete("/{tap_id}", status_code=204)
+@router.delete("/{tap_id}", status_code=204, response_class=Response)
 async def revoke_tap(
     tap_id: UUID,
     admin: dict = Depends(require_admin),
-) -> None:
+) -> Response:
     pool = get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -179,6 +180,7 @@ async def revoke_tap(
     if result.endswith(" 0"):
         raise HTTPException(404, "Tap nicht gefunden oder bereits revoked")
     log.warning("Tap %s revoked von %s", tap_id, admin.get("sub"))
+    return Response(status_code=204)
 
 
 # ── Pairing (öffentlich, Token-authentisiert) ────────────────────────────
