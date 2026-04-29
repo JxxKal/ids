@@ -144,10 +144,11 @@ class SignatureEngine:
         alerts     = []
 
         for rule in self._loader.rules:
+            fparams = _FlowParams(rule.parameters, is_internal)
             local_vars = {
                 "flow": flat,
                 "ctx": self._ctx,
-                "params": _FlowParams(rule.parameters, is_internal),
+                "params": fparams,
             }
             try:
                 match = eval(rule.condition_code, _EVAL_GLOBALS, local_vars)  # noqa: S307
@@ -164,7 +165,7 @@ class SignatureEngine:
                 continue   # zu kurz nach dem letzten Alert dieser Regel+IP
 
             self._cooldowns[key] = now
-            alerts.append(_make_alert(rule, flat, self._ctx))
+            alerts.append(_make_alert(rule, flat, self._ctx, fparams))
 
         return alerts
 
@@ -229,7 +230,7 @@ class SignatureEngine:
 
 # ── Alert-Erstellung mit dynamischer Beschreibung ─────────────────────────────
 
-def _make_alert(rule: Rule, flow: dict, ctx: RuleContext) -> dict:
+def _make_alert(rule: Rule, flow: dict, ctx: RuleContext, fparams: "_FlowParams") -> dict:
     src_ip = flow.get("src_ip") or ""
 
     # Kontextwerte zum Zeitpunkt des Feuerns sammeln
@@ -258,18 +259,35 @@ def _make_alert(rule: Rule, flow: dict, ctx: RuleContext) -> dict:
     if extras:
         description = f"{description} – {', '.join(extras)}"
 
+    # Phase-4.5: metric_values pro Param mit `metric:`-Deklaration einsammeln —
+    # alert-manager persistiert das, rule-tuner nutzt min/max-Werte aus
+    # FP/TP-Markierungen als Constraint.
+    metric_values: dict[str, float] = {}
+    for pname, schema in rule.parameters_schema.items():
+        metric_name = schema.get("metric")
+        if not metric_name:
+            continue
+        fn = METRIC_FUNCS.get(metric_name)
+        if fn is None:
+            continue
+        try:
+            metric_values[pname] = float(fn(ctx, flow, fparams))
+        except Exception:  # nosec - cleaner Fallback als crash im Alert-Pfad
+            pass
+
     return {
-        "rule_id":     rule.id,
-        "rule_name":   rule.name,
-        "severity":    rule.severity,
-        "tags":        rule.tags,
-        "description": description,
-        "src_ip":      flow.get("src_ip"),
-        "src_port":    flow.get("src_port"),
-        "dst_ip":      flow.get("dst_ip"),
-        "dst_port":    flow.get("dst_port"),
-        "proto":       flow.get("proto"),
-        "flow_id":     flow.get("flow_id"),
-        "ts":          float(flow.get("end_ts") or time.time()),
-        "is_test":     bool(flow.get("is_test", False)),
+        "rule_id":      rule.id,
+        "rule_name":    rule.name,
+        "severity":     rule.severity,
+        "tags":         rule.tags,
+        "description":  description,
+        "src_ip":       flow.get("src_ip"),
+        "src_port":     flow.get("src_port"),
+        "dst_ip":       flow.get("dst_ip"),
+        "dst_port":     flow.get("dst_port"),
+        "proto":        flow.get("proto"),
+        "flow_id":      flow.get("flow_id"),
+        "ts":           float(flow.get("end_ts") or time.time()),
+        "is_test":      bool(flow.get("is_test", False)),
+        "metric_values": metric_values or None,
     }

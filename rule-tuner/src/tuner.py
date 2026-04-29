@@ -38,6 +38,13 @@ log = logging.getLogger(__name__)
 QUANTILES = (0.5, 0.99, 0.995, 0.999)
 SAFETY_MARGIN = 1.05  # Quantil × 1.05, damit knappe Treffer nicht alarmieren
 
+# Phase 4.5 FP/TP-Constraint:
+# - mind. FP_TP_MIN_FEEDBACK Markierungen pro Rule
+# - TPs setzen Obergrenze: threshold ≤ min(metric@TP)
+# - FPs setzen Untergrenze: threshold ≥ max(metric@FP) + 1
+# - Konflikt (FP-Untergrenze > TP-Obergrenze): Constraint verwerfen, alten Wert behalten.
+FP_TP_MIN_FEEDBACK = 3
+
 
 async def _init_conn(conn: asyncpg.Connection) -> None:
     """Spiegelt api/src/database.py: Codec für json/jsonb registrieren, damit
@@ -290,6 +297,10 @@ class Tuner:
 
         rules = await api.list_rules()
         existing_ovs = await api.get_overrides()
+        # Phase 4.5: FP/TP-Markierungen pro (rule, param) als Constraint-Quelle.
+        # Pre-Loaded für alle Rules in diesem Cycle, damit wir keine N+1-Query
+        # pro Param machen.
+        feedback_by_rule = await self._load_feedback_metrics(rules)
 
         # Snapshot der Reservoirs.
         with self._lock:
@@ -310,6 +321,7 @@ class Tuner:
                 continue
             schema = rule.get("parameters_schema") or {}
             ovs_full = (existing_ovs.get(rid) or {}).get("parameters") or {}
+            fb_for_rule = feedback_by_rule.get(rid, {})
 
             for pname, ps in schema.items():
                 metric_name = ps.get("metric")
@@ -359,8 +371,27 @@ class Tuner:
                 new_v = self._postprocess(new_v, ps)
                 new_vi = self._postprocess(new_vi, ps) if new_vi is not None else None
 
+                # Phase 4.5: FP/TP-Constraints anwenden — nur wenn ≥3 Markierungen
+                # für die Rule INSGESAMT existieren (mit jeweils metric_values
+                # für diesen Param). Constraint wirkt uniform auf value und
+                # value_internal — V1, eine scope-bewusste Aufteilung wäre
+                # später möglich, ist aber spec-konform "kein Verlass darauf".
+                fp_max, tp_min, conflict = self._fp_tp_bounds(fb_for_rule, pname, ps)
+                if conflict:
+                    log.warning(
+                        "Rule %s/%s: FP/TP-Konflikt (FP_max+1=%s > TP_min=%s) — alten Wert behalten",
+                        rid, pname, fp_max, tp_min,
+                    )
+                    new_v = old_value if isinstance(old_value, (int, float)) else None
+                    new_vi = None
+                else:
+                    if new_v is not None:
+                        new_v = self._apply_fp_tp(new_v, fp_max, tp_min, ps)
+                    if new_vi is not None:
+                        new_vi = self._apply_fp_tp(new_vi, fp_max, tp_min, ps)
+
                 # max_change_per_cycle (nur ab 2. Apply mit altem ml-Wert)
-                if not first_apply and old_value is not None and isinstance(old_value, (int, float)):
+                if not first_apply and old_value is not None and isinstance(old_value, (int, float)) and new_v is not None:
                     new_v = self._clamp_change(new_v, float(old_value), max_change)
                 if not first_apply and new_vi is not None and isinstance(existing_param, dict):
                     old_vi = existing_param.get("value_internal")
@@ -376,6 +407,11 @@ class Tuner:
                     "sample_count_external": len(ext),
                     "sample_count_internal": len(intern),
                     "scope_split":   scope_split,
+                    # FP/TP-Constraint-Diagnose
+                    "fp_seen":  len(fb_for_rule.get(pname, {}).get("fp", [])),
+                    "tp_seen":  len(fb_for_rule.get(pname, {}).get("tp", [])),
+                    "fp_max":   fp_max,
+                    "tp_min":   tp_min,
                 }
                 entry = {
                     "value":          new_v if new_v is not None else (old_value or ps.get("default")),
@@ -394,6 +430,107 @@ class Tuner:
                      ml_updates, len([r for r in new_overrides.values() if r.get("parameters")]))
         else:
             log.info("Tuning-Cycle ohne Updates (nicht genug Samples oder alle manual)")
+
+    async def _load_feedback_metrics(
+        self, rules: list[dict]
+    ) -> dict[str, dict[str, dict[str, list[float]]]]:
+        """Lädt für alle Rules mit ≥FP_TP_MIN_FEEDBACK Markierungen die
+        metric_values der gefeedbackten Alerts. Rückgabe-Format:
+          {rule_id: {param_name: {"fp": [...], "tp": [...]}}}
+
+        Filtert auf alerts mit metric_values IS NOT NULL — alte Alerts
+        (vor Phase 4.5) haben das Feld nicht. Gating-Schwelle ≥3 wirkt PRO
+        Rule (Summe fp+tp), nicht pro Param — weil die Markierungen ohnehin
+        mehrere Params der gleichen Rule tragen.
+        """
+        assert self._pool is not None
+        rule_ids = [r.get("id") for r in rules if r.get("id")]
+        if not rule_ids:
+            return {}
+        async with self._pool.acquire() as conn:
+            # Einzelne Query pro Rule wäre N+1 — wir holen alles in einem
+            # Round-Trip und filtern in Python.
+            rows = await conn.fetch(
+                """
+                SELECT rule_id, feedback, metric_values
+                  FROM alerts
+                 WHERE rule_id = ANY($1::text[])
+                   AND feedback IS NOT NULL
+                   AND metric_values IS NOT NULL
+                """,
+                rule_ids,
+            )
+        out: dict[str, dict[str, dict[str, list[float]]]] = {}
+        per_rule_count: dict[str, int] = {}
+        for r in rows:
+            rid = r["rule_id"]
+            fb = r["feedback"]
+            mv = r["metric_values"]
+            if not isinstance(mv, dict):
+                continue
+            per_rule_count[rid] = per_rule_count.get(rid, 0) + 1
+            for pname, val in mv.items():
+                if not isinstance(val, (int, float)) or isinstance(val, bool):
+                    continue
+                bucket = out.setdefault(rid, {}).setdefault(pname, {"fp": [], "tp": []})
+                if fb in bucket:
+                    bucket[fb].append(float(val))
+        # Rules unterhalb des Schwellwerts wieder entfernen — kein Verlass
+        # auf einzelne Markierungen.
+        for rid in list(out.keys()):
+            if per_rule_count.get(rid, 0) < FP_TP_MIN_FEEDBACK:
+                del out[rid]
+        return out
+
+    @staticmethod
+    def _fp_tp_bounds(
+        rule_feedback: dict[str, dict[str, list[float]]],
+        pname: str,
+        schema: dict,
+    ) -> tuple[float | None, float | None, bool]:
+        """Liefert (fp_lower_bound, tp_upper_bound, conflict).
+
+        fp_lower_bound = max(FP-metrics) + 1 (für Int-Schwellwerte) bzw.
+                         max(FP-metrics) + epsilon (für Float).
+        tp_upper_bound = min(TP-metrics).
+        conflict = True wenn fp_lower_bound > tp_upper_bound.
+        """
+        bucket = rule_feedback.get(pname)
+        if not bucket:
+            return None, None, False
+        fp_vals = bucket.get("fp") or []
+        tp_vals = bucket.get("tp") or []
+
+        fp_max = max(fp_vals) if fp_vals else None
+        tp_min = min(tp_vals) if tp_vals else None
+
+        # FP-Untergrenze: Int +1, Float epsilon — damit der Schwellwert
+        # genau über dem max-FP liegt und das FP-Pattern nicht mehr feuert.
+        if fp_max is not None:
+            if schema.get("type") == "int":
+                fp_max = float(int(fp_max)) + 1.0
+            else:
+                fp_max = float(fp_max) + 1e-6
+
+        conflict = (fp_max is not None and tp_min is not None and fp_max > tp_min)
+        return fp_max, tp_min, conflict
+
+    @staticmethod
+    def _apply_fp_tp(
+        value: float,
+        fp_lower: float | None,
+        tp_upper: float | None,
+        schema: dict,
+    ) -> float:
+        """Klemmt `value` auf das FP/TP-Constraint-Intervall. Annahme:
+        kein Konflikt (das filtert der Caller bereits)."""
+        if fp_lower is not None and value < fp_lower:
+            value = fp_lower
+        if tp_upper is not None and value > tp_upper:
+            value = tp_upper
+        if schema.get("type") == "int":
+            value = float(int(round(value)))
+        return value
 
     @staticmethod
     def _copy_existing(ov: dict) -> dict:

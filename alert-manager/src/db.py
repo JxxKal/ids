@@ -63,8 +63,14 @@ class AlertWriter:
         log.error("Dropping batch of %d alerts after 3 failed attempts", len(batch))
 
     def _insert(self, batch: list[dict]) -> None:
+        import json as _json
         rows = []
         for a in batch:
+            mv = a.get("metric_values")
+            # Phase 4.5: nur valide dicts persistieren — psycopg2 schreibt
+            # Python-dict via JSON-Adapter, hier sicherheitshalber explizit
+            # serialisieren damit kein NULL/Object-Mix die Spalte zerschießt.
+            mv_json = _json.dumps(mv) if isinstance(mv, dict) and mv else None
             rows.append((
                 str(a.get("alert_id") or uuid.uuid4()),
                 a.get("ts") or time.time(),
@@ -82,6 +88,7 @@ class AlertWriter:
                 a.get("is_test", False),
                 list(a.get("tags") or []),
                 a.get("tap_id"),
+                mv_json,
             ))
 
         psycopg2.extras.execute_values(
@@ -91,7 +98,7 @@ class AlertWriter:
                 alert_id, ts, flow_id, source, rule_id,
                 severity, score,
                 src_ip, src_port, dst_ip, proto, dst_port,
-                description, is_test, tags, tap_id
+                description, is_test, tags, tap_id, metric_values
             ) VALUES %s
             """,
             rows,
@@ -99,7 +106,7 @@ class AlertWriter:
                 %s, %s::timestamptz, %s, %s, %s,
                 %s, %s,
                 %s, %s, %s, %s, %s,
-                %s, %s, %s, %s
+                %s, %s, %s, %s, %s::jsonb
             )""",
         )
 

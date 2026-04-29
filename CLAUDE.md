@@ -358,10 +358,26 @@ curl -X POST -H "$H" http://master/api/sig-rules/ml/resume
     - Eintrag mit `source: "ml"` + `ml`-Metadaten (trained_at, quantile, p995_external/internal, sample_count_external/internal, scope_split).
   - `PUT /api/sig-rules/overrides` mit gemergedem Stand (existierende `enabled`/`severity`/manual-Params bleiben erhalten).
 - ✅ Service-JWT: tuner mintet selbst ein langlebiges Token mit `role=admin` aus `API_SECRET_KEY` — kein User-DB-Eintrag nötig, da `get_current_user` nur die Signatur validiert.
-- ✅ FP/TP-Constraints sind im Code-Path **nicht** implementiert (V1) — CLAUDE.md hatte das als optional markiert ("kein Verlass darauf"). Alert-Wert beim Firing ist nicht persistiert; ein robuster Korrelationspfad würde Phase 4.5 brauchen (z.B. metric_value im Alert-Frame mitschreiben).
+- ✅ FP/TP-Constraints implementiert in Phase 4.5 (siehe unten).
 - ✅ State-Maschinen-Übergänge `training → tuning` und `last_tuning_at`-Updates schreiben direkt in `system_config` (DB-Codec sorgt für korrektes JSONB-Encoding); User-getriebene Übergänge (start/pause/resume) bleiben Sache der API-Endpoints — keine Konkurrenz, weil unterschiedliche Subfields.
 
 **Deploy nach Phase 4**: `docker compose --profile prod build rule-tuner && up -d` am Master. Kein Tap-Deploy nötig — Tap-Beiträge laufen via master-uplink ins Master-Kafka. Beim Boot pollt der tuner `/ml/status` mit Retry, bis api healthy ist.
+
+**Phase 4.5 — FP/TP-Constraints — ✅ erledigt 2026-04-30**
+
+Beim Firing einer Heuristik schreibt signature-engine die `metric_values` aller `metric:`-deklarierten Params in den Alert-Frame; alert-manager persistiert sie in `alerts.metric_values JSONB` (Migration 013). Der rule-tuner zieht im Tuning-Cycle die FP/TP-Markierungen + zugehörigen Metric-Werte und nutzt sie als Constraint:
+
+- ✅ Migration `013_alert_metric_values.sql`: `alerts.metric_values JSONB` + Sparse-Index `(rule_id, feedback) WHERE feedback IS NOT NULL AND metric_values IS NOT NULL`.
+- ✅ signature-engine `_make_alert()`: berechnet pro metric-deklariertem Param den Wert aus dem METRIC_FUNCS-Registry (mit aktivem `_FlowParams`-Resolver — scope-aware) und packt sie als `metric_values: {pname: float}` in den Alert.
+- ✅ alert-manager `db.py`: `metric_values` als `$::jsonb` in den INSERT.
+- ✅ rule-tuner `_load_feedback_metrics()`: ein DB-Round-Trip pro Cycle, lädt alle gefeedbackten Alerts mit `metric_values != NULL`, gruppiert pro `(rule, param)` in `{fp:[…], tp:[…]}`. Rules mit weniger als `FP_TP_MIN_FEEDBACK=3` Markierungen werden raus-gefiltert (zu wenig Signal).
+- ✅ rule-tuner `_fp_tp_bounds()`: berechnet `fp_lower = max(FP) + 1` (int) bzw. `+ epsilon` (float) und `tp_upper = min(TP)`. Konflikt-Erkennung: `fp_lower > tp_upper` → alten Wert behalten + Warning loggen.
+- ✅ rule-tuner `_apply_fp_tp()`: klemmt das Quantil-Ergebnis auf `[fp_lower, tp_upper]`. Wirkt aktuell uniform auf `value` und `value_internal` (V1 — eine scope-bewusste Aufteilung wäre möglich, aber der spec-Vermerk "kein Verlass darauf" macht es nicht prioritär).
+- ✅ ml-Metadaten am Override-Eintrag enthalten jetzt `fp_seen`, `tp_seen`, `fp_max`, `tp_min` für UI-Diagnose.
+
+**Deploy nach Phase 4.5**: `api`, `signature-engine`, `alert-manager`, `rule-tuner` rebuilden — Migration läuft beim api-Startup automatisch. Bei Tap-Deployments ändert sich nichts (signature-engine ist gleiche Image-Version, das `metric_values`-Feld ist nur additiv im Alert-Frame; master-uplink ignoriert unbekannte Felder, alert-manager schreibt sie in die Master-DB).
+
+**Test**: 6 Unit-Tests grün — bounds basic, conflict, only-FP, only-TP, apply-clamp+cast, no-feedback-no-constraint.
 
 **Beobachten**:
 - `docker compose logs rule-tuner` zeigt beim Start: `Kafka-Consumer subscribed: rule-metrics`, `API erreichbar — starte Hauptschleifen`.
