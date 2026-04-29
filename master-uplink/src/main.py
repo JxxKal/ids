@@ -22,6 +22,8 @@ import asyncio
 import logging
 import os
 import ssl
+from datetime import datetime, timezone
+from http import HTTPStatus
 from pathlib import Path
 
 import asyncpg
@@ -30,6 +32,8 @@ import websockets
 from confluent_kafka import Producer
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
+from websockets.datastructures import Headers
+from websockets.http11 import Response
 
 LISTEN_HOST = os.environ.get("UPLINK_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.environ.get("UPLINK_PORT", "8443"))
@@ -42,6 +46,15 @@ POSTGRES_DSN = os.environ.get(
 MASTER_CA_DIR = os.environ.get("MASTER_CA_DIR", "/var/lib/cyjan/master-ca")
 HEARTBEAT_INTERVAL_S = float(os.environ.get("HEARTBEAT_INTERVAL_S", "30"))
 HEARTBEAT_TIMEOUT_S = float(os.environ.get("HEARTBEAT_TIMEOUT_S", "75"))
+
+# Reverse-Channel: Tap pollt /config alle 5 min und überträgt die ausgelieferten
+# Dateien atomar in seinen lokalen signature-rules-Volume. Quelle für die
+# YAMLs ist das gleiche Layout wie auf dem Master:
+#   $RULES_DIR/builtin/*.yml      – buildin-Regeln (read-only via host-bind)
+#   $RULES_DIR/custom/*.yml       – evtl. eigene custom-Regeln (writable)
+#   $RULES_DIR/custom/_overrides.json
+#   $RULES_DIR/custom/_suricata_overrides.json
+RULES_DIR = Path(os.environ.get("RULES_DIR", "/rules"))
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -142,10 +155,151 @@ class TapAuth:
             tap_id, alerts_delta, peer,
         )
 
+    async def get_dns_resolvers(self) -> list[str]:
+        """Liest die system_config-Allowlist 'dns_resolvers'. JSONB-Spalte;
+        asyncpg gibt sie als String zurück (kein automatisches JSON-Decode),
+        deshalb hier orjson-loads."""
+        assert self._pool
+        try:
+            row = await self._pool.fetchrow(
+                "SELECT value::text AS v FROM system_config WHERE key='dns_resolvers'"
+            )
+        except Exception as exc:
+            log.warning("dns_resolvers-Query fehlgeschlagen: %s", exc)
+            return []
+        if not row or not row["v"]:
+            return []
+        try:
+            decoded = orjson.loads(row["v"])
+            if isinstance(decoded, list):
+                return [str(x) for x in decoded]
+        except Exception:
+            pass
+        return []
+
 
 def _delivery_cb(err, _msg) -> None:
     if err is not None:
         log.error("Kafka delivery failure: %s", err)
+
+
+# ── Reverse-Channel: Config-Bundle für Tap-Pull ──────────────────────────────
+
+
+async def build_config_bundle(auth: TapAuth) -> bytes:
+    """JSON-Bundle aller syncbaren Master-Konfig-Dateien für die Tap-Pull-Schleife.
+
+    Layout der Antwort:
+      {
+        "version": "1",
+        "generated_at": ISO-Timestamp,
+        "rules":              {filename: yaml_content},
+        "rules_overrides":    {...} oder null,
+        "suricata_overrides": {...} oder null,
+        "dns_resolvers":      [...]
+      }
+    Tap schreibt rules-Dateien unter $RULES_DIR/builtin/<filename>.yml und
+    overrides unter $RULES_DIR/custom/<filename>. signature-engine reagiert
+    mit inotify auf die Änderungen.
+
+    Suppression-Patterns (manual + ML) syncen wir bewusst NICHT in V1 –
+    das würde den DB-Suppression-Query nach master-uplink duplizieren.
+    Tap forwardet alle Alerts an den Master, dort greift Suppression im
+    alert-manager. Bandbreite kostet das nicht spürbar.
+    """
+    bundle: dict = {
+        "version": "1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "rules": {},
+        "rules_overrides": None,
+        "suricata_overrides": None,
+        "dns_resolvers": [],
+    }
+
+    builtin_dir = RULES_DIR / "builtin"
+    custom_dir  = RULES_DIR / "custom"
+
+    if builtin_dir.is_dir():
+        for f in sorted(builtin_dir.glob("*.yml")):
+            try:
+                bundle["rules"][f.name] = f.read_text(encoding="utf-8")
+            except Exception as exc:
+                log.warning("YAML %s nicht lesbar: %s", f, exc)
+
+    overrides_path = custom_dir / "_overrides.json"
+    if overrides_path.is_file():
+        try:
+            bundle["rules_overrides"] = orjson.loads(overrides_path.read_bytes())
+        except Exception as exc:
+            log.warning("_overrides.json nicht parsebar: %s", exc)
+
+    suricata_path = custom_dir / "_suricata_overrides.json"
+    if suricata_path.is_file():
+        try:
+            bundle["suricata_overrides"] = orjson.loads(suricata_path.read_bytes())
+        except Exception as exc:
+            log.warning("_suricata_overrides.json nicht parsebar: %s", exc)
+
+    bundle["dns_resolvers"] = await auth.get_dns_resolvers()
+
+    return orjson.dumps(bundle)
+
+
+def _make_http_handler(auth: TapAuth):
+    """Schließt eine async-Closure die der websockets.serve(process_request=...)
+    übergeben werden kann. Wenn der Pfad /config ist, beantworten wir direkt
+    HTTP-200 mit dem Bundle. Sonst None → WS-Upgrade läuft normal weiter."""
+    async def process(connection, request):
+        path = getattr(request, "path", "")
+        # WS-Upgrade-Anfragen (auch unsere Tap-Uplink-WSS) lassen wir durch.
+        if path != "/config":
+            return None
+
+        ssl_obj = connection.transport.get_extra_info("ssl_object")
+        if ssl_obj is None:
+            return Response(
+                HTTPStatus.UPGRADE_REQUIRED, "TLS Required",
+                Headers([("Content-Type", "text/plain")]),
+                b"TLS required",
+            )
+        fingerprint = _peer_fingerprint(ssl_obj)
+        if not fingerprint:
+            return Response(
+                HTTPStatus.UNAUTHORIZED, "No Client Cert",
+                Headers([("Content-Type", "text/plain")]),
+                b"client cert required",
+            )
+        info = await auth.lookup(fingerprint)
+        if not info or info["status"] != "active":
+            log.warning("/config-Request mit unbekanntem/revokeden Cert (fp=%s)", fingerprint[:16])
+            return Response(
+                HTTPStatus.FORBIDDEN, "Unknown Tap",
+                Headers([("Content-Type", "text/plain")]),
+                b"unknown or revoked tap",
+            )
+
+        try:
+            body = await build_config_bundle(auth)
+        except Exception as exc:
+            log.error("Config-Bundle-Build gescheitert: %s", exc)
+            return Response(
+                HTTPStatus.INTERNAL_SERVER_ERROR, "Bundle Error",
+                Headers([("Content-Type", "text/plain")]),
+                f"bundle error: {exc}".encode(),
+            )
+
+        log.info("Config-Bundle ausgeliefert an %s (%d Bytes)", info["name"], len(body))
+        return Response(
+            HTTPStatus.OK, "OK",
+            Headers([
+                ("Content-Type", "application/json"),
+                ("Content-Length", str(len(body))),
+                ("Cache-Control", "no-cache"),
+            ]),
+            body,
+        )
+
+    return process
 
 
 async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
@@ -286,6 +440,7 @@ async def amain() -> None:
         ssl=ssl_ctx,
         ping_interval=None,           # eigener Heartbeat
         max_size=1 * 1024 * 1024,     # 1 MB pro Frame ist großzügig für ein Alert-JSON
+        process_request=_make_http_handler(auth),
     ):
         try:
             await asyncio.Future()    # forever

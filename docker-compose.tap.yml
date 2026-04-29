@@ -130,8 +130,12 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
+      RULES_DIR: /rules
     volumes:
-      - signature-rules:/sig-rules            # befüllt via Reverse-Channel-Pull (Phase 5)
+      # Wird vom tap-uplink-Container via Reverse-Channel-Pull gefüllt.
+      # /rules/builtin/*.yml und /rules/custom/_overrides.json kommen vom
+      # Master alle 5 min; signature-engine reagiert mit inotify.
+      - signature-rules:/rules
 
   # ───────────────────────────────────────────────────────────────────────
   # tap-uplink – konsumiert lokales alerts-raw, forwardet an den Master
@@ -156,11 +160,17 @@ services:
       QUEUE_PATH: /var/lib/cyjan/uplink-queue.db
       QUEUE_MAX_GB: "1.0"
       STATE_PATH: /run/cyjan/tap-uplink.state.json
+      RULES_DIR: /rules
+      CONFIG_POLL_INTERVAL_S: "300"
       LOG_LEVEL: INFO
     volumes:
       - tap-cert:/etc/cyjan
       - tap-queue:/var/lib/cyjan
       - tap-runtime:/run/cyjan
+      # signature-rules-Volume RW: tap-uplink schreibt hier die vom Master
+      # gepullten Builtin-YAMLs + Custom-Overrides rein, signature-engine
+      # liest read-only daraus.
+      - signature-rules:/rules
 
   # ───────────────────────────────────────────────────────────────────────
   # tap-api – minimaler Status/Konfig-Web-View + Maschinen-Endpunkte für

@@ -405,9 +405,14 @@ services:
       MASTER_CA_DIR: /var/lib/cyjan/master-ca
       UPLINK_HOST: 0.0.0.0
       UPLINK_PORT: 8443
+      RULES_DIR: /rules
       LOG_LEVEL: INFO
     volumes:
       - master-ca:/var/lib/cyjan/master-ca:ro
+      # Reverse-Channel: master-uplink liefert die buildin-Regeln + Custom-
+      # Overrides via GET /config aus. Kein Schreibzugriff nötig.
+      - signature-rules:/rules/custom:ro
+      - ./signature-engine/rules:/rules/builtin:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${UPLINK_PORT:-8443}:8443"
 

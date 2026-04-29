@@ -33,6 +33,7 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 import orjson
 import websockets
 from confluent_kafka import Consumer, KafkaError, KafkaException
@@ -60,6 +61,13 @@ SEND_BATCH_SIZE = int(os.environ.get("SEND_BATCH_SIZE", "50"))
 HEARTBEAT_TO    = float(os.environ.get("HEARTBEAT_TIMEOUT_S", "75"))
 RECONNECT_MIN_S = 1.0
 RECONNECT_MAX_S = 60.0
+
+# Reverse-Channel: Config-Pull alle CONFIG_POLL_INTERVAL_S Sekunden vom Master.
+# Schreibt in $RULES_DIR/{builtin,custom}/. signature-engine reagiert mit
+# inotify auf die Änderungen.
+RULES_DIR             = Path(os.environ.get("RULES_DIR", "/rules"))
+CONFIG_POLL_INTERVAL_S = float(os.environ.get("CONFIG_POLL_INTERVAL_S", "300"))   # 5 min
+CONFIG_POLL_TIMEOUT_S  = float(os.environ.get("CONFIG_POLL_TIMEOUT_S",  "30"))
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -254,6 +262,114 @@ class Uplink:
                 await ws.send(orjson.dumps({"type": "pong"}).decode())
 
 
+# ── Reverse-Channel-Polling (Master → Tap Rule-Sync) ────────────────────────
+
+
+def _config_url() -> str:
+    """Wandelt MASTER_URL (wss://host:port/uplink) in HTTPS-Variante mit
+    /config-Pfad um. Für ws:// → http:// (Test-Setup ohne TLS, eher selten)."""
+    u = MASTER_URL
+    if u.startswith("wss://"):
+        u = "https://" + u[len("wss://"):]
+    elif u.startswith("ws://"):
+        u = "http://" + u[len("ws://"):]
+    # Pfad ersetzen: /uplink → /config (oder direkt anhängen wenn keiner da)
+    head, _, _path = u.partition("?")
+    base = head.rsplit("/", 1)[0] if "/" in head[len("https://"):] else head
+    return base + "/config"
+
+
+def _atomic_write(path: Path, content: bytes) -> None:
+    """tmp + rename → kein partieller Read durch signature-engine-inotify."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(content)
+    os.replace(tmp, path)
+
+
+def _apply_config_bundle(bundle: dict) -> tuple[int, int]:
+    """Schreibt das Bundle in den lokalen RULES_DIR. Liefert (rules_count,
+    side_files_count) für Logging."""
+    builtin_dir = RULES_DIR / "builtin"
+    custom_dir  = RULES_DIR / "custom"
+
+    # Vorhandene Builtin-YAMLs aufräumen die nicht mehr im Bundle sind.
+    # Custom-Files werden NICHT angefasst – das ist sonst-User-territory.
+    rules = bundle.get("rules", {}) or {}
+    if isinstance(rules, dict):
+        # Aktuelle YAMLs schreiben.
+        for fname, body in rules.items():
+            # Schutz vor Path-Traversal: nur einfache Dateinamen erlauben
+            if "/" in fname or fname.startswith(".") or not fname.endswith(".yml"):
+                log.warning("Skip rule mit auffälligem Dateinamen: %s", fname)
+                continue
+            _atomic_write(builtin_dir / fname, body.encode("utf-8"))
+        # Veraltete YAMLs in builtin/ entfernen, die nicht mehr im Bundle sind.
+        if builtin_dir.is_dir():
+            keep = set(rules.keys())
+            for f in builtin_dir.glob("*.yml"):
+                if f.name not in keep:
+                    try:
+                        f.unlink()
+                        log.info("Veraltete Rule entfernt: %s", f.name)
+                    except Exception as exc:
+                        log.warning("Konnte %s nicht löschen: %s", f, exc)
+
+    side_files = 0
+    ovr = bundle.get("rules_overrides")
+    if ovr is not None:
+        _atomic_write(custom_dir / "_overrides.json", orjson.dumps(ovr))
+        side_files += 1
+    sov = bundle.get("suricata_overrides")
+    if sov is not None:
+        _atomic_write(custom_dir / "_suricata_overrides.json", orjson.dumps(sov))
+        side_files += 1
+    dns = bundle.get("dns_resolvers")
+    if dns is not None:
+        # Eigene Datei – am Tap aktuell nicht aktiv konsumiert (alert-manager
+        # läuft ausschließlich am Master), aber für V2 schon mit-synct.
+        _atomic_write(custom_dir / "_dns_resolvers.json", orjson.dumps(dns))
+        side_files += 1
+
+    return len(rules), side_files
+
+
+async def config_poll_loop() -> None:
+    """Pollt MASTER /config alle 5 min mit mTLS-Cert. Liefert atomar in
+    den signature-rules-Volume; signature-engine zieht via inotify nach."""
+    url = _config_url()
+    log.info("Config-Poll-Loop aktiv: alle %.0fs gegen %s",
+             CONFIG_POLL_INTERVAL_S, url)
+    # Beim Boot kurz warten, damit der WSS-Reconnect zuerst läuft (sonst
+    # konkurrieren die Verbindungen um den ersten Cert-Read).
+    await asyncio.sleep(5)
+
+    while True:
+        if not _has_pairing():
+            await asyncio.sleep(min(30, CONFIG_POLL_INTERVAL_S))
+            continue
+
+        try:
+            ssl_ctx = _build_ssl_context()
+            async with httpx.AsyncClient(
+                timeout=CONFIG_POLL_TIMEOUT_S,
+                verify=ssl_ctx,
+                cert=(TAP_CERT, TAP_KEY),
+            ) as client:
+                resp = await client.get(url)
+            if resp.status_code != 200:
+                log.warning("Config-Poll HTTP %d: %s", resp.status_code, resp.text[:200])
+            else:
+                bundle = resp.json()
+                rc, sc = _apply_config_bundle(bundle)
+                log.info("Config-Poll erfolgreich: %d Rules + %d Side-Files (gen=%s)",
+                         rc, sc, bundle.get("generated_at"))
+        except Exception as exc:
+            log.warning("Config-Poll fehlgeschlagen: %s", exc)
+
+        await asyncio.sleep(CONFIG_POLL_INTERVAL_S)
+
+
 async def amain() -> None:
     diskq = DiskQueue(QUEUE_PATH, max_bytes=int(QUEUE_MAX_GB * 1024 * 1024 * 1024))
     state = StateWriter(STATE_PATH)
@@ -269,10 +385,15 @@ async def amain() -> None:
     t = threading.Thread(target=_kafka_consumer_thread, args=(diskq, stop), daemon=True)
     t.start()
 
+    # Reverse-Channel-Polling parallel zur WSS-Uplink-Schleife. Beide laufen
+    # nebenher; Ausfall des einen beendet nicht den anderen.
+    poll_task = asyncio.create_task(config_poll_loop())
+
     uplink = Uplink(diskq, state)
     try:
         await uplink.run()
     finally:
+        poll_task.cancel()
         stop.set()
         t.join(timeout=5)
 
