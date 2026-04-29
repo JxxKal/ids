@@ -634,22 +634,35 @@ export async function saveDnsResolvers(value: DnsResolversConfig): Promise<void>
 
 // ── Signature-Engine YAML-Regeln + Per-Regel-Overrides ───────────────────────
 
+export interface SigRuleParamSchema {
+  type:    'int' | 'float';
+  default: number;
+  min:     number | null;
+  max:     number | null;
+  label:   string;
+}
+
 export interface SigRuleEntry {
-  id:                string;
-  name:              string;
-  description:       string;
-  severity:          string;
-  severity_default:  string;
-  tags:              string[];
-  file:              string;
-  builtin:           boolean;
-  enabled:           boolean;
-  severity_override: string | null;
+  id:                  string;
+  name:                string;
+  description:         string;
+  severity:            string;
+  severity_default:    string;
+  tags:                string[];
+  file:                string;
+  builtin:             boolean;
+  enabled:             boolean;
+  severity_override:   string | null;
+  parameters_schema:   Record<string, SigRuleParamSchema>;
+  parameters_default:  Record<string, number>;
+  parameters:          Record<string, number>;          // effektiv (default ⊕ override)
+  parameters_override: Record<string, number>;
 }
 
 export interface SigRuleOverride {
-  enabled?:  boolean | null;
-  severity?: 'critical' | 'high' | 'medium' | 'low' | null;
+  enabled?:    boolean | null;
+  severity?:   'critical' | 'high' | 'medium' | 'low' | null;
+  parameters?: Record<string, number> | null;
 }
 
 export interface SigRulesOverridesResponse {

@@ -722,7 +722,7 @@
     },
     "ruleOverrides": {
       "title": "Rule adjustments",
-      "intro": "Per signature-engine rule you can override the severity or disable the rule entirely. The adjustments are stored in /sig-rules/custom/_overrides.json and picked up by the signature-engine within seconds, without a restart.",
+      "intro": "Per signature-engine rule you can tune thresholds, override the severity, or disable the rule entirely. If a heuristic floods you with normal traffic, raise the threshold — that's usually cleaner than downgrading severity, because real hits never get suppressed in the first place. Adjustments live in /sig-rules/custom/_overrides.json and are picked up within seconds, without a restart.",
       "scopeNote": "This page lists only the <strong>signature-engine YAML rules</strong> ({{count}} total) – the flow-based heuristics such as SCAN_002, DNS_AMP_001, ANOMALY_FRAGMENT_001, etc. The much larger collection of <strong>Suricata rules</strong> (thousands, .rules format) lives under <em>Rule set → Active rules</em> and <em>Custom signatures</em> and is managed there separately.",
       "search": "Filter: ID, name, description, tag",
       "filterAll": "All",
@@ -748,6 +748,9 @@
       "showCondition": "Show condition",
       "hideCondition": "Hide condition",
       "tagsLabel": "Tags:",
+      "thresholdsLabel": "Thresholds",
+      "thresholdsHint": "Values apply only to this rule. Fields you don't change keep the YAML default.",
+      "thresholdReset": "Reset to default",
       "applyHint": "Changes take effect within ~5 seconds without restarting the service."
     },
     "rules": {

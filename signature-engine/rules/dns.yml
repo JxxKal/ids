@@ -1,16 +1,24 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # DNS-Anomalien (Tunneling, DGA, Amplification)
+# Schwellwerte über `parameters:` in der GUI tunbar.
 # ══════════════════════════════════════════════════════════════════════════════
 
 - id: DNS_TUNNEL_001
   name: "DNS Tunneling (Volumenbasis)"
-  description: "DNS-Flow mit >50 KB – mögliches DNS-Tunneling"
+  description: "DNS-Flow mit ungewöhnlich hohem Datenvolumen – mögliches DNS-Tunneling"
   severity: high
   cooldown_s: 120
   tags: [dns, tunnel, exfiltration]
+  parameters:
+    bytes:
+      type: int
+      default: 50000
+      min: 1000
+      max: 1000000000
+      label: "Mindestvolumen (Bytes)"
   condition: |
     flow.get('dst_port') == 53
-    and flow.get('byte_count', 0) > 50_000
+    and flow.get('byte_count', 0) > params.bytes
 
 - id: DNS_DGA_001
   name: "DNS High-Entropy (DGA-Verdacht)"
@@ -18,11 +26,24 @@
   severity: high
   cooldown_s: 120
   tags: [dns, dga, c2]
+  parameters:
+    entropy_iat:
+      type: float
+      default: 2.5
+      min: 0.5
+      max: 10.0
+      label: "Mindest-IAT-Entropie"
+    pkt_count:
+      type: int
+      default: 10
+      min: 2
+      max: 100000
+      label: "Mindestanzahl Pakete"
   condition: |
     flow.get('proto') == 'UDP'
     and flow.get('dst_port') == 53
-    and flow.get('entropy_iat', 0) > 2.5
-    and flow.get('pkt_count', 0) > 10
+    and flow.get('entropy_iat', 0) > params.entropy_iat
+    and flow.get('pkt_count', 0) > params.pkt_count
 
 - id: DNS_AMP_001
   name: "DNS Amplification (möglicher Angreifer)"
@@ -30,19 +51,39 @@
   severity: medium
   cooldown_s: 120
   tags: [dns, amplification, dos]
+  parameters:
+    pps:
+      type: int
+      default: 100
+      min: 10
+      max: 10000000
+      label: "Mindest-Paketrate (pps)"
+    max_pkt_size:
+      type: int
+      default: 100
+      min: 32
+      max: 1500
+      label: "Max. mittlere Paketgröße (Bytes)"
   condition: |
     flow.get('proto') == 'UDP'
     and flow.get('dst_port') == 53
-    and flow.get('pps', 0) > 100
-    and flow.get('pkt_size', {}).get('mean', 9999) < 100
+    and flow.get('pps', 0) > params.pps
+    and flow.get('pkt_size', {}).get('mean', 9999) < params.max_pkt_size
 
 - id: DNS_NONSTANDARD_001
   name: "DNS über TCP mit großen Paketen"
-  description: "DNS über TCP mit Paketgröße >512 Bytes – ungewöhnlich"
+  description: "DNS über TCP mit ungewöhnlich großen Paketen"
   severity: low
   cooldown_s: 120
   tags: [dns, anomaly]
+  parameters:
+    min_pkt_size:
+      type: int
+      default: 512
+      min: 64
+      max: 9000
+      label: "Min. mittlere Paketgröße (Bytes)"
   condition: |
     flow.get('proto') == 'TCP'
     and flow.get('dst_port') == 53
-    and flow.get('pkt_size', {}).get('mean', 0) > 512
+    and flow.get('pkt_size', {}).get('mean', 0) > params.min_pkt_size

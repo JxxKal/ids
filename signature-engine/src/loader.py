@@ -21,6 +21,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import yaml
@@ -28,11 +29,12 @@ import yaml
 log = logging.getLogger(__name__)
 
 VALID_SEVERITIES = {"critical", "high", "medium", "low"}
+VALID_PARAM_TYPES = {"int", "float"}
 
-# Override-Datei für Per-Regel Disable + Severity-Override.
+# Override-Datei für Per-Regel Disable + Severity-Override + Parameter-Tuning.
 # Format:
-#   { "DNS_AMP_001": {"enabled": false, "severity": null},
-#     "SCAN_002":    {"enabled": true,  "severity": "low"} }
+#   { "DNS_AMP_001": {"enabled": false},
+#     "SCAN_001":    {"parameters": {"port_count": 200, "window_s": 60}} }
 # Liegt im custom/-Volume, damit GUI-Edits persistieren und der Loader sie via
 # inotify-mtime aufpickt.
 OVERRIDES_FILENAME = "_overrides.json"
@@ -48,6 +50,70 @@ class Rule:
     condition_src: str
     condition_code: Any   # compiled code object
     cooldown_s: int = 60  # Sekunden zwischen zwei Alerts derselben Regel+Src-IP
+    # Parameter-Schema (aus YAML) und effektive Werte (Default ⊕ Override).
+    # parameters_schema: { name: {type, default, min, max, label} }
+    parameters_schema: dict[str, dict] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
+    params_ns: SimpleNamespace = field(default_factory=SimpleNamespace)
+
+
+def _parse_param_schema(rule_id: str, raw_params: Any) -> dict[str, dict]:
+    """Parst und validiert den `parameters:`-Block einer Rule.
+
+    Erwartet ein Mapping {name: {type, default, min?, max?, label?}}. Akzeptiert
+    auch Skalar-Default als Shortcut: `port_count: 50` → int mit default 50.
+    Ungültige Einträge werden geloggt und übersprungen, statt die Rule zu killen.
+    """
+    if raw_params is None:
+        return {}
+    if not isinstance(raw_params, dict):
+        log.warning("Rule %s: 'parameters' muss ein Mapping sein – ignoriert", rule_id)
+        return {}
+
+    out: dict[str, dict] = {}
+    for name, spec in raw_params.items():
+        if not isinstance(name, str) or not name.isidentifier():
+            log.warning("Rule %s: Parameter-Name '%s' ist kein gültiger Bezeichner – übersprungen", rule_id, name)
+            continue
+        # Shortcut: `port_count: 50` → {type, default}
+        if isinstance(spec, (int, float)) and not isinstance(spec, bool):
+            ptype = "float" if isinstance(spec, float) else "int"
+            out[name] = {"type": ptype, "default": spec, "min": None, "max": None, "label": ""}
+            continue
+        if not isinstance(spec, dict):
+            log.warning("Rule %s: Parameter '%s' hat unerwartetes Format – übersprungen", rule_id, name)
+            continue
+        ptype = str(spec.get("type", "int")).lower()
+        if ptype not in VALID_PARAM_TYPES:
+            log.warning("Rule %s: Parameter '%s' hat unbekannten Typ '%s' – übersprungen", rule_id, name, ptype)
+            continue
+        if "default" not in spec:
+            log.warning("Rule %s: Parameter '%s' hat keinen 'default' – übersprungen", rule_id, name)
+            continue
+        try:
+            default_val = float(spec["default"]) if ptype == "float" else int(spec["default"])
+        except (TypeError, ValueError):
+            log.warning("Rule %s: Parameter '%s' default nicht in %s konvertierbar – übersprungen", rule_id, name, ptype)
+            continue
+        min_val = spec.get("min")
+        max_val = spec.get("max")
+        try:
+            min_val = (float(min_val) if ptype == "float" else int(min_val)) if min_val is not None else None
+            max_val = (float(max_val) if ptype == "float" else int(max_val)) if max_val is not None else None
+        except (TypeError, ValueError):
+            log.warning("Rule %s: Parameter '%s' min/max ungültig – auf None gesetzt", rule_id, name)
+            min_val = max_val = None
+        if min_val is not None and max_val is not None and min_val > max_val:
+            log.warning("Rule %s: Parameter '%s' min > max – min/max ignoriert", rule_id, name)
+            min_val = max_val = None
+        out[name] = {
+            "type": ptype,
+            "default": default_val,
+            "min": min_val,
+            "max": max_val,
+            "label": str(spec.get("label", "")),
+        }
+    return out
 
 
 def _compile_rule(raw: dict, source_file: str) -> Rule | None:
@@ -68,6 +134,9 @@ def _compile_rule(raw: dict, source_file: str) -> Rule | None:
         # damit Python-eval Zeilenumbrüche bei and/or-Ketten akzeptiert.
         code = compile(f"(\n{condition_src}\n)", f"<rule:{rule_id}>", "eval")
 
+        params_schema = _parse_param_schema(rule_id, raw.get("parameters"))
+        params_default = {n: s["default"] for n, s in params_schema.items()}
+
         return Rule(
             id=rule_id,
             name=raw.get("name", rule_id),
@@ -77,6 +146,9 @@ def _compile_rule(raw: dict, source_file: str) -> Rule | None:
             condition_src=condition_src,
             condition_code=code,
             cooldown_s=int(raw.get("cooldown_s", 60)),
+            parameters_schema=params_schema,
+            parameters=params_default,
+            params_ns=SimpleNamespace(**params_default),
         )
     except SyntaxError as exc:
         log.error("Rule %s in %s has syntax error: %s – skipped", rule_id, source_file, exc)
@@ -255,6 +327,14 @@ class RuleLoader:
             sev = ov.get("severity")
             if isinstance(sev, str) and sev.lower() in VALID_SEVERITIES:
                 entry["severity"] = sev.lower()
+            params = ov.get("parameters")
+            if isinstance(params, dict) and params:
+                # Roh übernehmen — Validierung gegen Schema passiert in _apply_overrides,
+                # weil das Schema rule-spezifisch ist und hier noch nicht verfügbar.
+                entry["parameters"] = {
+                    str(k): v for k, v in params.items()
+                    if isinstance(v, (int, float)) and not isinstance(v, bool)
+                }
             if entry:
                 cleaned[rule_id] = entry
         return cleaned
@@ -265,6 +345,7 @@ class RuleLoader:
         out: list[Rule] = []
         suppressed = 0
         adjusted = 0
+        param_tuned = 0
         for r in rules:
             ov = self._overrides.get(r.id)
             if ov is None:
@@ -273,18 +354,54 @@ class RuleLoader:
             if ov.get("enabled") is False:
                 suppressed += 1
                 continue
+            new_severity = r.severity
             sev_override = ov.get("severity")
             if sev_override and sev_override != r.severity:
+                new_severity = sev_override
+                adjusted += 1
+
+            new_params = dict(r.parameters)
+            raw_param_ov = ov.get("parameters") or {}
+            param_changed = False
+            for name, value in raw_param_ov.items():
+                schema = r.parameters_schema.get(name)
+                if schema is None:
+                    log.warning("Override für Rule %s: unbekannter Parameter '%s' – ignoriert", r.id, name)
+                    continue
+                try:
+                    cast = float(value) if schema["type"] == "float" else int(value)
+                except (TypeError, ValueError):
+                    log.warning("Override für Rule %s: Parameter '%s' Wert nicht castbar – ignoriert", r.id, name)
+                    continue
+                lo, hi = schema.get("min"), schema.get("max")
+                if lo is not None and cast < lo:
+                    log.warning("Override für Rule %s: Parameter '%s'=%s < min %s – auf min gesetzt", r.id, name, cast, lo)
+                    cast = lo
+                if hi is not None and cast > hi:
+                    log.warning("Override für Rule %s: Parameter '%s'=%s > max %s – auf max gesetzt", r.id, name, cast, hi)
+                    cast = hi
+                if cast != new_params.get(name):
+                    new_params[name] = cast
+                    param_changed = True
+            if param_changed:
+                param_tuned += 1
+
+            if new_severity != r.severity or param_changed:
                 r = Rule(
                     id=r.id, name=r.name, description=r.description,
-                    severity=sev_override, tags=r.tags,
+                    severity=new_severity, tags=r.tags,
                     condition_src=r.condition_src, condition_code=r.condition_code,
                     cooldown_s=r.cooldown_s,
+                    parameters_schema=r.parameters_schema,
+                    parameters=new_params,
+                    params_ns=SimpleNamespace(**new_params),
                 )
-                adjusted += 1
             out.append(r)
-        if suppressed or adjusted:
-            log.info("Overrides angewendet: %d disabled, %d severity-override", suppressed, adjusted)
+        if suppressed or adjusted or param_tuned:
+            log.info(
+                "Overrides angewendet: %d disabled, %d severity-override, %d parameter-tuned",
+                suppressed, adjusted, param_tuned,
+            )
         return out
 
     def _load_all(self) -> list[Rule]:

@@ -3712,16 +3712,48 @@ function RuleOverridesSettings() {
     return JSON.stringify(overrides) !== JSON.stringify(originalOverrides);
   }, [overrides, originalOverrides]);
 
+  const isEmptyOverride = (ov: SigRuleOverride) =>
+    (ov.enabled === true || ov.enabled == null)
+    && ov.severity == null
+    && (!ov.parameters || Object.keys(ov.parameters).length === 0);
+
   const updateOverride = (rid: string, patch: Partial<SigRuleOverride>) => {
     setOverrides(prev => {
       const cur = prev[rid] ?? {};
       const next: SigRuleOverride = { ...cur, ...patch };
-      // Clean: wenn beide Felder leer/default sind, Eintrag ganz raus
       const out = { ...prev };
-      if ((next.enabled === true || next.enabled == null) && next.severity == null) {
+      if (isEmptyOverride(next)) {
         delete out[rid];
       } else {
         out[rid] = next;
+      }
+      return out;
+    });
+    setInfo('');
+  };
+
+  // Schwellwert pro Rule+Parameter. Wenn der Wert wieder dem Default
+  // entspricht, wird der Param-Eintrag entfernt — leere parameters-Map räumt
+  // updateOverride später auf.
+  const updateParam = (rule: SigRuleEntry, name: string, value: number | null) => {
+    setOverrides(prev => {
+      const cur = prev[rule.id] ?? {};
+      const curParams = { ...(cur.parameters ?? {}) };
+      const def = rule.parameters_default[name];
+      if (value == null || Number.isNaN(value) || value === def) {
+        delete curParams[name];
+      } else {
+        curParams[name] = value;
+      }
+      const next: SigRuleOverride = {
+        ...cur,
+        parameters: Object.keys(curParams).length > 0 ? curParams : undefined,
+      };
+      const out = { ...prev };
+      if (isEmptyOverride(next)) {
+        delete out[rule.id];
+      } else {
+        out[rule.id] = next;
       }
       return out;
     });
@@ -3860,15 +3892,73 @@ function RuleOverridesSettings() {
                   </tr>
                   {isOpen && (
                     <tr className="bg-slate-900/40 border-b border-slate-800/40">
-                      <td colSpan={6} className="px-3 py-2 text-xs">
+                      <td colSpan={6} className="px-3 py-3 text-xs">
                         <p className="text-slate-400 mb-1">{r.description || '–'}</p>
                         {r.tags.length > 0 && (
-                          <p className="text-[10px] text-slate-500">
+                          <p className="text-[10px] text-slate-500 mb-2">
                             <span className="text-slate-600">{t('settings.ruleOverrides.tagsLabel')}</span>{' '}
                             {r.tags.map(tg => (
                               <span key={tg} className="inline-block px-1.5 py-0.5 mr-1 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono">{tg}</span>
                             ))}
                           </p>
+                        )}
+                        {Object.keys(r.parameters_schema).length > 0 && (
+                          <div className="mt-2 border-t border-slate-800/60 pt-2">
+                            <p className="text-[11px] font-semibold text-slate-300 mb-1">
+                              {t('settings.ruleOverrides.thresholdsLabel')}
+                            </p>
+                            <p className="text-[10px] text-slate-500 mb-2">
+                              {t('settings.ruleOverrides.thresholdsHint')}
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {Object.entries(r.parameters_schema).map(([pname, schema]) => {
+                                const ov = overrides[r.id]?.parameters?.[pname];
+                                const eff = ov ?? r.parameters_default[pname] ?? schema.default;
+                                const isOverridden = ov != null;
+                                const rangeHint = schema.min != null && schema.max != null
+                                  ? `${schema.min}–${schema.max}`
+                                  : schema.min != null ? `≥ ${schema.min}`
+                                  : schema.max != null ? `≤ ${schema.max}` : '';
+                                return (
+                                  <div key={pname} className="bg-slate-900/60 border border-slate-700/40 rounded px-2 py-1.5">
+                                    <label className="block text-[10px] text-slate-400 mb-1">
+                                      <span className="font-mono text-slate-300">{pname}</span>
+                                      {schema.label && <span className="ml-1 text-slate-500">— {schema.label}</span>}
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="number"
+                                        step={schema.type === 'float' ? 'any' : '1'}
+                                        min={schema.min ?? undefined}
+                                        max={schema.max ?? undefined}
+                                        className={`input text-xs w-32 font-mono ${isOverridden ? 'border-amber-600 text-amber-200' : ''}`}
+                                        value={Number.isFinite(eff) ? eff : ''}
+                                        onChange={e => {
+                                          const raw = e.target.value;
+                                          if (raw === '') { updateParam(r, pname, null); return; }
+                                          const n = schema.type === 'float' ? parseFloat(raw) : parseInt(raw, 10);
+                                          updateParam(r, pname, Number.isNaN(n) ? null : n);
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="btn-ghost text-[10px] disabled:opacity-30"
+                                        disabled={!isOverridden}
+                                        onClick={() => updateParam(r, pname, null)}
+                                        title={t('settings.ruleOverrides.thresholdReset')}
+                                      >
+                                        ↺
+                                      </button>
+                                    </div>
+                                    <p className="text-[9px] text-slate-600 mt-0.5 font-mono">
+                                      default: {r.parameters_default[pname] ?? schema.default}
+                                      {rangeHint && ` · range: ${rangeHint}`}
+                                    </p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
                         )}
                       </td>
                     </tr>

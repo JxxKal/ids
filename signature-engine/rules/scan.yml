@@ -1,47 +1,101 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Port- und Host-Scan Erkennung
 # Stateful: nutzt ctx.unique_dst_ports() und ctx.unique_dst_ips()
+# Schwellwerte sind in `parameters:` deklariert und in der GUI pro Rule
+# anpassbar — die `condition` referenziert sie via `params.<name>`.
 # ══════════════════════════════════════════════════════════════════════════════
 
 - id: SCAN_001
   name: "TCP SYN Port Scan"
-  description: "Einzelne Quelle sendet SYN-Pakete an >50 verschiedene Ports in 60s"
+  description: "Einzelne Quelle sendet SYN-Pakete an viele verschiedene Ports"
   severity: high
   cooldown_s: 120
   tags: [scan, recon]
+  parameters:
+    port_count:
+      type: int
+      default: 50
+      min: 5
+      max: 65535
+      label: "Mindestanzahl unterschiedlicher Zielports"
+    window_s:
+      type: int
+      default: 60
+      min: 5
+      max: 3600
+      label: "Zeitfenster (Sekunden)"
   condition: |
     flow.get('proto') == 'TCP'
     and flow.get('tcp_flags_abs', {}).get('SYN', 0) > 0
-    and ctx.unique_dst_ports(flow.get('src_ip', ''), 60) > 50
+    and ctx.unique_dst_ports(flow.get('src_ip', ''), params.window_s) > params.port_count
 
 - id: SCAN_002
   name: "UDP Port Scan"
-  description: "UDP-Flows an >50 verschiedene Ports in 60s"
+  description: "UDP-Flows an viele verschiedene Ports"
   severity: medium
   cooldown_s: 120
   tags: [scan, recon]
+  parameters:
+    port_count:
+      type: int
+      default: 50
+      min: 5
+      max: 65535
+      label: "Mindestanzahl unterschiedlicher Zielports"
+    window_s:
+      type: int
+      default: 60
+      min: 5
+      max: 3600
+      label: "Zeitfenster (Sekunden)"
   condition: |
     flow.get('proto') == 'UDP'
-    and ctx.unique_dst_ports(flow.get('src_ip', ''), 60) > 50
+    and ctx.unique_dst_ports(flow.get('src_ip', ''), params.window_s) > params.port_count
 
 - id: SCAN_003
   name: "ICMP Host Sweep (Ping Sweep)"
-  description: "ICMP-Pakete an >20 verschiedene IPs in 30s"
+  description: "ICMP-Pakete an viele verschiedene IPs"
   severity: medium
   cooldown_s: 120
   tags: [scan, recon]
+  parameters:
+    ip_count:
+      type: int
+      default: 20
+      min: 3
+      max: 100000
+      label: "Mindestanzahl unterschiedlicher Ziel-IPs"
+    window_s:
+      type: int
+      default: 30
+      min: 5
+      max: 3600
+      label: "Zeitfenster (Sekunden)"
   condition: |
     flow.get('proto') == 'ICMP'
-    and ctx.unique_dst_ips(flow.get('src_ip', ''), 30) > 20
+    and ctx.unique_dst_ips(flow.get('src_ip', ''), params.window_s) > params.ip_count
 
 - id: SCAN_004
   name: "Breite Netzwerk-Erkundung"
-  description: "Verbindungen zu >30 verschiedenen IPs in 60s (beliebiges Protokoll)"
+  description: "Verbindungen zu vielen verschiedenen IPs (beliebiges Protokoll)"
   severity: high
   cooldown_s: 120
   tags: [scan, recon]
+  parameters:
+    ip_count:
+      type: int
+      default: 30
+      min: 3
+      max: 100000
+      label: "Mindestanzahl unterschiedlicher Ziel-IPs"
+    window_s:
+      type: int
+      default: 60
+      min: 5
+      max: 3600
+      label: "Zeitfenster (Sekunden)"
   condition: |
-    ctx.unique_dst_ips(flow.get('src_ip', ''), 60) > 30
+    ctx.unique_dst_ips(flow.get('src_ip', ''), params.window_s) > params.ip_count
 
 - id: SCAN_005
   name: "TCP Xmas Scan"

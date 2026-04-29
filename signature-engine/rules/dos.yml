@@ -1,43 +1,84 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Denial-of-Service Erkennung
 # Stateful: nutzt ctx.syn_count() und ctx.flow_rate()
+# Schwellwerte über `parameters:` in der GUI tunbar.
 # ══════════════════════════════════════════════════════════════════════════════
 
 - id: DOS_SYN_001
   name: "SYN Flood"
-  description: ">500 SYN-Pakete in 10s von einer Quelle (TCP SYN Flood)"
+  description: "Viele SYN-Pakete in kurzer Zeit von einer Quelle (TCP SYN Flood)"
   severity: critical
   cooldown_s: 30
   tags: [dos, flood]
+  parameters:
+    syn_count:
+      type: int
+      default: 500
+      min: 50
+      max: 1000000
+      label: "Mindestanzahl SYN-Pakete im Fenster"
+    window_s:
+      type: int
+      default: 10
+      min: 1
+      max: 600
+      label: "Zeitfenster (Sekunden)"
   condition: |
     flow.get('proto') == 'TCP'
-    and ctx.syn_count(flow.get('src_ip', ''), 10) > 500
+    and ctx.syn_count(flow.get('src_ip', ''), params.window_s) > params.syn_count
 
 - id: DOS_CONN_001
   name: "Verbindungsflut"
-  description: ">200 Flows in 30s von einer Quelle (Connection Flood)"
+  description: "Hohe Flow-Rate von einer Quelle (Connection Flood)"
   severity: high
   cooldown_s: 30
   tags: [dos, flood]
+  parameters:
+    flow_count:
+      type: int
+      default: 200
+      min: 20
+      max: 1000000
+      label: "Mindestanzahl Flows im Fenster"
+    window_s:
+      type: int
+      default: 30
+      min: 1
+      max: 600
+      label: "Zeitfenster (Sekunden)"
   condition: |
-    ctx.flow_rate(flow.get('src_ip', ''), 30) > 200
+    ctx.flow_rate(flow.get('src_ip', ''), params.window_s) > params.flow_count
 
 - id: DOS_UDP_001
   name: "UDP Flood"
-  description: "Sehr hohe UDP-Paketrate (>10 000 pps) von einer Quelle"
+  description: "Sehr hohe UDP-Paketrate von einer Quelle"
   severity: critical
   cooldown_s: 30
   tags: [dos, flood]
+  parameters:
+    pps:
+      type: int
+      default: 10000
+      min: 100
+      max: 10000000
+      label: "Mindest-Paketrate (Pakete/Sekunde)"
   condition: |
     flow.get('proto') == 'UDP'
-    and flow.get('pps', 0) > 10000
+    and flow.get('pps', 0) > params.pps
 
 - id: DOS_ICMP_001
   name: "ICMP Flood"
-  description: "Hohe ICMP-Rate (>1 000 pps) von einer Quelle"
+  description: "Hohe ICMP-Rate von einer Quelle"
   severity: high
   cooldown_s: 30
   tags: [dos, flood]
+  parameters:
+    pps:
+      type: int
+      default: 1000
+      min: 50
+      max: 10000000
+      label: "Mindest-Paketrate (Pakete/Sekunde)"
   condition: |
     flow.get('proto') == 'ICMP'
-    and flow.get('pps', 0) > 1000
+    and flow.get('pps', 0) > params.pps

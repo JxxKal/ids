@@ -47,27 +47,42 @@ OVERRIDES_FILE = CUSTOM_DIR / "_overrides.json"
 SURICATA_OVERRIDES_FILE = CUSTOM_DIR / "_suricata_overrides.json"
 
 VALID_SEVERITIES = {"critical", "high", "medium", "low"}
+VALID_PARAM_TYPES = {"int", "float"}
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────
 
 
+class SigRuleParamSchema(BaseModel):
+    """Schema-Eintrag pro Parameter (Default/Range/Label aus YAML)."""
+    type:    Literal["int", "float"]
+    default: float
+    min:     float | None = None
+    max:     float | None = None
+    label:   str = ""
+
+
 class SigRuleEntry(BaseModel):
-    id:                 str
-    name:               str
-    description:        str
-    severity:           str           # die effektive Severity nach Override
-    severity_default:   str           # was die YAML ursprünglich sagt
-    tags:               list[str]
-    file:               str           # relativer Pfad ab rules-root
-    builtin:            bool
-    enabled:            bool          # Override-State (Default: true)
-    severity_override:  str | None    # gesetzt wenn != severity_default
+    id:                  str
+    name:                str
+    description:         str
+    severity:            str            # die effektive Severity nach Override
+    severity_default:    str            # was die YAML ursprünglich sagt
+    tags:                list[str]
+    file:                str            # relativer Pfad ab rules-root
+    builtin:             bool
+    enabled:             bool           # Override-State (Default: true)
+    severity_override:   str | None     # gesetzt wenn != severity_default
+    parameters_schema:   dict[str, SigRuleParamSchema] = Field(default_factory=dict)
+    parameters_default:  dict[str, float]              = Field(default_factory=dict)
+    parameters:          dict[str, float]              = Field(default_factory=dict)  # effektiv
+    parameters_override: dict[str, float]              = Field(default_factory=dict)
 
 
 class SigRuleOverride(BaseModel):
-    enabled:  bool | None = None
-    severity: Literal["critical", "high", "medium", "low"] | None = None
+    enabled:    bool | None = None
+    severity:   Literal["critical", "high", "medium", "low"] | None = None
+    parameters: dict[str, float] | None = None
 
 
 class SigRulesOverrides(BaseModel):
@@ -127,6 +142,58 @@ def _write_overrides_file(payload: dict[str, dict]) -> None:
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 
+def _parse_yaml_param_schema(raw_params: Any) -> dict[str, SigRuleParamSchema]:
+    """Spiegelt loader._parse_param_schema, aber API-seitig (für GET /list).
+
+    Liefert ausschließlich gültige Schema-Einträge zurück. Skalar-Shortcuts wie
+    `port_count: 50` werden zu int+default akzeptiert. Bei Inkonsistenzen wird
+    der Eintrag still verworfen — der Loader logged in dem Fall ohnehin.
+    """
+    if not isinstance(raw_params, dict):
+        return {}
+    out: dict[str, SigRuleParamSchema] = {}
+    for name, spec in raw_params.items():
+        if not isinstance(name, str) or not name.isidentifier():
+            continue
+        if isinstance(spec, (int, float)) and not isinstance(spec, bool):
+            ptype = "float" if isinstance(spec, float) else "int"
+            out[name] = SigRuleParamSchema(type=ptype, default=float(spec))
+            continue
+        if not isinstance(spec, dict):
+            continue
+        ptype = str(spec.get("type", "int")).lower()
+        if ptype not in VALID_PARAM_TYPES:
+            continue
+        if "default" not in spec:
+            continue
+        try:
+            default_val = float(spec["default"])
+            min_val = float(spec["min"]) if spec.get("min") is not None else None
+            max_val = float(spec["max"]) if spec.get("max") is not None else None
+        except (TypeError, ValueError):
+            continue
+        if min_val is not None and max_val is not None and min_val > max_val:
+            min_val = max_val = None
+        out[name] = SigRuleParamSchema(
+            type=ptype,
+            default=default_val,
+            min=min_val,
+            max=max_val,
+            label=str(spec.get("label", "")),
+        )
+    return out
+
+
+def _clamp_param(value: float, schema: SigRuleParamSchema) -> float:
+    """Cast + Range-Clamp eines Override-Wertes gegen ein Schema."""
+    cast = float(value) if schema.type == "float" else int(value)
+    if schema.min is not None and cast < schema.min:
+        cast = schema.min if schema.type == "float" else int(schema.min)
+    if schema.max is not None and cast > schema.max:
+        cast = schema.max if schema.type == "float" else int(schema.max)
+    return cast
+
+
 @router.get(
     "/list",
     response_model=list[SigRuleEntry],
@@ -159,6 +226,20 @@ async def list_rules() -> list[SigRuleEntry]:
                 sev_override = None
             effective = sev_override or sev_default
 
+            params_schema = _parse_yaml_param_schema(raw.get("parameters"))
+            params_default = {n: s.default for n, s in params_schema.items()}
+
+            params_ov_clean: dict[str, float] = {}
+            raw_params_ov = ov.get("parameters") or {}
+            if isinstance(raw_params_ov, dict):
+                for pname, pval in raw_params_ov.items():
+                    schema = params_schema.get(str(pname))
+                    if schema is None or not isinstance(pval, (int, float)) or isinstance(pval, bool):
+                        continue
+                    params_ov_clean[str(pname)] = _clamp_param(float(pval), schema)
+
+            params_effective = {**params_default, **params_ov_clean}
+
             try:
                 rel = str(path.relative_to(BUILTIN_DIR.parent if builtin else CUSTOM_DIR.parent))
             except ValueError:
@@ -175,6 +256,10 @@ async def list_rules() -> list[SigRuleEntry]:
                 builtin=builtin,
                 enabled=enabled,
                 severity_override=sev_override,
+                parameters_schema=params_schema,
+                parameters_default=params_default,
+                parameters=params_effective,
+                parameters_override=params_ov_clean,
             ))
 
     out.sort(key=lambda r: (not r.builtin, r.id))
@@ -193,12 +278,21 @@ async def get_overrides() -> SigRulesOverrides:
     for rid, ov in raw.items():
         if not isinstance(ov, dict):
             continue
+        params_raw = ov.get("parameters")
+        params: dict[str, float] | None = None
+        if isinstance(params_raw, dict) and params_raw:
+            params = {
+                str(k): float(v)
+                for k, v in params_raw.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            } or None
         cleaned[rid] = SigRuleOverride(
             enabled=ov.get("enabled") if isinstance(ov.get("enabled"), bool) else None,
             severity=ov.get("severity") if (
                 isinstance(ov.get("severity"), str)
                 and ov.get("severity", "").lower() in VALID_SEVERITIES
             ) else None,
+            parameters=params,
         )
     return SigRulesOverrides(overrides=cleaned)
 
@@ -210,6 +304,17 @@ async def get_overrides() -> SigRulesOverrides:
     summary="Overrides setzen (komplett ersetzen)",
 )
 async def put_overrides(body: SigRulesOverrides) -> SigRulesOverrides:
+    # Schema pro Rule-ID einsammeln, damit wir Parameter-Werte clampen + auf
+    # bekannte Param-Namen filtern können. Unbekannte Rule-IDs werden hier nicht
+    # rausgefiltert (sonst sind Custom-Rules problematisch); Parameter-Cleanup
+    # passiert nur, wenn die Rule-ID im aktuellen Repo-Stand bekannt ist.
+    schema_by_rid: dict[str, dict[str, SigRuleParamSchema]] = {}
+    for _, raw_rules, _ in _read_yaml_files():
+        for raw in raw_rules:
+            rid = str(raw.get("id") or "")
+            if rid and rid not in schema_by_rid:
+                schema_by_rid[rid] = _parse_yaml_param_schema(raw.get("parameters"))
+
     payload: dict[str, dict] = {}
     for rid, ov in body.overrides.items():
         entry: dict = {}
@@ -217,6 +322,21 @@ async def put_overrides(body: SigRulesOverrides) -> SigRulesOverrides:
             entry["enabled"] = ov.enabled
         if ov.severity is not None:
             entry["severity"] = ov.severity
+        if ov.parameters:
+            schema = schema_by_rid.get(rid, {})
+            cleaned_params: dict[str, float] = {}
+            for pname, pval in ov.parameters.items():
+                ps = schema.get(pname)
+                if ps is None:
+                    # Unbekannter Parameter — entweder Rule existiert noch nicht
+                    # (Custom-File wurde noch nicht gespeichert) oder Tippfehler.
+                    # Wir behalten den Eintrag bei unbekannter Rule-ID, sonst raus.
+                    if rid not in schema_by_rid:
+                        cleaned_params[pname] = float(pval)
+                    continue
+                cleaned_params[pname] = _clamp_param(float(pval), ps)
+            if cleaned_params:
+                entry["parameters"] = cleaned_params
         if entry:
             payload[rid] = entry
 

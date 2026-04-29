@@ -1,26 +1,41 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Protokoll- und Verhaltensanomalien
+# Schwellwerte über `parameters:` in der GUI tunbar.
 # ══════════════════════════════════════════════════════════════════════════════
 
 - id: ANOMALY_LONGFLOW_001
   name: "Ungewöhnlich langer Flow"
-  description: "Flow läuft länger als 4 Stunden – mögliche C2-Verbindung oder Exfiltration"
+  description: "Flow läuft sehr lange – mögliche C2-Verbindung oder Exfiltration"
   severity: medium
   cooldown_s: 300
   tags: [anomaly, c2, exfiltration]
+  parameters:
+    duration_s:
+      type: int
+      default: 14400
+      min: 60
+      max: 86400
+      label: "Mindestdauer (Sekunden)"
   condition: |
-    flow.get('duration_s', 0) > 14400
+    flow.get('duration_s', 0) > params.duration_s
     and flow.get('connection_state') == 'ESTABLISHED'
 
 - id: ANOMALY_HIGHBYTES_001
   name: "Sehr hoher Datentransfer"
-  description: "TCP-Flow mit >500 MB – mögliche Daten-Exfiltration"
+  description: "TCP-Flow mit ungewöhnlich hohem Volumen – mögliche Daten-Exfiltration"
   severity: medium
   cooldown_s: 300
   tags: [anomaly, exfiltration]
+  parameters:
+    bytes:
+      type: int
+      default: 500000000
+      min: 1000000
+      max: 1099511627776
+      label: "Mindestvolumen (Bytes)"
   condition: |
     flow.get('proto') == 'TCP'
-    and flow.get('byte_count', 0) > 500_000_000
+    and flow.get('byte_count', 0) > params.bytes
     and flow.get('connection_state') == 'ESTABLISHED'
 
 - id: ANOMALY_LOWENTROPY_001
@@ -29,12 +44,31 @@
   severity: high
   cooldown_s: 300
   tags: [anomaly, c2, beaconing]
+  parameters:
+    pkt_count:
+      type: int
+      default: 50
+      min: 10
+      max: 1000000
+      label: "Mindestanzahl Pakete"
+    max_entropy_iat:
+      type: float
+      default: 0.3
+      min: 0.0
+      max: 5.0
+      label: "Max. IAT-Entropie"
+    duration_s:
+      type: int
+      default: 60
+      min: 5
+      max: 86400
+      label: "Mindestdauer (Sekunden)"
   condition: |
     flow.get('proto') == 'TCP'
-    and flow.get('pkt_count', 0) > 50
-    and flow.get('entropy_iat', 999) < 0.3
+    and flow.get('pkt_count', 0) > params.pkt_count
+    and flow.get('entropy_iat', 999) < params.max_entropy_iat
     and flow.get('connection_state') == 'ESTABLISHED'
-    and flow.get('duration_s', 0) > 60
+    and flow.get('duration_s', 0) > params.duration_s
 
 - id: ANOMALY_FRAGMENT_001
   name: "Fragmentierter Verkehr"
@@ -42,18 +76,44 @@
   severity: low
   cooldown_s: 300
   tags: [anomaly, evasion]
+  parameters:
+    pkt_count:
+      type: int
+      default: 20
+      min: 5
+      max: 1000000
+      label: "Mindestanzahl Pakete"
+    pps:
+      type: int
+      default: 50
+      min: 5
+      max: 10000000
+      label: "Mindest-Paketrate (pps)"
   condition: |
     flow.get('ip_version') == 4
-    and flow.get('pkt_count', 0) > 20
-    and flow.get('pps', 0) > 50
+    and flow.get('pkt_count', 0) > params.pkt_count
+    and flow.get('pps', 0) > params.pps
 
 - id: ANOMALY_HIGHPPS_001
   name: "Ungewöhnlich hohe Paketrate"
-  description: "Flow mit >5 000 pps bei kleinen Paketen – möglicher Traffic-Generator"
+  description: "Flow mit hoher pps bei kleinen Paketen – möglicher Traffic-Generator"
   severity: medium
   cooldown_s: 300
   tags: [anomaly, dos]
+  parameters:
+    pps:
+      type: int
+      default: 5000
+      min: 100
+      max: 10000000
+      label: "Mindest-Paketrate (pps)"
+    max_pkt_size:
+      type: int
+      default: 100
+      min: 32
+      max: 9000
+      label: "Max. mittlere Paketgröße (Bytes)"
   condition: |
-    flow.get('pps', 0) > 5000
-    and flow.get('pkt_size', {}).get('mean', 9999) < 100
+    flow.get('pps', 0) > params.pps
+    and flow.get('pkt_size', {}).get('mean', 9999) < params.max_pkt_size
     and flow.get('proto') == 'TCP'

@@ -51,9 +51,10 @@ class SignatureEngine:
 
         now        = time.time()
         alerts     = []
-        local_vars = {"flow": flat, "ctx": self._ctx}
+        local_vars = {"flow": flat, "ctx": self._ctx, "params": None}
 
         for rule in self._loader.rules:
+            local_vars["params"] = rule.params_ns
             try:
                 match = eval(rule.condition_code, _EVAL_GLOBALS, local_vars)  # noqa: S307
             except Exception as exc:

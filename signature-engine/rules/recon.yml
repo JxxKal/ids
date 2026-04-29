@@ -1,37 +1,77 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # Reconnaissance / Aufklärungsverkehr
+# Schwellwerte über `parameters:` in der GUI tunbar.
 # ══════════════════════════════════════════════════════════════════════════════
 
 - id: RECON_001
   name: "Viele Half-Open Verbindungen"
-  description: ">30 TCP-Verbindungen ohne vollständigen Handshake (Half-Open) in 60s"
+  description: "Viele TCP-Verbindungen ohne vollständigen Handshake (Half-Open)"
   severity: medium
   cooldown_s: 90
   tags: [recon, scan]
+  parameters:
+    flow_count:
+      type: int
+      default: 30
+      min: 5
+      max: 1000000
+      label: "Mindestanzahl Half-Open-Flows im Fenster"
+    window_s:
+      type: int
+      default: 60
+      min: 5
+      max: 3600
+      label: "Zeitfenster (Sekunden)"
   condition: |
     flow.get('proto') == 'TCP'
     and flow.get('half_open', False)
-    and ctx.flow_rate(flow.get('src_ip', ''), 60) > 30
+    and ctx.flow_rate(flow.get('src_ip', ''), params.window_s) > params.flow_count
 
 - id: RECON_002
   name: "Systematischer Port-Sweep bekannter Dienste"
-  description: "Verbindungsversuche auf privilegierte Ports (<1024) an >10 IPs in 30s"
+  description: "Verbindungsversuche auf privilegierte Ports (<1024) an viele IPs"
   severity: medium
   cooldown_s: 90
   tags: [recon]
+  parameters:
+    ip_count:
+      type: int
+      default: 10
+      min: 3
+      max: 100000
+      label: "Mindestanzahl unterschiedlicher Ziel-IPs"
+    window_s:
+      type: int
+      default: 30
+      min: 5
+      max: 3600
+      label: "Zeitfenster (Sekunden)"
   condition: |
     flow.get('proto') == 'TCP'
     and (flow.get('dst_port') or 9999) < 1024
     and flow.get('connection_state') in ('SYN_ONLY', 'RESET')
-    and ctx.unique_dst_ips(flow.get('src_ip', ''), 30) > 10
+    and ctx.unique_dst_ips(flow.get('src_ip', ''), params.window_s) > params.ip_count
 
 - id: RECON_003
   name: "Viele RST-Verbindungen"
-  description: ">50 TCP-Verbindungen mit RST-Abschluss in 60s – möglicher Scanner"
+  description: "Hohe Rate von TCP-Verbindungen mit RST-Abschluss – möglicher Scanner"
   severity: low
   cooldown_s: 90
   tags: [recon, scan]
+  parameters:
+    flow_count:
+      type: int
+      default: 50
+      min: 10
+      max: 1000000
+      label: "Mindestanzahl RST-Flows im Fenster"
+    window_s:
+      type: int
+      default: 60
+      min: 5
+      max: 3600
+      label: "Zeitfenster (Sekunden)"
   condition: |
     flow.get('proto') == 'TCP'
     and flow.get('connection_state') == 'RESET'
-    and ctx.flow_rate(flow.get('src_ip', ''), 60) > 50
+    and ctx.flow_rate(flow.get('src_ip', ''), params.window_s) > params.flow_count
