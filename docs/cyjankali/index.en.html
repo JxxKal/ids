@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CYJANKALI – Cyjan IDS Offensive Test Framework</title>
+  <meta name="description" content="Structured Kali Linux test scripts for the Cyjan IDS – reconnaissance, exploits, brute force, slow DDoS, MITM. Includes the expected detection signatures.">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="assets/CYJAN_x_KALI_Banner.png">
+  <link rel="alternate" hreflang="de" href="index.html">
+  <link rel="alternate" hreflang="en" href="index.en.html">
+</head>
+<body>
+
+<header class="hero">
+  <img src="assets/CYJAN_x_KALI_Banner.png" alt="CYJANKALI – Cyjan IDS Offensive Test Framework" class="banner">
+</header>
+
+<nav class="topnav">
+  <a href="#about">What is this</a>
+  <a href="#lab">Lab setup</a>
+  <a href="#tests">Test catalogue</a>
+  <a href="#verify">Verification</a>
+  <a href="#resources">Resources</a>
+  <a href="#disclaimer">Disclaimer</a>
+  <span class="lang-switch">
+    <a href="index.html" hreflang="de">DE</a>
+    <a href="index.en.html" hreflang="en" class="is-active" aria-current="page">EN</a>
+  </span>
+</nav>
+
+<main>
+
+<section id="about">
+  <h1>Attack the guardian, detect the attacker</h1>
+  <p class="lede">
+    <strong>CYJANKALI</strong> is the offensive test playground for the
+    <a href="https://github.com/JxxKal/ids">Cyjan IDS</a>. It collects
+    Kali Linux scripts that put your IDS deployment under realistic load —
+    along with what the frontend <em>should</em> show in response. If a
+    detection fails to trigger, you know exactly where to tune.
+  </p>
+  <p>
+    The wordplay is the point: <strong>cyanide</strong> (potassium cyanide,
+    German <em>Cyankali</em>) is the poison the system protects against.
+    <strong>Kali Linux</strong> is the tool we use to simulate the poison.
+  </p>
+</section>
+
+<section id="lab">
+  <h2>Lab setup</h2>
+
+  <h3>Topology</h3>
+  <p>
+    At least two VMs in an isolated subnet:
+  </p>
+  <ul class="topology">
+    <li><strong>Cyjan IDS</strong> – installed from the current ISO, with a mirror interface (e.g. <code>ens19</code>) on the SPAN/mirror port of the lab switch.</li>
+    <li><strong>Kali attacker</strong> – Kali Linux, regular routing interface.</li>
+    <li><strong>Target VM</strong> (optional) – so the sniffer sees real traffic: a web server, a domain controller, a DVWA container.</li>
+  </ul>
+  <p>
+    No physical switch with a SPAN port? In Proxmox/VMware put the vSwitch
+    into <em>promiscuous</em> mode and attach the IDS mirror interface to
+    the same vSwitch as the target VM's routing interface. The sniffer
+    will then capture all bridge traffic.
+  </p>
+
+  <h3>Provision Kali</h3>
+  <p>
+    Grab a fresh Kali image and import it into your VM platform of choice:
+  </p>
+  <p>
+    <a class="btn-primary" href="https://www.kali.org/get-kali/" rel="noopener">→ kali.org / get-kali</a>
+  </p>
+  <p>
+    <em>Recommendation:</em> the <strong>pre-built virtual machines</strong>
+    (.ova / .vmx) save you a full installer run. Change the default login
+    <code>kali / kali</code> immediately.
+  </p>
+</section>
+
+<section id="tests">
+  <h2>Test catalogue</h2>
+  <p class="lede">
+    Each category provides a script you run on the Kali box, plus the
+    <em>expected</em> reaction in the Cyjan frontend. If the alert does
+    not fire → that's an anti-pattern for a rule or ML model improvement.
+  </p>
+  <aside class="lab-only">
+    <strong>Detection validation, not an attack toolkit.</strong> These
+    scripts simulate typical attack patterns <em>against your own IDS</em>
+    so you can verify whether detection works. Before running any of them:
+    is the target system in your hands and do you have written authorisation
+    from the owner? If not, stop here — see <a href="#disclaimer">disclaimer</a>.
+    All examples use private RFC1918 addresses (192.168.x.y) as a marker
+    for "your own lab".
+  </aside>
+
+  <article class="test">
+    <h3 id="test-recon">1. Reconnaissance · nmap scans</h3>
+    <p>
+      Various stealth variants against the target VM. Good to verify
+      sniffer drop_pct stays clean and the connection graph marks the
+      Kali IP as a new node.
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+TARGET=${1:-192.168.56.10}
+
+echo "[+] SYN scan (top 1000 ports)"
+sudo nmap -sS -T4 "$TARGET"
+
+echo "[+] FIN scan (stealth)"
+sudo nmap -sF -T3 "$TARGET"
+
+echo "[+] NULL scan"
+sudo nmap -sN -T3 "$TARGET"
+
+echo "[+] Xmas scan"
+sudo nmap -sX -T3 "$TARGET"
+
+echo "[+] Service and OS detection"
+sudo nmap -sV -O -A "$TARGET"
+</code></pre>
+    <details>
+      <summary>Expected IDS reaction</summary>
+      <ul>
+        <li><strong>Signature engine</strong>: <code>port-scan-burst</code> &amp; <code>fin-scan-stealth</code> alerts (severity <code>medium</code>).</li>
+        <li><strong>ML engine</strong>: anomaly score on the flow aggregate level rises; multiple short flows from the same source IP.</li>
+        <li><strong>Connection graph</strong>: the Kali IP becomes a hub with many outgoing edges.</li>
+      </ul>
+    </details>
+  </article>
+
+  <article class="test">
+    <h3 id="test-web">2. Web attacks · sqlmap, nikto, dirb</h3>
+    <p>
+      Classic web app probes against DVWA or your own test app. The
+      mirror port should pick up the HTTP request traffic.
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+TARGET=${1:-http://192.168.56.10}
+
+echo "[+] nikto: misconfig + known CVEs"
+nikto -h "$TARGET" -Tuning 9
+
+echo "[+] dirb: default wordlist brute force"
+dirb "$TARGET" /usr/share/dirb/wordlists/common.txt -r
+
+echo "[+] sqlmap: injection probe against DVWA login"
+sqlmap -u "$TARGET/login.php" \
+       --data "username=admin&password=admin&Login=Login" \
+       --batch --threads 4 --level 3
+</code></pre>
+    <details>
+      <summary>Expected IDS reaction</summary>
+      <ul>
+        <li><strong>Signature engine</strong>: <code>sql-inject-tautology</code>, <code>web-bruteforce-paths</code> alerts (severity <code>high</code>).</li>
+        <li><strong>Suricata</strong> (if active): ET-WEB-Server rule hits.</li>
+        <li><strong>Alert manager</strong>: the dedup window suppresses the nikto spam wave after 300 s.</li>
+      </ul>
+    </details>
+  </article>
+
+  <article class="test">
+    <h3 id="test-bruteforce">3. Brute force · hydra against SSH</h3>
+    <p>
+      Classic SSH login hammering against a <strong>lab-owned account</strong>.
+      Tests both the signature engine (connection burst pattern) and the
+      ML anomaly detection.
+    </p>
+    <p class="muted">
+      The wordlists are deliberately variables — do not blindly point
+      <code>rockyou.txt</code> at a production host. Create a separate lab
+      user with a controlled, intentionally guessable password so you can
+      verify the hit without burning third-party accounts.
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+TARGET=${1:-192.168.56.10}
+USERLIST=${USERLIST:-/path/to/your-lab-userlist.txt}
+PASSLIST=${PASSLIST:-/path/to/your-controlled-pwlist.txt}
+
+echo "[+] hydra: SSH brute force against lab account"
+hydra -L "$USERLIST" \
+      -P "$PASSLIST" \
+      -t 4 -e nsr \
+      ssh://"$TARGET"
+</code></pre>
+    <details>
+      <summary>Expected IDS reaction</summary>
+      <ul>
+        <li><strong>Signature engine</strong>: <code>ssh-bruteforce</code> alert after &gt; 10 failed logins/min (severity <code>high</code>).</li>
+        <li><strong>ML engine</strong>: flow inter-arrival-time entropy drops sharply, anomaly score &gt; 0.8.</li>
+      </ul>
+    </details>
+  </article>
+
+  <article class="test">
+    <h3 id="test-mitm">4. MITM · responder in analysis mode</h3>
+    <p>
+      Classic Windows lab attack. We use
+      <strong>analysis mode (<code>-A</code>)</strong>: responder observes
+      LLMNR/NBT broadcasts and logs them but does <em>not</em> write
+      anything back onto the network. That is enough for the IDS detection
+      — the sniffer sees broadcast traffic anyway — and avoids spoofing
+      foreign hostnames, which would be a different legal corridor.
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+# Passive analysis only: responder logs LLMNR/NBT queries without
+# answering them. Active spoofing (-wF) deliberately not listed.
+IFACE=${1:-eth0}
+
+sudo responder -I "$IFACE" -A
+</code></pre>
+    <details>
+      <summary>Expected IDS reaction</summary>
+      <ul>
+        <li><strong>Signature engine</strong>: <code>llmnr-broadcast-storm</code> alert (severity <code>medium</code>).</li>
+        <li><strong>Connection graph</strong>: a cluster of broadcast-active hosts becomes visible; the Kali box is a passive observer.</li>
+      </ul>
+    </details>
+  </article>
+
+  <article class="test">
+    <h3 id="test-dns">5. DNS attack despite resolver allowlist</h3>
+    <p>
+      A Cyjan IDS operator maintains the <strong>DNS resolver allowlist</strong>
+      (Settings → System → DNS resolvers) so legitimate response flows do
+      not scream as pseudo port scans. Only <code>medium</code> and
+      <code>low</code> severity alerts are suppressed there. Real DNS
+      attacks (<code>high</code>) must still fire — this test verifies
+      exactly that.
+    </p>
+    <p>
+      Three steps: first a harmless lookup wave against the configured
+      resolver (control, should stay <em>silent</em>), then a DGA
+      simulation and a tunneling volume test (both should <em>scream</em>).
+    </p>
+<pre><code class="lang-bash">#!/usr/bin/env bash
+# Cyjankali DNS test: shows that the DNS resolver allowlist in Cyjan IDS
+# only suppresses low/medium FPs — high-severity DNS attacks (tunneling,
+# DGA) still fire.
+#
+# Prerequisite: $RESOLVER is configured in Cyjan IDS under Settings →
+# System → DNS resolvers.
+
+RESOLVER=${1:-192.168.56.1}
+
+echo "[1/3] Control: 200 normal lookups against the resolver"
+echo "      Expectation: NO alert (medium/low dropped via allowlist)"
+for i in $(seq 1 200); do
+  dig +short +time=1 +tries=1 example.com @"$RESOLVER" &gt; /dev/null
+done
+
+echo
+echo "[2/3] DGA simulation: 50 random subdomains with variable IAT, single socket"
+echo "      Expectation: DNS_DGA_001 (high) fires despite allowlist"
+RESOLVER="$RESOLVER" python3 - &lt;&lt;'PY'
+import os, random, socket, struct, time
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(('', 0))                       # one source port → one flow
+target = (os.environ['RESOLVER'], 53)
+for _ in range(50):
+    qname = ''.join(random.choices('abcdefghijklmnop', k=24)) + '.test.invalid'
+    txid = random.randint(0, 0xffff)
+    header = struct.pack('!HHHHHH', txid, 0x0100, 1, 0, 0, 0)
+    parts = qname.split('.')
+    body = b''.join(bytes([len(p)]) + p.encode() for p in parts) + b'\x00'
+    body += struct.pack('!HH', 1, 1)     # type A, class IN
+    sock.sendto(header + body, target)
+    time.sleep(random.uniform(0.05, 0.6))  # → entropy_iat &gt; 2.5
+PY
+
+echo
+echo "[3/3] Tunneling volume: 1500 queries with large QNAMES, single socket"
+echo "      Expectation: DNS_TUNNEL_001 (high) fires despite allowlist"
+RESOLVER="$RESOLVER" python3 - &lt;&lt;'PY'
+import os, random, socket, struct
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.bind(('', 0))
+target = (os.environ['RESOLVER'], 53)
+for _ in range(1500):
+    # 60-hex-char subdomain → ~95 byte query, 1500× &gt; 50 KB byte_count
+    sub = ''.join(random.choices('0123456789abcdef', k=60))
+    qname = sub + '.exfil.test.invalid'
+    txid = random.randint(0, 0xffff)
+    header = struct.pack('!HHHHHH', txid, 0x0100, 1, 0, 0, 0)
+    parts = qname.split('.')
+    body = b''.join(bytes([len(p)]) + p.encode() for p in parts) + b'\x00'
+    body += struct.pack('!HH', 1, 1)
+    sock.sendto(header + body, target)
+PY
+
+echo
+echo "In the Cyjan frontend (Settings → DNS resolvers with $RESOLVER configured):"
+echo "  Step 1 → no new alerts (allowlist takes effect)"
+echo "  Step 2 → DNS_DGA_001  (high) – fires even with allowlist"
+echo "  Step 3 → DNS_TUNNEL_001 (high) – fires even with allowlist"
+</code></pre>
+    <details>
+      <summary>Expected IDS reaction</summary>
+      <ul>
+        <li><strong>Step 1 (control):</strong> no alerts – the allowlist
+          suppresses SCAN_002 / DNS_AMP_001 / DNS_NONSTANDARD_001 (all
+          medium/low) for the configured resolver.</li>
+        <li><strong>Step 2 (DGA):</strong> <code>DNS_DGA_001</code> severity
+          <code>high</code> – the allowlist does not apply here because
+          policy lets high/critical through.</li>
+        <li><strong>Step 3 (tunneling):</strong> <code>DNS_TUNNEL_001</code>
+          severity <code>high</code> – byte_count &gt; 50 KB in a single
+          flow, same path as step 2 (no suppress).</li>
+        <li><strong>alert-manager stats log:</strong>
+          <code>dns_allowlisted=N</code> counts the step-1 drops — that's
+          how you verify server-side that suppression actually works.</li>
+      </ul>
+    </details>
+    <p class="muted">
+      If steps 2 or 3 fail to fire, check whether the DNS allowlist is
+      accidentally blocking high severity too (bug) or whether the test
+      queries reach the IDS sniffer at all (dual-NIC: mirror port active?
+      single-NIC: resolver must sit in the same L2 segment as the mgmt
+      interface).
+    </p>
+  </article>
+
+  <article class="test placeholder">
+    <h3>More categories (to follow)</h3>
+    <ul>
+      <li>Slow DoS (<code>slowloris</code>, <code>hping3 --rand-source</code>)</li>
+      <li>Metasploit modules against typical lab targets</li>
+      <li>BloodHound + impacket suite (lateral movement)</li>
+      <li>BurpSuite Active Scan against DVWA</li>
+    </ul>
+    <p class="muted">
+      Pull requests welcome – schema per test is <em>script / expected
+      detection / severity</em>.
+    </p>
+  </article>
+</section>
+
+<section id="verify">
+  <h2>Verification in the IDS frontend</h2>
+  <p>
+    While running the Kali scripts, watch the following spots in the
+    Cyjan frontend (<code>http://&lt;mgmt-ip&gt;/</code>):
+  </p>
+  <table class="verify-table">
+    <thead>
+      <tr><th>UI area</th><th>What you should see</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Alert feed (live)</td>
+        <td>WebSocket push of new alerts in real time, severity column correlates with the test category.</td>
+      </tr>
+      <tr>
+        <td>Connection graph</td>
+        <td>Kali IP appears as a new hub node; nmap scans give it a high out-degree.</td>
+      </tr>
+      <tr>
+        <td>Threat level (header)</td>
+        <td>The 15-minute score indicator moves from <span class="dot-green"></span> green → <span class="dot-yellow"></span> yellow → <span class="dot-orange"></span> orange → <span class="dot-red"></span> red, depending on volume and severity.</td>
+      </tr>
+      <tr>
+        <td>PCAP download</td>
+        <td>Per-alert <code>±60 s</code> PCAP downloadable (once the MinIO upload completes).</td>
+      </tr>
+      <tr>
+        <td>ML status</td>
+        <td>Anomaly score histogram grows a right tail during the test sessions.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="resources">
+  <h2>Resources</h2>
+  <ul class="links">
+    <li><a href="https://github.com/JxxKal/ids" rel="noopener">Cyjan IDS repository</a> – source, issues, releases</li>
+    <li><a href="https://github.com/JxxKal/ids/releases/latest" rel="noopener">Latest ISO / update package</a></li>
+    <li><a href="https://www.kali.org/get-kali/" rel="noopener">Kali Linux download</a></li>
+    <li><a href="https://www.kali.org/tools/" rel="noopener">Kali tools reference</a></li>
+    <li><a href="https://attack.mitre.org/" rel="noopener">MITRE ATT&amp;CK framework</a> – TTP mapping</li>
+  </ul>
+</section>
+
+<section id="disclaimer" class="disclaimer">
+  <h2>Disclaimer</h2>
+  <p>
+    The scripts collected here are intended for <strong>authorised
+    security testing in your own lab</strong>. Using them against systems
+    you do not own without explicit written permission from the owner is
+    a criminal offence under <strong>§ 202c StGB</strong> (preparation of
+    spying out and intercepting data), <strong>§ 303a StGB</strong> (data
+    alteration) and <strong>§ 303b StGB</strong> (computer sabotage) in
+    Germany. In the United States <strong>18 U.S.C. § 1030</strong> (CFAA)
+    applies. Comparable laws exist in most other jurisdictions.
+  </p>
+  <p>
+    <strong>No warranty.</strong> The scripts are provided "as-is" for
+    educational and detection-validation purposes — without any guarantee
+    of function, safety, or lawful use. Anyone aiming the CYJANKALI
+    material at production systems does so at their own risk; the
+    maintainers expressly accept no liability for the resulting
+    consequences.
+  </p>
+  <p class="trademark-note">
+    <small>
+      <strong>Trademark notice:</strong> Kali Linux is a registered
+      trademark of OffSec Services Limited. This project is not affiliated
+      with Kali Linux, OffSec, or the Kali Linux team. The name
+      "CYJANKALI" references the chemical poison <em>Cyankali</em>
+      (potassium cyanide) — the wordplay with "Kali" is a pun, not an
+      endorsement claim.
+    </small>
+  </p>
+</section>
+
+</main>
+
+<footer>
+  <p>
+    <small>
+      CYJANKALI is part of the
+      <a href="https://github.com/JxxKal/ids" rel="noopener">Cyjan IDS</a> project.
+      Pull requests welcome under
+      <code>docs/cyjankali/</code>.
+    </small>
+  </p>
+  <p class="footer-links">
+    <small>
+      <a href="impressum.html">Imprint (German)</a> ·
+      <a href="#disclaimer">Disclaimer</a> ·
+      <a href="https://github.com/JxxKal/ids" rel="noopener">Source repo</a>
+    </small>
+  </p>
+</footer>
+
+</body>
+</html>

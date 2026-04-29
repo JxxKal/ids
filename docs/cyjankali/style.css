@@ -94,6 +94,34 @@ a:hover { border-bottom-color: var(--cyjan-2); }
 }
 .topnav a:hover { color: var(--cyjan-2); }
 
+/* Sprachumschaltung – schiebt sich nach rechts und behält den Stil. */
+.lang-switch {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.lang-switch a {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+}
+.lang-switch a:hover {
+  color: var(--cyjan-2);
+  border-color: var(--cyjan-2);
+}
+.lang-switch a.is-active {
+  color: var(--cyjan-2);
+  border-color: var(--cyjan-2);
+  background: rgba(14, 165, 233, 0.12);
+}
+@media (max-width: 720px) {
+  .lang-switch { margin-left: 0; }
+}
+
 /* ── Main Layout ──────────────────────────────────────────────────────────── */
 
 main {
