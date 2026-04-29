@@ -3689,6 +3689,11 @@ function RuleOverridesSettings() {
   const [search, setSearch]             = useState('');
   const [filter, setFilter]             = useState<'all' | 'enabled' | 'disabled' | 'changed'>('all');
   const [expanded, setExpanded]         = useState<Record<string, boolean>>({});
+  // Roh-Text der aktuell editierten Parameter-Felder (key: `${rule_id}.${param_name}`).
+  // Verhindert, dass beim Leeren des Inputs der Override sofort auf null zurückfällt
+  // und das Feld dadurch wieder den Default anzeigt — der Edit-State lebt lokal,
+  // bis das Feld blurred oder ein gültiger Wert eingegeben wird.
+  const [editingParam, setEditingParam] = useState<Record<string, string>>({});
   const [error, setError]               = useState('');
   const [info, setInfo]                 = useState('');
   const [loading, setLoading]           = useState(true);
@@ -3919,6 +3924,10 @@ function RuleOverridesSettings() {
                                   ? `${schema.min}–${schema.max}`
                                   : schema.min != null ? `≥ ${schema.min}`
                                   : schema.max != null ? `≤ ${schema.max}` : '';
+                                const editKey = `${r.id}.${pname}`;
+                                const displayValue = editKey in editingParam
+                                  ? editingParam[editKey]
+                                  : (Number.isFinite(eff) ? String(eff) : '');
                                 return (
                                   <div key={pname} className="bg-slate-900/60 border border-slate-700/40 rounded px-2 py-1.5">
                                     <label className="block text-[10px] text-slate-400 mb-1">
@@ -3932,19 +3941,38 @@ function RuleOverridesSettings() {
                                         min={schema.min ?? undefined}
                                         max={schema.max ?? undefined}
                                         className={`input text-xs w-32 font-mono ${isOverridden ? 'border-amber-600 text-amber-200' : ''}`}
-                                        value={Number.isFinite(eff) ? eff : ''}
+                                        value={displayValue}
                                         onChange={e => {
                                           const raw = e.target.value;
-                                          if (raw === '') { updateParam(r, pname, null); return; }
+                                          // Roh-Text immer halten — sonst rastet das Feld
+                                          // beim Leeren auf den Default zurück.
+                                          setEditingParam(prev => ({ ...prev, [editKey]: raw }));
+                                          if (raw === '' || raw === '-') return;
                                           const n = schema.type === 'float' ? parseFloat(raw) : parseInt(raw, 10);
-                                          updateParam(r, pname, Number.isNaN(n) ? null : n);
+                                          if (Number.isFinite(n)) updateParam(r, pname, n);
+                                        }}
+                                        onBlur={() => {
+                                          // Edit-State auflösen: beim nächsten Render gewinnt
+                                          // wieder der canonisch formatierte eff-Wert.
+                                          setEditingParam(prev => {
+                                            if (!(editKey in prev)) return prev;
+                                            const { [editKey]: _, ...rest } = prev;
+                                            return rest;
+                                          });
                                         }}
                                       />
                                       <button
                                         type="button"
                                         className="btn-ghost text-[10px] disabled:opacity-30"
                                         disabled={!isOverridden}
-                                        onClick={() => updateParam(r, pname, null)}
+                                        onClick={() => {
+                                          updateParam(r, pname, null);
+                                          setEditingParam(prev => {
+                                            if (!(editKey in prev)) return prev;
+                                            const { [editKey]: _, ...rest } = prev;
+                                            return rest;
+                                          });
+                                        }}
                                         title={t('settings.ruleOverrides.thresholdReset')}
                                       >
                                         ↺
