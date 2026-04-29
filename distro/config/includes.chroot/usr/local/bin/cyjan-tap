@@ -20,36 +20,71 @@ COMPOSE_DIR="${CYJAN_DIR:-/opt/ids}"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.tap.yml"
 
 require_curl()  { command -v curl  >/dev/null || { echo "curl fehlt" >&2; exit 1; }; }
-require_jq()    { command -v jq    >/dev/null || { echo "jq fehlt"   >&2; exit 1; }; }
+# jq ist nice-to-have, aber nicht hart erforderlich – wir greifen für
+# JSON-Escaping auf python3 zurück, falls jq fehlt. Output-Pretty-Printing
+# fällt dann auf 'cat' zurück.
+have_jq()       { command -v jq >/dev/null; }
 compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
 
 api_get()  { curl -fsS "$TAP_API_URL$1"; }
 api_post() { curl -fsS -H 'Content-Type: application/json' -X POST -d "$2" "$TAP_API_URL$1"; }
 
+# JSON-String-Encode für eine Bash-Variable. Ohne externe Deps – python3 ist
+# auf Debian-Basis-System immer da (Wizard-Voraussetzung), jq nicht zwingend.
+json_escape() {
+  python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
+}
+
+# Pretty-Print JSON wenn jq da ist, sonst raw.
+maybe_jq() {
+  if have_jq; then jq .; else cat; fi
+}
+
 print_state() {
   local s
-  s=$(api_get /api/state)
-  jq -r '
-    def fmtts: if . == null then "–" else (now - .) | tostring + "s" end;
-    "Master-URL:        \(.master_url // "–")",
-    "Verbindung:        \(.connection)",
-    "Letzter Connect:   \(.last_connect_at | fmtts)",
-    "Letzter Send:      \(.last_send_at | fmtts)",
-    "Gesendet (total):  \(.sent_total)",
-    "Queue-Einträge:    \(.queue_count)",
-    "Queue-Bytes:       \(.queue_bytes)",
-    "Cert läuft ab:     \(.cert_expires_at // "–")",
-    "Letzter Fehler:    \(.last_error // "–")"
-  ' <<<"$s"
+  s=$(api_get /api/state) || { echo "tap-api nicht erreichbar"; return 1; }
+  if have_jq; then
+    jq -r '
+      def fmtts: if . == null then "–" else (now - .) | tostring + "s" end;
+      "Master-URL:        \(.master_url // "–")",
+      "Verbindung:        \(.connection)",
+      "Letzter Connect:   \(.last_connect_at | fmtts)",
+      "Letzter Send:      \(.last_send_at | fmtts)",
+      "Gesendet (total):  \(.sent_total)",
+      "Queue-Einträge:    \(.queue_count)",
+      "Queue-Bytes:       \(.queue_bytes)",
+      "Cert läuft ab:     \(.cert_expires_at // "–")",
+      "Letzter Fehler:    \(.last_error // "–")"
+    ' <<<"$s"
+  else
+    # Fallback ohne jq: kompaktes Python-Pretty-Print mit den wichtigsten
+    # Feldern. Genauso lesbar, nur weniger ausgeschmückt.
+    python3 -c '
+import json, sys, time
+d = json.loads(sys.stdin.read())
+def rel(t):
+    if not t: return "–"
+    return f"{int(time.time()-t)}s"
+print(f"Master-URL:        {d.get(\"master_url\") or \"–\"}")
+print(f"Verbindung:        {d.get(\"connection\")}")
+print(f"Letzter Connect:   {rel(d.get(\"last_connect_at\"))}")
+print(f"Letzter Send:      {rel(d.get(\"last_send_at\"))}")
+print(f"Gesendet (total):  {d.get(\"sent_total\", 0)}")
+print(f"Queue-Einträge:    {d.get(\"queue_count\", 0)}")
+print(f"Queue-Bytes:       {d.get(\"queue_bytes\", 0)}")
+print(f"Cert läuft ab:     {d.get(\"cert_expires_at\") or \"–\"}")
+print(f"Letzter Fehler:    {d.get(\"last_error\") or \"–\"}")
+' <<<"$s"
+  fi
 }
 
 cmd_status() {
-  require_curl; require_jq
+  require_curl
   print_state
 }
 
 cmd_connection() {
-  require_curl; require_jq
+  require_curl
   case "${1:-}" in
     follow)
       while true; do
@@ -70,15 +105,15 @@ cmd_pair() {
   local master="${1:-}" token="${2:-}"
   if [[ -z "$master" || -z "$token" ]]; then
     echo "Usage: cyjan-tap pair <master-url> <token>"
-    echo "  Beispiel: cyjan-tap pair https://192.168.1.230:8001 v_abc123..."
+    echo "  Beispiel: cyjan-tap pair http://192.168.1.230:8001 v_abc123..."
     exit 2
   fi
   local body
   body=$(printf '{"master_url":%s,"token":%s}' \
-    "$(jq -Rn --arg v "$master" '$v')" \
-    "$(jq -Rn --arg v "$token"  '$v')")
+    "$(json_escape "$master")" \
+    "$(json_escape "$token")")
   echo "[*] Pairing mit $master …"
-  api_post /api/pair "$body" | jq .
+  api_post /api/pair "$body" | maybe_jq
   echo "[*] tap-uplink neu starten, damit das neue Cert geladen wird …"
   compose restart tap-uplink
   echo "[+] fertig"
@@ -86,7 +121,7 @@ cmd_pair() {
 
 cmd_test() {
   require_curl
-  api_post /api/test-alert '{}' | jq .
+  api_post /api/test-alert '{}' | maybe_jq
 }
 
 cmd_reconnect() {
@@ -102,9 +137,9 @@ cmd_logs() {
 }
 
 cmd_config() {
-  require_curl; require_jq
+  require_curl
   case "${1:-get}" in
-    get) api_get /api/config | jq . ;;
+    get) api_get /api/config | maybe_jq ;;
     *)   echo "Usage: cyjan-tap config get" ; exit 2 ;;
   esac
 }

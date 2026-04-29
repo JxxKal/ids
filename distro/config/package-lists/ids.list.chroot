@@ -28,6 +28,7 @@ less
 unzip
 zstd
 sudo
+jq
 bash-completion
 locales
 console-setup
