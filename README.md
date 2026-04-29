@@ -74,6 +74,9 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | `snort` | Suricata | ✅ | Paketerfassung auf Mirror-/Test-Interface, ET Open + OT/ICS-Regelsets, EVE JSON Output |
 | `snort-bridge` | Python | ✅ | Liest Suricata EVE JSON → normalisiert → Kafka alerts-raw (`source=suricata`) |
 | `irma-bridge` | Python | ✅ | Pollt IRMA REST-API, importiert externe Alarme → Kafka alerts-raw (`source=external`) |
+| `master-uplink` | Python | ✅ | mTLS-WSS-Endpoint (Port 8443) für Remote-Taps, nimmt Tap-Alarme ins Master-Kafka auf und serviert Reverse-Channel `/config` für Rule-Sync |
+| `tap-uplink` | Python | ✅ | *(nur Tap)* mTLS-Client zum Master, SQLite-Outage-Buffer, alle 5 min Reverse-Pull der Heuristik-Rules + Overrides |
+| `tap-api` | Python | ✅ | *(nur Tap)* Minimaler Status-View + Maschinen-Endpoints für die `cyjan-tap`-CLI |
 
 ---
 
@@ -378,6 +381,42 @@ Vorkonfigurierte OT/ICS-Quellen (deaktiviert, bei Bedarf aktivieren):
 #### Regelübersicht
 
 Alle aktiven Regeln, Suche, Pagination, Aktion-Badges.
+
+#### Regel-Anpassungen (Heuristik-Schwellwerte tunen)
+
+Pro Heuristik-Regel der Signature-Engine lassen sich **Schwellwerte, Severity und Aktivierung** über die GUI anpassen. Der Pfad ist explizit dafür gedacht, den klassischen Alert-Sturm-Konflikt sauber aufzulösen:
+
+- **Schwellwert hochdrehen** (z.B. SCAN_001 `port_count` von 50 → 200) wenn normaler Traffic den Default überschreitet — echte Scans bleiben damit erkannt.
+- **Severity runterstufen** nur als Notnagel — das maskiert auch echte Treffer.
+- **Regel deaktivieren** wenn sie für die Umgebung gar nicht passt.
+
+Das funktioniert, weil jede Builtin-Regel ihre Schwellwerte als `parameters:`-Block deklariert (mit `default`, `min`, `max`, `label`):
+
+```yaml
+- id: SCAN_001
+  name: "TCP SYN Port Scan"
+  severity: high
+  parameters:
+    port_count: { type: int, default: 50, min: 5, max: 65535, label: "Min. Zielports" }
+    window_s:   { type: int, default: 60, min: 5, max: 3600,  label: "Zeitfenster (s)" }
+  condition: |
+    flow.get('proto') == 'TCP'
+    and ctx.unique_dst_ports(flow.get('src_ip', ''), params.window_s) > params.port_count
+```
+
+Die GUI rendert pro Rule eine Number-Input-Maske mit Range-Hinweis und Reset-Button. Werte werden gegen `min`/`max` geclampt, default-konforme Werte automatisch aus dem Override entfernt. Persistiert in `signature-rules`-Volume als `_overrides.json`:
+
+```json
+{
+  "SCAN_001":  { "parameters": { "port_count": 200 } },
+  "DOS_SYN_001": { "parameters": { "syn_count": 1500 } },
+  "DNS_AMP_001": { "enabled": false }
+}
+```
+
+- **Hot-Reload**: signature-engine reagiert via inotify, Änderungen greifen ohne Restart binnen Sekunden.
+- **Reverse-Sync auf Taps**: gepairte Remote-Taps pullen das geänderte File alle 5 min und übernehmen die Schwellwerte automatisch (siehe [Remote-Tap](#remote-tap-verteilte-erfassung)).
+- **Suricata** wird separat gepflegt (Rule-Sources / Eigene Signaturen) — dort gibt es einen analogen `_suricata_overrides.json`-Mechanismus für Severity + Disable, Threshold-Tuning auf Rule-Body-Ebene ist Roadmap.
 
 #### SSL / TLS-Zertifikat
 
@@ -880,3 +919,109 @@ Suricata-Alerts erscheinen mit `source=suricata`, `rule_id=SURICATA:GID:SID:REV`
 | `none` | – | 0 |
 
 Live-Reload: Dashboard → Settings → Regelquellen → Update starten (SIGUSR2 an Suricata, kein Neustart).
+
+---
+
+## Remote-Tap (verteilte Erfassung)
+
+Ein zentraler **Master** kann beliebig viele physisch entfernte **Remote-Taps** anbinden — kompakte Sniffer-Knoten an entfernten Switch-Mirror-Ports, die ihre Alarme über mTLS an den Master schicken und im Gegenzug Heuristik-Rules + Overrides automatisch vom Master ziehen. Die Bedienung am Tap selbst erfolgt über eine schlanke CLI; die Master-GUI verwaltet Pairing, Status und Konfiguration zentral.
+
+### Topologie
+
+```
+   ┌──────────────────────────────────────────────────────────────────────┐
+   │  Master-IDS (192.168.1.81)                                           │
+   │                                                                      │
+   │  Mirror-Port (lokal)                                                 │
+   │      │                                                               │
+   │      ▼                                                               │
+   │   Sniffer → Flow-Aggregator → Signature-Engine ─┐                    │
+   │                                                  ▼                   │
+   │                                          alerts-raw (Kafka)          │
+   │                                                  ▲                   │
+   │                                                  │                   │
+   │                                            master-uplink             │
+   │                                          (mTLS-WSS, Port 8443)       │
+   │                                            │  │  │   │               │
+   └────────────────────────────────────────────┼──┼──┼───┼───────────────┘
+                                                │  │  │   │ mTLS
+                            ┌───────────────────┘  │  │   └────────────────┐
+                            ▼                      ▼  ▼                    ▼
+                        Tap A                  Tap B                    Tap C
+                  (192.168.1.95)             (Standort 2)          (Mobile-Sensor)
+                  Mirror → Sniffer →           Mirror → …           Mirror → …
+                  Flow-Agg → Sig-Eng →          (lokales Kafka)
+                  alerts-raw → tap-uplink ─►  Master-Kafka
+                                       ◄─── Reverse-Channel
+                                            (Rules + Overrides)
+```
+
+Jeder Tap betreibt seine eigene Mini-Pipeline (Sniffer → Flow-Aggregator → Signature-Engine → lokales Kafka). Heuristiken laufen **lokal** auf dem Tap — nur fertige Alarme gehen über die Wire. Damit bleibt die Bandbreitenlast minimal, und ein temporärer Verbindungsverlust zum Master verhindert keine Erkennung.
+
+### Pairing
+
+1. **Master**: *Settings → Remote Taps → Pairing-Token erzeugen*. Modal fragt `Name` (frei wählbarer Tap-Bezeichner), `Standort` (optional) und `TTL` ab. Das Token wird genau einmal angezeigt — danach ist nur noch der Hash in der DB.
+2. **Tap**: per SSH (oder direkt am Boot-Wizard für ISO-Installs):
+
+   ```bash
+   sudo cyjan-tap pair
+   # → fragt interaktiv Master-URL (wss://192.168.1.81:8443/uplink) + Token ab
+   ```
+
+3. Der Tap-Wizard tauscht das Token gegen ein mTLS-Client-Cert + die Master-CA. Cert/Key landen im Tap-Cert-Volume, und der `tap-uplink`-Container startet automatisch die Verbindung zum Master.
+4. Sobald der erste Heartbeat ankommt, erscheint der Tap im Master-UI mit `last_seen`, Standort und Anzahl bisher empfangener Alarme.
+
+### mTLS
+
+- Master hält eine eigene CA (`master-ca`-Volume, vom api-Container beim ersten Boot generiert).
+- Pro Tap signiert der Master ein Client-Cert mit `CN=<Tap-Name>`, gültig 10 Jahre.
+- master-uplink akzeptiert nur Verbindungen mit gültigem Client-Cert gegen die eigene CA.
+- tap-uplink prüft das Master-Cert gegen die beim Pairing übermittelte Master-CA — kein Trust-on-First-Use, kein Zertifikat von „außen".
+- **Revoke**: Master-UI → Tap-Zeile → ✕ — der Tap-Eintrag wird gelöscht, sein Cert in die Sperrliste aufgenommen, weitere Alarme werden abgewiesen.
+
+### Outage-Buffer
+
+`tap-uplink` schreibt jeden Alarm zunächst in eine SQLite-Queue (`/var/lib/cyjan/queue.sqlite`):
+
+- **Online**: Alarm wird sofort an den Master geschickt und nach Ack aus der Queue gelöscht.
+- **Offline**: Alarme stapeln sich in der Queue (kein Limit jenseits Festplattenkapazität).
+- **Reconnect**: tap-uplink reicht den Backlog in Reihenfolge nach. Der Master deduplicated über `alert_id` — Mehrfachzustellungen sind harmlos.
+- **Sichtbar im Tap-UI** (`http://<tap-ip>/`): Queue-Tiefe + letzter erfolgreicher Forward in Echtzeit.
+
+### Reverse-Channel (Rule-Sync)
+
+`master-uplink` stellt unter `GET /config` (mTLS-authentifiziert) ein Bundle aus:
+
+- `builtin/*.yml` – die Heuristik-YAMLs aus `signature-engine/rules/` (Master-Stand)
+- `custom/_overrides.json` – Per-Regel Disable/Severity-Override/Schwellwert-Tuning
+- `custom/_suricata_overrides.json` – Per-SID Suricata-Overrides
+- `custom/*.yml` – eigene Custom-Regeln, sofern angelegt
+
+`tap-uplink` pullt alle 5 min, schreibt die Files atomar ins lokale `signature-rules`-Volume und triggert die Tap-eigene `signature-engine` per inotify-mtime. Damit sind GUI-Änderungen am Master innerhalb von max. 5 min auf allen verbundenen Taps aktiv, ohne dass irgendwer manuell etwas auf dem Tap-Host macht.
+
+### CLI: `cyjan-tap`
+
+Im Tap-ISO ist eine schlanke Verwaltungs-CLI vorinstalliert (`/usr/local/bin/cyjan-tap`):
+
+```bash
+sudo cyjan-tap status               # Pair-Status, Master-URL, last_seen, Queue-Tiefe
+sudo cyjan-tap connection           # Detail-View der mTLS-Verbindung (Cert-Ablauf, RTT)
+sudo cyjan-tap pair                 # Geführter Pair-Flow (interaktiv: URL + Token)
+sudo cyjan-tap test                 # Probe-Verbindung zum Master ohne State-Änderung
+sudo cyjan-tap reconnect            # tap-uplink-Container neu starten
+sudo cyjan-tap logs [<service>]     # Container-Logs (Default: tap-uplink, follow)
+sudo cyjan-tap config [get|set]     # Lese/Schreibe Tap-Config-Felder
+```
+
+Die CLI hat keine harten Abhängigkeiten außer `bash` und `docker compose` — `jq` wird optional genutzt, fehlt es, fällt der Output auf Roh-JSON zurück.
+
+### Tap-ISO
+
+Eigenes ISO-Build (`distro/tap-config/`), erzeugt parallel zum Master-ISO im Workflow `build-release.yml`. Enthält:
+
+- Debian Bookworm Live + Installer
+- Vorgebaute Docker-Images für `sniffer`, `flow-aggregator`, `signature-engine`, `tap-uplink`, `tap-api`, lokales `kafka`
+- `cyjan-tap` CLI in `/usr/local/bin`
+- Boot-Wizard, der das Pairing-Token + Master-URL abfragt und sofort den Stack hochfährt
+
+Update auf einem laufenden Tap: klassisch `cd /opt/ids && git pull && docker compose -f docker-compose.tap.yml build && up -d` — das ISO bringt also nur den Erstausroll; danach bleibt das Tap-Repo wie auf dem Master per `git pull` aktuell. Heuristik-Rule-Änderungen kommen ohnehin separat über den Reverse-Channel und brauchen keinen Container-Rebuild.
