@@ -36,6 +36,7 @@ from minio import Minio
 
 from config import Config
 from database import close_pool, get_pool, init_pool
+import master_ca
 import migrate
 from deps import get_current_user
 from routers import alerts as alerts_router
@@ -47,6 +48,7 @@ from routers import ml as ml_router
 from routers import rules as rules_router
 from routers import sig_rules as sig_rules_router
 from routers import egress_whitelist as egress_whitelist_router
+from routers import taps as taps_router
 from routers import ssl as ssl_router
 from routers import system as system_router
 from routers import update as update_router
@@ -159,6 +161,10 @@ app.include_router(ml_router.router,       dependencies=_auth)
 app.include_router(rules_router.router,    dependencies=_auth)
 app.include_router(sig_rules_router.router, dependencies=_auth)
 app.include_router(egress_whitelist_router.router, dependencies=_auth)
+# taps_router: GET/POST(token)/DELETE sind admin-only; POST /api/taps/pair ist
+# bewusst öffentlich (Token-authentisiert), darum hier ohne global JWT-Gate
+# aufgehängt – die einzelnen Endpunkte nutzen Depends(require_admin) selbst.
+app.include_router(taps_router.router)
 app.include_router(system_router.router,   dependencies=_auth)
 app.include_router(tests_router.router,    dependencies=_auth)
 app.include_router(users_router.router,    dependencies=_auth)
@@ -177,6 +183,10 @@ async def startup() -> None:
     await init_pool(cfg.postgres_dsn)
     log.info("DB pool initialised")
     await migrate.run(get_pool())
+
+    # Master-CA für mTLS-Pairing der Remote-Taps. Erzeugt einen self-signed
+    # Root beim ersten Start; danach idempotent.
+    master_ca.init(cfg.master_ca_dir)
 
     # WebSocket-Broadcast-Task
     asyncio.create_task(_broadcast_loop())

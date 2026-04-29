@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cyjan Remote Tap – {% block title %}Status{% endblock %}</title>
+  <link rel="stylesheet" href="/static/tap.css">
+</head>
+<body>
+  <header>
+    <div class="brand">CY<span>JAN</span> · Remote Tap</div>
+    <nav>
+      <a href="/">Status</a>
+      <a href="/config">Konfiguration</a>
+    </nav>
+  </header>
+  <main>{% block body %}{% endblock %}</main>
+  <footer>
+    <small>
+      Cyjan IDS Remote Tap · keine Auth · nur im Mgmt-VLAN exponieren ·
+      Alarme + Master-Heartbeat über mTLS-WSS
+    </small>
+  </footer>
+</body>
+</html>

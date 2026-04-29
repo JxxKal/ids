@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# cyjan-tap – CLI für den Cyjan IDS Remote-Tap.
+#
+# Spricht mit der lokalen tap-api (Default 127.0.0.1:8001) und mit dem
+# docker compose Stack unter /opt/ids. Kein eigener Auth – die tap-api
+# bindet sich an localhost.
+#
+# Beispiele:
+#   cyjan-tap status
+#   cyjan-tap connection follow
+#   cyjan-tap pair https://master.example.com:8001 abcDEF...
+#   cyjan-tap test
+#   cyjan-tap reconnect
+#   cyjan-tap logs follow tap-uplink
+
+set -euo pipefail
+
+TAP_API_URL="${TAP_API_URL:-http://127.0.0.1:8001}"
+COMPOSE_DIR="${CYJAN_DIR:-/opt/ids}"
+COMPOSE_FILE="$COMPOSE_DIR/docker-compose.tap.yml"
+
+require_curl()  { command -v curl  >/dev/null || { echo "curl fehlt" >&2; exit 1; }; }
+require_jq()    { command -v jq    >/dev/null || { echo "jq fehlt"   >&2; exit 1; }; }
+compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+
+api_get()  { curl -fsS "$TAP_API_URL$1"; }
+api_post() { curl -fsS -H 'Content-Type: application/json' -X POST -d "$2" "$TAP_API_URL$1"; }
+
+print_state() {
+  local s
+  s=$(api_get /api/state)
+  jq -r '
+    def fmtts: if . == null then "–" else (now - .) | tostring + "s" end;
+    "Master-URL:        \(.master_url // "–")",
+    "Verbindung:        \(.connection)",
+    "Letzter Connect:   \(.last_connect_at | fmtts)",
+    "Letzter Send:      \(.last_send_at | fmtts)",
+    "Gesendet (total):  \(.sent_total)",
+    "Queue-Einträge:    \(.queue_count)",
+    "Queue-Bytes:       \(.queue_bytes)",
+    "Cert läuft ab:     \(.cert_expires_at // "–")",
+    "Letzter Fehler:    \(.last_error // "–")"
+  ' <<<"$s"
+}
+
+cmd_status() {
+  require_curl; require_jq
+  print_state
+}
+
+cmd_connection() {
+  require_curl; require_jq
+  case "${1:-}" in
+    follow)
+      while true; do
+        clear
+        echo "─── cyjan-tap connection follow (Ctrl+C zum Beenden) ─────────────"
+        date '+%Y-%m-%d %H:%M:%S'
+        echo
+        print_state || echo "tap-api nicht erreichbar"
+        sleep 2
+      done
+      ;;
+    *) echo "Usage: cyjan-tap connection follow"; exit 2 ;;
+  esac
+}
+
+cmd_pair() {
+  require_curl
+  local master="${1:-}" token="${2:-}"
+  if [[ -z "$master" || -z "$token" ]]; then
+    echo "Usage: cyjan-tap pair <master-url> <token>"
+    echo "  Beispiel: cyjan-tap pair https://192.168.1.230:8001 v_abc123..."
+    exit 2
+  fi
+  local body
+  body=$(printf '{"master_url":%s,"token":%s}' \
+    "$(jq -Rn --arg v "$master" '$v')" \
+    "$(jq -Rn --arg v "$token"  '$v')")
+  echo "[*] Pairing mit $master …"
+  api_post /api/pair "$body" | jq .
+  echo "[*] tap-uplink neu starten, damit das neue Cert geladen wird …"
+  compose restart tap-uplink
+  echo "[+] fertig"
+}
+
+cmd_test() {
+  require_curl
+  api_post /api/test-alert '{}' | jq .
+}
+
+cmd_reconnect() {
+  echo "[*] Erzwinge tap-uplink-Reconnect (Container-Restart) …"
+  compose restart tap-uplink
+}
+
+cmd_logs() {
+  case "${1:-follow}" in
+    follow) shift || true; compose logs -f --tail=100 "$@" ;;
+    *)      compose logs --tail=200 "$@" ;;
+  esac
+}
+
+cmd_config() {
+  require_curl; require_jq
+  case "${1:-get}" in
+    get) api_get /api/config | jq . ;;
+    *)   echo "Usage: cyjan-tap config get" ; exit 2 ;;
+  esac
+}
+
+usage() {
+  cat <<USAGE
+cyjan-tap – Remote-Tap-CLI
+
+  cyjan-tap status                       Status anzeigen
+  cyjan-tap connection follow            Live-Tail des Master-Connection-Status
+  cyjan-tap pair <master-url> <token>    erstmaliges Pairing mit Master
+  cyjan-tap test                         synthetischen Test-Alert an Master schicken
+  cyjan-tap reconnect                    tap-uplink-Reconnect erzwingen
+  cyjan-tap logs follow [service]        Container-Logs (Default alle)
+  cyjan-tap config get                   aktuelle Konfiguration
+
+ENV:
+  TAP_API_URL    Default http://127.0.0.1:8001
+  CYJAN_DIR      Default /opt/ids
+USAGE
+}
+
+case "${1:-status}" in
+  status)     shift; cmd_status "$@" ;;
+  connection) shift; cmd_connection "$@" ;;
+  pair)       shift; cmd_pair "$@" ;;
+  test)       shift; cmd_test "$@" ;;
+  reconnect)  shift; cmd_reconnect ;;
+  logs)       shift; cmd_logs "$@" ;;
+  config)     shift; cmd_config "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage; exit 2 ;;
+esac

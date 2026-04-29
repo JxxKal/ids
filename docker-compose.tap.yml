@@ -1,0 +1,178 @@
+# Cyjan IDS Remote-Tap – stripped-down Stack für Capture-Knoten an Außen-
+# standorten oder vSwitch-Mirror-Ports.
+#
+# Lokal laufen: sniffer + flow-aggregator + signature-engine + Kafka.
+# Erkannte Alerts werden vom tap-uplink-Service via mTLS-WSS an den
+# Master forwarded. Lokal kein Postgres/Redis/MinIO/api/frontend.
+#
+# Bedienung:
+#   docker compose -f docker-compose.tap.yml up -d        # alles starten
+#   docker compose -f docker-compose.tap.yml logs -f      # live-Logs
+#
+# Konfiguration über /etc/cyjan/profile (vom Wizard `ids-setup` gefüllt):
+#   MIRROR_INTERFACE   – physisches Interface mit dem Mirror-Traffic
+#   MASTER_URL         – wss://master.example.com:8443/uplink
+#   POSTGRES_PASSWORD  – nicht benötigt (kein lokales DB), muss aber gesetzt sein
+#                        damit die env-Substitution nicht meckert.
+
+networks:
+  tap-net:
+    driver: bridge
+
+volumes:
+  kafka-data:
+  signature-rules:                  # Per-Regel Overrides (sync vom Master)
+  tap-cert:                         # /etc/cyjan/tap.{key,pem} + master-ca.pem
+  tap-queue:                        # SQLite-Outage-Buffer
+  tap-runtime:                      # geteilter Mount für state.json (uplink → api)
+
+services:
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Kafka – single-broker, klein konfiguriert. Bei Tap-Workloads ist die
+  # Datenmenge klein (nur Pakete vom Mirror, kein DB-Backup, etc.), keine
+  # 168h-Retention nötig: 24h ist mehr als genug.
+  # ───────────────────────────────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:latest
+    container_name: cyjan-tap-kafka
+    restart: unless-stopped
+    stop_grace_period: 30s
+    networks: [tap-net]
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: "24"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_CLUSTER_ID: "Q3lqYW5UYXBLYWZrYUNsdXM"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: cyjan-tap-kafka-init
+    networks: [tap-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./infra/kafka/init-topics-tap.sh:/init-topics.sh:ro
+    entrypoint: ["/bin/bash", "/init-topics.sh"]
+    restart: "no"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # SNIFFER – braucht NET_ADMIN + NET_RAW + Host-Network um den Mirror-Port
+  # mitzuhören. Identisches Image wie auf dem Master.
+  # ───────────────────────────────────────────────────────────────────────
+  sniffer:
+    build: ./sniffer
+    container_name: cyjan-tap-sniffer
+    restart: unless-stopped
+    network_mode: host           # AF_PACKET will den realen NIC sehen
+    cap_add: [NET_ADMIN, NET_RAW]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: localhost:9092           # host-network → kafka über localhost:9094
+      INTERFACE: ${MIRROR_INTERFACE:-eth0}
+      RUST_LOG: info
+    volumes:
+      - /sys:/host/sys:ro
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Detection-Pipeline (lokal): flow-aggregator → signature-engine
+  # ML-Engine ist bewusst NICHT dabei – das Modell sitzt am Master.
+  # ───────────────────────────────────────────────────────────────────────
+  flow-aggregator:
+    build: ./flow-aggregator
+    container_name: cyjan-tap-flow-aggregator
+    restart: unless-stopped
+    networks: [tap-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+
+  signature-engine:
+    build: ./signature-engine
+    container_name: cyjan-tap-signature-engine
+    restart: unless-stopped
+    networks: [tap-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    volumes:
+      - signature-rules:/sig-rules            # befüllt via Reverse-Channel-Pull (Phase 5)
+
+  # ───────────────────────────────────────────────────────────────────────
+  # tap-uplink – konsumiert lokales alerts-raw, forwardet an den Master
+  # via mTLS-WSS. Cert-Material in /etc/cyjan (vom Wizard gepairt).
+  # ───────────────────────────────────────────────────────────────────────
+  tap-uplink:
+    build: ./tap-uplink
+    container_name: cyjan-tap-uplink
+    restart: unless-stopped
+    networks: [tap-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      ALERTS_TOPIC: alerts-raw
+      KAFKA_GROUP_ID: tap-uplink
+      MASTER_URL: ${MASTER_URL:-wss://master.example.com:8443/uplink}
+      TAP_CERT:  /etc/cyjan/tap.pem
+      TAP_KEY:   /etc/cyjan/tap.key
+      MASTER_CA: /etc/cyjan/master-ca.pem
+      QUEUE_PATH: /var/lib/cyjan/uplink-queue.db
+      QUEUE_MAX_GB: "1.0"
+      STATE_PATH: /run/cyjan/tap-uplink.state.json
+      LOG_LEVEL: INFO
+    volumes:
+      - tap-cert:/etc/cyjan
+      - tap-queue:/var/lib/cyjan
+      - tap-runtime:/run/cyjan
+
+  # ───────────────────────────────────────────────────────────────────────
+  # tap-api – minimaler Status/Konfig-Web-View + Maschinen-Endpunkte für
+  # die `cyjan-tap`-CLI. Liest tap-uplink.state.json, kein eigener Auth-Stack.
+  # ───────────────────────────────────────────────────────────────────────
+  tap-api:
+    build: ./tap-api
+    container_name: cyjan-tap-api
+    restart: unless-stopped
+    networks: [tap-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      ALERTS_TOPIC: alerts-raw
+      MASTER_URL: ${MASTER_URL:-}
+      MIRROR_IFACE: ${MIRROR_INTERFACE:-}
+      TAP_CERT: /etc/cyjan/tap.pem
+      STATE_PATH: /run/cyjan/tap-uplink.state.json
+      LOG_LEVEL: INFO
+    volumes:
+      - tap-cert:/etc/cyjan                 # pair-Endpoint schreibt hier rein
+      - tap-runtime:/run/cyjan:ro
+    ports:
+      - "${TAP_UI_BIND:-127.0.0.1}:${TAP_UI_PORT:-8001}:8000"

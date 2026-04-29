@@ -81,6 +81,7 @@ class AlertWriter:
                 a.get("description", ""),
                 a.get("is_test", False),
                 list(a.get("tags") or []),
+                a.get("tap_id"),
             ))
 
         psycopg2.extras.execute_values(
@@ -90,7 +91,7 @@ class AlertWriter:
                 alert_id, ts, flow_id, source, rule_id,
                 severity, score,
                 src_ip, src_port, dst_ip, proto, dst_port,
-                description, is_test, tags
+                description, is_test, tags, tap_id
             ) VALUES %s
             """,
             rows,
@@ -98,7 +99,7 @@ class AlertWriter:
                 %s, %s::timestamptz, %s, %s, %s,
                 %s, %s,
                 %s, %s, %s, %s, %s,
-                %s, %s, %s
+                %s, %s, %s, %s
             )""",
         )
 

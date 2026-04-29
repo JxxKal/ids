@@ -26,6 +26,7 @@ volumes:
   snort-alerts:   # Shared Volume: Snort → snort-bridge
   irma-data:      # Persistiert letzte bekannte IRMA-Alarm-ID
   ids-certs:      # TLS-Zertifikate (API schreibt, nginx liest)
+  master-ca:      # Master-CA für mTLS-Auth der Remote-Taps (api schreibt, master-uplink liest)
 
 services:
 
@@ -248,6 +249,11 @@ services:
         condition: service_healthy
       timescaledb:
         condition: service_healthy
+      # api applies DB-Migrations beim Startup. Wenn alert-manager vor api
+      # startet und das Schema (z.B. alerts.tap_id ab Migration 011) noch
+      # nicht aktualisiert ist, scheitert der INSERT. Daher Reihenfolge fix.
+      api:
+        condition: service_started
     environment:
       KAFKA_BROKERS: kafka:9092
       POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
@@ -341,6 +347,7 @@ services:
       ML_BOOTSTRAP_MIN: ${ML_BOOTSTRAP_MIN:-500}
       MIRROR_IFACE: ${MIRROR_IFACE:-}
       MANAGEMENT_IFACE: ${MANAGEMENT_IFACE:-}
+      MASTER_CA_DIR: /var/lib/cyjan/master-ca
     volumes:
       - snort-rules:/rules
       # signature-rules-Volume für Per-Regel Overrides + Custom-YAML.
@@ -349,6 +356,7 @@ services:
       - signature-rules:/sig-rules
       - ml-models:/models
       - ids-certs:/certs
+      - master-ca:/var/lib/cyjan/master-ca
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/ids:/opt/ids
       - ./infra/timescaledb/migrations:/migrations:ro
@@ -360,6 +368,37 @@ services:
       - /proc:/host/proc:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
+
+  # ───────────────────────────────────────────────────────────────────────
+  # MASTER-UPLINK – mTLS-WebSocket-Endpunkt für Remote-Taps. Hört separat
+  # auf 8443, damit der reguläre api-Container weiterhin nur JWT-Auth
+  # macht. Teilt sich das master-ca-Volume mit der api (api bootstrappt
+  # die CA, master-uplink liest sie als Server-Cert + Trust-Root).
+  # ───────────────────────────────────────────────────────────────────────
+  master-uplink:
+    build: ./master-uplink
+    container_name: ids-master-uplink
+    restart: unless-stopped
+    networks: [ids-net]
+    depends_on:
+      api:
+        condition: service_started   # api bootstrappt die CA
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      ALERTS_TOPIC: alerts-raw
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      MASTER_CA_DIR: /var/lib/cyjan/master-ca
+      UPLINK_HOST: 0.0.0.0
+      UPLINK_PORT: 8443
+      LOG_LEVEL: INFO
+    volumes:
+      - master-ca:/var/lib/cyjan/master-ca:ro
+    ports:
+      - "${MANAGEMENT_IP:-0.0.0.0}:${UPLINK_PORT:-8443}:8443"
 
   frontend:
     build: ./frontend

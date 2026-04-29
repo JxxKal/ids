@@ -13,6 +13,7 @@ class Config:
     pcap_bucket: str
     secret_key: str
     test_mode: bool
+    master_ca_dir: str          # Verzeichnis für Master-CA (Cert + Key) für mTLS-Auth der Remote-Taps
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -29,4 +30,5 @@ class Config:
             pcap_bucket=os.environ.get("PCAP_BUCKET", "ids-pcaps"),
             secret_key=os.environ.get("SECRET_KEY", "change-me-in-production"),
             test_mode=os.environ.get("TEST_MODE", "false").lower() == "true",
+            master_ca_dir=os.environ.get("MASTER_CA_DIR", "/var/lib/cyjan/master-ca"),
         )

@@ -1,0 +1,70 @@
+{% extends "_base.html" %}
+{% block title %}Status{% endblock %}
+{% block body %}
+<section class="card">
+  <h2>Master-Verbindung</h2>
+  <div class="grid">
+    <div>
+      <div class="label">Status</div>
+      <div class="value status-{{ state.connection or 'unknown' }}">
+        {{ state.connection or 'unknown' }}
+      </div>
+    </div>
+    <div>
+      <div class="label">Master-URL</div>
+      <div class="value mono">{{ state.master_url or config.master_url or '–' }}</div>
+    </div>
+    <div>
+      <div class="label">Letzter Connect</div>
+      <div class="value mono" data-ts="{{ state.last_connect_at or '' }}">
+        {{ state.last_connect_at or '–' }}
+      </div>
+    </div>
+    <div>
+      <div class="label">Letzter Disconnect</div>
+      <div class="value mono" data-ts="{{ state.last_disconnect_at or '' }}">
+        {{ state.last_disconnect_at or '–' }}
+      </div>
+    </div>
+    <div>
+      <div class="label">Letzter Send</div>
+      <div class="value mono" data-ts="{{ state.last_send_at or '' }}">
+        {{ state.last_send_at or '–' }}
+      </div>
+    </div>
+    <div>
+      <div class="label">Cert läuft ab</div>
+      <div class="value mono" data-ts="{{ state.cert_expires_at or '' }}">
+        {{ state.cert_expires_at or '–' }}
+      </div>
+    </div>
+  </div>
+  {% if state.last_error %}
+    <div class="error">⚠ {{ state.last_error }}</div>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Telemetrie</h2>
+  <div class="grid">
+    <div>
+      <div class="label">Insgesamt gesendet</div>
+      <div class="value mono">{{ state.sent_total or 0 }}</div>
+    </div>
+    <div>
+      <div class="label">Queue-Einträge</div>
+      <div class="value mono">{{ state.queue_count or 0 }}</div>
+    </div>
+    <div>
+      <div class="label">Queue-Größe (Bytes)</div>
+      <div class="value mono">{{ state.queue_bytes or 0 }}</div>
+    </div>
+  </div>
+  <p class="hint">
+    Bei aktiver Master-Verbindung sollte die Queue typischerweise leer sein.
+    Wachsende Queue = Master nicht erreichbar oder Backpressure am Master.
+  </p>
+</section>
+
+<script src="/static/tap.js"></script>
+{% endblock %}

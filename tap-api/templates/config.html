@@ -1,0 +1,28 @@
+{% extends "_base.html" %}
+{% block title %}Konfiguration{% endblock %}
+{% block body %}
+<section class="card">
+  <h2>Konfiguration (read-only)</h2>
+  <p class="hint">
+    Konfiguration wird im Wizard gesetzt (<code>sudo ids-setup</code>) und in
+    <code>/etc/cyjan/profile</code> persistiert. Hier zur Diagnose.
+  </p>
+  <table class="kv">
+    <tr><th>Master-URL</th><td class="mono">{{ config.master_url or '–' }}</td></tr>
+    <tr><th>Mirror-Interface</th><td class="mono">{{ config.mirror_iface or '–' }}</td></tr>
+    <tr><th>Tap-Cert-Pfad</th><td class="mono">{{ config.tap_cert_path }}</td></tr>
+    <tr>
+      <th>Pairing-Status</th>
+      <td>
+        {% if config.tap_cert_present %}
+          <span class="ok">✓ gepaart</span>
+        {% else %}
+          <span class="err">✗ noch nicht gepaart</span>
+        {% endif %}
+      </td>
+    </tr>
+    <tr><th>Lokales Kafka</th><td class="mono">{{ config.kafka_brokers }}</td></tr>
+    <tr><th>Topic</th><td class="mono">{{ config.alerts_topic }}</td></tr>
+  </table>
+</section>
+{% endblock %}
