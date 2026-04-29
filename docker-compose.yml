@@ -351,6 +351,11 @@ services:
       RULES_DIR: /rules
       MODELS_DIR: /models
       ML_BOOTSTRAP_MIN: ${ML_BOOTSTRAP_MIN:-500}
+      # SUPPRESSION_-Werte für /api/ml/learned (UI zeigt sie an).
+      # Müssen identisch zum alert-manager-Block oben sein.
+      SUPPRESSION_LEARN_WINDOW_D: ${SUPPRESSION_LEARN_WINDOW_D:-14}
+      SUPPRESSION_MIN_HOURS:      ${SUPPRESSION_MIN_HOURS:-8}
+      SUPPRESSION_Z_THRESHOLD:    ${SUPPRESSION_Z_THRESHOLD:-2.0}
       MIRROR_IFACE: ${MIRROR_IFACE:-}
       MANAGEMENT_IFACE: ${MANAGEMENT_IFACE:-}
       MASTER_CA_DIR: /var/lib/cyjan/master-ca

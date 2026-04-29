@@ -339,11 +339,11 @@ async def get_learned_patterns(
 
     ENV-Konfiguration (muss mit alert-manager übereinstimmen):
       SUPPRESSION_LEARN_WINDOW_D  (default 14)
-      SUPPRESSION_MIN_HOURS       (default 24)
+      SUPPRESSION_MIN_HOURS       (default 8 = 1 Business-Tag, vorher 24)
       SUPPRESSION_Z_THRESHOLD     (default 2.0)
     """
     window_d    = int(os.environ.get("SUPPRESSION_LEARN_WINDOW_D", "14"))
-    min_hours   = int(os.environ.get("SUPPRESSION_MIN_HOURS",      "24"))
+    min_hours   = int(os.environ.get("SUPPRESSION_MIN_HOURS",      "8"))
     z_threshold = float(os.environ.get("SUPPRESSION_Z_THRESHOLD",  "2.0"))
 
     async with pool.acquire() as conn:

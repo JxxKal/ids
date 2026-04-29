@@ -556,8 +556,12 @@ if [ "$SKIP_PAIRING" = "0" ]; then
     exit 1
   fi
 
-  PAIR_TOKEN=$(password "Pairing-Token" \
-    "Einmaliger Pairing-Token vom Master\n(Settings → Remote Taps → 'Neuen Tap koppeln'):") || PAIR_TOKEN=""
+  # Token-Eingabe bewusst per inputbox (sichtbar) – nicht passwordbox. Der
+  # Token ist im Master-Frontend ohnehin als Klartext sichtbar (genau einmal),
+  # und beim Tippen verhindern Sterne nur dass der User Tippfehler erkennt.
+  PAIR_TOKEN=$(input "Pairing-Token" \
+    "Einmaliger Pairing-Token vom Master\n(Settings → Remote Taps → 'Pairing-Token erzeugen'):" \
+    "") || PAIR_TOKEN=""
   if [ -z "$PAIR_TOKEN" ]; then
     msg "Ohne Pairing-Token kann das Tap nicht authentifiziert werden – Abbruch."
     exit 1

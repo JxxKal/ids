@@ -3963,14 +3963,42 @@ function RemoteTapsSettings() {
 
   async function copyToken() {
     if (!newToken) return;
+    let ok = false;
+    // Moderne Clipboard-API funktioniert nur auf HTTPS / localhost. Master-
+    // Frontend läuft typisch über HTTP im LAN, dann fällt das schon im
+    // Permissions-Check durch. Daher zuerst die alte execCommand-Methode
+    // probieren – die funktioniert ohne Secure-Context.
     try {
-      await navigator.clipboard.writeText(newToken.token);
+      const ta = document.createElement('textarea');
+      ta.value = newToken.token;
+      // außerhalb des Viewports parken, sonst scrollt manche Browser
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      ta.setAttribute('readonly', '');
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      // execCommand ist deprecated aber als Fallback einer der wenigen
+      // verlässlichen Wege auf HTTP. Auf modernen Browsern weiterhin
+      // verfügbar.
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch {
+      ok = false;
+    }
+    if (!ok && navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(newToken.token);
+        ok = true;
+      } catch { ok = false; }
+    }
+    if (ok) {
       setTokenCopied(true);
       window.setTimeout(() => setTokenCopied(false), 2500);
-    } catch {
-      // Kein clipboard verfügbar (alter Browser / kein HTTPS): User soll
-      // markieren+kopieren. Token ist sichtbar, also kein Datenverlust.
     }
+    // Wenn beide Wege fehlschlagen: Token ist sichtbar, User kann manuell
+    // markieren+kopieren. Kein Datenverlust.
   }
 
   async function doRevoke() {
