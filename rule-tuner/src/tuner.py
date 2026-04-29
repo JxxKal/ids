@@ -17,6 +17,7 @@ laufen über die API.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 import time
@@ -36,6 +37,20 @@ log = logging.getLogger(__name__)
 
 QUANTILES = (0.5, 0.99, 0.995, 0.999)
 SAFETY_MARGIN = 1.05  # Quantil × 1.05, damit knappe Treffer nicht alarmieren
+
+
+async def _init_conn(conn: asyncpg.Connection) -> None:
+    """Spiegelt api/src/database.py: Codec für json/jsonb registrieren, damit
+    Python-Dicts direkt nach $1::jsonb-Parametern wandern und gelesene Werte
+    direkt als dict ankommen. Ohne diesen Codec liefert asyncpg jsonb als
+    Python-str — und meine system_config-State-Updates crashen mit DataError."""
+    for pg_type in ("json", "jsonb"):
+        await conn.set_type_codec(
+            pg_type,
+            encoder=json.dumps,
+            decoder=json.loads,
+            schema="pg_catalog",
+        )
 
 
 class Tuner:
@@ -58,7 +73,7 @@ class Tuner:
 
     async def setup(self) -> None:
         self._pool = await asyncpg.create_pool(
-            self._cfg.postgres_dsn, min_size=1, max_size=4
+            self._cfg.postgres_dsn, min_size=1, max_size=4, init=_init_conn,
         )
 
     async def teardown(self) -> None:
