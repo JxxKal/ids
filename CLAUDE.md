@@ -315,10 +315,30 @@ Loader und API-Serializer akzeptieren beide Formen:
 
 **Beobachten**: `docker compose logs signature-engine` sollte beim Start `Shadow-Metrik aktiv: topic=rule-metrics sampling=0.0100` zeigen. Topic füllt sich erst nachdem Flows reinlaufen. Mit Kafka-UI auf `http://master:8080` kann man `rule-metrics` browsen, um die Verteilung visuell zu prüfen.
 
-**Phase 3 — DB-Schema + Trainings-State**
-- Migration: `rule_baselines (rule_id, param_name, scope, p50, p99, p995, p999, sample_count, updated_at)`. Keine Hypertable, normale Tabelle.
-- Migration: `system_config`-Erweiterung: `ml_tuning_state` (`idle|training|tuning|paused`), `ml_tuning_config` JSONB (`window_s`, `target_alert_rate`, `scope_split_enabled`, `blacklist[]`).
-- Neue API-Endpoints unter `/api/sig-rules/ml/`: `GET status`, `POST start-training {window_s, …}`, `POST pause`, `POST resume`, `GET baselines` (für UI-Sparklines).
+**Phase 3 — DB-Schema + Trainings-State — ✅ erledigt 2026-04-29**
+- ✅ Migration `012_rule_tuner_baselines.sql`: `rule_baselines (rule_id, param_name, scope, p50, p99, p995, p999, sample_count, updated_at)` — keine Hypertable, PK `(rule_id, param_name, scope)`. `scope` kann `internal | external | global` sein (`global` für Params ohne value_internal-Slot oder wenn known_networks-Split aus ist).
+- ✅ Migration: `system_config`-Defaults für `ml_tuning_state` (`{state: idle|training|tuning|paused, started_at, training_until, last_tuning_at, paused_from}`) und `ml_tuning_config` (`{window_s: 36000, target_alert_rate_per_hour: 0.5, scope_split_enabled: true, quantile: 0.995, max_change_per_cycle: 0.20, blacklist: []}`). Beide Inserts sind `ON CONFLICT (key) DO NOTHING` — re-runs sind idempotent.
+- ✅ API-Endpoints unter `/api/sig-rules/ml/` (in `api/src/routers/sig_rules.py`):
+  - `GET /status` → `{state, config, total_samples}` (sample_count über alle Baselines).
+  - `POST /start-training` mit optionalem Body (`window_s`, `target_alert_rate_per_hour`, `scope_split_enabled`, `quantile`, `max_change_per_cycle`, `blacklist`) — merged in bestehende Config, setzt `state=training`, `started_at=now`, `training_until=now+window_s`, löscht `paused_from`. Kann aus jedem State aufgerufen werden (Restart erlaubt).
+  - `POST /pause` — idempotent, merkt sich `paused_from=<vorheriger State>`.
+  - `POST /resume` — restored `paused_from`. Wenn dort `training` stand und `training_until` schon abgelaufen ist, springt direkt nach `tuning`.
+  - `GET /baselines?rule_id=<optional>` — Liste der Baseline-Einträge für UI-Sparklines.
+- ✅ Alle Endpoints `Depends(require_admin)`. State-Transitions in einer DB-Transaction, damit zwei parallele PUT/POST nicht zu inkonsistentem `paused_from` führen.
+
+**Deploy nach Phase 3**: nur `api`-Service rebuilden — Migration läuft beim FastAPI-Startup automatisch (`migrate.run()` im startup-Hook). signature-engine + master-uplink unverändert.
+
+**Beobachten**: nach Deploy `curl -H "Authorization: Bearer <token>" http://master/api/sig-rules/ml/status` → liefert `{state: "idle", config: {...defaults...}, total_samples: 0}`. baselines-Endpoint ist erstmal leer (rule-tuner-Service kommt erst in Phase 4). Trainings-Steuerung kann manuell getestet werden:
+
+```bash
+TOKEN=...  # JWT aus /api/auth/login
+H="Authorization: Bearer $TOKEN"
+curl -X POST -H "$H" -H 'Content-Type: application/json' \
+  -d '{"window_s": 7200, "blacklist": ["DOS_SYN_001"]}' \
+  http://master/api/sig-rules/ml/start-training
+curl -X POST -H "$H" http://master/api/sig-rules/ml/pause
+curl -X POST -H "$H" http://master/api/sig-rules/ml/resume
+```
 
 **Phase 4 — rule-tuner Service**
 - Neuer Python-Service in `rule-tuner/`, nur am Master (Compose: `--profile prod`).

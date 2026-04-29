@@ -26,13 +26,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+import asyncpg
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from database import get_pool
 from deps import require_admin
 
 log = logging.getLogger(__name__)
@@ -552,3 +555,285 @@ async def put_suricata_overrides(body: SuricataOverridesPayload) -> SuricataOver
     _write_suricata_overrides_file(payload)
     log.info("Suricata-SID-Overrides geschrieben: %d Einträge", len(payload))
     return await get_suricata_overrides()
+
+
+# ── ML-Tuning State + Baselines (Phase 3) ─────────────────────────────────────
+#
+# Endpoints unter /api/sig-rules/ml/. Werden vom Phase-5-Frontend (Settings →
+# Rule Adjustments → Tab "ML-Tuning") sowie vom Phase-4-rule-tuner-Service
+# konsumiert. Die State-Transitions sind absichtlich minimal — der eigentliche
+# tuning-Loop läuft als separater Service, der den State nur als Eingabe liest
+# und nach Trainingsende selbst auf "tuning" hochsetzt (kein Endpoint dafür,
+# damit die UI nichts versehentlich überschreibt).
+
+ML_VALID_STATES = {"idle", "training", "tuning", "paused"}
+
+
+class MlTuningState(BaseModel):
+    state: Literal["idle", "training", "tuning", "paused"] = "idle"
+    started_at: str | None = None
+    training_until: str | None = None
+    last_tuning_at: str | None = None
+    # paused_from speichert den State vor pause(), damit resume() den
+    # vorherigen Zustand wiederherstellt — sonst landet man immer in 'tuning'
+    # und überspringt eine evtl. noch laufende Trainingsphase.
+    paused_from: Literal["idle", "training", "tuning"] | None = None
+
+
+class MlTuningConfig(BaseModel):
+    window_s: int = 36000
+    target_alert_rate_per_hour: float = 0.5
+    scope_split_enabled: bool = True
+    quantile: float = 0.995
+    max_change_per_cycle: float = 0.20
+    blacklist: list[str] = Field(default_factory=list)
+
+
+class MlTuningStatus(BaseModel):
+    state: MlTuningState
+    config: MlTuningConfig
+    total_samples: int
+
+
+class StartTrainingPayload(BaseModel):
+    """Optionaler Override aller config-Werte. Nicht-übergebene Felder bleiben
+    wie aktuell in system_config.ml_tuning_config gespeichert."""
+    window_s: int | None = Field(default=None, ge=60, le=30 * 24 * 3600)
+    target_alert_rate_per_hour: float | None = Field(default=None, ge=0.0)
+    scope_split_enabled: bool | None = None
+    quantile: float | None = Field(default=None, ge=0.5, le=0.9999)
+    max_change_per_cycle: float | None = Field(default=None, ge=0.0, le=1.0)
+    blacklist: list[str] | None = None
+
+
+class BaselineEntry(BaseModel):
+    rule_id: str
+    param_name: str
+    scope: Literal["internal", "external", "global"]
+    p50: float | None
+    p99: float | None
+    p995: float | None
+    p999: float | None
+    sample_count: int
+    updated_at: str
+
+
+async def _read_state(conn: asyncpg.Connection) -> dict:
+    row = await conn.fetchrow(
+        "SELECT value::text AS v FROM system_config WHERE key='ml_tuning_state'"
+    )
+    if not row:
+        return {"state": "idle"}
+    try:
+        return json.loads(row["v"])
+    except (TypeError, ValueError):
+        return {"state": "idle"}
+
+
+async def _read_config(conn: asyncpg.Connection) -> dict:
+    row = await conn.fetchrow(
+        "SELECT value::text AS v FROM system_config WHERE key='ml_tuning_config'"
+    )
+    if not row:
+        return {}
+    try:
+        return json.loads(row["v"])
+    except (TypeError, ValueError):
+        return {}
+
+
+async def _write_state(conn: asyncpg.Connection, payload: dict) -> None:
+    await conn.execute(
+        """
+        INSERT INTO system_config (key, value)
+        VALUES ('ml_tuning_state', $1::jsonb)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+        """,
+        json.dumps(payload),
+    )
+
+
+async def _write_config(conn: asyncpg.Connection, payload: dict) -> None:
+    await conn.execute(
+        """
+        INSERT INTO system_config (key, value)
+        VALUES ('ml_tuning_config', $1::jsonb)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+        """,
+        json.dumps(payload),
+    )
+
+
+async def _build_status(conn: asyncpg.Connection) -> MlTuningStatus:
+    state = await _read_state(conn)
+    cfg = await _read_config(conn)
+    total = await conn.fetchval(
+        "SELECT COALESCE(SUM(sample_count), 0)::bigint FROM rule_baselines"
+    ) or 0
+    return MlTuningStatus(
+        state=MlTuningState(**{k: state.get(k) for k in MlTuningState.model_fields}),
+        config=MlTuningConfig(**{k: cfg.get(k) for k in MlTuningConfig.model_fields if k in cfg}),
+        total_samples=int(total),
+    )
+
+
+@router.get(
+    "/ml/status",
+    response_model=MlTuningStatus,
+    dependencies=[Depends(require_admin)],
+    summary="ML-Tuning Status + Konfiguration + globaler Sample-Count",
+)
+async def ml_status(pool: asyncpg.Pool = Depends(get_pool)) -> MlTuningStatus:
+    async with pool.acquire() as conn:
+        return await _build_status(conn)
+
+
+@router.post(
+    "/ml/start-training",
+    response_model=MlTuningStatus,
+    dependencies=[Depends(require_admin)],
+    summary="Trainings-Phase starten (idle/paused/tuning → training)",
+)
+async def ml_start_training(
+    body: StartTrainingPayload,
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> MlTuningStatus:
+    """Setzt state='training' und merged optional übergebene Config-Werte in
+    system_config.ml_tuning_config. Aus 'training' heraus erneut aufgerufen
+    bewirkt einen Restart mit neuem Fenster — das ist gewünscht (User möchte
+    z.B. blacklist mid-flight ändern).
+    """
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            cur_cfg = await _read_config(conn)
+            merged: dict[str, Any] = {**MlTuningConfig().model_dump(), **cur_cfg}
+            if body.window_s is not None:
+                merged["window_s"] = int(body.window_s)
+            if body.target_alert_rate_per_hour is not None:
+                merged["target_alert_rate_per_hour"] = float(body.target_alert_rate_per_hour)
+            if body.scope_split_enabled is not None:
+                merged["scope_split_enabled"] = bool(body.scope_split_enabled)
+            if body.quantile is not None:
+                merged["quantile"] = float(body.quantile)
+            if body.max_change_per_cycle is not None:
+                merged["max_change_per_cycle"] = float(body.max_change_per_cycle)
+            if body.blacklist is not None:
+                merged["blacklist"] = sorted({str(x) for x in body.blacklist})
+            await _write_config(conn, merged)
+
+            cur_state = await _read_state(conn)
+            now = datetime.now(timezone.utc)
+            until = now + timedelta(seconds=int(merged["window_s"]))
+            new_state = {
+                "state": "training",
+                "started_at": now.isoformat(),
+                "training_until": until.isoformat(),
+                "last_tuning_at": cur_state.get("last_tuning_at"),
+                "paused_from": None,
+            }
+            await _write_state(conn, new_state)
+            log.info("ML-Tuning Training gestartet (window_s=%d, until=%s)",
+                     merged["window_s"], until.isoformat())
+        return await _build_status(conn)
+
+
+@router.post(
+    "/ml/pause",
+    response_model=MlTuningStatus,
+    dependencies=[Depends(require_admin)],
+    summary="Tuner pausieren (training/tuning → paused, idempotent)",
+)
+async def ml_pause(pool: asyncpg.Pool = Depends(get_pool)) -> MlTuningStatus:
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            cur = await _read_state(conn)
+            if cur.get("state") == "paused":
+                return await _build_status(conn)
+            prev = cur.get("state") or "idle"
+            if prev not in ("idle", "training", "tuning"):
+                prev = "idle"
+            cur["paused_from"] = prev
+            cur["state"] = "paused"
+            await _write_state(conn, cur)
+            log.info("ML-Tuning pausiert (paused_from=%s)", prev)
+        return await _build_status(conn)
+
+
+@router.post(
+    "/ml/resume",
+    response_model=MlTuningStatus,
+    dependencies=[Depends(require_admin)],
+    summary="Tuner wieder anlaufen lassen (paused → vorheriger State)",
+)
+async def ml_resume(pool: asyncpg.Pool = Depends(get_pool)) -> MlTuningStatus:
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            cur = await _read_state(conn)
+            if cur.get("state") != "paused":
+                raise HTTPException(409, f"Aktueller State {cur.get('state')!r} ist nicht 'paused'")
+            target = cur.get("paused_from") or "idle"
+            if target not in ("idle", "training", "tuning"):
+                target = "idle"
+            # Wenn paused_from='training' aber training_until bereits abgelaufen
+            # ist, springen wir direkt nach 'tuning' — der rule-tuner nimmt das
+            # so auf, ohne dass das Fenster künstlich verlängert wird.
+            if target == "training":
+                ti = cur.get("training_until")
+                if ti:
+                    try:
+                        if datetime.fromisoformat(ti) <= datetime.now(timezone.utc):
+                            target = "tuning"
+                    except ValueError:
+                        pass
+            cur["state"] = target
+            cur["paused_from"] = None
+            await _write_state(conn, cur)
+            log.info("ML-Tuning resumed → %s", target)
+        return await _build_status(conn)
+
+
+@router.get(
+    "/ml/baselines",
+    response_model=list[BaselineEntry],
+    dependencies=[Depends(require_admin)],
+    summary="Quantile-Baselines pro (rule, param, scope) für UI-Sparklines",
+)
+async def ml_baselines(
+    rule_id: str | None = None,
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> list[BaselineEntry]:
+    async with pool.acquire() as conn:
+        if rule_id:
+            rows = await conn.fetch(
+                """
+                SELECT rule_id, param_name, scope, p50, p99, p995, p999,
+                       sample_count, updated_at
+                  FROM rule_baselines
+                 WHERE rule_id = $1
+                 ORDER BY param_name, scope
+                """,
+                rule_id,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT rule_id, param_name, scope, p50, p99, p995, p999,
+                       sample_count, updated_at
+                  FROM rule_baselines
+                 ORDER BY rule_id, param_name, scope
+                """
+            )
+    return [
+        BaselineEntry(
+            rule_id=r["rule_id"],
+            param_name=r["param_name"],
+            scope=r["scope"],
+            p50=r["p50"],
+            p99=r["p99"],
+            p995=r["p995"],
+            p999=r["p999"],
+            sample_count=int(r["sample_count"]),
+            updated_at=r["updated_at"].isoformat(),
+        )
+        for r in rows
+    ]
