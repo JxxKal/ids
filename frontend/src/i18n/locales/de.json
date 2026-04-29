@@ -229,7 +229,32 @@
   "topbar": {
     "live": "Live",
     "offline": "Offline",
-    "logout": "Abmelden"
+    "logout": "Abmelden",
+    "helpOn": "Hilfe-Modus einschalten",
+    "helpOff": "Hilfe-Modus ausschalten (oder ESC)"
+  },
+  "help": {
+    "dashboard": {
+      "sidebarNav": "Hauptnavigation. Wechselt zwischen Übersicht, Netzwerk-Inventar, Host-Inventar, Test-Szenarien und Einstellungen.",
+      "topbarLive": "Live-Status der WebSocket-Verbindung. Grün = Echtzeit-Alerts laufen ein, Rot = keine Verbindung zum Server.",
+      "topbarKpi": "Kennzahlen für das aktuell gewählte Zeitfenster: Gesamt, kritisch+hoch, Alerts/Stunde sowie sichtbar nach Filter.",
+      "topbarLogout": "Aktuelle Session beenden und zur Anmelde-Seite zurück.",
+      "threatGauge": "Live-Bedrohungslevel der Appliance, berechnet aus Severity und Häufigkeit der letzten Alerts. Leerlauf = grün, akute Eskalation = rot.",
+      "severityCard": "Verteilung der sichtbaren Alerts nach Schweregrad (kritisch/hoch/mittel/niedrig). Klick filtert die Liste, erneuter Klick hebt den Filter wieder auf.",
+      "protocolsCard": "Top-Protokolle der sichtbaren Alerts (TCP-Ports, UDP-Dienste). Hilfreich um auffällige Cluster wie viele DNS- oder RDP-Alerts auf einen Blick zu erkennen.",
+      "timeWindow": "Zeitfenster der Anzeige. 'Live' streamt neue Alerts kontinuierlich, die anderen lassen einen Snapshot der letzten 1 Min/15 Min/1 Std/4 Std/1 Tag laden. Erneuter Klick auf das aktive Fenster lädt es neu.",
+      "alertCount": "Anzahl der gerade in der Liste sichtbaren Alerts (nach Filtern und Suche).",
+      "unknownHosts": "Unbekannte Hosts im Heimnetz, die noch nie zugeordnet oder benannt wurden. Klick öffnet einen Drawer zum Pflegen von Namen, Tags und Kommentaren.",
+      "snifferDrops": "Sniffer-Paket-Drops in den letzten Sekunden. >1 % = gelb, >5 % = rot. Häufige Ursache: zu viele Pakete pro Sekunde oder zu kleine Ringbuffer.",
+      "mlOnly": "Filter: nur Alerts der ML-Engine anzeigen (Anomalien aus IsolationForest), Signature-Engine und Suricata werden ausgeblendet.",
+      "showTest": "Test-Alerts mit anzeigen. Standardmäßig versteckt, weil die Test-Szenarien-Seite hunderte produzieren kann.",
+      "snapshotHint": "Hinweis: aktuell wird ein Schnappschuss angezeigt, neue Alerts erscheinen erst nach erneutem Laden oder Wechsel auf 'Live'.",
+      "alertSearch": "Volltextsuche über Regel-ID, Beschreibung, Tags, IPs, Hostnamen und CMDB-Namen. Komma-getrennte Begriffe werden alle UND-verknüpft.",
+      "alertEgress": "Egress-Filter. 'Aus' = alles, 'An' = nur ausgehender Traffic mit Boundary-Klassifikation, 'An+WL' = inklusive bereits whitelisteter Verbindungen.",
+      "alertSortPriority": "Sortiert die Liste nach Egress-Priority (P0 oben) statt nach Zeit. Inaktiv = neueste zuerst.",
+      "alertGroup": "Gruppiert identische Alerts (gleiche Regel + gleiche Endpunkte) zu einer Zeile mit Counter zusammen, statt jede Wiederholung einzeln zu zeigen.",
+      "alertRow": "Eine Alert-Zeile: Klick öffnet die Detailansicht mit PCAP-Vorschau, Verbindungsgraph und True/False-Positive-Bewertung."
+    }
   },
   "tabs": {
     "dashboard": "Übersicht",

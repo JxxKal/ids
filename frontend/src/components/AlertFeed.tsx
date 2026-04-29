@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { Alert, Enrichment } from '../types';
 import { alertsExportUrl, createEgressWhitelist } from '../api';
 import { AlertDetail } from './AlertDetail';
+import { HelpTip } from './HelpTip';
 import { SeverityBadge } from './SeverityBadge';
 import { PcapPreview } from './PcapPreview';
 
@@ -498,14 +499,16 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
     <div className="card flex flex-col h-full">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-800">
-        <input
-          id="alert-search"
-          name="alert-search"
-          className="input flex-1 min-w-32"
-          placeholder={t('alertFeed.search')}
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
+        <HelpTip helpKey="alertSearch" className="flex-1 min-w-32">
+          <input
+            id="alert-search"
+            name="alert-search"
+            className="input w-full"
+            placeholder={t('alertFeed.search')}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </HelpTip>
         <select className="input w-28" value={severityF} onChange={e => setSeverityF(e.target.value)}
           title={t('alertFeed.filters.severity')}>
           {SEVERITIES.map(s => (
@@ -529,6 +532,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
         </select>
 
         {/* Gruppierungs-Toggle */}
+        <HelpTip helpKey="alertGroup">
         <button
           onClick={() => setGrouped(g => !g)}
           className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border font-mono ${
@@ -540,8 +544,10 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
         >
           {grouped ? t('alertFeed.groupedToggle.grouped') : t('alertFeed.groupedToggle.single')}
         </button>
+        </HelpTip>
 
         {/* Egress-Boundary 3-State-Toggle */}
+        <HelpTip helpKey="alertEgress">
         <button
           onClick={() => setEgressMode(m => m === 'off' ? 'on' : m === 'on' ? 'on+wl' : 'off')}
           className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border font-mono ${
@@ -557,8 +563,10 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             : egressMode === 'on' ? t('alertFeed.egressToggle.on')
             : t('alertFeed.egressToggle.onWl')}
         </button>
+        </HelpTip>
 
         {/* Sort by Boundary-Priority */}
+        <HelpTip helpKey="alertSortPriority">
         <button
           onClick={() => setSortByPriority(p => !p)}
           className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border font-mono ${
@@ -570,6 +578,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
         >
           {sortByPriority ? t('alertFeed.priorityToggle.on') : t('alertFeed.priorityToggle.off')}
         </button>
+        </HelpTip>
 
         {whitelistedNotice && (
           <span className="text-[11px] text-green-400 font-mono">{whitelistedNotice}</span>

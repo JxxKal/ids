@@ -229,7 +229,32 @@
   "topbar": {
     "live": "Live",
     "offline": "Offline",
-    "logout": "Sign out"
+    "logout": "Sign out",
+    "helpOn": "Turn on help mode",
+    "helpOff": "Turn off help mode (or press ESC)"
+  },
+  "help": {
+    "dashboard": {
+      "sidebarNav": "Main navigation. Switches between overview, network inventory, host inventory, test scenarios, and settings.",
+      "topbarLive": "Live status of the WebSocket connection. Green = real-time alerts streaming, red = no connection to the backend.",
+      "topbarKpi": "Key metrics for the selected time window: total, critical+high, alerts per hour, and visible after filtering.",
+      "topbarLogout": "End the current session and return to the login screen.",
+      "threatGauge": "Live threat level computed from the severity and frequency of recent alerts. Calm = green, active escalation = red.",
+      "severityCard": "Distribution of visible alerts by severity (critical/high/medium/low). Click to filter the list, click again to clear the filter.",
+      "protocolsCard": "Top protocols across visible alerts (TCP ports, UDP services). Useful to spot clusters such as many DNS or RDP alerts at a glance.",
+      "timeWindow": "Display window. 'Live' streams new alerts continuously, the others load a snapshot of the last 1 min / 15 min / 1 h / 4 h / 1 day. Click the active window again to reload it.",
+      "alertCount": "Number of alerts currently visible in the list (after filters and search).",
+      "unknownHosts": "Unknown hosts on the home network that have not been named or tagged yet. Click to open a drawer to maintain names, tags, and notes.",
+      "snifferDrops": "Sniffer packet drops over the last seconds. >1 % = yellow, >5 % = red. Typical causes: high pps or undersized ring buffer.",
+      "mlOnly": "Filter: show only ML engine alerts (IsolationForest anomalies). Signature engine and Suricata alerts are hidden.",
+      "showTest": "Include test alerts. Hidden by default because the test scenarios page can produce hundreds.",
+      "snapshotHint": "Note: a snapshot is shown right now. New alerts appear only after reloading or switching back to 'Live'.",
+      "alertSearch": "Full-text search across rule ID, description, tags, IPs, hostnames, and CMDB names. Comma-separated terms are AND-combined.",
+      "alertEgress": "Egress filter. 'Off' = all alerts, 'On' = outbound traffic with boundary classification only, 'On+WL' = also include already whitelisted connections.",
+      "alertSortPriority": "Sort by egress priority (P0 first) instead of time. Off = newest first.",
+      "alertGroup": "Groups identical alerts (same rule + same endpoints) into one row with a counter, instead of listing every repetition separately.",
+      "alertRow": "An alert row: click to open the detail view with PCAP preview, connection graph, and true/false-positive feedback."
+    }
   },
   "tabs": {
     "dashboard": "Overview",

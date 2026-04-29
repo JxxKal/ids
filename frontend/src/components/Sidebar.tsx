@@ -2,6 +2,7 @@ import { FlaskConical, LayoutDashboard, Network, Server, Settings } from 'lucide
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchVersion } from '../api';
+import { HelpTip } from './HelpTip';
 
 export type NavTab = 'dashboard' | 'networks' | 'hosts' | 'tests' | 'settings';
 
@@ -39,22 +40,24 @@ export function Sidebar({ active, onNav, username }: Props) {
         </div>
       </div>
 
-      <nav className="cyjan-sidebar-nav">
-        {ITEMS.map(item => {
-          const isActive = active === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onNav(item.id)}
-              className={`cyjan-sidebar-item ${isActive ? 'is-active' : ''}`}
-            >
-              <span className="cyjan-sidebar-icon">{item.icon}</span>
-              {t(`sidebar.${item.id}`)}
-            </button>
-          );
-        })}
-      </nav>
+      <HelpTip helpKey="sidebarNav" block>
+        <nav className="cyjan-sidebar-nav">
+          {ITEMS.map(item => {
+            const isActive = active === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onNav(item.id)}
+                className={`cyjan-sidebar-item ${isActive ? 'is-active' : ''}`}
+              >
+                <span className="cyjan-sidebar-icon">{item.icon}</span>
+                {t(`sidebar.${item.id}`)}
+              </button>
+            );
+          })}
+        </nav>
+      </HelpTip>
 
       <div className="cyjan-sidebar-footer">
         {t('sidebar.footer', { username, version: version ?? '…' })}

@@ -13,6 +13,7 @@ import { NetworksPage } from './components/NetworksPage';
 import { SettingsPage } from './components/SettingsPage';
 import { SeverityBarsCard } from './components/SeverityBarsCard';
 import { HostConnectionDrawer } from './components/HostConnectionDrawer';
+import { HelpTip } from './components/HelpTip';
 import { Sidebar, type NavTab } from './components/Sidebar';
 import { TestsPage } from './components/TestsPage';
 import { ThreatGauge } from './components/ThreatGauge';
@@ -180,13 +181,14 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
 
             {/* KPI Row */}
             <div className="flex items-stretch gap-4 flex-wrap">
-              <ThreatGauge />
-              <SeverityBarsCard alerts={displayAlerts} showTest={showTest} />
-              <TopProtocolsCard alerts={displayAlerts} showTest={showTest} />
+              <HelpTip helpKey="threatGauge"><ThreatGauge /></HelpTip>
+              <HelpTip helpKey="severityCard"><SeverityBarsCard alerts={displayAlerts} showTest={showTest} /></HelpTip>
+              <HelpTip helpKey="protocolsCard"><TopProtocolsCard alerts={displayAlerts} showTest={showTest} /></HelpTip>
             </div>
 
             {/* Toolbar */}
             <div className="flex items-center gap-3 flex-wrap">
+                <HelpTip helpKey="timeWindow">
                 <div className="flex items-center rounded overflow-hidden border border-slate-800">
                   {TIME_WINDOWS.map(w => {
                     const isActive = timeWindow === w.id;
@@ -215,13 +217,17 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                     );
                   })}
                 </div>
+                </HelpTip>
 
-                <span className="text-xs text-slate-500 font-mono">
-                  {isLoading ? t('common.loading') : t('dashboard.alertCount', { count: alertCount })}
-                </span>
+                <HelpTip helpKey="alertCount">
+                  <span className="text-xs text-slate-500 font-mono">
+                    {isLoading ? t('common.loading') : t('dashboard.alertCount', { count: alertCount })}
+                  </span>
+                </HelpTip>
 
                 {/* Unbekannte Hosts */}
                 {unknownCount !== null && unknownCount > 0 && (
+                  <HelpTip helpKey="unknownHosts">
                   <button
                     onClick={() => setShowUnknown(true)}
                     title={t('dashboard.unknownHosts.title', { count: unknownCount })}
@@ -232,10 +238,12 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                     </svg>
                     {t('dashboard.unknownHosts.label', { count: unknownCount })}
                   </button>
+                  </HelpTip>
                 )}
 
                 {/* Sniffer-Health-Warnung */}
                 {sysStats && sysStats.sniffer.drop_pct !== null && sysStats.sniffer.drop_pct > 1 && (
+                  <HelpTip helpKey="snifferDrops">
                   <span
                     title={t('dashboard.snifferDrops.title', { pct: sysStats.sniffer.drop_pct.toFixed(2) })}
                     className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono cursor-default ${
@@ -246,8 +254,10 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                   >
                     {t('dashboard.snifferDrops.label', { pct: sysStats.sniffer.drop_pct.toFixed(1) })}
                   </span>
+                  </HelpTip>
                 )}
 
+                <HelpTip helpKey="mlOnly">
                 <label htmlFor="ml-only-toggle" className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
                   <input
                     id="ml-only-toggle"
@@ -264,8 +274,10 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                     {t('dashboard.filters.mlOnly')}
                   </span>
                 </label>
+                </HelpTip>
 
                 {timeWindow === 'live' && (
+                  <HelpTip helpKey="showTest">
                   <label htmlFor="show-test-toggle" className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
                     <input
                       id="show-test-toggle"
@@ -280,12 +292,15 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                     />
                     {t('dashboard.filters.showTest')}
                   </label>
+                  </HelpTip>
                 )}
 
                 {timeWindow !== 'live' && !isLoading && (
-                  <span className="text-xs text-slate-600 italic">
-                    {t('dashboard.snapshotHint')}
-                  </span>
+                  <HelpTip helpKey="snapshotHint">
+                    <span className="text-xs text-slate-600 italic">
+                      {t('dashboard.snapshotHint')}
+                    </span>
+                  </HelpTip>
                 )}
             </div>
 
