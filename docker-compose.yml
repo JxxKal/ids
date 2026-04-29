@@ -407,6 +407,41 @@ services:
       start_period: 30s
 
   # ───────────────────────────────────────────────────────────────────────
+  # RULE-TUNER (Phase 4) – konsumiert rule-metrics, hält Reservoirs,
+  # persistiert Quantile in rule_baselines und schreibt im State 'tuning'
+  # alle 6h Overrides via PUT /api/sig-rules/overrides. Master-only.
+  # ───────────────────────────────────────────────────────────────────────
+  rule-tuner:
+    build: ./rule-tuner
+    container_name: ids-rule-tuner
+    restart: unless-stopped
+    profiles: [prod]
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      METRICS_TOPIC: rule-metrics
+      KAFKA_GROUP_ID: rule-tuner
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      API_BASE_URL: http://api:8000
+      # Identisch zum SECRET_KEY der api — der Tuner mintet selbst ein
+      # langlebiges JWT mit role=admin (kein User-DB-Eintrag nötig, weil
+      # get_current_user nur die Signatur prüft).
+      API_SECRET_KEY: ${API_SECRET_KEY:-change-me-in-production}
+      RESERVOIR_SIZE: ${TUNER_RESERVOIR_SIZE:-10000}
+      PERSIST_INTERVAL_S: ${TUNER_PERSIST_INTERVAL_S:-60}
+      STATE_POLL_INTERVAL_S: ${TUNER_STATE_POLL_INTERVAL_S:-30}
+      TUNING_CYCLE_S: ${TUNER_TUNING_CYCLE_S:-21600}
+      MIN_SAMPLES: ${TUNER_MIN_SAMPLES:-100}
+      LOG_LEVEL: INFO
+
+  # ───────────────────────────────────────────────────────────────────────
   # MASTER-UPLINK – mTLS-WebSocket-Endpunkt für Remote-Taps. Hört separat
   # auf 8443, damit der reguläre api-Container weiterhin nur JWT-Auth
   # macht. Teilt sich das master-ca-Volume mit der api (api bootstrappt

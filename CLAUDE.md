@@ -340,18 +340,34 @@ curl -X POST -H "$H" http://master/api/sig-rules/ml/pause
 curl -X POST -H "$H" http://master/api/sig-rules/ml/resume
 ```
 
-**Phase 4 — rule-tuner Service**
-- Neuer Python-Service in `rule-tuner/`, nur am Master (Compose: `--profile prod`).
-- Konsumiert `rule-metrics` (Master + alle Taps), hält Reservoir-Samples in-memory pro `(rule, param, scope)`, persistiert P99,5 + Sample-Count alle 60s in `rule_baselines`.
-- Subscribed auf `feedback`-Topic + DB-Lookup, korreliert TP/FP-Markierungen mit Metrik-Werten zum Alert-Zeitpunkt (aus `alerts`-Tabelle).
-- State-Machine:
-  - `idle` → nur Sampling, keine Schreibe
-  - `training` → Sampling, kein Override-Write
-  - nach Trainingsende: einmaliger Override-Write (status → `tuning`)
-  - `tuning` → alle 6h: Quantile aus Reservoir, Constraints anwenden, ggf. Override updaten
-  - `paused` → alles steht
-- Schreibt via `PUT /api/sig-rules/overrides` mit Service-Token (langlebiges JWT, role=`api`).
-- Manuell gelockte Params werden übersprungen.
+**Phase 4 — rule-tuner Service — ✅ erledigt 2026-04-29**
+- ✅ Neuer Python-Service in `rule-tuner/` (`Dockerfile`, `requirements.txt`, `src/{config,reservoir,api_client,tuner,main}.py`). Master-only via Compose-Profil `prod`. Depends-on: kafka healthy, timescaledb healthy, api healthy.
+- ✅ Reservoir-Sampling (Algorithm R, default 10k Samples pro `(rule, param, scope)`). Kafka-Consumer läuft im Daemon-Thread, Reservoir-Updates unter `threading.Lock` — async-Persistierung greift den Snapshot, ohne den Consumer zu blockieren.
+- ✅ Persistierungs-Loop alle 60s (`PERSIST_INTERVAL_S`): UPSERT `rule_baselines` mit P50/P99/P995/P999 + sample_count.
+- ✅ State-Loop alle 30s (`STATE_POLL_INTERVAL_S`): pollt `/api/sig-rules/ml/status`. Übergänge:
+  - `idle`/`paused` → nur Sampling, keine Schreiboperation
+  - `training` → wenn `training_until <= now`: erster Override-Write (`first_apply=True`, ohne max_change_per_cycle-Klemme), dann state → `tuning` + `last_tuning_at = now`
+  - `tuning` → wenn `now - last_tuning_at >= TUNING_CYCLE_S` (default 6h): erneuter Override-Write mit Klemme auf `±max_change_per_cycle` ggü. altem ml-Wert, `last_tuning_at` aktualisiert
+- ✅ Override-Write-Algorithmus:
+  - `GET /api/sig-rules/list` → Schemata + aktuelle Overrides
+  - Für jeden Param mit `metric:`-Deklaration und `rule.id ∉ blacklist`:
+    - Wenn `existing.parameters[pname].source == "manual"` oder Skalar (= impliziter manual-Lock von vor Phase 1): überspringen.
+    - `scope_split_enabled=true`: `value` aus external-Reservoir, `value_internal` aus internal-Reservoir, beide mindestens `MIN_SAMPLES` (default 100).
+    - `scope_split_enabled=false`: `value` aus combined-Reservoir, `value_internal=null`.
+    - Quantile × `SAFETY_MARGIN` (1.05) → schema min/max-Clamp → optional Klemme auf `±max_change_per_cycle` × alter ml-Wert.
+    - Eintrag mit `source: "ml"` + `ml`-Metadaten (trained_at, quantile, p995_external/internal, sample_count_external/internal, scope_split).
+  - `PUT /api/sig-rules/overrides` mit gemergedem Stand (existierende `enabled`/`severity`/manual-Params bleiben erhalten).
+- ✅ Service-JWT: tuner mintet selbst ein langlebiges Token mit `role=admin` aus `API_SECRET_KEY` — kein User-DB-Eintrag nötig, da `get_current_user` nur die Signatur validiert.
+- ✅ FP/TP-Constraints sind im Code-Path **nicht** implementiert (V1) — CLAUDE.md hatte das als optional markiert ("kein Verlass darauf"). Alert-Wert beim Firing ist nicht persistiert; ein robuster Korrelationspfad würde Phase 4.5 brauchen (z.B. metric_value im Alert-Frame mitschreiben).
+- ✅ State-Maschinen-Übergänge `training → tuning` und `last_tuning_at`-Updates schreiben direkt in `system_config` (DB-Codec sorgt für korrektes JSONB-Encoding); User-getriebene Übergänge (start/pause/resume) bleiben Sache der API-Endpoints — keine Konkurrenz, weil unterschiedliche Subfields.
+
+**Deploy nach Phase 4**: `docker compose --profile prod build rule-tuner && up -d` am Master. Kein Tap-Deploy nötig — Tap-Beiträge laufen via master-uplink ins Master-Kafka. Beim Boot pollt der tuner `/ml/status` mit Retry, bis api healthy ist.
+
+**Beobachten**:
+- `docker compose logs rule-tuner` zeigt beim Start: `Kafka-Consumer subscribed: rule-metrics`, `API erreichbar — starte Hauptschleifen`.
+- Im State `idle` (Default) füllen sich Reservoirs unsichtbar; nach 60s erscheinen Zeilen in `rule_baselines` (`SELECT rule_id, param_name, scope, p995, sample_count FROM rule_baselines ORDER BY rule_id;`).
+- Trainingslauf: `POST /api/sig-rules/ml/start-training {window_s: 300}` (5 min) — beim Ablauf log-line `Training abgeschlossen — schalte auf tuning + erster Override-Write`. `_overrides.json` enthält danach Einträge mit `source: "ml"`.
+- Cycle-Test mit kürzerem TUNING_CYCLE_S (z.B. `TUNER_TUNING_CYCLE_S=300` in `.env` für 5-min-Cycles statt 6h) — Tuner schreibt dann alle 5 min statt alle 6 h.
 
 **Phase 5 — Frontend-UI (Settings → Rule Adjustments)**
 - Neuer Tab "ML-Tuning":
