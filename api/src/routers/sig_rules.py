@@ -40,9 +40,13 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sig-rules", tags=["sig-rules"])
 
 # Pfade: Built-in YAMLs liegen im Repo unter signature-engine/rules/.
-# Custom YAMLs + Overrides liegen im persistenten Volume.
+# Custom YAMLs + Overrides liegen im persistenten Volume signature-rules.
+# WICHTIG: Das Volume wird im signature-engine-Container unter /rules/custom
+# gemountet. Damit der dortige Loader _overrides.json findet, MUSS die API
+# direkt in den Volume-Root schreiben — nicht in einen weiteren custom/-Subdir
+# (sonst landet die Datei eine Ebene zu tief und greift nie).
 BUILTIN_DIR = Path(os.getenv("SIG_BUILTIN_DIR", "/opt/ids/signature-engine/rules"))
-CUSTOM_DIR  = Path(os.getenv("SIG_CUSTOM_DIR",  "/sig-rules/custom"))
+CUSTOM_DIR  = Path(os.getenv("SIG_CUSTOM_DIR",  "/sig-rules"))
 OVERRIDES_FILE = CUSTOM_DIR / "_overrides.json"
 SURICATA_OVERRIDES_FILE = CUSTOM_DIR / "_suricata_overrides.json"
 
