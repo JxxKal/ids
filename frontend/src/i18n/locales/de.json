@@ -253,7 +253,8 @@
       "alertEgress": "Egress-Filter. 'Aus' = alles, 'An' = nur ausgehender Traffic mit Boundary-Klassifikation, 'An+WL' = inklusive bereits whitelisteter Verbindungen.",
       "alertSortPriority": "Sortiert die Liste nach Egress-Priority (P0 oben) statt nach Zeit. Inaktiv = neueste zuerst.",
       "alertGroup": "Gruppiert identische Alerts (gleiche Regel + gleiche Endpunkte) zu einer Zeile mit Counter zusammen, statt jede Wiederholung einzeln zu zeigen.",
-      "alertRow": "Eine Alert-Zeile: Klick öffnet die Detailansicht mit PCAP-Vorschau, Verbindungsgraph und True/False-Positive-Bewertung."
+      "alertRow": "Eine Alert-Zeile: Klick öffnet die Detailansicht mit PCAP-Vorschau, Verbindungsgraph und True/False-Positive-Bewertung.",
+      "boundaryCell": "Egress-Boundary-Klassifikation für ausgehenden Verkehr. Drei Pillen: N = Zielnetz bekannt (CMDB-Eintrag), S = Quell-Host bekannt (Trust-Liste), D = Ziel-Host bekannt. Daraus folgt die Priorität: P0 = nichts bekannt (höchste Priorität), P1 = nur ein Endpunkt bekannt, P2 = beide Endpunkte oder Netz bekannt, P3 = Netz + ein Endpunkt bekannt. Alles drei bekannt = kein Egress-Alert. ·WL = bereits whitelisted."
     }
   },
   "tabs": {

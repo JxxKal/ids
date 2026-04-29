@@ -253,7 +253,8 @@
       "alertEgress": "Egress filter. 'Off' = all alerts, 'On' = outbound traffic with boundary classification only, 'On+WL' = also include already whitelisted connections.",
       "alertSortPriority": "Sort by egress priority (P0 first) instead of time. Off = newest first.",
       "alertGroup": "Groups identical alerts (same rule + same endpoints) into one row with a counter, instead of listing every repetition separately.",
-      "alertRow": "An alert row: click to open the detail view with PCAP preview, connection graph, and true/false-positive feedback."
+      "alertRow": "An alert row: click to open the detail view with PCAP preview, connection graph, and true/false-positive feedback.",
+      "boundaryCell": "Egress boundary classification for outbound traffic. Three pills: N = destination network known (CMDB entry), S = source host known (trust list), D = destination host known. Priority follows: P0 = nothing known (highest), P1 = only one endpoint known, P2 = both endpoints or network known, P3 = network + one endpoint known. All three known = no egress alert. ·WL = already whitelisted."
     }
   },
   "tabs": {

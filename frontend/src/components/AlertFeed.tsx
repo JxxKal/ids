@@ -179,17 +179,19 @@ function BoundaryCell({ alert }: { alert: Alert }) {
   );
 
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className={`px-1.5 py-0.5 text-[10px] font-mono rounded border w-fit ${PRIORITY_COLOR[alert.boundary_priority] ?? ''}`}>
-        {alert.boundary_priority}
-        {alert.boundary_whitelisted && <span className="ml-1 opacity-70">·WL</span>}
-      </span>
-      <span className="flex gap-0.5">
-        <Pill ok={alert.boundary_net_known} label="N" />
-        <Pill ok={alert.boundary_src_known} label="S" />
-        <Pill ok={alert.boundary_dst_known} label="D" />
-      </span>
-    </div>
+    <HelpTip helpKey="boundaryCell">
+      <div className="flex flex-col gap-0.5">
+        <span className={`px-1.5 py-0.5 text-[10px] font-mono rounded border w-fit ${PRIORITY_COLOR[alert.boundary_priority] ?? ''}`}>
+          {alert.boundary_priority}
+          {alert.boundary_whitelisted && <span className="ml-1 opacity-70">·WL</span>}
+        </span>
+        <span className="flex gap-0.5">
+          <Pill ok={alert.boundary_net_known} label="N" />
+          <Pill ok={alert.boundary_src_known} label="S" />
+          <Pill ok={alert.boundary_dst_known} label="D" />
+        </span>
+      </div>
+    </HelpTip>
   );
 }
 
