@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Alert, Enrichment } from '../types';
-import { alertsExportUrl, createEgressWhitelist } from '../api';
+import type { Alert, Enrichment, RemoteTap } from '../types';
+import { alertsExportUrl, createEgressWhitelist, fetchTaps } from '../api';
 import { AlertDetail } from './AlertDetail';
 import { HelpTip } from './HelpTip';
 import { SeverityBadge } from './SeverityBadge';
@@ -415,6 +415,25 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
   const [sortByPriority,    setSortByPriority]    = useState(false);
   const [whitelistFor,      setWhitelistFor]      = useState<Alert | null>(null);
   const [whitelistedNotice, setWhitelistedNotice] = useState<string>('');
+  // Tap-Filter: '' = alle, 'master' = nur lokal erzeugte Alerts (tap_id null),
+  // sonst Tap-UUID. Wir laden die Tap-Liste einmal beim Mount; ist sie leer,
+  // wird der Filter + die Spalte gar nicht erst gerendert.
+  const [tapFilter,         setTapFilter]         = useState('');
+  const [taps,              setTaps]              = useState<RemoteTap[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTaps()
+      .then(rows => { if (!cancelled) setTaps(rows); })
+      .catch(() => { /* Tap-Listing schlägt für non-Admin fehl – einfach
+                        ohne Tap-Spalte/Filter weiterfahren. */ });
+    return () => { cancelled = true; };
+  }, []);
+  const showTapColumn = taps.length > 0;
+  const tapsById = useMemo(
+    () => Object.fromEntries(taps.map(tap => [tap.id, tap])) as Record<string, RemoteTap>,
+    [taps],
+  );
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -433,6 +452,13 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
       if (egressMode !== 'off') {
         if (!a.boundary_priority) return false;
         if (egressMode === 'on' && a.boundary_whitelisted) return false;
+      }
+      if (tapFilter) {
+        if (tapFilter === 'master') {
+          if (a.tap_id) return false;
+        } else if (a.tap_id !== tapFilter) {
+          return false;
+        }
       }
       if (q) {
         // Auch Hostnamen + Display-Names durchsuchen — die IpCell rendert
@@ -463,7 +489,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
       });
     }
     return filteredArr;
-  }, [alerts, showTest, mlOnly, suppressIrmaAsset, severityF, sourceF, feedbackF, search, egressMode, sortByPriority]);
+  }, [alerts, showTest, mlOnly, suppressIrmaAsset, severityF, sourceF, feedbackF, search, egressMode, sortByPriority, tapFilter]);
 
   // Export-URL passend zu aktiven Filtern aufbauen
   const exportUrl = alertsExportUrl({
@@ -532,6 +558,18 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           <option value="fp">False Positive</option>
           <option value="tp">True Positive</option>
         </select>
+
+        {/* Tap-Filter (nur sichtbar wenn überhaupt ein Tap registriert ist) */}
+        {showTapColumn && (
+          <select className="input w-32" value={tapFilter} onChange={e => setTapFilter(e.target.value)}
+            title={t('alertFeed.filters.tap')}>
+            <option value="">{t('alertFeed.filters.allTaps')}</option>
+            <option value="master">{t('alertFeed.filters.tapMaster')}</option>
+            {taps.map(tap => (
+              <option key={tap.id} value={tap.id}>{tap.name}</option>
+            ))}
+          </select>
+        )}
 
         {/* Gruppierungs-Toggle */}
         <HelpTip helpKey="alertGroup">
@@ -624,6 +662,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                 <th className="px-3 py-2">{t('alertFeed.columns.lastSeen')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>
                 {egressMode !== 'off' && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
+                {showTapColumn && <th className="px-3 py-2">{t('alertFeed.columns.tap')}</th>}
                 <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>
@@ -657,6 +696,13 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   </td>
                   {egressMode !== 'off' && (
                     <td className="px-3 py-2"><BoundaryCell alert={g.latest} /></td>
+                  )}
+                  {showTapColumn && (
+                    <td className="px-3 py-2 text-[11px] font-mono text-slate-400 whitespace-nowrap">
+                      {g.latest.tap_id
+                        ? (tapsById[g.latest.tap_id]?.name ?? g.latest.tap_id.slice(0, 8))
+                        : <span className="text-slate-600">–</span>}
+                    </td>
                   )}
                   <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
                     {g.rule_id ?? '–'}
@@ -720,6 +766,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                 <th className="px-3 py-2">{t('alertFeed.columns.time')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>
                 {egressMode !== 'off' && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
+                {showTapColumn && <th className="px-3 py-2">{t('alertFeed.columns.tap')}</th>}
                 <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>
                 <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>
@@ -746,6 +793,13 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   <td className="px-3 py-2"><SeverityBadge severity={a.severity} /></td>
                   {egressMode !== 'off' && (
                     <td className="px-3 py-2"><BoundaryCell alert={a} /></td>
+                  )}
+                  {showTapColumn && (
+                    <td className="px-3 py-2 text-[11px] font-mono text-slate-400 whitespace-nowrap">
+                      {a.tap_id
+                        ? (tapsById[a.tap_id]?.name ?? a.tap_id.slice(0, 8))
+                        : <span className="text-slate-600">–</span>}
+                    </td>
                   )}
                   <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
                     {a.rule_id}

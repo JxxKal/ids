@@ -1,4 +1,4 @@
-import type { Alert, Host, KnownNetwork, MLConfig, MLStatus, RuleListResponse, RuleSource, SamlConfig, SystemUpdateStatus, TestRun, ThreatLevel, UpdateStatus, User } from './types';
+import type { Alert, Host, KnownNetwork, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, RuleListResponse, RuleSource, SamlConfig, SystemUpdateStatus, TestRun, ThreatLevel, UpdateStatus, User } from './types';
 import * as demo from './demo/api';
 import { isDemoMode } from './demo/mode';
 
@@ -1125,4 +1125,25 @@ export async function restoreDb(password: string, file: File): Promise<{ success
 
 export async function fetchMaintenanceAudit(limit = 100): Promise<MaintenanceAuditEntry[]> {
   return req(`/api/maintenance/audit?limit=${limit}`);
+}
+
+// ── Remote Taps ──────────────────────────────────────────────────────────────
+
+export async function fetchTaps(): Promise<RemoteTap[]> {
+  return req('/api/taps');
+}
+
+export async function createTapPairingToken(body: {
+  name:   string;
+  site?:  string;
+  ttl_min?: number;
+}): Promise<RemoteTapPairingToken> {
+  return req('/api/taps/pairing-tokens', {
+    method: 'POST',
+    body:   JSON.stringify(body),
+  });
+}
+
+export async function revokeTap(id: string): Promise<void> {
+  await req(`/api/taps/${id}`, { method: 'DELETE' });
 }

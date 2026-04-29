@@ -22,13 +22,14 @@ import {
   fetchSuricataOverrides, saveSuricataOverrides,
   type SuricataOverrideEntry,
   fetchBoundaryPriorityMap, saveBoundaryPriorityMap,
+  fetchTaps, createTapPairingToken, revokeTap,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
   DbStatsResponse, MaintenanceAuditEntry,
   RuleFileMeta,
 } from '../api';
-import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
+import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
 
@@ -3910,6 +3911,319 @@ function RuleOverridesSettings() {
   );
 }
 
+// ── RemoteTapsSettings ──────────────────────────────────────────────────────
+//
+// Master-seitige Verwaltung der Remote-Capture-Knoten. Listet die in der
+// taps-Tabelle bekannten Knoten auf, bietet einen "Pairing-Token erzeugen"-
+// Button (Modal mit Name/Site/TTL → Token wird genau einmal angezeigt) und
+// einen Revoke-Action pro Tap. Die eigentliche Pair-Mechanik passiert dann
+// am Tap-Wizard, der den Token plus Master-API-URL gegen den Pairing-Endpoint
+// einlöst.
+
+function RemoteTapsSettings() {
+  const { t, i18n } = useTranslation();
+  const [taps, setTaps] = useState<RemoteTap[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string>('');
+  const [showAdd, setShowAdd] = useState(false);
+  const [newToken, setNewToken] = useState<RemoteTapPairingToken | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<RemoteTap | null>(null);
+  const [revokeBusy, setRevokeBusy] = useState(false);
+  const [tokenCopied, setTokenCopied] = useState(false);
+
+  async function reload() {
+    try {
+      setTaps(await fetchTaps());
+      setLoadErr('');
+    } catch (exc) {
+      setLoadErr(t('settings.remoteTaps.loadError', { message: String(exc) }));
+    }
+  }
+
+  useEffect(() => { void reload(); }, []);
+  // Periodisches Refresh für last_seen + alerts_received-Spalten.
+  useEffect(() => {
+    const id = window.setInterval(() => { void reload(); }, 15_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  function fmtRelative(iso: string | null | undefined): string {
+    if (!iso) return t('settings.remoteTaps.never');
+    const t0 = new Date(iso).getTime();
+    if (Number.isNaN(t0)) return '–';
+    const diff = (Date.now() - t0) / 1000;
+    if (diff < 60)  return `${Math.round(diff)} s`;
+    if (diff < 3600) return `${Math.round(diff / 60)} min`;
+    if (diff < 86400) return `${Math.round(diff / 3600)} h`;
+    return `${Math.round(diff / 86400)} d`;
+  }
+
+  function fmtAbs(iso: string): string {
+    return new Date(iso).toLocaleString(i18n.resolvedLanguage ?? 'de');
+  }
+
+  async function copyToken() {
+    if (!newToken) return;
+    try {
+      await navigator.clipboard.writeText(newToken.token);
+      setTokenCopied(true);
+      window.setTimeout(() => setTokenCopied(false), 2500);
+    } catch {
+      // Kein clipboard verfügbar (alter Browser / kein HTTPS): User soll
+      // markieren+kopieren. Token ist sichtbar, also kein Datenverlust.
+    }
+  }
+
+  async function doRevoke() {
+    if (!revokeTarget) return;
+    setRevokeBusy(true);
+    try {
+      await revokeTap(revokeTarget.id);
+      setRevokeTarget(null);
+      await reload();
+    } catch (exc) {
+      alert(t('settings.remoteTaps.revokeError', { message: String(exc) }));
+    } finally {
+      setRevokeBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-200">{t('settings.remoteTaps.title')}</h2>
+          <p className="text-xs text-slate-400 mt-1 max-w-3xl">{t('settings.remoteTaps.intro')}</p>
+        </div>
+        <button
+          onClick={() => setShowAdd(true)}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-600/30 text-cyan-100 border border-cyan-500/50 hover:bg-cyan-600/40 whitespace-nowrap"
+        >
+          + {t('settings.remoteTaps.addBtn')}
+        </button>
+      </div>
+
+      {loadErr && <div className="text-xs text-red-400">{loadErr}</div>}
+
+      {taps && taps.length === 0 && (
+        <div className="text-xs text-slate-500 italic">{t('settings.remoteTaps.noTaps')}</div>
+      )}
+
+      {taps && taps.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-slate-400 border-b border-slate-700">
+                <th className="text-left px-3 py-2">{t('settings.remoteTaps.colName')}</th>
+                <th className="text-left px-3 py-2">{t('settings.remoteTaps.colSite')}</th>
+                <th className="text-left px-3 py-2">{t('settings.remoteTaps.colStatus')}</th>
+                <th className="text-left px-3 py-2">{t('settings.remoteTaps.colLastSeen')}</th>
+                <th className="text-right px-3 py-2">{t('settings.remoteTaps.colAlerts')}</th>
+                <th className="text-left px-3 py-2">{t('settings.remoteTaps.colCertExpires')}</th>
+                <th className="text-right px-3 py-2">{t('settings.remoteTaps.colActions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {taps.map(tap => {
+                const isActive = tap.status === 'active';
+                return (
+                  <tr key={tap.id} className="border-b border-slate-800/60">
+                    <td className="px-3 py-2 font-mono text-cyan-300">{tap.name}</td>
+                    <td className="px-3 py-2 text-slate-400">{tap.site || '–'}</td>
+                    <td className="px-3 py-2">
+                      {isActive
+                        ? <span className="px-1.5 py-0.5 text-[10px] rounded bg-green-900/50 text-green-300 border border-green-700/40">{t('settings.remoteTaps.statusActive')}</span>
+                        : <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">{t('settings.remoteTaps.statusRevoked')}</span>}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-slate-300" title={tap.last_seen ? fmtAbs(tap.last_seen) : ''}>
+                      {fmtRelative(tap.last_seen)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-300">
+                      {tap.alerts_received.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-slate-400">
+                      {fmtAbs(tap.cert_expires_at)}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {isActive && (
+                        <button
+                          onClick={() => setRevokeTarget(tap)}
+                          className="px-2 py-1 rounded text-[11px] bg-red-900/30 text-red-300 border border-red-700/40 hover:bg-red-900/50"
+                        >
+                          {t('settings.remoteTaps.revoke')}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showAdd && (
+        <CreateTapTokenModal
+          onClose={() => setShowAdd(false)}
+          onCreated={tok => { setNewToken(tok); setShowAdd(false); void reload(); }}
+        />
+      )}
+
+      {newToken && (
+        <ShowTokenModal
+          token={newToken}
+          copied={tokenCopied}
+          onCopy={copyToken}
+          onClose={() => setNewToken(null)}
+        />
+      )}
+
+      {revokeTarget && (
+        <ConfirmDialog
+          message={`${t('settings.remoteTaps.revokeConfirmTitle')}\n\n${t('settings.remoteTaps.revokeConfirmBody', { name: revokeTarget.name })}`}
+          confirmLabel={revokeBusy ? '…' : t('settings.remoteTaps.revoke')}
+          onConfirm={doRevoke}
+          onCancel={() => { if (!revokeBusy) setRevokeTarget(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateTapTokenModal({
+  onClose, onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (tok: RemoteTapPairingToken) => void;
+}) {
+  const { t } = useTranslation();
+  const [name, setName] = useState('');
+  const [site, setSite] = useState('');
+  const [ttl,  setTtl]  = useState(60);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!name.trim()) return;
+    setBusy(true);
+    try {
+      const tok = await createTapPairingToken({
+        name: name.trim(),
+        site: site.trim() || undefined,
+        ttl_min: ttl,
+      });
+      onCreated(tok);
+    } catch (exc) {
+      alert(t('settings.remoteTaps.createError', { message: String(exc) }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="bg-slate-900 border border-slate-700 rounded-lg p-5 w-[420px] max-w-[92vw] shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold text-slate-100 mb-3">{t('settings.remoteTaps.addModalTitle')}</h3>
+
+        <div className="space-y-3 text-xs">
+          <label className="block">
+            <div className="text-slate-400 mb-1">{t('settings.remoteTaps.addNameLabel')}</div>
+            <input
+              autoFocus
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder={t('settings.remoteTaps.addNamePlaceholder')}
+              className="input w-full"
+            />
+          </label>
+          <label className="block">
+            <div className="text-slate-400 mb-1">{t('settings.remoteTaps.addSiteLabel')}</div>
+            <input
+              type="text"
+              value={site}
+              onChange={e => setSite(e.target.value)}
+              placeholder={t('settings.remoteTaps.addSitePlaceholder')}
+              className="input w-full"
+            />
+          </label>
+          <label className="block">
+            <div className="text-slate-400 mb-1">{t('settings.remoteTaps.addTtlLabel')}</div>
+            <input
+              type="number"
+              min={5}
+              max={1440}
+              value={ttl}
+              onChange={e => setTtl(Math.max(5, Math.min(1440, Number(e.target.value) || 60)))}
+              className="input w-full"
+            />
+          </label>
+        </div>
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onClose} className="px-3 py-1.5 rounded text-xs text-slate-400 hover:text-slate-200">
+            {t('settings.remoteTaps.addCancel')}
+          </button>
+          <button
+            onClick={submit}
+            disabled={busy || !name.trim()}
+            className="px-3 py-1.5 rounded text-xs bg-cyan-600 text-white disabled:opacity-50"
+          >
+            {t('settings.remoteTaps.addCreate')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShowTokenModal({
+  token, copied, onCopy, onClose,
+}: {
+  token: RemoteTapPairingToken;
+  copied: boolean;
+  onCopy: () => void;
+  onClose: () => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const masterUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.protocol}//${window.location.host}`
+      : '';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="bg-slate-900 border border-cyan-700/60 rounded-lg p-5 w-[560px] max-w-[94vw] shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold text-cyan-200 mb-3">{t('settings.remoteTaps.tokenModalTitle')}</h3>
+        <p className="text-xs text-slate-300 mb-3">
+          {t('settings.remoteTaps.tokenInstruction', { url: masterUrl })}
+        </p>
+
+        <div className="bg-slate-950 border border-slate-700 rounded p-3 font-mono text-[11px] text-cyan-200 break-all select-all">
+          {token.token}
+        </div>
+
+        <div className="text-[11px] text-slate-500 mt-2">
+          {t('settings.remoteTaps.tokenExpires', { when: new Date(token.expires_at).toLocaleString(i18n.resolvedLanguage ?? 'de') })}
+        </div>
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button onClick={onCopy} className="px-3 py-1.5 rounded text-xs bg-slate-700 text-slate-100 hover:bg-slate-600">
+            {copied ? t('settings.remoteTaps.tokenCopied') : t('settings.remoteTaps.tokenCopy')}
+          </button>
+          <button onClick={onClose} className="px-3 py-1.5 rounded text-xs bg-cyan-600 text-white">
+            {t('settings.remoteTaps.tokenClose')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── EgressPrioritySettings ───────────────────────────────────────────────────
 
 // 7 echte Klassifikations-Tupel für die Egress-View (✓✓✓ ist nicht-egress).
@@ -4189,7 +4503,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'thorsten';
+type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -4237,6 +4551,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'interfaces',     icon: <Network   {...ICON_PROPS} /> },
       { id: 'dns-resolvers',  icon: <Server    {...ICON_PROPS} /> },
       { id: 'egress-priorities', icon: <Sliders {...ICON_PROPS} /> },
+      { id: 'remote-taps',    icon: <Network   {...ICON_PROPS} /> },
       { id: 'ssl',            icon: <Lock      {...ICON_PROPS} /> },
       { id: 'syslog',         icon: <FileText  {...ICON_PROPS} /> },
       { id: 'update',         icon: <Upload    {...ICON_PROPS} /> },
@@ -4356,6 +4671,7 @@ export function SettingsPage() {
             {active === 'interfaces'    && <NetworkInterfaces />}
             {active === 'dns-resolvers' && <DnsResolverSettings />}
             {active === 'egress-priorities' && <EgressPrioritySettings />}
+            {active === 'remote-taps'   && <RemoteTapsSettings />}
             {active === 'ssl'           && <SslSettings />}
             {active === 'syslog'        && <SyslogSettings />}
             {active === 'irma'          && <IrmaSettings />}

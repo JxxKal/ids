@@ -78,6 +78,30 @@ export interface Alert {
   boundary_dst_known?: boolean | null;
   boundary_priority?:  'P0' | 'P1' | 'P2' | 'P3' | null;
   boundary_whitelisted?: boolean;
+  // Remote-Tap-Herkunft: NULL = lokal am Master erzeugt, sonst UUID des Taps
+  // (siehe Remote-Tap-Architektur). Frontend zeigt eine Spalte "Tap" wenn
+  // wenigstens ein Tap konfiguriert ist.
+  tap_id?: string | null;
+}
+
+export interface RemoteTap {
+  id: string;
+  name: string;
+  site?: string | null;
+  cert_fingerprint: string;
+  cert_expires_at: string;
+  status: 'active' | 'revoked';
+  paired_at: string;
+  paired_by?: string | null;
+  last_seen?: string | null;
+  alerts_received: number;
+}
+
+export interface RemoteTapPairingToken {
+  token: string;
+  expires_at: string;
+  name: string;
+  site?: string | null;
 }
 
 export interface ThreatLevel {
