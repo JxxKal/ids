@@ -530,8 +530,8 @@ if [ "$ROLE" = "tap" ]; then
 
 if [ "$SKIP_PAIRING" = "0" ]; then
   MASTER_API_URL=$(input "Master-API-URL" \
-    "Basis-URL der Master-IDS-API\n(Beispiel: https://192.168.1.230:8001 oder http://master.lan:8001):" \
-    "${MASTER_API_URL:-https://192.168.1.230:8001}") || MASTER_API_URL=""
+    "Basis-URL der Master-IDS-API\n(Default-Setup ohne TLS: http://<master-ip>:8001).\nWenn Master hinter Reverse-Proxy mit TLS: https://master.lan):" \
+    "${MASTER_API_URL:-http://192.168.1.230:8001}") || MASTER_API_URL=""
   if [ -z "$MASTER_API_URL" ]; then
     msg "Ohne Master-URL kann kein Pairing erfolgen – Setup abgebrochen."
     exit 1

@@ -26,7 +26,7 @@ TOPIC_FLOWS = "flows"
 
 
 class FlowPublisher:
-    def __init__(self, kafka_brokers: str, postgres_dsn: str, batch_size: int = 100) -> None:
+    def __init__(self, kafka_brokers: str, postgres_dsn: str | None, batch_size: int = 100) -> None:
         self._producer = Producer({
             "bootstrap.servers":            kafka_brokers,
             "queue.buffering.max.messages": "50000",
@@ -38,8 +38,15 @@ class FlowPublisher:
             "retry.backoff.ms":             "100",
         })
 
-        self._conn = psycopg2.connect(postgres_dsn)
-        self._conn.autocommit = False
+        # postgres_dsn=None: Tap-Mode, kein lokales Postgres → DB-Pfad
+        # komplett deaktiviert. Records gehen weiterhin nach Kafka.
+        if postgres_dsn:
+            self._conn = psycopg2.connect(postgres_dsn)
+            self._conn.autocommit = False
+            logger.info("Postgres-Anbindung aktiv (Master-Mode)")
+        else:
+            self._conn = None
+            logger.info("Postgres-DSN leer – DB-Pfad deaktiviert (Tap-Mode)")
 
         self._batch_size  = batch_size
         self._pending_db: list[FlowRecord] = []
@@ -59,10 +66,11 @@ class FlowPublisher:
 
         for record in records:
             self._send_kafka(record)
-            self._pending_db.append(record)
+            if self._conn is not None:
+                self._pending_db.append(record)
 
-        # Batch-Insert wenn Schwelle erreicht
-        if len(self._pending_db) >= self._batch_size:
+        # Batch-Insert wenn Schwelle erreicht (nur wenn DB aktiv)
+        if self._conn is not None and len(self._pending_db) >= self._batch_size:
             self._flush_db()
 
         # Delivery-Callbacks verarbeiten (non-blocking)
@@ -70,15 +78,17 @@ class FlowPublisher:
 
     def flush(self) -> None:
         """Abschließender Flush vor Shutdown."""
-        self._flush_db()
+        if self._conn is not None:
+            self._flush_db()
         self._producer.flush(timeout=10)
 
     def close(self) -> None:
         self.flush()
-        try:
-            self._conn.close()
-        except Exception:
-            pass
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
 
     @property
     def stats(self) -> dict:

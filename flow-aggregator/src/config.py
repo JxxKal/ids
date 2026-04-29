@@ -5,7 +5,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class Config:
     kafka_brokers: str
-    postgres_dsn: str
+    postgres_dsn: str | None     # leer = nur Kafka, kein DB-Insert (Tap-Mode)
     flow_timeout_s: int       # Inaktivitäts-Timeout: Flow endet nach X Sekunden ohne Pakete
     flow_max_duration_s: int  # Maximale Flow-Dauer unabhängig von Aktivität
     flush_interval_s: float   # Wie oft abgelaufene Flows geprüft werden
@@ -14,9 +14,10 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        postgres_dsn = os.environ.get("POSTGRES_DSN")
-        if not postgres_dsn:
-            raise RuntimeError("POSTGRES_DSN ist nicht gesetzt")
+        # POSTGRES_DSN ist im Master-Mode pflicht (flows-Hypertable wird
+        # geschrieben), im Tap-Mode jedoch leer – dann läuft der Aggregator
+        # nur als Kafka-Publisher, ohne DB-Anbindung.
+        postgres_dsn = os.environ.get("POSTGRES_DSN") or None
 
         return cls(
             kafka_brokers=os.environ.get("KAFKA_BROKERS", "localhost:9092"),

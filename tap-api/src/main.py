@@ -172,12 +172,29 @@ async def api_pair(body: PairBody) -> JSONResponse:
     #    bekäme zwar das Token, aber der Master bekommt sofort die CSR
     #    und legt einen Tap an – der echte Tap würde beim eigenen Pair-
     #    Versuch ein 'Token bereits verwendet'-409 sehen und Alarm schlagen.
-    url = body.master_url.rstrip("/") + "/api/taps/pair"
-    try:
-        async with httpx.AsyncClient(timeout=30.0, verify=body.verify_ssl) as client:
-            resp = await client.post(url, json={"token": body.token, "csr_pem": csr_pem})
-    except httpx.HTTPError as exc:
-        raise HTTPException(502, f"Master nicht erreichbar: {exc}")
+    #
+    # Fallback-Logik: Wenn die übergebene URL https:// ist und der Master
+    # in Wirklichkeit HTTP serviert (typisches LAN-Setup ohne TLS), kommt
+    # ein TLS-Handshake-Error. Wir versuchen dann automatisch http://.
+    base = body.master_url.rstrip("/")
+    candidates = [base]
+    if base.startswith("https://"):
+        candidates.append("http://" + base[len("https://"):])
+
+    last_exc: Exception | None = None
+    resp = None
+    for cand in candidates:
+        url = cand + "/api/taps/pair"
+        try:
+            async with httpx.AsyncClient(timeout=30.0, verify=body.verify_ssl) as client:
+                resp = await client.post(url, json={"token": body.token, "csr_pem": csr_pem})
+            break
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            log.warning("Master-Pair-Call gegen %s fehlgeschlagen: %s", cand, exc)
+            continue
+    if resp is None:
+        raise HTTPException(502, f"Master nicht erreichbar (alle Schemes): {last_exc}")
     if resp.status_code != 200:
         raise HTTPException(resp.status_code, f"Master abgewiesen: {resp.text[:200]}")
     data = resp.json()
