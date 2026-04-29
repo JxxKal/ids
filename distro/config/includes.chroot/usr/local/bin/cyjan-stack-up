@@ -8,25 +8,20 @@
 # Hard-Power-Off Container manchmal von ihrem Compose-Netzwerk ab.
 #
 # Diese Unit wird beim Boot einmal aufgerufen und bringt den Compose-Stack auf
-# den in /etc/cyjan/profile hinterlegten Soll-Zustand. Idempotent: bereits
-# laufende Container bleiben unangetastet.
+# den in /etc/cyjan/mode + /etc/cyjan/profile hinterlegten Soll-Zustand.
+# Idempotent: bereits laufende Container bleiben unangetastet.
+#
+# /etc/cyjan/mode (optional, Default 'master')
+#     master  → docker-compose.yml mit --profile aus /etc/cyjan/profile
+#     tap     → docker-compose.tap.yml (kein --profile, schmaler Stack)
 set -eu
 
 IDS_DIR="/opt/ids"
+MODE_FILE="/etc/cyjan/mode"
 PROFILE_FILE="/etc/cyjan/profile"
 
-# /etc/cyjan/profile enthält ein Komma-getrenntes Profil-Set, z.B. "prod" oder
-# "prod,snort". Compose interpretiert "a,b" als EINEN Profilnamen, deshalb
-# müssen wir pro Profil ein eigenes --profile-Flag setzen.
-PROFILE_RAW="$(cat "$PROFILE_FILE" 2>/dev/null || echo prod)"
-
-set --
-old_ifs="${IFS-}"
-IFS=','
-for p in $PROFILE_RAW; do
-  [ -n "$p" ] && set -- "$@" --profile "$p"
-done
-IFS="$old_ifs"
+MODE="$(cat "$MODE_FILE" 2>/dev/null | tr -d '[:space:]')"
+[ -z "$MODE" ] && MODE="master"
 
 if [ ! -d "$IDS_DIR" ]; then
   echo "cyjan-stack-up: $IDS_DIR existiert nicht – Stack-Init übersprungen." >&2
@@ -34,6 +29,26 @@ if [ ! -d "$IDS_DIR" ]; then
 fi
 
 cd "$IDS_DIR"
+
+case "$MODE" in
+  tap)
+    COMPOSE_ARGS="-f docker-compose.tap.yml"
+    CONTAINER_PREFIX="cyjan-tap-"
+    set -- $COMPOSE_ARGS
+    ;;
+  master|*)
+    COMPOSE_ARGS=""
+    CONTAINER_PREFIX="ids-"
+    PROFILE_RAW="$(cat "$PROFILE_FILE" 2>/dev/null || echo prod)"
+    set --
+    old_ifs="${IFS-}"
+    IFS=','
+    for p in $PROFILE_RAW; do
+      [ -n "$p" ] && set -- "$@" --profile "$p"
+    done
+    IFS="$old_ifs"
+    ;;
+esac
 
 # Hard-Power-Off-Detektion: Wir hatten zweimal die Situation, dass nach einem
 # unsauberen Reboot einzelne Container in den Daemon zurückkamen, dabei aber
@@ -49,7 +64,7 @@ cd "$IDS_DIR"
 # leichten up -d.
 WEDGED=0
 for svc in $(docker compose "$@" ps --services 2>/dev/null); do
-  cname="ids-${svc}"
+  cname="${CONTAINER_PREFIX}${svc}"
   if ! docker container inspect "$cname" >/dev/null 2>&1; then
     continue                                          # Service noch nie gestartet
   fi
@@ -62,9 +77,9 @@ for svc in $(docker compose "$@" ps --services 2>/dev/null); do
 done
 
 if [ "$WEDGED" = "1" ]; then
-  echo "cyjan-stack-up: docker compose $* up -d --force-recreate (Recovery)"
+  echo "cyjan-stack-up: docker compose $* up -d --force-recreate (Recovery, mode=$MODE)"
   exec docker compose "$@" up -d --force-recreate
 fi
 
-echo "cyjan-stack-up: docker compose $* up -d (aus $IDS_DIR)"
+echo "cyjan-stack-up: docker compose $* up -d (aus $IDS_DIR, mode=$MODE)"
 exec docker compose "$@" up -d
