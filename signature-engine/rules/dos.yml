@@ -17,6 +17,7 @@
       min: 50
       max: 1000000
       label: "Mindestanzahl SYN-Pakete im Fenster"
+      metric: syn_count
     window_s:
       type: int
       default: 10
@@ -40,6 +41,7 @@
       min: 20
       max: 1000000
       label: "Mindestanzahl Flows im Fenster"
+      metric: flow_rate
     window_s:
       type: int
       default: 30
@@ -62,6 +64,7 @@
       min: 100
       max: 10000000
       label: "Mindest-Paketrate (Pakete/Sekunde)"
+      metric: pps
   condition: |
     flow.get('proto') == 'UDP'
     and flow.get('pps', 0) > params.pps
@@ -79,6 +82,7 @@
       min: 50
       max: 10000000
       label: "Mindest-Paketrate (Pakete/Sekunde)"
+      metric: pps
   condition: |
     flow.get('proto') == 'ICMP'
     and flow.get('pps', 0) > params.pps

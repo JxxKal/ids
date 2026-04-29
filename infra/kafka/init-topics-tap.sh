@@ -21,5 +21,9 @@ create() {
 create raw-packets   2
 create flows         2
 create alerts-raw    1
+# Phase-2 Shadow-Metrik: signature-engine schreibt rein, tap-uplink konsumiert
+# und forwarded zum Master. Lokal ohne Konsument läuft das Topic auf bis zur
+# 24h-Retention voll — kein Issue, Volumen klein durch Sampling.
+create rule-metrics  1
 
 echo "[init-topics-tap] fertig"

@@ -16,6 +16,7 @@
       min: 5
       max: 1000000
       label: "Mindestanzahl Half-Open-Flows im Fenster"
+      metric: flow_rate
     window_s:
       type: int
       default: 60
@@ -40,6 +41,7 @@
       min: 3
       max: 100000
       label: "Mindestanzahl unterschiedlicher Ziel-IPs"
+      metric: unique_dst_ips
     window_s:
       type: int
       default: 30
@@ -65,6 +67,7 @@
       min: 10
       max: 1000000
       label: "Mindestanzahl RST-Flows im Fenster"
+      metric: flow_rate
     window_s:
       type: int
       default: 60

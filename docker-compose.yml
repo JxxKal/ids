@@ -220,6 +220,13 @@ services:
       KAFKA_BROKERS: kafka:9092
       RULES_DIR: /rules
       TEST_MODE: ${TEST_MODE:-false}
+      # Phase-2 Shadow-Metrik. Sampling-Rate auf 0 setzen → Topic bleibt
+      # leer (z.B. während Bring-up oder bei Backpressure). Default 1 %
+      # ist konservativ; in der Trainingsphase kann man via .env auf 0.05
+      # oder höher gehen, um schneller Reservoir-Sample-Counts zu erreichen.
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_TOPIC:  ${METRICS_TOPIC:-rule-metrics}
+      METRICS_SAMPLING_RATE: ${METRICS_SAMPLING_RATE:-0.01}
 
   ml-engine:
     build: ./ml-engine
@@ -401,6 +408,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       ALERTS_TOPIC: alerts-raw
+      METRICS_TOPIC: rule-metrics
       POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
       MASTER_CA_DIR: /var/lib/cyjan/master-ca
       UPLINK_HOST: 0.0.0.0

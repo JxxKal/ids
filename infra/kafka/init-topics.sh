@@ -72,6 +72,13 @@ create_topic() {
 # test-commands     API → Traffic-Generator (nur Test-Mode)
 #                   1 Partition
 #                   Retention 1h
+#
+# rule-metrics      Signature-Engine (+ via tap-uplink) → Rule-Tuner (Phase 4)
+#                   1 Partition: sequenzielle Verarbeitung pro Rule/Param
+#                   Retention 7 Tage: deckt 10d-Trainings-Maximum nicht voll
+#                   ab, aber der Tuner samplet in-memory + persistiert
+#                   Reservoir alle 60s nach `rule_baselines` — Replay aus
+#                   Topic ist nur für Debug-/Backfill-Sonderfälle.
 # ──────────────────────────────────────────────────────────────────────────────
 
 create_topic "raw-packets"          4   600000    "--config max.message.bytes=1048576"
@@ -82,6 +89,7 @@ create_topic "alerts-enriched"      2   604800000
 create_topic "alerts-enriched-push" 1   3600000
 create_topic "feedback"             1   2592000000
 create_topic "test-commands"        1   3600000
+create_topic "rule-metrics"         1   604800000
 
 echo ""
 echo "[kafka-init] Alle Topics angelegt:"

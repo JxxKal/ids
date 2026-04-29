@@ -186,6 +186,10 @@ async def _sync(pool: asyncpg.Pool) -> None:
                         nets_err += 1
 
             _log(f"  Netzwerke: {nets_ok} upserted, {nets_err} Fehler.")
+            if nets_ok:
+                # signature-engine via _known_networks.json informieren
+                from sig_sync import sync_known_networks_file
+                await sync_known_networks_file(pool)
 
             # ── CI-Klassen → host_info ────────────────────────────────────────
             for cls, fields in _CI_CLASSES.items():

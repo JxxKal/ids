@@ -4,12 +4,22 @@ Signature Engine – wertet Regeln gegen eingehende Flows aus.
 Neuerungen:
 - Cooldown pro (rule_id, src_ip): verhindert Alert-Flooding
 - Dynamische Beschreibung: zeigt zur Laufzeit gemessene Werte (Ports, Flows, …)
+- Flow-kontextabhängiger Param-Resolver: liest `value_internal` statt `value`,
+  wenn der Quell-Host in einem `known_networks`-CIDR liegt. Fehlt der Split
+  (kein `value_internal` gesetzt oder leeres known_networks-File), wird
+  überall der globale `value` benutzt → kein Verhaltensunterschied zur Ära
+  vor Phase 1.
+- Phase 2 Shadow-Metrik: `compute_metrics(flow)` liefert pro `(rule, param)`
+  mit `metric:`-Deklaration im YAML einen Telemetry-Eintrag. Wert wird mit
+  den aktuellen effektiven Params (scope-aware) berechnet — auch wenn die
+  Rule-Condition nicht feuert. Aufrufer (main.py) entscheidet via Sampling
+  ob/wie oft tatsächlich emittiert wird.
 """
 from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import Any, Callable
 
 from context import RuleContext
 from loader import Rule, RuleLoader
@@ -25,6 +35,78 @@ _SAFE_BUILTINS: dict[str, Any] = {
     "True": True, "False": False, "None": None,
 }
 _EVAL_GLOBALS: dict[str, Any] = {"__builtins__": _SAFE_BUILTINS}
+
+
+# ── Metric-Funktions-Registry (Phase 2 Shadow-Metrik-Pipeline) ────────────────
+#
+# Jeder symbolische `metric:`-Name aus dem Rule-YAML wird hier auf eine
+# Berechnungs-Funktion gemappt. Signatur:
+#     metric_fn(ctx, flow, params) -> int | float
+# wobei `params` ein _FlowParams-Resolver ist (siehe unten) – damit fenster-
+# basierte Metriken den aktuellen `window_s`-Wert der Rule benutzen, inkl.
+# scope-aware Override (`value_internal` vs `value`).
+#
+# Erweiterung: einfach hier eine neue Funktion hinzufügen und im YAML
+# `metric: <name>` setzen. Kein Schema-Migrationsbedarf.
+
+def _metric_unique_dst_ports(ctx: "RuleContext", flow: dict, params: "_FlowParams") -> int:
+    return ctx.unique_dst_ports(flow.get("src_ip", "") or "", params.window_s)
+
+
+def _metric_unique_dst_ips(ctx: "RuleContext", flow: dict, params: "_FlowParams") -> int:
+    return ctx.unique_dst_ips(flow.get("src_ip", "") or "", params.window_s)
+
+
+def _metric_flow_rate(ctx: "RuleContext", flow: dict, params: "_FlowParams") -> int:
+    return ctx.flow_rate(flow.get("src_ip", "") or "", params.window_s)
+
+
+def _metric_syn_count(ctx: "RuleContext", flow: dict, params: "_FlowParams") -> int:
+    return ctx.syn_count(flow.get("src_ip", "") or "", params.window_s)
+
+
+def _metric_pps(ctx: "RuleContext", flow: dict, params: "_FlowParams") -> float:
+    # Flow-intrinsisch — kein Window. Float-fähig (flow-aggregator schreibt
+    # round(.., 2)).
+    return float(flow.get("pps", 0) or 0)
+
+
+METRIC_FUNCS: dict[str, Callable[["RuleContext", dict, "_FlowParams"], Any]] = {
+    "unique_dst_ports": _metric_unique_dst_ports,
+    "unique_dst_ips":   _metric_unique_dst_ips,
+    "flow_rate":        _metric_flow_rate,
+    "syn_count":        _metric_syn_count,
+    "pps":              _metric_pps,
+}
+
+
+class _FlowParams:
+    """Pro-Flow Param-Resolver. Lazy-Lookup gegen rule.parameters mit Auswahl
+    von `value_internal` vs. `value` anhand `is_internal`.
+
+    Beispiel: `params.port_count` in einer Rule-Condition.
+
+    Attribut-Zugriff für unbekannte Param-Namen liefert AttributeError –
+    damit fällt die Rule-Auswertung in eval() in den except-Pfad und der
+    Alert wird nicht gefeuert (Vorhandensein des Attributs heißt: Rule
+    deklariert den Param). Der Loader stellt sicher, dass alle in der
+    Condition referenzierten Params auch im Schema deklariert sind.
+    """
+
+    __slots__ = ("_params", "_is_internal")
+
+    def __init__(self, params: dict[str, dict], is_internal: bool) -> None:
+        self._params = params
+        self._is_internal = is_internal
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            entry = self._params[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+        if self._is_internal and entry.get("value_internal") is not None:
+            return entry["value_internal"]
+        return entry["value"]
 
 
 class SignatureEngine:
@@ -49,12 +131,24 @@ class SignatureEngine:
         flat = {**flow, **flow.get("stats", {})}
         self._ctx.record(flat)
 
+        # Internal/external einmal pro Flow bestimmen — alle Rules sehen das
+        # gleiche Ergebnis. is_internal() ist ein O(N)-Scan über die CIDRs,
+        # ohne Cache leicht hot bei N Rules × M Flows; daher nur 1× pro Flow.
+        src_ip = flat.get("src_ip") or ""
+        is_internal = self._loader.is_internal(src_ip)
+        # Für downstream-Konsumenten (Phase 2 ML-Tuner) optional schon mal
+        # ins flow-Dict mergen — Alerts werden ohnehin neu gebaut.
+        flat.setdefault("src_internal", is_internal)
+
         now        = time.time()
         alerts     = []
-        local_vars = {"flow": flat, "ctx": self._ctx, "params": None}
 
         for rule in self._loader.rules:
-            local_vars["params"] = rule.params_ns
+            local_vars = {
+                "flow": flat,
+                "ctx": self._ctx,
+                "params": _FlowParams(rule.parameters, is_internal),
+            }
             try:
                 match = eval(rule.condition_code, _EVAL_GLOBALS, local_vars)  # noqa: S307
             except Exception as exc:
@@ -65,8 +159,7 @@ class SignatureEngine:
                 continue
 
             # ── Cooldown-Prüfung ──────────────────────────────────────────────
-            src_ip = flat.get("src_ip") or ""
-            key    = (rule.id, src_ip)
+            key = (rule.id, src_ip)
             if now - self._cooldowns.get(key, 0.0) < rule.cooldown_s:
                 continue   # zu kurz nach dem letzten Alert dieser Regel+IP
 
@@ -74,6 +167,64 @@ class SignatureEngine:
             alerts.append(_make_alert(rule, flat, self._ctx))
 
         return alerts
+
+    def compute_metrics(self, flow: dict) -> list[dict]:
+        """Phase-2 Shadow-Metrik: für jeden Param mit `metric:`-Deklaration
+        einen Telemetry-Eintrag berechnen.
+
+        Schema des Rückgabe-Eintrags (matched Topic `rule-metrics`):
+          {rule_id, param_name, metric_value, src_ip, scope, ts}
+
+        Wichtig:
+          - Wir berechnen *unabhängig* davon, ob die Rule-Condition gefeuert
+            hätte (sonst Bias: man sähe nur Werte oberhalb des Schwellwerts).
+          - Wir nutzen dieselbe `_FlowParams`-Resolution wie bei der Auswertung,
+            damit z.B. `params.window_s` den aktiven Wert (inkl. scope-Split)
+            verwendet.
+          - Methode setzt voraus, dass evaluate() für diesen Flow bereits
+            durchgelaufen ist (oder zumindest ctx.record() — sonst ist der
+            Sliding-Window-Stand nicht aktuell). main.py ruft sie genau in der
+            Reihenfolge.
+        """
+        if not self._loader.rules:
+            return []
+        flat = {**flow, **flow.get("stats", {})}
+        src_ip = flat.get("src_ip") or ""
+        is_internal = self._loader.is_internal(src_ip)
+        scope = "internal" if is_internal else "external"
+        ts = float(flat.get("end_ts") or time.time())
+
+        out: list[dict] = []
+        for rule in self._loader.rules:
+            if not rule.parameters_schema:
+                continue
+            fparams: _FlowParams | None = None
+            for pname, schema in rule.parameters_schema.items():
+                metric_name = schema.get("metric")
+                if not metric_name:
+                    continue
+                fn = METRIC_FUNCS.get(metric_name)
+                if fn is None:
+                    log.debug("Rule %s Param %s: metric '%s' nicht in METRIC_FUNCS",
+                              rule.id, pname, metric_name)
+                    continue
+                if fparams is None:
+                    fparams = _FlowParams(rule.parameters, is_internal)
+                try:
+                    value = fn(self._ctx, flat, fparams)
+                except Exception as exc:
+                    log.debug("Metric %s for rule %s/%s failed: %s",
+                              metric_name, rule.id, pname, exc)
+                    continue
+                out.append({
+                    "rule_id":      rule.id,
+                    "param_name":   pname,
+                    "metric_value": value,
+                    "src_ip":       src_ip,
+                    "scope":        scope,
+                    "ts":           ts,
+                })
+        return out
 
 
 # ── Alert-Erstellung mit dynamischer Beschreibung ─────────────────────────────

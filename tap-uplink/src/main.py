@@ -48,6 +48,12 @@ from state      import StateWriter
 
 KAFKA_BROKERS = os.environ.get("KAFKA_BROKERS", "kafka:9092")
 ALERTS_TOPIC  = os.environ.get("ALERTS_TOPIC", "alerts-raw")
+# Phase-2 Shadow-Metrik: lokales rule-metrics-Topic; tap-uplink wrapped jeden
+# Record als {"type":"metric"}-Frame und schickt ihn über die gleiche WSS-
+# Verbindung an den Master. Topic muss am Tap existieren (init-topics-tap.sh)
+# — fehlt es, ignoriert confluent-kafka die Subscription mit warning, der
+# alerts-Pfad bleibt davon unbeeinflusst.
+METRICS_TOPIC = os.environ.get("METRICS_TOPIC", "rule-metrics")
 GROUP_ID      = os.environ.get("KAFKA_GROUP_ID", "tap-uplink")
 
 MASTER_URL    = os.environ.get("MASTER_URL", "wss://master.example.com:8443/uplink")
@@ -140,16 +146,25 @@ def _get_ssl_context() -> ssl.SSLContext:
 
 
 def _kafka_consumer_thread(diskq: DiskQueue, stop: threading.Event) -> None:
-    """Liest alerts-raw und pusht jeden Alert in die DiskQueue. Läuft in
-    einem dedizierten Thread, weil confluent-kafka synchron ist."""
+    """Liest alerts-raw + rule-metrics und pusht jede Message in die DiskQueue.
+    Frame-Type wird anhand des Quell-Topics gesetzt (alert vs. metric). Läuft
+    in einem dedizierten Thread, weil confluent-kafka synchron ist.
+
+    Outage-Verhalten: Beide Streams nutzen denselben Disk-Buffer + denselben
+    1-GB-Cap. Bei langem Master-Outage verdrängen die volumen-stärkeren
+    Records (= Metriken bei aktivem Sampling) ggf. ältere Alerts. Das ist
+    bewusst so: Alerts sind selten und werden auch ohne Tuning vom alert-
+    manager normal geschluckt sobald reconnected; Metrik-Backlog wird
+    schwerer kompensierbar je länger der Outage ist."""
+    topics = [ALERTS_TOPIC, METRICS_TOPIC]
     consumer = Consumer({
         "bootstrap.servers": KAFKA_BROKERS,
         "group.id": GROUP_ID,
         "auto.offset.reset": "latest",
         "enable.auto.commit": True,
     })
-    consumer.subscribe([ALERTS_TOPIC])
-    log.info("Kafka-Consumer subscribed: %s @ %s", ALERTS_TOPIC, KAFKA_BROKERS)
+    consumer.subscribe(topics)
+    log.info("Kafka-Consumer subscribed: %s @ %s", topics, KAFKA_BROKERS)
 
     try:
         while not stop.is_set():
@@ -164,16 +179,27 @@ def _kafka_consumer_thread(diskq: DiskQueue, stop: threading.Event) -> None:
             payload = msg.value()
             if not payload:
                 continue
+            # Frame-Format: {"type":"alert"|"metric","payload":<original-dict>}
+            # Type ergibt sich aus dem Quell-Topic. Klein-Wrapping erlaubt es,
+            # zukünftige Telemetrie-Streams (Heartbeats, Health-Snapshots)
+            # über denselben WSS-Frame-Strom zu schicken ohne neues Schema.
+            topic = msg.topic()
+            if topic == ALERTS_TOPIC:
+                ftype = "alert"
+            elif topic == METRICS_TOPIC:
+                ftype = "metric"
+            else:
+                # Unwahrscheinlich (subscribe nur auf zwei Topics), aber
+                # Topic-Auto-Routing in confluent-kafka kann Wildcards öffnen –
+                # lieber explizit drop statt mit unbekanntem Type rauspushen.
+                log.debug("Unbekanntes Topic %s übersprungen", topic)
+                continue
             try:
-                # Frame-Format: {"type":"alert","payload":<original-alert-dict>}
-                # Die Klein-Wrapping-Schicht kostet ein paar Bytes, vereinfacht
-                # aber den Master-Endpoint, weil Kontroll-Frames (ping/pong/
-                # später cmd/ack) das gleiche Schema benutzen können.
-                alert = orjson.loads(payload)
-                frame = orjson.dumps({"type": "alert", "payload": alert})
+                payload_obj = orjson.loads(payload)
+                frame = orjson.dumps({"type": ftype, "payload": payload_obj})
                 diskq.push(frame)
             except Exception as exc:
-                log.error("Push in Queue fehlgeschlagen: %s", exc)
+                log.error("Push in Queue fehlgeschlagen (%s): %s", ftype, exc)
     finally:
         consumer.close()
         log.info("Kafka-Consumer beendet")
@@ -361,6 +387,12 @@ def _apply_config_bundle(bundle: dict) -> tuple[int, int]:
     sov = bundle.get("suricata_overrides")
     if sov is not None:
         _atomic_write(custom_dir / "_suricata_overrides.json", orjson.dumps(sov))
+        side_files += 1
+    kn = bundle.get("known_networks")
+    if kn is not None:
+        # Wird vom signature-engine-Loader für den internal/external
+        # Param-Split (Phase-1-ML-Tuner-Vorbereitung) konsumiert.
+        _atomic_write(custom_dir / "_known_networks.json", orjson.dumps(kn))
         side_files += 1
     dns = bundle.get("dns_resolvers")
     if dns is not None:

@@ -188,6 +188,15 @@ async def startup() -> None:
     # Root beim ersten Start; danach idempotent.
     master_ca.init(cfg.master_ca_dir)
 
+    # _known_networks.json initial ins sig-rules-Volume schreiben, damit die
+    # signature-engine den CIDR-Cache für den internal/external-Param-Split
+    # bekommt — ohne dass zuerst ein Network-CRUD getriggert werden muss.
+    try:
+        from sig_sync import sync_known_networks_file
+        await sync_known_networks_file(get_pool())
+    except Exception as exc:
+        log.warning("known_networks-Sync beim Startup fehlgeschlagen: %s", exc)
+
     # WebSocket-Broadcast-Task
     asyncio.create_task(_broadcast_loop())
 

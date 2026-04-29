@@ -17,6 +17,7 @@ Umgebungsvariablen (siehe config.py):
 from __future__ import annotations
 
 import logging
+import random
 import signal
 import sys
 import time
@@ -63,6 +64,14 @@ def _delivery_cb(err, msg):
         log.error("Alert delivery failed: %s", err)
 
 
+def _metrics_delivery_cb(err, _msg):
+    # Metrik-Verluste sind unkritisch (Shadow-Pipeline, kein Alert-Pfad) –
+    # debug statt error, damit eine Producer-Backpressure-Phase die Logs
+    # nicht flutet.
+    if err:
+        log.debug("Rule-metric delivery failed: %s", err)
+
+
 def run(cfg: Config) -> None:
     engine = SignatureEngine(cfg.rules_dir)
     engine.setup()
@@ -73,6 +82,16 @@ def run(cfg: Config) -> None:
 
     consumer.subscribe([FLOWS_TOPIC])
     log.info("Subscribed to topic '%s'", FLOWS_TOPIC)
+
+    if cfg.metrics_enabled and cfg.metrics_sampling_rate > 0.0:
+        log.info(
+            "Shadow-Metrik aktiv: topic=%s sampling=%.4f (≈ 1 von %d Flows)",
+            cfg.metrics_topic,
+            cfg.metrics_sampling_rate,
+            int(round(1.0 / cfg.metrics_sampling_rate)) if cfg.metrics_sampling_rate else 0,
+        )
+    else:
+        log.info("Shadow-Metrik aus (METRICS_ENABLED=false oder rate=0)")
 
     last_reload = time.monotonic()
     running = True
@@ -85,8 +104,9 @@ def run(cfg: Config) -> None:
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT,  _stop)
 
-    total_flows  = 0
-    total_alerts = 0
+    total_flows   = 0
+    total_alerts  = 0
+    total_metrics = 0
 
     try:
         while running:
@@ -141,15 +161,45 @@ def run(cfg: Config) -> None:
                     callback=_delivery_cb,
                 )
 
-            # Flush periodisch (bei jedem Flow mit Alerts sofort)
-            if alerts:
+            # Phase-2 Shadow-Metrik: Bernoulli-Sampling pro Flow. Wenn drin,
+            # alle metric-deklarierten Params dieses Flows als Bündel emittieren.
+            # Per-Flow-Sample (statt per-Param) hält die Werte für einen Flow
+            # zeitlich konsistent — der Tuner kann beim Korrelieren mit Alerts
+            # auf einen Snapshot zugreifen.
+            metrics_emitted = 0
+            if (
+                cfg.metrics_enabled
+                and cfg.metrics_sampling_rate > 0.0
+                and (cfg.metrics_sampling_rate >= 1.0
+                     or random.random() < cfg.metrics_sampling_rate)
+            ):
+                try:
+                    metrics = engine.compute_metrics(flow)
+                except Exception as exc:
+                    log.debug("compute_metrics failed: %s", exc)
+                    metrics = []
+                for m in metrics:
+                    producer.produce(
+                        cfg.metrics_topic,
+                        # Key: rule_id|param_name → gleiche Partition für gleiche
+                        # Metrik, damit der Tuner-Consumer ordering pro Stream hat.
+                        key=f"{m['rule_id']}|{m['param_name']}".encode(),
+                        value=orjson.dumps(m),
+                        callback=_metrics_delivery_cb,
+                    )
+                    metrics_emitted += 1
+                total_metrics += metrics_emitted
+
+            # Flush periodisch (bei jedem Flow mit Alerts oder Metriken sofort)
+            if alerts or metrics_emitted:
                 producer.poll(0)
 
     finally:
         log.info(
-            "Shutting down – flows processed: %d, alerts generated: %d",
+            "Shutting down – flows processed: %d, alerts generated: %d, metrics emitted: %d",
             total_flows,
             total_alerts,
+            total_metrics,
         )
         producer.flush(timeout=10)
         consumer.close()
@@ -158,10 +208,12 @@ def run(cfg: Config) -> None:
 def main() -> None:
     cfg = Config.from_env()
     log.info(
-        "Starting signature-engine | brokers=%s rules_dir=%s test_mode=%s",
+        "Starting signature-engine | brokers=%s rules_dir=%s test_mode=%s metrics=%s rate=%s",
         cfg.kafka_brokers,
         cfg.rules_dir,
         cfg.test_mode,
+        cfg.metrics_enabled,
+        cfg.metrics_sampling_rate,
     )
     try:
         run(cfg)

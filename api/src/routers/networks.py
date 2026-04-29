@@ -9,6 +9,7 @@ from fastapi.responses import Response
 
 from database import get_pool
 from models import NetworkCreate, NetworkResponse, NetworkUpdate
+from sig_sync import sync_known_networks_file
 
 router = APIRouter(prefix="/api/networks", tags=["networks"])
 
@@ -50,6 +51,7 @@ async def create_network(
         raise HTTPException(status_code=409, detail="CIDR already exists")
     except asyncpg.InvalidTextRepresentationError:
         raise HTTPException(status_code=422, detail="Invalid CIDR notation")
+    await sync_known_networks_file(pool)
     return NetworkResponse(
         id=row["id"],
         cidr=str(row["cidr"]),
@@ -168,6 +170,8 @@ async def import_networks_csv(
             except Exception as exc:
                 errors.append(f"Zeile {lineno} ({cidr}): {exc}")
 
+    if imported:
+        await sync_known_networks_file(pool)
     return {"imported": imported, "skipped": skipped, "errors": errors[:20]}
 
 
@@ -196,6 +200,10 @@ async def update_network(
             """,
             network_id, new_name, new_desc, new_color,
         )
+    # Name/Beschreibung-Updates ändern den CIDR-Set nicht, aber wir syncen
+    # trotzdem — Inhalt-Identität-Check in sync_known_networks_file verhindert
+    # unnötige Rewrites.
+    await sync_known_networks_file(pool)
     return NetworkResponse(
         id=row["id"],
         cidr=str(row["cidr"]),
@@ -216,3 +224,4 @@ async def delete_network(
         )
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Network not found")
+    await sync_known_networks_file(pool)

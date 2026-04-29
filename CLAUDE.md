@@ -240,3 +240,120 @@ Die YAML-Rules in `signature-engine/rules/*.yml` deklarieren Schwellwerte als be
 - **Kein Restart nötig**: signature-engine erkennt mtime-Änderungen am File und lädt innerhalb weniger Sekunden neu.
 
 **Empfehlung**: Bei Heuristik-Floods *Schwellwert hochdrehen* statt Severity runterstufen — letzteres maskiert auch echte Treffer, ersteres unterdrückt nur die Ursache (Normal-Traffic, der den alten Default überschreitet).
+
+## Geplant: ML-Schwellwert-Tuner (rule-tuner)
+
+**Status: in Planung (2026-04-29). Code existiert noch nicht.** Ziel ist ein neuer Service, der das Normalverhalten des Netzes über einen Trainingszeitraum (2h Test / 10d Prod, einstellbar) lernt und danach die `parameters:`-Schwellwerte der Heuristik-Rules selbstständig pflegt — sichtbar als provenance-getaggte Einträge im existierenden `_overrides.json`, manuell weiterhin überschreibbar.
+
+### Designentscheidungen (mit User abgestimmt)
+
+- **Verfahren**: Shadow-Evaluation. signature-engine emittiert pro Rule-Auswertung den **Metrik-Wert** (z.B. `unique_dst_ports`) ins neue Kafka-Topic `rule-metrics` — Verteilung lernen, nicht Alerts zählen.
+- **Schwellwert-Wahl**: Quantile (Default P99,5) der beobachteten Metrik + Sicherheitsmarge, geclamped auf `min`/`max` des Rule-Schemas.
+- **FP/TP-Constraints**: optional, **kein Verlass darauf** (User markiert in der Praxis nicht zuverlässig). Nur wenn ≥3 vorhandene Markierungen pro Rule: TPs setzen Obergrenze (`threshold ≤ min(metric_at_tp)`), FPs setzen Untergrenze (`threshold ≥ max(metric_at_fp) + 1`). Bei Konflikt: alten Wert behalten + Warnung loggen.
+- **Während Trainings: Heuristiken feuern weiter** mit Default-Schwellwerten — sonst rutschen echte Angriffe im Lernfenster durch.
+- **Scope: global an/aus** (keine Pro-Rule-Opt-ins). Plus konfigurierbare **Blacklist** für Rules, die bewusst pessimistisch hart bleiben sollen (z.B. DOS-Hochlast).
+- **`known_networks`-Split ist eigenständiges Feature**: pro Param wird zusätzlich zum Default-Wert (`value`, gilt für externe Quellen) optional ein `value_internal` für interne Quellen geführt. signature-engine wählt zur Auswertung anhand `flow.src_ip ∈ known_networks` den passenden Wert. UI macht den Split sichtbar.
+- **Manueller Lock**: jeder Param hat `source: "manual" | "ml"`. Sobald User manuell editiert → `source=manual`, rule-tuner fasst diesen Param nicht mehr an, bis User in der UI explizit "ML wieder übernehmen" klickt.
+- **Continuous-Loop-Cadence**: alle 6h, max ±20 % Threshold-Bewegung pro Cycle.
+- **Architektur**: rule-tuner läuft **nur am Master**, schreibt Overrides via `PUT /api/sig-rules/overrides` (nicht direkt am File — sonst race mit GUI). Verteilung an Taps läuft über existierenden Reverse-Channel.
+
+### Override-Schema (erweitert, abwärtskompatibel)
+
+Loader und API-Serializer akzeptieren beide Formen:
+
+```jsonc
+// Alte Form (manuell, weiter unterstützt)
+"SCAN_001": { "parameters": { "port_count": 200 }, "enabled": true }
+
+// Neue strukturierte Form (ML oder manuell mit Provenance)
+"SCAN_001": {
+  "parameters": {
+    "port_count": {
+      "value": 35,             // gilt für externe Quellen (oder global, wenn split aus)
+      "value_internal": 187,   // optional, nur wenn known_networks-Split aktiv
+      "source": "ml",          // "ml" | "manual"
+      "ml": {
+        "trained_at": "2026-05-02T08:00:00Z",
+        "p995_external": 28, "p995_internal": 152,
+        "sample_count": 42130,
+        "fp_seen": 0, "tp_seen": 0,
+        "last_update": "2026-05-08T14:00:00Z"
+      }
+    },
+    "window_s": { "value": 60, "source": "manual" }
+  },
+  "enabled": true, "severity": null
+}
+```
+
+### Phasenplan
+
+**Phase 1 — Schema-Erweiterung (signature-engine + api) — ✅ erledigt 2026-04-29**
+- ✅ Override-Loader (`signature-engine/src/loader.py`): Param-Wert kann jetzt Objekt mit `value`/`value_internal`/`source`/`ml` sein, Skalar-Form bleibt vollständig akzeptiert. Neuer Helper `is_internal(ip)` mit CIDR-Cache aus `_known_networks.json` (vorgeparst als `ipaddress.ip_network`).
+- ✅ Engine (`signature-engine/src/engine.py`): `_FlowParams`-Resolver pro Flow — wählt `value_internal`, wenn `flow.src_ip` in `known_networks` und `value_internal` im Override gesetzt ist; sonst Fallback auf `value`. `flat["src_internal"]` wird in den Flow gemerged für Phase-2-Telemetrie.
+- ✅ Rules-Schema: optionales `metric:`-Feld pro Parameter im YAML wird vom Loader gelesen und in `parameters_schema` durchgereicht. Bisher noch nicht in `*.yml` deklariert — kommt mit Phase 2 (Shadow-Pipeline) rein. Rules ohne `metric:` bleiben nicht ML-tunbar.
+- ✅ API (`api/src/routers/sig_rules.py`): neue Pydantic-Modelle `SigRuleParamOverride` (Object-Form) + Erweiterung von `SigRuleEntry.parameters_full`. GET liefert Skalar wo trivial, Object sonst — beide nebeneinander. PUT akzeptiert pro Param `float | SigRuleParamOverride`. Persistenz: kompakter Skalar wenn keine Provenance, sonst Object-Form.
+- ✅ known_networks-Sync (`api/src/sig_sync.py`, `api/src/main.py`, `api/src/routers/networks.py`, `api/src/routers/itop.py`): CIDR-Liste wird beim Startup + nach jedem Network-CRUD + nach iTop-Subnet-Import als `_known_networks.json` ins sig-rules-Volume geschrieben (atomic write, content-identity-skip). signature-engine zieht via mtime-Watch nach.
+- ✅ Reverse-Channel (`master-uplink/src/main.py`, `tap-uplink/src/main.py`): Bundle (Schema-Version "1") trägt jetzt zusätzlich `known_networks`. Tap-uplink schreibt es als `_known_networks.json` ins lokale custom/-Subdir.
+- ✅ Smoketest verifiziert: Skalar-Override, Object-Override mit `value_internal` + Provenance, CIDR-Match (v4 + cross-family), Resolver-Fallback wenn `value_internal` fehlt, Clamping gegen Schema-min/max, defektes Override wird ignoriert (Default bleibt).
+
+**Deploy nach Phase 1**: alle vier Services rebuilden — `api`, `signature-engine`, `master-uplink`, `tap-uplink` (`docker compose --profile prod build api signature-engine master-uplink && up -d`; auf dem Tap `docker compose -f docker-compose.tap.yml build signature-engine tap-uplink && up -d`).
+
+**Beobachten**: `_overrides.json` wird beim ersten PUT nach Phase 1 neu geschrieben — Skalare bleiben kompakt, neue Object-Form-Einträge erscheinen nur wenn rule-tuner (Phase 4) oder UI mit Provenance/internal_value einen Wert setzt.
+
+**Phase 2 — Shadow-Metrik-Pipeline — ✅ erledigt 2026-04-29**
+- ✅ YAML-Rules: `metric:`-Feld pro tunbarem Param hinzugefügt (`scan.yml`, `dos.yml`, `recon.yml`). Mapping: `port_count → unique_dst_ports`, `ip_count → unique_dst_ips`, `flow_count → flow_rate`, `syn_count → syn_count`, `pps → pps`. `window_s` bleibt absichtlich ohne `metric:` (manuell-only).
+- ✅ Engine (`signature-engine/src/engine.py`): `METRIC_FUNCS`-Registry (symbolischer Name → Callable(ctx, flow, params)) + neue Methode `compute_metrics(flow)`. Berechnet pro `(rule, param)` mit Metric-Deklaration einen Telemetrie-Eintrag — scope-aware via `_FlowParams` (interne Quelle nutzt `value_internal`/`window_s` falls gesetzt). Wird *nach* `evaluate()` gerufen, damit der Sliding-Window-Stand aktuell ist; emittiert auch wenn die Condition nicht gefeuert hat (sonst Bias).
+- ✅ Sampling (`signature-engine/src/main.py` + `config.py`): per-Flow Bernoulli-Sample mit `METRICS_SAMPLING_RATE` (default 0.01). Bei Treffer wird das ganze Metric-Bündel (1 Record pro Param) auf Topic `METRICS_TOPIC` (default `rule-metrics`) produziert. `METRICS_ENABLED=false` deaktiviert komplett. Kafka-Key `<rule_id>|<param_name>` hält pro Stream Ordering, falls das Topic später partitioniert wird.
+- ✅ Kafka-Topic-Init: `infra/kafka/init-topics.sh` (Master, 1p, 7d) + `infra/kafka/init-topics-tap.sh` (Tap, 1p, 24d über das KAFKA_LOG_RETENTION_HOURS-Default).
+- ✅ Tap-Uplink (`tap-uplink/src/main.py`): Consumer subscribed jetzt auf `alerts-raw` *und* `rule-metrics`; Frame-Type wird anhand des Quell-Topics gesetzt (`alert` vs. `metric`). Beide Streams teilen sich die DiskQueue (1 GB Outage-Cap) — Metriken können bei langem Outage ältere Records verdrängen, bewusst so (Alert-Backfill nicht kritisch fürs Tuning).
+- ✅ Master-Uplink (`master-uplink/src/main.py`): `handle_tap()` akzeptiert Frame-Type `metric` und produziert auf `METRICS_TOPIC` mit `tap_id`-Tag — Tuner kann später Master- vs. Tap-Beiträge auseinanderhalten. `pong`/`alert`-Pfade unverändert.
+- ✅ Compose: `METRICS_*`-Env-Vars in `signature-engine` (Master + Tap), `METRICS_TOPIC` zusätzlich in `master-uplink` und `tap-uplink`. Sampling-Rate via `.env` (`METRICS_SAMPLING_RATE`) zentral steuerbar — in der Trainingsphase auf 0.05–0.1 anheben für schnelleres Reservoir.
+- ✅ Smoketest verifiziert: Records erscheinen nur für metric-deklarierte Params (window_s nicht), `scope` korrekt anhand `known_networks`, `value_internal`-Override wirkt im Resolver, alle YAML-deklarierten Metric-Namen sind in `METRIC_FUNCS` registriert, Record-Schema vollständig (rule_id, param_name, metric_value, src_ip, scope, ts).
+
+**Deploy nach Phase 2**: dieselben vier Services wie Phase 1 rebuilden — `api` braucht es nicht, ist unverändert. `kafka-init` läuft beim nächsten Stack-Start automatisch und legt `rule-metrics` an; bei einem rolling-Update muss das Topic ggf. einmalig manuell erzeugt werden (`docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --topic rule-metrics --partitions 1 --replication-factor 1`).
+
+**Beobachten**: `docker compose logs signature-engine` sollte beim Start `Shadow-Metrik aktiv: topic=rule-metrics sampling=0.0100` zeigen. Topic füllt sich erst nachdem Flows reinlaufen. Mit Kafka-UI auf `http://master:8080` kann man `rule-metrics` browsen, um die Verteilung visuell zu prüfen.
+
+**Phase 3 — DB-Schema + Trainings-State**
+- Migration: `rule_baselines (rule_id, param_name, scope, p50, p99, p995, p999, sample_count, updated_at)`. Keine Hypertable, normale Tabelle.
+- Migration: `system_config`-Erweiterung: `ml_tuning_state` (`idle|training|tuning|paused`), `ml_tuning_config` JSONB (`window_s`, `target_alert_rate`, `scope_split_enabled`, `blacklist[]`).
+- Neue API-Endpoints unter `/api/sig-rules/ml/`: `GET status`, `POST start-training {window_s, …}`, `POST pause`, `POST resume`, `GET baselines` (für UI-Sparklines).
+
+**Phase 4 — rule-tuner Service**
+- Neuer Python-Service in `rule-tuner/`, nur am Master (Compose: `--profile prod`).
+- Konsumiert `rule-metrics` (Master + alle Taps), hält Reservoir-Samples in-memory pro `(rule, param, scope)`, persistiert P99,5 + Sample-Count alle 60s in `rule_baselines`.
+- Subscribed auf `feedback`-Topic + DB-Lookup, korreliert TP/FP-Markierungen mit Metrik-Werten zum Alert-Zeitpunkt (aus `alerts`-Tabelle).
+- State-Machine:
+  - `idle` → nur Sampling, keine Schreibe
+  - `training` → Sampling, kein Override-Write
+  - nach Trainingsende: einmaliger Override-Write (status → `tuning`)
+  - `tuning` → alle 6h: Quantile aus Reservoir, Constraints anwenden, ggf. Override updaten
+  - `paused` → alles steht
+- Schreibt via `PUT /api/sig-rules/overrides` mit Service-Token (langlebiges JWT, role=`api`).
+- Manuell gelockte Params werden übersprungen.
+
+**Phase 5 — Frontend-UI (Settings → Rule Adjustments)**
+- Neuer Tab "ML-Tuning":
+  - Status-Card (state, Restzeit, globaler Sample-Count)
+  - Trainings-Konfiguration: Dauer (2h/10d/custom), `target_alert_rate` (default 0,5/h pro Rule), `scope_split_enabled`-Toggle, Blacklist-Multiselect
+  - Start/Pause/Resume
+  - Verteilungs-Sparklines pro Rule aus `rule_baselines`
+- Bestehende Rule-Cards: Provenance-Badge "ML-tuned 187 (intern) / 35 (extern)", Tooltip mit ml-Metadaten, Buttons "Manuell sperren" und "ML wieder übernehmen".
+- Bei manueller Number-Input-Editierung automatisch `source=manual` setzen.
+
+**Phase 6 — Reverse-Channel + Verteilung**
+- Existierender Master-uplink `/config`-Endpoint serviert die erweiterte `_overrides.json` ohne Änderung — Tap-side signature-engine versteht das neue Schema bereits aus Phase 1.
+- WebSocket-Push nach Override-Update (`feedback_updated` analog) → Frontend re-fetcht.
+
+**Phase 7 — Validierung + Re-Evaluierung anderer ML-Modelle**
+- 24h Shadow-Run auf Dev (192.168.1.230) ohne Override-Write, Verteilungen visuell prüfen.
+- 2h-Test-Training auf Master mit Synthetic Traffic.
+- Alert-Rate vorher/nachher messen.
+- Danach separat: Verhältnis zu IsolationForest (`ml-engine`) + `training-loop` neu bewerten — der neue Tuner ist deterministisch+statistisch (ergänzt, ersetzt nicht zwingend).
+
+### Was explizit NICHT zum Scope gehört
+
+- Lernen für Rules ohne `parameters:`-Block (Xmas-Scan, NULL-Scan etc. — pure Pattern, nicht tunbar).
+- Zeitabhängige Schwellwerte (Tag/Nacht-Profile) — kann Phase 8 sein, jetzt nicht.
+- Übergreifende Korrelationen über mehrere Rules — der Tuner pflegt jeden `(rule, param, scope)` unabhängig.

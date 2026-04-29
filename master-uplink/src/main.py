@@ -42,6 +42,11 @@ LISTEN_HOST = os.environ.get("UPLINK_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.environ.get("UPLINK_PORT", "8443"))
 KAFKA_BROKERS = os.environ.get("KAFKA_BROKERS", "kafka:9092")
 ALERTS_TOPIC = os.environ.get("ALERTS_TOPIC", "alerts-raw")
+# Phase-2 Shadow-Metrik: Tap-uplink schickt `metric`-Frames neben den
+# Alerts. Wir produzieren sie 1:1 in das Master-rule-metrics-Topic, damit
+# der spätere Rule-Tuner (Phase 4) Master- und Tap-Metriken im selben
+# Reservoir aggregieren kann.
+METRICS_TOPIC = os.environ.get("METRICS_TOPIC", "rule-metrics")
 POSTGRES_DSN = os.environ.get(
     "POSTGRES_DSN",
     "postgresql://ids:ids-change-me@timescaledb:5432/ids",
@@ -206,6 +211,7 @@ def _build_bundle_sync() -> tuple[dict, bool]:
         "rules": {},
         "rules_overrides": None,
         "suricata_overrides": None,
+        "known_networks": None,
         "dns_resolvers": [],
     }
 
@@ -234,6 +240,17 @@ def _build_bundle_sync() -> tuple[dict, bool]:
             bundle["suricata_overrides"] = orjson.loads(suricata_path.read_bytes())
         except Exception as exc:
             log.warning("_suricata_overrides.json nicht parsebar: %s", exc)
+            bundle["complete"] = False
+
+    # known_networks.json (CIDR-Liste der bekannten/internen Netze) — wird
+    # vom signature-engine-Loader für den value_internal/value-Split gelesen.
+    # Quelle: API schreibt die Datei beim Network-CRUD direkt ins Volume.
+    known_path = custom_dir / "_known_networks.json"
+    if known_path.is_file():
+        try:
+            bundle["known_networks"] = orjson.loads(known_path.read_bytes())
+        except Exception as exc:
+            log.warning("_known_networks.json nicht parsebar: %s", exc)
             bundle["complete"] = False
 
     return bundle, bundle["complete"]
@@ -385,6 +402,7 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
     tap_name = info["name"]
     log.info("Tap verbunden: name=%s id=%s peer=%s", tap_name, tap_id, peer)
     alerts_received = 0
+    metrics_received = 0
 
     async def heartbeat_loop() -> None:
         try:
@@ -437,37 +455,64 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
             mtype = msg.get("type", "alert")
             if mtype == "pong":
                 continue
-            if mtype != "alert":
-                log.warning("Unbekannter Frame-Type von %s: %s", tap_name, mtype)
+            if mtype == "alert":
+                alert = msg.get("payload") or {}
+                if not isinstance(alert, dict):
+                    continue
+                alert["tap_id"] = tap_id
+                alert["source"] = alert.get("source", "signature")  # Default falls fehlt
+
+                try:
+                    producer.produce(
+                        ALERTS_TOPIC,
+                        key=(alert.get("src_ip") or tap_id).encode(),
+                        value=orjson.dumps(alert),
+                        callback=_delivery_cb,
+                    )
+                    producer.poll(0)
+                    alerts_received += 1
+                except Exception as exc:
+                    log.error("Kafka produce (alert) fehlgeschlagen: %s", exc)
+                    # Bei Kafka-Down keinen Disconnect erzwingen: der Tap-Buffer
+                    # würde sonst unnötig anwachsen. Wir signalisieren backpressure
+                    # über den nicht gesendeten Ack (Tap-seitig optional).
                 continue
 
-            alert = msg.get("payload") or {}
-            if not isinstance(alert, dict):
+            if mtype == "metric":
+                # Phase-2 Shadow-Metrik vom Tap. Schema:
+                #   {rule_id, param_name, metric_value, src_ip, scope, ts}
+                # Wir taggen mit tap_id, damit der Tuner später Master- und
+                # Tap-Beiträge auseinanderhalten kann (z.B. um pro Tap einen
+                # eigenen Reservoir-Stream zu fahren).
+                metric = msg.get("payload") or {}
+                if not isinstance(metric, dict) or "rule_id" not in metric:
+                    continue
+                metric["tap_id"] = tap_id
+                try:
+                    producer.produce(
+                        METRICS_TOPIC,
+                        key=f"{metric.get('rule_id', '')}|{metric.get('param_name', '')}".encode(),
+                        value=orjson.dumps(metric),
+                        callback=_delivery_cb,
+                    )
+                    producer.poll(0)
+                    metrics_received += 1
+                except Exception as exc:
+                    log.error("Kafka produce (metric) fehlgeschlagen: %s", exc)
                 continue
-            alert["tap_id"] = tap_id
-            alert["source"] = alert.get("source", "signature")  # Default falls fehlt
 
-            try:
-                producer.produce(
-                    ALERTS_TOPIC,
-                    key=(alert.get("src_ip") or tap_id).encode(),
-                    value=orjson.dumps(alert),
-                    callback=_delivery_cb,
-                )
-                producer.poll(0)
-                alerts_received += 1
-            except Exception as exc:
-                log.error("Kafka produce fehlgeschlagen: %s", exc)
-                # Bei Kafka-Down keinen Disconnect erzwingen: der Tap-Buffer
-                # würde sonst unnötig anwachsen. Wir signalisieren backpressure
-                # über den nicht gesendeten Ack (Tap-seitig optional).
+            log.warning("Unbekannter Frame-Type von %s: %s", tap_name, mtype)
 
     except websockets.ConnectionClosed as exc:
-        log.info("Tap %s disconnected: %s", tap_name, exc.code)
+        log.info("Tap %s disconnected: %s (alerts=%d metrics=%d)",
+                 tap_name, exc.code, alerts_received, metrics_received)
     finally:
         hb.cancel()
         st.cancel()
-        # Final-Stats persistieren
+        # Final-Stats persistieren. Metriken zählen aktuell nicht in die
+        # taps.alerts_received-Spalte rein – das wäre irreführend für die UI.
+        # Falls später ein metrics_received-Counter in der DB erwünscht ist,
+        # kann auth.heartbeat() um ein zweites Argument erweitert werden.
         if alerts_received:
             await auth.heartbeat(tap_id, alerts_received, peer)
 
@@ -483,8 +528,8 @@ async def amain() -> None:
     })
 
     ssl_ctx = _build_ssl_context()
-    log.info("master-uplink lauscht auf wss://%s:%d  (mTLS, Topic %s)",
-             LISTEN_HOST, LISTEN_PORT, ALERTS_TOPIC)
+    log.info("master-uplink lauscht auf wss://%s:%d  (mTLS, Topics %s + %s)",
+             LISTEN_HOST, LISTEN_PORT, ALERTS_TOPIC, METRICS_TOPIC)
 
     proto_cls = _make_protocol_class(auth)
     async with websockets.serve(

@@ -131,6 +131,11 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       RULES_DIR: /rules
+      # Phase-2 Shadow-Metrik. tap-uplink konsumiert das gleichnamige Topic
+      # und forwardet die Records via mTLS-WSS an den Master.
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      METRICS_TOPIC:  ${METRICS_TOPIC:-rule-metrics}
+      METRICS_SAMPLING_RATE: ${METRICS_SAMPLING_RATE:-0.01}
     volumes:
       # Wird vom tap-uplink-Container via Reverse-Channel-Pull gefüllt.
       # /rules/builtin/*.yml und /rules/custom/_overrides.json kommen vom
@@ -152,6 +157,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       ALERTS_TOPIC: alerts-raw
+      METRICS_TOPIC: rule-metrics
       KAFKA_GROUP_ID: tap-uplink
       MASTER_URL: ${MASTER_URL:-wss://master.example.com:8443/uplink}
       TAP_CERT:  /etc/cyjan/tap.pem

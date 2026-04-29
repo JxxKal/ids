@@ -52,6 +52,7 @@ SURICATA_OVERRIDES_FILE = CUSTOM_DIR / "_suricata_overrides.json"
 
 VALID_SEVERITIES = {"critical", "high", "medium", "low"}
 VALID_PARAM_TYPES = {"int", "float"}
+VALID_PARAM_SOURCES = {"manual", "ml"}
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────
@@ -64,6 +65,24 @@ class SigRuleParamSchema(BaseModel):
     min:     float | None = None
     max:     float | None = None
     label:   str = ""
+    # Phase 2: Symbolischer Name der Counting-Funktion, die dieser Param
+    # steuert (z.B. "unique_dst_ports"). Der ML-Tuner nutzt das für
+    # Shadow-Metrik-Sammeln. None = nicht ML-tunbar.
+    metric:  str | None = None
+
+
+class SigRuleParamOverride(BaseModel):
+    """Strukturierter Override-Eintrag pro Parameter mit Provenance + Scope-Split.
+
+    `value`           – Schwellwert für externe Quellen oder global
+    `value_internal`  – optionaler Schwellwert für Quellen in known_networks
+    `source`          – wer hat den Wert zuletzt gesetzt (manual/ml)
+    `ml`              – freie Metadaten vom rule-tuner (Trainingszeitpunkt etc.)
+    """
+    value:           float
+    value_internal:  float | None = None
+    source:          Literal["manual", "ml"] | None = None
+    ml:              dict[str, Any] | None = None
 
 
 class SigRuleEntry(BaseModel):
@@ -79,14 +98,25 @@ class SigRuleEntry(BaseModel):
     severity_override:   str | None     # gesetzt wenn != severity_default
     parameters_schema:   dict[str, SigRuleParamSchema] = Field(default_factory=dict)
     parameters_default:  dict[str, float]              = Field(default_factory=dict)
-    parameters:          dict[str, float]              = Field(default_factory=dict)  # effektiv
+    # Skalar-Form bleibt aus Backwards-Compat für die existierende GUI: enthält
+    # den effektiven externen Wert (= value, oder default falls kein Override).
+    parameters:          dict[str, float]              = Field(default_factory=dict)
     parameters_override: dict[str, float]              = Field(default_factory=dict)
+    # Vollform (Phase 1): pro Param Provenance + value_internal + ml-Metadaten,
+    # wenn vorhanden. Wird von der neuen UI in Phase 5 + dem rule-tuner gelesen.
+    parameters_full:     dict[str, SigRuleParamOverride] = Field(default_factory=dict)
 
 
 class SigRuleOverride(BaseModel):
+    """Override für eine einzelne Rule.
+
+    Param-Werte können wahlweise als Skalar (Backwards-Compat) ODER als
+    `SigRuleParamOverride` (mit Scope-Split + Provenance) übergeben werden.
+    Bei PUT wird die kompakte Skalar-Form gespeichert wenn keine
+    Provenance/internal_value vorliegt — sonst die strukturierte Form."""
     enabled:    bool | None = None
     severity:   Literal["critical", "high", "medium", "low"] | None = None
-    parameters: dict[str, float] | None = None
+    parameters: dict[str, float | SigRuleParamOverride] | None = None
 
 
 class SigRulesOverrides(BaseModel):
@@ -178,12 +208,15 @@ def _parse_yaml_param_schema(raw_params: Any) -> dict[str, SigRuleParamSchema]:
             continue
         if min_val is not None and max_val is not None and min_val > max_val:
             min_val = max_val = None
+        metric_raw = spec.get("metric")
+        metric = metric_raw if isinstance(metric_raw, str) and metric_raw.isidentifier() else None
         out[name] = SigRuleParamSchema(
             type=ptype,
             default=default_val,
             min=min_val,
             max=max_val,
             label=str(spec.get("label", "")),
+            metric=metric,
         )
     return out
 
@@ -196,6 +229,39 @@ def _clamp_param(value: float, schema: SigRuleParamSchema) -> float:
     if schema.max is not None and cast > schema.max:
         cast = schema.max if schema.type == "float" else int(schema.max)
     return cast
+
+
+def _normalize_param_ov_raw(value: Any) -> dict[str, Any] | None:
+    """Akzeptiert eine Rohform aus dem File (Skalar ODER Objekt) und gibt sie
+    als normalisiertes Dict {value, value_internal, source, ml} zurück. None
+    wenn das Eingabe-Format unbrauchbar ist."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return {"value": float(value), "value_internal": None, "source": None, "ml": None}
+    if isinstance(value, dict):
+        v = value.get("value")
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return None
+        vi = value.get("value_internal")
+        if vi is not None and (not isinstance(vi, (int, float)) or isinstance(vi, bool)):
+            vi = None
+        src = value.get("source")
+        if src not in VALID_PARAM_SOURCES:
+            src = None
+        ml = value.get("ml") if isinstance(value.get("ml"), dict) else None
+        return {"value": float(v), "value_internal": float(vi) if vi is not None else None,
+                "source": src, "ml": ml}
+    return None
+
+
+def _ov_is_trivial(entry: dict[str, Any]) -> bool:
+    """True wenn der Override-Eintrag keine Information außer `value` trägt
+    (= als Skalar speicherbar). False sobald value_internal/source/ml gesetzt
+    sind — dann muss die Object-Form persistiert werden."""
+    return (
+        entry.get("value_internal") is None
+        and entry.get("source") is None
+        and not entry.get("ml")
+    )
 
 
 @router.get(
@@ -234,13 +300,28 @@ async def list_rules() -> list[SigRuleEntry]:
             params_default = {n: s.default for n, s in params_schema.items()}
 
             params_ov_clean: dict[str, float] = {}
+            params_full: dict[str, SigRuleParamOverride] = {}
             raw_params_ov = ov.get("parameters") or {}
             if isinstance(raw_params_ov, dict):
                 for pname, pval in raw_params_ov.items():
                     schema = params_schema.get(str(pname))
-                    if schema is None or not isinstance(pval, (int, float)) or isinstance(pval, bool):
+                    if schema is None:
                         continue
-                    params_ov_clean[str(pname)] = _clamp_param(float(pval), schema)
+                    norm = _normalize_param_ov_raw(pval)
+                    if norm is None:
+                        continue
+                    cast_v = _clamp_param(norm["value"], schema)
+                    cast_vi = (
+                        _clamp_param(norm["value_internal"], schema)
+                        if norm["value_internal"] is not None else None
+                    )
+                    params_ov_clean[str(pname)] = cast_v
+                    params_full[str(pname)] = SigRuleParamOverride(
+                        value=cast_v,
+                        value_internal=cast_vi,
+                        source=norm["source"],
+                        ml=norm["ml"],
+                    )
 
             params_effective = {**params_default, **params_ov_clean}
 
@@ -264,6 +345,7 @@ async def list_rules() -> list[SigRuleEntry]:
                 parameters_default=params_default,
                 parameters=params_effective,
                 parameters_override=params_ov_clean,
+                parameters_full=params_full,
             ))
 
     out.sort(key=lambda r: (not r.builtin, r.id))
@@ -283,13 +365,25 @@ async def get_overrides() -> SigRulesOverrides:
         if not isinstance(ov, dict):
             continue
         params_raw = ov.get("parameters")
-        params: dict[str, float] | None = None
+        params: dict[str, float | SigRuleParamOverride] | None = None
         if isinstance(params_raw, dict) and params_raw:
-            params = {
-                str(k): float(v)
-                for k, v in params_raw.items()
-                if isinstance(v, (int, float)) and not isinstance(v, bool)
-            } or None
+            tmp: dict[str, float | SigRuleParamOverride] = {}
+            for k, v in params_raw.items():
+                norm = _normalize_param_ov_raw(v)
+                if norm is None:
+                    continue
+                # Skalar zurückgeben wenn trivial — Pydantic-Modell lässt
+                # beides zu, GUI-Code sieht weiter Skalare wo möglich.
+                if _ov_is_trivial(norm):
+                    tmp[str(k)] = norm["value"]
+                else:
+                    tmp[str(k)] = SigRuleParamOverride(
+                        value=norm["value"],
+                        value_internal=norm["value_internal"],
+                        source=norm["source"],
+                        ml=norm["ml"],
+                    )
+            params = tmp or None
         cleaned[rid] = SigRuleOverride(
             enabled=ov.get("enabled") if isinstance(ov.get("enabled"), bool) else None,
             severity=ov.get("severity") if (
@@ -328,17 +422,41 @@ async def put_overrides(body: SigRulesOverrides) -> SigRulesOverrides:
             entry["severity"] = ov.severity
         if ov.parameters:
             schema = schema_by_rid.get(rid, {})
-            cleaned_params: dict[str, float] = {}
+            cleaned_params: dict[str, Any] = {}
             for pname, pval in ov.parameters.items():
                 ps = schema.get(pname)
+                # Pydantic hat den Eintrag bereits zu float ODER
+                # SigRuleParamOverride aufgelöst. Wir normalisieren beides
+                # auf {value, value_internal, source, ml}.
+                if isinstance(pval, SigRuleParamOverride):
+                    norm = {
+                        "value": float(pval.value),
+                        "value_internal": float(pval.value_internal) if pval.value_internal is not None else None,
+                        "source": pval.source,
+                        "ml": pval.ml,
+                    }
+                else:
+                    norm = {"value": float(pval), "value_internal": None,
+                            "source": None, "ml": None}
+
                 if ps is None:
-                    # Unbekannter Parameter — entweder Rule existiert noch nicht
-                    # (Custom-File wurde noch nicht gespeichert) oder Tippfehler.
-                    # Wir behalten den Eintrag bei unbekannter Rule-ID, sonst raus.
+                    # Unbekannter Parameter: nur durchwinken wenn die ganze
+                    # Rule unbekannt ist (Custom-File noch nicht gespeichert).
+                    # Bei bekannter Rule mit unbekanntem Param: ignorieren.
                     if rid not in schema_by_rid:
-                        cleaned_params[pname] = float(pval)
+                        cleaned_params[pname] = (
+                            norm["value"] if _ov_is_trivial(norm) else norm
+                        )
                     continue
-                cleaned_params[pname] = _clamp_param(float(pval), ps)
+
+                norm["value"] = _clamp_param(norm["value"], ps)
+                if norm["value_internal"] is not None:
+                    norm["value_internal"] = _clamp_param(norm["value_internal"], ps)
+
+                # Trivial → Skalar für kompaktes File. Sonst Object-Form.
+                cleaned_params[pname] = (
+                    norm["value"] if _ov_is_trivial(norm) else norm
+                )
             if cleaned_params:
                 entry["parameters"] = cleaned_params
         if entry:
