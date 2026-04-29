@@ -72,6 +72,7 @@ def _wait_for_ca() -> tuple[Path, Path]:
 
 def _build_ssl_context() -> ssl.SSLContext:
     ca_cert, ca_key = _wait_for_ca()
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     # Master-Cert: wir benutzen das CA-Cert als Server-Cert. Funktional ist
     # das ungewöhnlich (CA als Server-Cert), in unserem Inter-Service-mTLS-
     # Szenario aber praktisch: der Tap kennt nur die Master-CA und vertraut
