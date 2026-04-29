@@ -385,14 +385,30 @@ Beim Firing einer Heuristik schreibt signature-engine die `metric_values` aller 
 - Trainingslauf: `POST /api/sig-rules/ml/start-training {window_s: 300}` (5 min) — beim Ablauf log-line `Training abgeschlossen — schalte auf tuning + erster Override-Write`. `_overrides.json` enthält danach Einträge mit `source: "ml"`.
 - Cycle-Test mit kürzerem TUNING_CYCLE_S (z.B. `TUNER_TUNING_CYCLE_S=300` in `.env` für 5-min-Cycles statt 6h) — Tuner schreibt dann alle 5 min statt alle 6 h.
 
-**Phase 5 — Frontend-UI (Settings → Rule Adjustments)**
-- Neuer Tab "ML-Tuning":
-  - Status-Card (state, Restzeit, globaler Sample-Count)
-  - Trainings-Konfiguration: Dauer (2h/10d/custom), `target_alert_rate` (default 0,5/h pro Rule), `scope_split_enabled`-Toggle, Blacklist-Multiselect
-  - Start/Pause/Resume
-  - Verteilungs-Sparklines pro Rule aus `rule_baselines`
-- Bestehende Rule-Cards: Provenance-Badge "ML-tuned 187 (intern) / 35 (extern)", Tooltip mit ml-Metadaten, Buttons "Manuell sperren" und "ML wieder übernehmen".
-- Bei manueller Number-Input-Editierung automatisch `source=manual` setzen.
+**Phase 5 — Frontend-UI (Settings → Rule Adjustments) — ✅ erledigt 2026-04-30 (V1 MVP)**
+
+Im bestehenden Tab "Regel-Anpassungen" oben in der Section sitzt jetzt eine **ML-Tuning-Card** (`MlTuningCard` in `frontend/src/components/SettingsPage.tsx`):
+- ✅ Status-Badge mit Farbe je `state` (idle/training/tuning/paused) + bei `training` die Restzeit bis `training_until` (z.B. "noch 2h 15m").
+- ✅ Globaler Sample-Count (`status.total_samples`) + `last_tuning_at`-Timestamp ("letzter Tuner-Schreib").
+- ✅ Trainings-Konfig: Dauer in Stunden (toFixed(2) für Sub-Stunden-Werte), Blacklist mit Datalist-Autocomplete aller Rule-IDs. `target_alert_rate_per_hour`, `quantile`, `max_change_per_cycle` werden in der DB gespeichert; UI exposed nur Dauer + Blacklist (V1 MVP — die anderen Knöpfe lohnen sich erst, wenn man sie wirklich braucht).
+- ✅ Start/Pause/Resume-Buttons (kontextabhängig sichtbar je nach `state`). 15s-Auto-Polling, damit der State live mitwandert wenn der rule-tuner den `training → tuning`-Übergang macht.
+- ✅ Bestehende Rule-Cards (Param-Editor) zeigen Badges:
+  - `tunbar` (grau) → Param hat `metric:`-Deklaration im YAML, ist also vom rule-tuner verwaltbar.
+  - `ML` (grün) → aktueller Override wurde vom rule-tuner gesetzt (`source=ml`).
+  - `manuell` (amber) → User hat manuell editiert oder Skalar-Override aus pre-Phase-1 (impliziter Lock).
+  Bei vorhandenem `value_internal` wird in der Footer-Zeile zusätzlich "intern: 187" angezeigt.
+- ✅ Backwards-Compat: Skalar-Overrides werden weiter wie bisher gerendert; manuelles Editieren eines ml-getunten Werts überschreibt mit Skalar (impliziter `manual`-Lock — entspricht spec "Bei manueller Number-Input-Editierung automatisch `source=manual` setzen").
+- ✅ API-Client (`frontend/src/api.ts`): Typen + Wrapper für `/ml/status`, `/ml/start-training`, `/ml/pause`, `/ml/resume`, `/ml/baselines`. Demo-Mode liefert vernünftige Defaults.
+
+**V2-Backlog (in V1 absichtlich weggelassen)**:
+- Sparklines pro `rule_baselines`-Eintrag — bräuchte Chart-Lib (recharts/chartjs); UX-Wert für Bring-up gering.
+- Explizite "Manuell sperren" / "ML wieder übernehmen"-Buttons — sind über Feldedit + Reset-↺ erreichbar, ein Extra-Button-Set wäre Doppelung.
+- Per-Alert-`metric_values`-Anzeige im Alert-Detail-Drawer — Phase 4.5 schreibt sie in die DB, Frontend zeigt sie noch nicht. Nice to have.
+- `target_alert_rate`/`quantile`/`max_change_per_cycle` als Slider in der Card — V2 wenn jemand das braucht.
+
+**Deploy nach Phase 5**: nur `frontend` rebuilden — `docker compose --profile prod build frontend && up -d --no-deps frontend`. Kein Tap-Deploy nötig.
+
+**Test (mit Browser)**: Login → Einstellungen → Regelwerk → Regel-Anpassungen → ML-Tuning-Card oben sichtbar. SCAN_001 ausklappen zeigt `port_count tunbar`-Badge. Nach `start-training`-Klick wechselt der State auf `training`, Restzeit zählt herunter, beim Ablauf springt er auf `tuning` und der ML-Badge erscheint an den getunten Params.
 
 **Phase 6 — Reverse-Channel + Verteilung**
 - Existierender Master-uplink `/config`-Endpoint serviert die erweiterte `_overrides.json` ohne Änderung — Tap-side signature-engine versteht das neue Schema bereits aus Phase 1.
