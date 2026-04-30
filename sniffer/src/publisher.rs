@@ -18,11 +18,14 @@ pub fn create_producer(config: &Config) -> Result<BaseProducer> {
         .set("bootstrap.servers",              &config.kafka_brokers)
         // Wie lange rdkafka auf Ack wartet bevor Fehler
         .set("message.timeout.ms",             "5000")
-        // Interner Puffer: max. Nachrichten in Queue
-        .set("queue.buffering.max.messages",   "100000")
-        // Batching-Delay: bis zu 5ms sammeln für höheren Throughput
-        .set("queue.buffering.max.ms",         "5")
-        .set("batch.num.messages",             "1000")
+        // Großer Producer-Puffer fängt Pentest-Bursts ab. Bei 10 kpps SYN-
+        // Flood würde der vorige Default 100k binnen ~10 s überlaufen, der
+        // Flow-Aggregator hängt dann minutenlang im Backlog.
+        .set("queue.buffering.max.messages",   "500000")
+        .set("queue.buffering.max.kbytes",     "262144")
+        // Batching-Delay: bis zu 20 ms sammeln für höheren Throughput.
+        .set("queue.buffering.max.ms",         "20")
+        .set("batch.num.messages",             "5000")
         // LZ4 ist schnell und hat gute Kompression für JSON
         .set("compression.codec",              "lz4")
         .set("socket.keepalive.enable",        "true")

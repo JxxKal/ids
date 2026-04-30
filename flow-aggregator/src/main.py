@@ -131,11 +131,11 @@ def main() -> None:
                 pub = publisher.stats
                 logger.info(
                     "active_flows=%-6d  msgs=%d  parse_err=%d  "
-                    "kafka_ok=%d  kafka_err=%d  db_ok=%d  db_err=%d",
+                    "kafka_ok=%d  kafka_err=%d  kafka_drop=%d  db_ok=%d  db_err=%d",
                     aggregator.active_count,
                     msgs_total,
                     parse_errs,
-                    pub["kafka_ok"], pub["kafka_err"],
+                    pub["kafka_ok"], pub["kafka_err"], pub["kafka_dropped"],
                     pub["db_ok"],    pub["db_err"],
                 )
                 last_stats = now

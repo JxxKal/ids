@@ -9,6 +9,7 @@ Design:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -29,9 +30,12 @@ class FlowPublisher:
     def __init__(self, kafka_brokers: str, postgres_dsn: str | None, batch_size: int = 100) -> None:
         self._producer = Producer({
             "bootstrap.servers":            kafka_brokers,
-            "queue.buffering.max.messages": "50000",
-            "queue.buffering.max.ms":       "10",
-            "batch.num.messages":           "500",
+            # Großer Producer-Puffer fängt Pentest-Bursts (~10 kpps) ab,
+            # ohne dass die produce()-Calls blockieren oder Pakete droppen.
+            "queue.buffering.max.messages": "500000",
+            # Wir tolerieren etwas mehr Latenz für besseres Batching.
+            "queue.buffering.max.ms":       "50",
+            "batch.num.messages":           "5000",
             "compression.codec":            "lz4",
             "socket.keepalive.enable":      "true",
             "retries":                      "3",
@@ -52,10 +56,12 @@ class FlowPublisher:
         self._pending_db: list[FlowRecord] = []
 
         # Metriken
-        self.kafka_ok:  int = 0
-        self.kafka_err: int = 0
-        self.db_ok:     int = 0
-        self.db_err:    int = 0
+        self.kafka_ok:        int = 0
+        self.kafka_err:       int = 0
+        self.kafka_dropped:   int = 0   # vom Producer-Pfad bewusst verworfen
+        self.db_ok:           int = 0
+        self.db_err:          int = 0
+        self._last_drop_warn: float = 0.0
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -93,10 +99,11 @@ class FlowPublisher:
     @property
     def stats(self) -> dict:
         return {
-            "kafka_ok":  self.kafka_ok,
-            "kafka_err": self.kafka_err,
-            "db_ok":     self.db_ok,
-            "db_err":    self.db_err,
+            "kafka_ok":      self.kafka_ok,
+            "kafka_err":     self.kafka_err,
+            "kafka_dropped": self.kafka_dropped,
+            "db_ok":         self.db_ok,
+            "db_err":        self.db_err,
         }
 
     # ── Kafka ─────────────────────────────────────────────────────────────────
@@ -113,9 +120,10 @@ class FlowPublisher:
                 on_delivery=self._on_delivery,
             )
         except BufferError:
-            # Queue voll → kurz warten und nochmal
-            logger.warning("Kafka-Puffer voll, warte...")
-            self._producer.poll(0.5)
+            # Queue voll → einmal Callbacks abarbeiten lassen und einen
+            # einzigen schnellen Retry. Wenn der auch scheitert: Flow droppen,
+            # damit der Konsum-Pfad nicht blockiert (Backpressure-Schutz).
+            self._producer.poll(0)
             try:
                 self._producer.produce(
                     TOPIC_FLOWS,
@@ -124,8 +132,15 @@ class FlowPublisher:
                     on_delivery=self._on_delivery,
                 )
             except BufferError:
-                logger.error("Kafka-Puffer dauerhaft voll, verwerfe Flow %s", record.flow_id)
-                self.kafka_err += 1
+                self.kafka_dropped += 1
+                # Geratet warnen — bei einem 10 k-Burst wäre log-spam sinnlos.
+                now = time.monotonic()
+                if now - self._last_drop_warn > 5.0:
+                    logger.warning(
+                        "Kafka-Puffer voll, drop-Phase aktiv (gesamt %d)",
+                        self.kafka_dropped,
+                    )
+                    self._last_drop_warn = now
 
     def _on_delivery(self, err, msg) -> None:
         if err:

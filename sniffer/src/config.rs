@@ -48,7 +48,10 @@ impl Config {
             snaplen,
             buffer_size: buffer_mb * 1024 * 1024,
             test_mode,
-            channel_capacity: 10_000,
+            // Großer Capture→Publisher-Channel: bei Pentest-Bursts (10 kpps)
+            // füllt sich der vorige 10 k schon nach 1 s, der Capture-Thread
+            // dropt dann Pakete. 100 k entspricht ~10 s Burst-Toleranz.
+            channel_capacity: 100_000,
         })
     }
 }
