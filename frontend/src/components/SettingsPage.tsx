@@ -716,6 +716,7 @@ function buildParamDocs(t: TFn) {
 // muss, um zu sehen ob alles im erwarteten Zustand ist. Das Pipeline-
 // Diagramm darunter spiegelt docs/ML_ENGINE.md Section 0.
 function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => void }) {
+  const { t } = useTranslation();
   const [mlStatus, setMlStatus] = useState<MLStatus | null>(null);
   const [tunerStatus, setTunerStatus] = useState<MlTuningStatus | null>(null);
   const [learnedCount, setLearnedCount] = useState<{ manual: number; ml: number } | null>(null);
@@ -767,18 +768,30 @@ function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => voi
       const m = Math.floor((ms % 3_600_000) / 60_000);
       trainingRest = h > 0 ? `${h}h ${m}m` : `${m}m`;
     } else {
-      trainingRest = 'gleich';
+      trainingRest = t('settings.mlOverview.tuner.remainingNow');
     }
   }
+
+  // Diagramm: Sprache-agnostisch lassen wir den ASCII-Aufbau, ersetzen aber
+  // die Beschriftungen über Übersetzungen (i18n-Werte als Mini-Pseudo-Diagram).
+  const diagramText =
+`Flow-Aggregator ─► signature-engine ─► alerts-raw ─► alert-manager ─► alerts (DB)
+                ─► ML-Engine (IsolationForest) ─┘                       │
+                                                                          │
+   ┌──────────────────────────────────────────────────────────────────────┘
+   ▼
+1) source=ml (IsolationForest)         → Suppression skip   · ML-Retrain via feedback-Topic
+2) signature heuristic + metric:       → Suppression skip   · rule-tuner verwaltet Threshold
+                                                              + Auto-FP feedback when pattern floods
+3) signature heuristic, no metric:     → Suppression active · pattern-only rules (SCAN_005, ANOMALY_*)
+4) signature SURICATA:*                → Suppression active · static _suricata_overrides.json
+5) source=external (IRMA/ASSET::*)     → Suppression skip   · external statements, not detection noise`;
 
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-sm font-semibold text-slate-200">KI / ML — Übersicht</h2>
-        <p className="text-xs text-slate-500 mt-1">
-          Drei lernende Komponenten arbeiten parallel und ergänzen sich. Diese Seite
-          zeigt den Status auf einen Blick — Detail-Konfiguration jeweils über die Quick-Links.
-        </p>
+        <h2 className="text-sm font-semibold text-slate-200">{t('settings.mlOverview.title')}</h2>
+        <p className="text-xs text-slate-500 mt-1">{t('settings.mlOverview.intro')}</p>
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
 
@@ -786,92 +799,94 @@ function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => voi
         {/* ── Card 1: IsolationForest ────────────────────────────────────── */}
         <div className={`rounded-lg border p-3 space-y-2 ${ifColor}`}>
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider">Anomalie-Engine</h3>
-            <span className="text-[10px] font-mono opacity-70">IsolationForest</span>
+            <h3 className="text-xs font-semibold uppercase tracking-wider">{t('settings.mlOverview.anomaly.title')}</h3>
+            <span className="text-[10px] font-mono opacity-70">{t('settings.mlOverview.anomaly.subtitle')}</span>
           </div>
           {mlStatus ? (
             <>
               <div className="text-lg font-medium">{mlStatus.phase_label || mlStatus.phase}</div>
               <div className="text-[10px] space-y-0.5 text-slate-400">
-                <div>Bootstrap: <span className="text-slate-200 tabular-nums">{mlStatus.bootstrap.current_flows.toLocaleString('de-DE')}</span> / {mlStatus.bootstrap.required.toLocaleString('de-DE')} ({mlStatus.bootstrap.progress_pct}%)</div>
-                <div>Alerts (24h): <span className="text-slate-200 tabular-nums">{mlStatus.stats_24h.ml_alerts}</span> · Filter-Rate: {mlStatus.stats_24h.filter_rate_pct}%</div>
-                <div>Schwellwert: <span className="text-slate-200 tabular-nums">{mlStatus.stats_24h.alert_threshold.toFixed(2)}</span></div>
+                <div>{t('settings.mlOverview.anomaly.bootstrap')} <span className="text-slate-200 tabular-nums">{mlStatus.bootstrap.current_flows.toLocaleString()}</span> / {mlStatus.bootstrap.required.toLocaleString()} ({mlStatus.bootstrap.progress_pct}%)</div>
+                <div>{t('settings.mlOverview.anomaly.alerts24h')} <span className="text-slate-200 tabular-nums">{mlStatus.stats_24h.ml_alerts}</span> · {t('settings.mlOverview.anomaly.filterRate')} {mlStatus.stats_24h.filter_rate_pct}%</div>
+                <div>{t('settings.mlOverview.anomaly.threshold')} <span className="text-slate-200 tabular-nums">{mlStatus.stats_24h.alert_threshold.toFixed(2)}</span></div>
               </div>
               <p className="text-[10px] leading-relaxed text-slate-400">
-                Erzeugt <strong>neue</strong> Alerts (<code className="text-cyan-300">source=ml</code>) bei
-                Flows, die sich vom Normalverhalten unterscheiden.
+                <Trans i18nKey="settings.mlOverview.anomaly.description"
+                  components={{ strong: <strong />, code: <code className="text-cyan-300" /> }} />
               </p>
             </>
           ) : (
-            <p className="text-xs text-slate-500">Lade…</p>
+            <p className="text-xs text-slate-500">{t('settings.mlOverview.loading')}</p>
           )}
           <button
             onClick={() => onNavigate('ml-status')}
             className="w-full text-[11px] px-2 py-1 rounded border border-slate-700 hover:border-slate-500 hover:text-slate-200 text-slate-400 transition-colors"
           >
-            Konfigurieren →
+            {t('settings.mlOverview.configure')}
           </button>
         </div>
 
         {/* ── Card 2: rule-tuner ─────────────────────────────────────────── */}
         <div className={`rounded-lg border p-3 space-y-2 ${tnColor}`}>
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider">Threshold-Tuner</h3>
-            <span className="text-[10px] font-mono opacity-70">Reservoir + Quantile</span>
+            <h3 className="text-xs font-semibold uppercase tracking-wider">{t('settings.mlOverview.tuner.title')}</h3>
+            <span className="text-[10px] font-mono opacity-70">{t('settings.mlOverview.tuner.subtitle')}</span>
           </div>
           {tunerStatus ? (
             <>
               <div className="text-lg font-medium">
                 {tnState}
-                {trainingRest && <span className="ml-2 text-xs opacity-70">noch {trainingRest}</span>}
+                {trainingRest && <span className="ml-2 text-xs opacity-70">{t('settings.mlOverview.tuner.remaining', { value: trainingRest })}</span>}
               </div>
               <div className="text-[10px] space-y-0.5 text-slate-400">
-                <div>Samples gesamt: <span className="text-slate-200 tabular-nums">{tunerStatus.total_samples.toLocaleString('de-DE')}</span></div>
-                <div>Letzter Tuner-Schreib: <span className="text-slate-200">{tunerStatus.state.last_tuning_at ? new Date(tunerStatus.state.last_tuning_at).toLocaleString('de-DE') : '–'}</span></div>
-                <div>Quantil: P{(tunerStatus.config.quantile * 100).toFixed(1).replace(/\.0$/, '')} · Blacklist: {tunerStatus.config.blacklist.length}</div>
+                <div>{t('settings.mlOverview.tuner.samplesTotal')} <span className="text-slate-200 tabular-nums">{tunerStatus.total_samples.toLocaleString()}</span></div>
+                <div>{t('settings.mlOverview.tuner.lastWrite')} <span className="text-slate-200">{tunerStatus.state.last_tuning_at ? new Date(tunerStatus.state.last_tuning_at).toLocaleString() : '–'}</span></div>
+                <div>{t('settings.mlOverview.tuner.quantileBlacklist', {
+                  quantile: (tunerStatus.config.quantile * 100).toFixed(1).replace(/\.0$/, ''),
+                  count:    tunerStatus.config.blacklist.length,
+                })}</div>
               </div>
               <p className="text-[10px] leading-relaxed text-slate-400">
-                Passt <strong>Schwellwerte</strong> tunbarer Heuristik-Rules an die
-                Verteilung des Netzes an. Erhält Severity, statt sie zu degradieren.
+                <Trans i18nKey="settings.mlOverview.tuner.description" components={{ strong: <strong /> }} />
               </p>
             </>
           ) : (
-            <p className="text-xs text-slate-500">Lade…</p>
+            <p className="text-xs text-slate-500">{t('settings.mlOverview.loading')}</p>
           )}
           <button
             onClick={() => onNavigate('rules-overrides')}
             className="w-full text-[11px] px-2 py-1 rounded border border-slate-700 hover:border-slate-500 hover:text-slate-200 text-slate-400 transition-colors"
           >
-            Konfigurieren → (in Regel-Anpassungen)
+            {t('settings.mlOverview.configureInRules')}
           </button>
         </div>
 
         {/* ── Card 3: Suppression ────────────────────────────────────────── */}
         <div className="rounded-lg border border-violet-700/40 bg-violet-900/20 text-violet-300 p-3 space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider">Pattern-Suppression</h3>
-            <span className="text-[10px] font-mono opacity-70">Layer 1 + 2</span>
+            <h3 className="text-xs font-semibold uppercase tracking-wider">{t('settings.mlOverview.suppression.title')}</h3>
+            <span className="text-[10px] font-mono opacity-70">{t('settings.mlOverview.suppression.subtitle')}</span>
           </div>
           {learnedCount ? (
             <>
-              <div className="text-lg font-medium">{(learnedCount.manual + learnedCount.ml).toLocaleString('de-DE')} Pattern</div>
+              <div className="text-lg font-medium">{t('settings.mlOverview.suppression.patternsTotal', { count: learnedCount.manual + learnedCount.ml })}</div>
               <div className="text-[10px] space-y-0.5 text-slate-400">
-                <div>Manual FPs (Layer 1): <span className="text-slate-200 tabular-nums">{learnedCount.manual}</span></div>
-                <div>ML-gelernt (Layer 2): <span className="text-slate-200 tabular-nums">{learnedCount.ml}</span></div>
+                <div>{t('settings.mlOverview.suppression.manualLayer')} <span className="text-slate-200 tabular-nums">{learnedCount.manual}</span></div>
+                <div>{t('settings.mlOverview.suppression.mlLayer')} <span className="text-slate-200 tabular-nums">{learnedCount.ml}</span></div>
               </div>
               <p className="text-[10px] leading-relaxed text-slate-400">
-                Drosselt <strong>FP-Pattern pro IP-Paar</strong> auf <code className="text-amber-300">low</code>.
-                Skip für ML-Engine-Output und tunbare Heuristiken (rule-tuner ist da zuständig).
+                <Trans i18nKey="settings.mlOverview.suppression.description"
+                  components={{ strong: <strong />, code: <code className="text-amber-300" /> }} />
               </p>
             </>
           ) : (
-            <p className="text-xs text-slate-500">Lade…</p>
+            <p className="text-xs text-slate-500">{t('settings.mlOverview.loading')}</p>
           )}
           <button
             onClick={() => onNavigate('ml-learned')}
             className="w-full text-[11px] px-2 py-1 rounded border border-slate-700 hover:border-slate-500 hover:text-slate-200 text-slate-400 transition-colors"
           >
-            Patterns ansehen →
+            {t('settings.mlOverview.viewPatterns')}
           </button>
         </div>
       </div>
@@ -879,24 +894,11 @@ function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => voi
       {/* ── Pipeline-Diagramm ─────────────────────────────────────────────── */}
       <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-4">
         <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">
-          So arbeiten die drei zusammen
+          {t('settings.mlOverview.diagram.title')}
         </h3>
-        <pre className="text-[10px] font-mono text-slate-400 leading-relaxed overflow-x-auto whitespace-pre">
-{`Flow-Aggregator ─► signature-engine ─► alerts-raw ─► alert-manager ─► alerts (DB)
-                ─► ML-Engine (IsolationForest) ─┘                       │
-                                                                          │
-   ┌──────────────────────────────────────────────────────────────────────┘
-   ▼
-1) source=ml (IsolationForest)         → Suppression skip   · ML-Retrain via feedback-Topic
-2) signature heuristic mit metric:     → Suppression skip   · rule-tuner verwaltet Threshold
-                                                              Auto-FP-Feedback wenn Pattern floodet
-3) signature heuristic ohne metric:    → Suppression aktiv  · pattern-only Rules (SCAN_005, ANOMALY_*)
-4) signature SURICATA:*                → Suppression aktiv  · _suricata_overrides.json statisch
-5) source=external (IRMA/ASSET::*)     → Suppression skip   · externe Aussagen, kein Detection-Noise`}
-        </pre>
+        <pre className="text-[10px] font-mono text-slate-400 leading-relaxed overflow-x-auto whitespace-pre">{diagramText}</pre>
         <p className="text-[10px] text-slate-500 mt-2">
-          Detail-Architektur in <code className="text-cyan-300">docs/ML_ENGINE.md</code>
-          {' '}Sections 10 + 11.
+          <Trans i18nKey="settings.mlOverview.diagram.footer" components={{ code: <code className="text-cyan-300" /> }} />
         </p>
       </div>
     </div>
@@ -3884,6 +3886,7 @@ function SeverityCell({
 // Settings-Section gerendert. Polling alle 15s damit der State live mitwandert,
 // sobald rule-tuner den training→tuning-Übergang macht.
 function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<MlTuningStatus | null>(null);
   const [error, setError]   = useState<string>('');
   const [busy, setBusy]     = useState(false);
@@ -3919,7 +3922,7 @@ function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
   if (!status) {
     return (
       <div className="bg-slate-900/40 border border-slate-700/40 rounded p-3 text-xs text-slate-500">
-        ML-Tuning-Status wird geladen{error ? ` … ${error}` : '…'}
+        {t('settings.ruleOverrides.mlTuning.loading')}{error ? ` … ${error}` : '…'}
       </div>
     );
   }
@@ -3940,12 +3943,12 @@ function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
       const m = Math.floor((ms % 3_600_000) / 60_000);
       trainingRest = h > 0 ? `${h}h ${m}m` : `${m}m`;
     } else {
-      trainingRest = 'gleich';
+      trainingRest = t('settings.ruleOverrides.mlTuning.remainingNow');
     }
   }
 
   const lastTuning = status.state.last_tuning_at
-    ? new Date(status.state.last_tuning_at).toLocaleString('de-DE')
+    ? new Date(status.state.last_tuning_at).toLocaleString()
     : '–';
 
   const handleStart = async () => {
@@ -3969,27 +3972,26 @@ function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
   return (
     <div className="bg-slate-900/40 border border-slate-700/40 rounded p-3 space-y-2">
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">ML-Tuning</span>
+        <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">{t('settings.ruleOverrides.mlTuning.title')}</span>
         <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${stColor}`}>
           {st}
-          {trainingRest && ` · noch ${trainingRest}`}
+          {trainingRest && ` · ${t('settings.ruleOverrides.mlTuning.remaining', { value: trainingRest })}`}
         </span>
         <span className="text-[10px] text-slate-500">
-          Samples: <span className="text-slate-300 tabular-nums">{status.total_samples.toLocaleString('de-DE')}</span>
+          {t('settings.ruleOverrides.mlTuning.samples')} <span className="text-slate-300 tabular-nums">{status.total_samples.toLocaleString()}</span>
         </span>
         <span className="text-[10px] text-slate-500">
-          Letzter Tuner-Schreib: <span className="text-slate-400">{lastTuning}</span>
+          {t('settings.ruleOverrides.mlTuning.lastTuning')} <span className="text-slate-400">{lastTuning}</span>
         </span>
       </div>
 
       <p className="text-[10px] text-slate-500 leading-relaxed">
-        Der rule-tuner sammelt Verteilungen pro Rule+Param und setzt nach Trainings­ende
-        Schwellwerte automatisch. Manuell editierte Werte (Skalar-Form unten) werden nicht angefasst.
+        {t('settings.ruleOverrides.mlTuning.intro')}
       </p>
 
       <div className="flex gap-2 items-end flex-wrap">
         <label className="text-[10px] text-slate-400">
-          <div>Trainingsdauer (h)</div>
+          <div>{t('settings.ruleOverrides.mlTuning.windowLabel')}</div>
           <input
             type="number"
             min={0.1}
@@ -4001,12 +4003,12 @@ function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
           />
         </label>
         <label className="text-[10px] text-slate-400 flex-1 min-w-48">
-          <div>Blacklist (Rule-IDs, kommagetrennt)</div>
+          <div>{t('settings.ruleOverrides.mlTuning.blacklistLabel')}</div>
           <input
             type="text"
             className="input text-xs w-full font-mono"
             value={blacklist}
-            placeholder="z.B. DOS_SYN_001"
+            placeholder={t('settings.ruleOverrides.mlTuning.blacklistPlaceholder')}
             onChange={e => setBlacklist(e.target.value)}
             disabled={busy}
             list="ml-blacklist-rules"
@@ -4018,14 +4020,14 @@ function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
         <div className="flex gap-1">
           {(st === 'idle' || st === 'paused' || st === 'tuning' || st === 'training') && (
             <button className="btn-primary text-xs" onClick={handleStart} disabled={busy}>
-              {st === 'training' ? 'Training neu starten' : 'Training starten'}
+              {st === 'training' ? t('settings.ruleOverrides.mlTuning.btnRestart') : t('settings.ruleOverrides.mlTuning.btnStart')}
             </button>
           )}
           {(st === 'training' || st === 'tuning') && (
-            <button className="btn-ghost text-xs" onClick={handlePause} disabled={busy}>Pause</button>
+            <button className="btn-ghost text-xs" onClick={handlePause} disabled={busy}>{t('settings.ruleOverrides.mlTuning.btnPause')}</button>
           )}
           {st === 'paused' && (
-            <button className="btn-primary text-xs" onClick={handleResume} disabled={busy}>Resume</button>
+            <button className="btn-primary text-xs" onClick={handleResume} disabled={busy}>{t('settings.ruleOverrides.mlTuning.btnResume')}</button>
           )}
         </div>
       </div>
@@ -4277,17 +4279,17 @@ function RuleOverridesSettings() {
                       {mlParamCount > 0 && (
                         <span
                           className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-700/40"
-                          title={`${mlParamCount} Param(s) vom rule-tuner gesetzt — aufklappen für Werte`}
+                          title={t('settings.ruleOverrides.badges.rowMlTooltip', { count: mlParamCount })}
                         >
-                          ML×{mlParamCount}
+                          {t('settings.ruleOverrides.badges.rowMlLabel', { count: mlParamCount })}
                         </span>
                       )}
                       {manualParamCount > 0 && (
                         <span
                           className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-amber-900/40 text-amber-300 border border-amber-700/40"
-                          title={`${manualParamCount} Param(s) manuell gesetzt — Tuner respektiert das`}
+                          title={t('settings.ruleOverrides.badges.rowManualTooltip', { count: manualParamCount })}
                         >
-                          ✎×{manualParamCount}
+                          {t('settings.ruleOverrides.badges.rowManualLabel', { count: manualParamCount })}
                         </span>
                       )}
                     </td>
@@ -4353,25 +4355,25 @@ function RuleOverridesSettings() {
                                       {schema.metric && (
                                         <span
                                           className="ml-1 inline-block text-[9px] px-1 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400"
-                                          title={`metric: ${schema.metric} — ML-tunbar`}
+                                          title={t('settings.ruleOverrides.badges.tunableTooltip', { metric: schema.metric })}
                                         >
-                                          tunbar
+                                          {t('settings.ruleOverrides.badges.tunable')}
                                         </span>
                                       )}
                                       {ovSource === 'ml' && (
                                         <span
                                           className="ml-1 inline-block text-[9px] px-1 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/40 text-emerald-300"
-                                          title="vom rule-tuner gesetzt — manuelles Editieren überschreibt mit source=manual"
+                                          title={t('settings.ruleOverrides.badges.mlTooltip')}
                                         >
-                                          ML
+                                          {t('settings.ruleOverrides.badges.ml')}
                                         </span>
                                       )}
                                       {ovSource === 'manual' && (
                                         <span
                                           className="ml-1 inline-block text-[9px] px-1 py-0.5 rounded bg-amber-900/40 border border-amber-700/40 text-amber-300"
-                                          title="manuell gesetzt — rule-tuner fasst diesen Param nicht an"
+                                          title={t('settings.ruleOverrides.badges.manualTooltip')}
                                         >
-                                          manuell
+                                          {t('settings.ruleOverrides.badges.manual')}
                                         </span>
                                       )}
                                       {schema.label && <span className="ml-1 text-slate-500">— {schema.label}</span>}
@@ -4424,7 +4426,7 @@ function RuleOverridesSettings() {
                                       default: {r.parameters_default[pname] ?? schema.default}
                                       {rangeHint && ` · range: ${rangeHint}`}
                                       {ovInternal != null && (
-                                        <span className="ml-1 text-emerald-400">· intern: {ovInternal}</span>
+                                        <span className="ml-1 text-emerald-400">· {t('settings.ruleOverrides.badges.internalLabel')}: {ovInternal}</span>
                                       )}
                                     </p>
                                   </div>

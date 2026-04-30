@@ -366,6 +366,17 @@
     "csvExport": {
       "title": "Gefilterte Alerts als CSV exportieren (max. 5000)"
     },
+    "columnPicker": {
+      "buttonLabel": "⚙ Spalten",
+      "buttonTitle": "Spalten der Alarmtabelle ein-/ausblenden",
+      "headerShow": "Spalten anzeigen",
+      "inactiveHint": "(inaktiv)",
+      "resetHidden": "↺ Alle einblenden",
+      "resetWidths": "↺ Spalten-Breiten zurücksetzen",
+      "resetWidthsTitle": "Setzt alle Spaltenbreiten auf Auto-Layout zurück",
+      "resizeTip": "Tipp: Spalten lassen sich am rechten Rand des Headers ziehen.",
+      "resizeHandleTitle": "Ziehen zum Anpassen der Spaltenbreite"
+    },
     "counts": {
       "groups": "Gruppen",
       "alerts": "Alerts"
@@ -721,6 +732,45 @@
       "learnedTitle": "Aus dem Traffic-Verhalten automatisch gelernt",
       "refreshFooter": "Alert-Manager-Refresh: 60 s · UI-Refresh: 30 s · ENV: SUPPRESSION_LEARN_WINDOW_D, SUPPRESSION_MIN_HOURS, SUPPRESSION_Z_THRESHOLD"
     },
+    "mlOverview": {
+      "title": "KI / ML — Übersicht",
+      "intro": "Drei lernende Komponenten arbeiten parallel und ergänzen sich. Diese Seite zeigt den Status auf einen Blick — Detail-Konfiguration jeweils über die Quick-Links.",
+      "loading": "Lade…",
+      "configure": "Konfigurieren →",
+      "configureInRules": "Konfigurieren → (in Regel-Anpassungen)",
+      "viewPatterns": "Patterns ansehen →",
+      "anomaly": {
+        "title": "Anomalie-Engine",
+        "subtitle": "IsolationForest",
+        "bootstrap": "Bootstrap:",
+        "alerts24h": "Alerts (24h):",
+        "filterRate": "Filter-Rate:",
+        "threshold": "Schwellwert:",
+        "description": "Erzeugt <strong>neue</strong> Alerts (<code>source=ml</code>) bei Flows, die sich vom Normalverhalten unterscheiden."
+      },
+      "tuner": {
+        "title": "Threshold-Tuner",
+        "subtitle": "Reservoir + Quantile",
+        "remaining": "noch {{value}}",
+        "remainingNow": "gleich",
+        "samplesTotal": "Samples gesamt:",
+        "lastWrite": "Letzter Tuner-Schreib:",
+        "quantileBlacklist": "Quantil: P{{quantile}} · Blacklist: {{count}}",
+        "description": "Passt <strong>Schwellwerte</strong> tunbarer Heuristik-Rules an die Verteilung des Netzes an. Erhält Severity, statt sie zu degradieren."
+      },
+      "suppression": {
+        "title": "Pattern-Suppression",
+        "subtitle": "Layer 1 + 2",
+        "patternsTotal": "{{count}} Pattern",
+        "manualLayer": "Manual FPs (Layer 1):",
+        "mlLayer": "ML-gelernt (Layer 2):",
+        "description": "Drosselt <strong>FP-Pattern pro IP-Paar</strong> auf <code>low</code>. Skip für ML-Engine-Output und tunbare Heuristiken (rule-tuner ist da zuständig)."
+      },
+      "diagram": {
+        "title": "So arbeiten die drei zusammen",
+        "footer": "Detail-Architektur in <code>docs/ML_ENGINE.md</code> Sections 10 + 11."
+      }
+    },
     "ruleOverrides": {
       "title": "Regel-Anpassungen",
       "intro": "Pro Signature-Engine-Regel kannst du Schwellwerte anpassen, den Severity-Wert übersteuern oder die Regel komplett deaktivieren. Wenn dich eine Heuristik mit normalem Traffic flutet, dreh den Schwellwert hoch — das ist meist sauberer als die Severity runterzustufen, weil echte Treffer dann erst gar nicht entstehen. Anpassungen liegen in /sig-rules/custom/_overrides.json und werden ohne Restart binnen Sekunden übernommen.",
@@ -752,7 +802,36 @@
       "thresholdsLabel": "Schwellwerte",
       "thresholdsHint": "Werte gelten nur für diese Regel. Felder, die du nicht änderst, bleiben auf dem YAML-Default.",
       "thresholdReset": "Auf Default zurücksetzen",
-      "applyHint": "Änderungen wirken nach max. ~5 Sekunden ohne Service-Restart."
+      "applyHint": "Änderungen wirken nach max. ~5 Sekunden ohne Service-Restart.",
+      "badges": {
+        "tunable": "tunbar",
+        "tunableTooltip": "metric: {{metric}} — vom rule-tuner verwaltbar",
+        "ml": "ML",
+        "mlTooltip": "vom rule-tuner gesetzt — manuelles Editieren überschreibt mit source=manual",
+        "manual": "manuell",
+        "manualTooltip": "manuell gesetzt — rule-tuner fasst diesen Param nicht an",
+        "internalLabel": "intern",
+        "rowMlLabel": "ML×{{count}}",
+        "rowMlTooltip": "{{count}} Param(s) vom rule-tuner gesetzt — aufklappen für Werte",
+        "rowManualLabel": "✎×{{count}}",
+        "rowManualTooltip": "{{count}} Param(s) manuell gesetzt — Tuner respektiert das"
+      },
+      "mlTuning": {
+        "loading": "ML-Tuning-Status wird geladen",
+        "title": "ML-Tuning",
+        "samples": "Samples:",
+        "lastTuning": "Letzter Tuner-Schreib:",
+        "intro": "Der rule-tuner sammelt Verteilungen pro Rule+Param und setzt nach Trainings­ende Schwellwerte automatisch. Manuell editierte Werte (Skalar-Form unten) werden nicht angefasst.",
+        "windowLabel": "Trainingsdauer (h)",
+        "blacklistLabel": "Blacklist (Rule-IDs, kommagetrennt)",
+        "blacklistPlaceholder": "z.B. DOS_SYN_001",
+        "btnStart": "Training starten",
+        "btnRestart": "Training neu starten",
+        "btnPause": "Pause",
+        "btnResume": "Resume",
+        "remaining": "noch {{value}}",
+        "remainingNow": "gleich"
+      }
     },
     "rules": {
       "sourcesTitle": "Rule-Quellen",

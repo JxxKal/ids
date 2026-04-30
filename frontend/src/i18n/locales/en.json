@@ -366,6 +366,17 @@
     "csvExport": {
       "title": "Export filtered alerts as CSV (max 5000)"
     },
+    "columnPicker": {
+      "buttonLabel": "⚙ Columns",
+      "buttonTitle": "Show/hide alert table columns",
+      "headerShow": "Show columns",
+      "inactiveHint": "(inactive)",
+      "resetHidden": "↺ Show all",
+      "resetWidths": "↺ Reset column widths",
+      "resetWidthsTitle": "Reverts all column widths to auto layout",
+      "resizeTip": "Tip: drag the right edge of a header to resize.",
+      "resizeHandleTitle": "Drag to resize column"
+    },
     "counts": {
       "groups": "groups",
       "alerts": "alerts"
@@ -721,6 +732,45 @@
       "learnedTitle": "Automatically learned from traffic behaviour",
       "refreshFooter": "Alert manager refresh: 60 s · UI refresh: 30 s · ENV: SUPPRESSION_LEARN_WINDOW_D, SUPPRESSION_MIN_HOURS, SUPPRESSION_Z_THRESHOLD"
     },
+    "mlOverview": {
+      "title": "AI / ML — overview",
+      "intro": "Three learning components run in parallel and complement each other. This page shows their status at a glance — detailed configuration via the quick links.",
+      "loading": "Loading…",
+      "configure": "Configure →",
+      "configureInRules": "Configure → (in Rule adjustments)",
+      "viewPatterns": "View patterns →",
+      "anomaly": {
+        "title": "Anomaly engine",
+        "subtitle": "IsolationForest",
+        "bootstrap": "Bootstrap:",
+        "alerts24h": "Alerts (24h):",
+        "filterRate": "Filter rate:",
+        "threshold": "Threshold:",
+        "description": "Generates <strong>new</strong> alerts (<code>source=ml</code>) for flows that deviate from normal behaviour."
+      },
+      "tuner": {
+        "title": "Threshold tuner",
+        "subtitle": "Reservoir + quantile",
+        "remaining": "{{value}} left",
+        "remainingNow": "any moment",
+        "samplesTotal": "Samples total:",
+        "lastWrite": "Last tuner write:",
+        "quantileBlacklist": "Quantile: P{{quantile}} · Blacklist: {{count}}",
+        "description": "Adjusts <strong>thresholds</strong> of tunable heuristic rules to the network's distribution. Preserves severity instead of degrading it."
+      },
+      "suppression": {
+        "title": "Pattern suppression",
+        "subtitle": "Layer 1 + 2",
+        "patternsTotal": "{{count}} patterns",
+        "manualLayer": "Manual FPs (Layer 1):",
+        "mlLayer": "ML-learned (Layer 2):",
+        "description": "Throttles <strong>FP patterns per IP pair</strong> down to <code>low</code>. Skipped for ML-engine output and tunable heuristics (rule-tuner is responsible there)."
+      },
+      "diagram": {
+        "title": "How the three work together",
+        "footer": "Detailed architecture in <code>docs/ML_ENGINE.md</code> sections 10 + 11."
+      }
+    },
     "ruleOverrides": {
       "title": "Rule adjustments",
       "intro": "Per signature-engine rule you can tune thresholds, override the severity, or disable the rule entirely. If a heuristic floods you with normal traffic, raise the threshold — that's usually cleaner than downgrading severity, because real hits never get suppressed in the first place. Adjustments live in /sig-rules/custom/_overrides.json and are picked up within seconds, without a restart.",
@@ -752,7 +802,36 @@
       "thresholdsLabel": "Thresholds",
       "thresholdsHint": "Values apply only to this rule. Fields you don't change keep the YAML default.",
       "thresholdReset": "Reset to default",
-      "applyHint": "Changes take effect within ~5 seconds without restarting the service."
+      "applyHint": "Changes take effect within ~5 seconds without restarting the service.",
+      "badges": {
+        "tunable": "tunable",
+        "tunableTooltip": "metric: {{metric}} — managed by rule-tuner",
+        "ml": "ML",
+        "mlTooltip": "Set by rule-tuner — manual edit overrides with source=manual",
+        "manual": "manual",
+        "manualTooltip": "Manually set — rule-tuner won't touch this param",
+        "internalLabel": "internal",
+        "rowMlLabel": "ML×{{count}}",
+        "rowMlTooltip": "{{count}} param(s) set by rule-tuner — expand to see values",
+        "rowManualLabel": "✎×{{count}}",
+        "rowManualTooltip": "{{count}} param(s) manually set — tuner respects them"
+      },
+      "mlTuning": {
+        "loading": "Loading ML-tuning status",
+        "title": "ML tuning",
+        "samples": "Samples:",
+        "lastTuning": "Last tuner write:",
+        "intro": "The rule-tuner samples distributions per rule+param and sets thresholds automatically once training ends. Manually-edited values (scalar form below) are left alone.",
+        "windowLabel": "Training duration (h)",
+        "blacklistLabel": "Blacklist (rule IDs, comma-separated)",
+        "blacklistPlaceholder": "e.g. DOS_SYN_001",
+        "btnStart": "Start training",
+        "btnRestart": "Restart training",
+        "btnPause": "Pause",
+        "btnResume": "Resume",
+        "remaining": "{{value}} left",
+        "remainingNow": "any moment"
+      }
     },
     "rules": {
       "sourcesTitle": "Rule sources",

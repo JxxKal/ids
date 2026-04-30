@@ -518,7 +518,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
       <span
         className="absolute right-0 top-1 bottom-1 w-1 cursor-col-resize bg-transparent hover:bg-cyan-500/40 active:bg-cyan-500/60"
         onMouseDown={e => startResize(ckey, e)}
-        title="Ziehen zum Anpassen der Spaltenbreite"
+        title={t('alertFeed.columnPicker.resizeHandleTitle')}
       />
     </th>
   );
@@ -744,13 +744,13 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
         <details className="relative">
           <summary
             className="cursor-pointer list-none px-2.5 py-1 rounded text-xs font-medium border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors select-none"
-            title="Spalten der Alarmtabelle ein-/ausblenden"
+            title={t('alertFeed.columnPicker.buttonTitle')}
           >
-            ⚙ Spalten {hiddenCols.size > 0 && <span className="text-amber-400">({hiddenCols.size})</span>}
+            {t('alertFeed.columnPicker.buttonLabel')} {hiddenCols.size > 0 && <span className="text-amber-400">({hiddenCols.size})</span>}
           </summary>
           <div className="absolute right-0 mt-1 z-20 bg-slate-900 border border-slate-700 rounded shadow-lg p-2 min-w-48">
             <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 px-1">
-              Spalten anzeigen
+              {t('alertFeed.columnPicker.headerShow')}
             </div>
             {ALL_COLS.map(c => {
               // Bedingungs-abhängige Spalten greyen wir aus, wenn der Auslöser
@@ -769,7 +769,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     onChange={() => toggleCol(c.key)}
                   />
                   <span>{c.label}</span>
-                  {dimmed && <span className="ml-auto text-[9px] text-slate-600">(inaktiv)</span>}
+                  {dimmed && <span className="ml-auto text-[9px] text-slate-600">{t('alertFeed.columnPicker.inactiveHint')}</span>}
                 </label>
               );
             })}
@@ -779,20 +779,20 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   className="w-full text-[10px] text-slate-500 hover:text-slate-300 px-1 py-0.5 text-left"
                   onClick={() => setHiddenCols(new Set())}
                 >
-                  ↺ Alle einblenden
+                  {t('alertFeed.columnPicker.resetHidden')}
                 </button>
               )}
               {Object.keys(colWidths).length > 0 && (
                 <button
                   className="w-full text-[10px] text-slate-500 hover:text-slate-300 px-1 py-0.5 text-left"
                   onClick={() => setColWidths({})}
-                  title="Setzt alle Spaltenbreiten auf Auto-Layout zurück"
+                  title={t('alertFeed.columnPicker.resetWidthsTitle')}
                 >
-                  ↺ Spalten-Breiten zurücksetzen
+                  {t('alertFeed.columnPicker.resetWidths')}
                 </button>
               )}
               <p className="text-[9px] text-slate-600 px-1 leading-relaxed">
-                Tipp: Spalten lassen sich am rechten Rand des Headers ziehen.
+                {t('alertFeed.columnPicker.resizeTip')}
               </p>
             </div>
           </div>
