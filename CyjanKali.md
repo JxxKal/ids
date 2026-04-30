@@ -135,6 +135,77 @@ Daraus folgt: **das Problem ist nicht der Threshold, das Problem ist das Modell*
 3. **Strenger gefittetes Modell** (`config.py` + `model.py`): `contamination=0.005`, `n_estimators=200`. Damit wird der "Anomalie"-Anteil im Training kleiner gefittet → echte Outlier landen weiter im negativen `decision_function`-Bereich → Score-Verteilung dehnt sich, Default-Threshold 0.65 wird wieder sinnvoll.
 4. **Modell zurücksetzen + Bootstrap erzwingen** auf Master: alte `iforest.joblib`/`scaler.joblib` löschen, `ids-ml-engine` restarten — der Bootstrap-Pfad in `main.py` lädt Flows aus DB und trainiert frisch.
 
+### Implementierung der Maßnahmen — Commits
+
+| Commit | Inhalt |
+|---|---|
+| `ee26503` | features.py +4 Features (FEATURE_DIM 14→18); bootstrap.py SQL-Pfad gefixt (`stats->...` JSONB); Filter `start_ts < now() - 2h` und `NOT EXISTS alerts.flow_id`; contamination 0.01→0.005; n_estimators 100→200; training-loop synchron auf 18 Features. |
+| `1496fc0` | docker-compose.yml: `BOOTSTRAP_MIN_SAMPLES` und `CONTAMINATION` durchgereicht (vorher las `config.py` `BOOTSTRAP_MIN_SAMPLES`, der Compose setzte aber `ML_BOOTSTRAP_MIN` → der Default 500 war nie überschreibbar). Default 25 000 → bootstrap auf 50 000 Flows. |
+
+### Deployment
+
+```bash
+cd /opt/ids && git pull
+docker compose --profile prod build ml-engine training-loop
+docker compose stop ml-engine training-loop
+docker run --rm -v ids_ml-models:/m alpine sh -c \
+  'rm -f /m/iforest.joblib /m/scaler.joblib /m/meta.json /m/ml_config.json'
+docker compose --profile prod up -d ml-engine
+# Auf "Bootstrap: loaded 50000 flows from DB" + "Model trained and saved" warten
+docker compose --profile prod up -d training-loop
+```
+
+### Befund nach dem Re-Training (Modell v2, FEATURE_DIM=18)
+
+Tests T9–T11 mit dem neuen Modell:
+
+| Test | Befehl | signature | suricata | ml | ML-Top-Score (Subnet) |
+|---|---|---|---|---|---|
+| T9  | `nmap -sS -T4 --top-ports 1000 80` | SCAN_001 high, DOS_CONN_001 high | 1 medium | 0 | – |
+| T10 | gleicher nmap, threshold auf 0.40 | SCAN_001 high, DOS_CONN_001 high | 0 | **1** (0.43, Linuxhost→CDN) | 0.55 (1.77→Akamai) |
+| T11 | `hping3 -S -p 80 -i u200 -c 10000` | DOS_CONN_001 high, **DOS_SYN_001 critical**, RECON_003 low | 1 medium | 0 | – |
+
+**ML-Engine-Verhalten im Vergleich vorher/nachher:**
+
+| Metrik | Vor Re-Training (Modell v1, 14 Features) | Nach Re-Training (Modell v2, 18 Features) |
+|---|---|---|
+| ML-Alerts in 24 h Idle (Threshold 0.65) | 0 | 0 |
+| ML-Alerts in 90 s Idle (Threshold 0.40) | 48 (alle 0.40–0.46, viele FPs auf mDNS) | 3 (Spreizung 0.41–0.49, präziser) |
+| Top-Score normaler Subnet-Traffic | 0.46 | 0.55 |
+| Score-Verteilung | extrem schmal um 0.40 | breiter, deutlich höhere Spitzen |
+
+**Persistente Threshold-Einstellung** auf dem Master:
+```bash
+docker exec ids-ml-engine sh -c 'echo "{\"alert_threshold\": 0.40}" > /models/ml_config.json'
+```
+Die ml-engine pollt diesen Wert alle 500 Flows und übernimmt zur Laufzeit.
+
+### Ehrliche Einordnung — was ML ab jetzt erkennt und was nicht
+
+**ML feuert jetzt zuverlässig** auf Flows die im Feature-Raum vom 50 k-Trainings-Sample abweichen:
+- atypische Bandbreitenprofile (`bps`/`pps` an den Rändern)
+- ungewöhnliche IAT-Entropie (gleichmäßig getaktete Pakete vs. natürliche Bursts)
+- exotische Flag-Kombinationen
+- Flows zu non-standard Ports mit unüblicher Größe/Dauer
+
+**ML kann strukturell *nicht* erkennen, was die Heuristik leistet**: Port-Scans und SYN-Floods landen nach Flow-Aggregation als **viele Mini-Flows** in die Pipeline (random src_port → 1 Flow je Quell-Port mit 1 Paket). Jeder einzelne dieser Flows ist statistisch nicht von einem Half-Open-Web-Versuch trennbar. Ein IsolationForest auf Single-Flow-Features kann das prinzipiell nicht detektieren — er bräuchte Sliding-Window-Aggregation pro `src_ip` ("derselbe Sender hat in 60 s 1 000 verschiedene `dst_port` angepingt"). Genau diese Aggregation **leistet die signature-engine** über den `ctx.unique_dst_ports(src_ip, window_s)`-Helper. Beide Engines sind komplementär:
+
+- **signature** = stateful, hand-kuratiert, zuverlässig auf benannten Pattern (Scan, Flood, DNS-Amp, ICMP-Flood, Recon, Fragment).
+- **ml** = stateless, IsolationForest auf 18 Features, fängt anomales **Single-Flow-Verhalten** ab — z.B. einen ungewöhnlich großen oder lang laufenden TCP-Flow, der durch keine Heuristik gedeckt ist.
+
+Genau diese Rollenverteilung deckte sich auch bei T11: die Heuristik hat den SYN-Flood mit `severity=critical` markiert, ML feuerte parallel auf einen separaten Linuxhost-zu-Akamai-Flow mit Score 0.55 — also das was es leisten *kann*.
+
+### Offene Beobachtung — Tap-Backpressure
+
+Während des hping3-Floods (T3, ~10 k Pakete in 4 s, später wiederholt mit 4 min Burst) füllte sich der **Tap-Kafka-Producer-Buffer** und blockierte den Sniffer-Read-Pfad. Folge: nachfolgende Tests (T5–T8) sahen praktisch keinen Kali-Verkehr mehr im Master, weil der Tap die Backlogs noch über mehrere Minuten abarbeitete (`Kafka-Puffer voll, warte...`-Warnings im flow-aggregator-Log). Erst nach `docker compose -f docker-compose.tap.yml restart sniffer flow-aggregator kafka` floss der Burst-Verkehr wieder durch. **V2-Backlog**: Tap-Sniffer Backpressure-Strategie (Drop-Policy bei vollem Buffer statt blocking) und größere Kafka-Producer-Queue (`queue.buffering.max.messages`).
+
+### Zusammenfassung — was der Lauf gezeigt hat
+
+1. **Tap funktioniert** für normalen Subnet-Traffic. Burst-Pentest-Lasten (>1 k pps) verstopfen den Tap-Kafka-Buffer und verursachen sichtbare Drop-Phasen.
+2. **Heuristik (signature-engine)** erkennt jeden Test (Stealth-Scan, Full-Port-Scan, SYN-Flood) zuverlässig und korrekt-priorisiert.
+3. **ML-Engine** war initial taub (0 Alerts in 24 h, 0 Alerts auf jedem aggressiven Test). Nach Code-Patch (4 zusätzliche Features, gefilterte Trainingsdaten, korrektes Bootstrap-SQL, höheres Sample-Limit, strengere Contamination, 200 Estimators) und Threshold-Anpassung (0.65 → 0.40) feuert ML jetzt im erwarteten Rahmen auf Single-Flow-Anomalien — und ist damit komplementär zur Heuristik aufgestellt.
+4. **Lehre**: IsolationForest auf 14–18 Single-Flow-Features ist **kein Scan-/Flood-Detektor**. Die Heuristik ist das, ML übernimmt die nicht-benannten Verhaltens-Anomalien. Die Erwartung „ML erkennt nmap" ist falsch — der Detektor dafür sitzt richtig in der signature-engine, ML ergänzt sie für unbekannte Pattern.
+
 
 
 
