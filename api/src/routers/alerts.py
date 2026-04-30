@@ -108,8 +108,15 @@ async def list_alerts(
         params.append(is_test); idx += 1
 
     if severity:
-        filters.append(f"a.severity = ${idx}")
-        params.append(severity); idx += 1
+        # Akzeptiert sowohl "high" als auch "critical,high" (CSV) — letzteres
+        # für das Multi-Severity-Filter im Frontend.
+        sev_list = [s.strip() for s in severity.split(",") if s.strip()]
+        if len(sev_list) == 1:
+            filters.append(f"a.severity = ${idx}")
+            params.append(sev_list[0]); idx += 1
+        elif len(sev_list) > 1:
+            filters.append(f"a.severity = ANY(${idx}::text[])")
+            params.append(sev_list); idx += 1
     if source:
         filters.append(f"a.source = ${idx}")
         params.append(source); idx += 1
@@ -184,7 +191,11 @@ async def export_alerts_csv(
     if is_test is not None:
         filters.append(f"is_test = ${idx}"); params.append(is_test); idx += 1
     if severity:
-        filters.append(f"severity = ${idx}"); params.append(severity); idx += 1
+        sev_list = [s.strip() for s in severity.split(",") if s.strip()]
+        if len(sev_list) == 1:
+            filters.append(f"severity = ${idx}"); params.append(sev_list[0]); idx += 1
+        elif len(sev_list) > 1:
+            filters.append(f"severity = ANY(${idx}::text[])"); params.append(sev_list); idx += 1
     if source:
         filters.append(f"source = ${idx}"); params.append(source); idx += 1
     if rule_id:

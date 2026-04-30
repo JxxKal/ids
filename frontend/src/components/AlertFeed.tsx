@@ -79,7 +79,7 @@ interface Props {
   mlOnly: boolean;
 }
 
-const SEVERITIES = ['', 'critical', 'high', 'medium', 'low'];
+const SEVERITIES_ORDERED = ['critical', 'high', 'medium', 'low'] as const;
 
 const ROW_SEVERITY: Record<string, string> = {
   critical: 'cyjan-row-critical',
@@ -403,7 +403,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
 export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
   const { t } = useTranslation();
   const [selected,          setSelected]          = useState<Alert | null>(null);
-  const [severityF,         setSeverityF]         = useState('');
+  const [severityFilters,   setSeverityFilters]   = useState<string[]>([]);
   const [sourceF,           setSourceF]           = useState('');
   const [feedbackF,         setFeedbackF]         = useState('');
   const [search,            setSearch]            = useState('');
@@ -533,7 +533,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
       if (!showTest && a.is_test) return false;
       if (mlOnly && a.source !== 'ml') return false;
       if (suppressIrmaAsset && a.source === 'external' && a.rule_id?.startsWith('ASSET::')) return false;
-      if (severityF && a.severity !== severityF) return false;
+      if (severityFilters.length && !severityFilters.includes(a.severity)) return false;
       if (sourceF   && a.source   !== sourceF)   return false;
       if (feedbackF === 'none' && a.feedback)     return false;
       if (feedbackF === 'fp'   && a.feedback !== 'fp') return false;
@@ -580,11 +580,11 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
       });
     }
     return filteredArr;
-  }, [alerts, showTest, mlOnly, suppressIrmaAsset, severityF, sourceF, feedbackF, search, egressMode, sortByPriority, tapFilter]);
+  }, [alerts, showTest, mlOnly, suppressIrmaAsset, severityFilters, sourceF, feedbackF, search, egressMode, sortByPriority, tapFilter]);
 
   // Export-URL passend zu aktiven Filtern aufbauen
   const exportUrl = alertsExportUrl({
-    severity: severityF  || undefined,
+    severity: severityFilters.length ? severityFilters.join(',') : undefined,
     source:   sourceF    || undefined,
     feedback: feedbackF  || undefined,
     is_test:  showTest ? null : false,
@@ -628,12 +628,26 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             onChange={e => setSearch(e.target.value)}
           />
         </HelpTip>
-        <select className="input w-28" value={severityF} onChange={e => setSeverityF(e.target.value)}
-          title={t('alertFeed.filters.severity')}>
-          {SEVERITIES.map(s => (
-            <option key={s} value={s}>{s || t('common.all')}</option>
-          ))}
-        </select>
+        <div className="flex gap-1 items-center" title={t('alertFeed.filters.severity')}>
+          {SEVERITIES_ORDERED.map(s => {
+            const active = severityFilters.includes(s);
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSeverityFilters(prev =>
+                  prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
+                )}
+                className={`cyjan-sev-badge cyjan-sev-${s} cursor-pointer transition-opacity ${
+                  active ? '' : 'opacity-30 hover:opacity-60'
+                }`}
+                aria-pressed={active}
+              >
+                {s}
+              </button>
+            );
+          })}
+        </div>
         <select className="input w-28" value={sourceF} onChange={e => setSourceF(e.target.value)}
           title={t('alertFeed.filters.source')}>
           <option value="">{t('alertFeed.filters.allSources')}</option>
