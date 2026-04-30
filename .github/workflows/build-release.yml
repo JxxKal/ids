@@ -100,9 +100,14 @@ jobs:
           done
 
           # Master-Bundle (Custom + Externe Master).
+          # rule-tuner: Phase-4-Service (ML-Threshold-Anpassung), seit v1.5.0
+          # Master-only. Vorher fehlte er hier — Update-ZIPs ohne rule-tuner
+          # ließen die Reservoir-/Tuning-Pipeline auf der Zielmaschine ohne
+          # Container.
           CUSTOM_MASTER=(api frontend flow-aggregator signature-engine ml-engine \
                          alert-manager enrichment-service pcap-store training-loop \
-                         sniffer irma-bridge snort snort-bridge master-uplink)
+                         sniffer irma-bridge snort snort-bridge master-uplink \
+                         rule-tuner)
 
           IMAGES_MASTER=()
           for svc in "${CUSTOM_MASTER[@]}"; do
