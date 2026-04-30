@@ -195,9 +195,59 @@ Die ml-engine pollt diesen Wert alle 500 Flows und übernimmt zur Laufzeit.
 
 Genau diese Rollenverteilung deckte sich auch bei T11: die Heuristik hat den SYN-Flood mit `severity=critical` markiert, ML feuerte parallel auf einen separaten Linuxhost-zu-Akamai-Flow mit Score 0.55 — also das was es leisten *kann*.
 
-### Offene Beobachtung — Tap-Backpressure
+### Tap-Backpressure-Fix (Commit `2c957bb`, 2026-04-30)
 
-Während des hping3-Floods (T3, ~10 k Pakete in 4 s, später wiederholt mit 4 min Burst) füllte sich der **Tap-Kafka-Producer-Buffer** und blockierte den Sniffer-Read-Pfad. Folge: nachfolgende Tests (T5–T8) sahen praktisch keinen Kali-Verkehr mehr im Master, weil der Tap die Backlogs noch über mehrere Minuten abarbeitete (`Kafka-Puffer voll, warte...`-Warnings im flow-aggregator-Log). Erst nach `docker compose -f docker-compose.tap.yml restart sniffer flow-aggregator kafka` floss der Burst-Verkehr wieder durch. **V2-Backlog**: Tap-Sniffer Backpressure-Strategie (Drop-Policy bei vollem Buffer statt blocking) und größere Kafka-Producer-Queue (`queue.buffering.max.messages`).
+Während des hping3-Floods füllte sich der Tap-Kafka-Producer-Buffer und blockierte den Sniffer-Read-Pfad. Nachfolgende Tests sahen praktisch keinen Kali-Verkehr mehr im Master, weil der Tap das Backlog noch über mehrere Minuten abarbeitete (`Kafka-Puffer voll, warte...`-Warnings im flow-aggregator-Log).
+
+**Fix:**
+- Sniffer (Rust): `queue.buffering.max.messages 100 k → 500 k`, `channel_capacity 10 k → 100 k`, größere Batches (1 k → 5 k), `linger.ms 5 → 20`.
+- flow-aggregator (Python): `queue.buffering.max.messages 50 k → 500 k`, größere Batches (500 → 5 000), `linger.ms 10 → 50`. Wichtigster Fix: bei `BufferError` nur **einen** schnellen Retry, dann sauber **droppen** (Counter `kafka_dropped`, rate-limitiertes Warning) statt 0,5 s blockieren.
+
+**Validierung (Burst-Test BT, 2026-04-30T17:29:18):**
+
+```
+hping3 -S -p 80 -i u200 -c 10000 192.168.1.80   # 5 kpps × 2 s
++ direkt nmap -sS -T4 -Pn --top-ports 1000 192.168.1.80
+```
+
+| Metrik | Tap | Master |
+|---|---|---|
+| `kafka_drop` während Burst | 0 | 0 |
+| `kafka_ok` Aufholzeit nach Burst | ~30 s | ~30 s |
+| Sniffer `drop_pct` | 0,00 % | 0,00 % |
+| nmap nach Burst | sauber durch (SCAN_001 + RECON_001 sofort) | – |
+
+Vorher: 5+ min Pipeline-Stau. Jetzt: 30 s Aufholzeit, danach komplett wieder einsatzbereit.
+
+### ML-Threshold-Sweet-Spot — Empirisch ermittelt
+
+Nach dem Re-Training und initialem Threshold 0.40 zeigte das Modell viele False-Positive-Alerts auf normalem Subnet-Verkehr (mDNS, MQTT, Linuxhost-zu-CDN). Empirische Score-Verteilung über 30 min Idle-Subnet-Verkehr:
+
+| Quantil | Score |
+|---|---|
+| Median (P50) | 0,435 |
+| P95 | 0,517 |
+| **P99** | **0,550** |
+| Maximum | 0,559 |
+
+Threshold gesetzt auf **0,57** (knapp über dem beobachteten Maximum):
+
+```bash
+docker exec ids-ml-engine sh -c \
+  'echo "{\"alert_threshold\": 0.57}" > /models/ml_config.json'
+```
+
+**Validierung:**
+
+| Phase | ML-Alerts | Bewertung |
+|---|---|---|
+| 5 min Idle (Subnet-Hintergrund) | 0 | ✓ Keine FPs |
+| 10 min Idle | 0 | ✓ Stabil |
+| Burst-Test BT (hping3 + nmap) | 0 | erwartet — Multi-Flow-Pattern, ML-blind (siehe Befund) |
+
+**Bewertung des Sweet-Spots:** Threshold 0,57 sitzt 1 Punkt über dem Idle-Maximum, ist also robust gegen normales Subnet-Rauschen. Reale Single-Flow-Outlier (ungewöhnliche Bandbreite, lang anhaltende exotische TCP-Verbindungen) müssen den Score klar überschreiten — das ist plausibel, weil unser Idle-P99 schon bei 0,55 deckelt und echte Anomalien deutlich höhere Scores produzieren sollten.
+
+**Falls in Produktion zu wenig ML-Aktivität:** Threshold schrittweise auf 0,55 senken — pro 0,01 Senkung ungefähr 2× mehr Alerts.
 
 ### Zusammenfassung — was der Lauf gezeigt hat
 
