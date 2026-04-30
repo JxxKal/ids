@@ -105,6 +105,73 @@
     Lab-Topologie steckt.
   </p>
 
+  <h4>Voraussetzung: dedizierte Mirror-Bridge anlegen</h4>
+  <p>
+    Bevor das Hookscript greift, brauchst du in Proxmox eine eigene
+    Linux-Bridge <em>nur für den Mirror-Traffic</em>. Der Sinn: die
+    Sniffer-NIC der Tap-VM hängt isoliert daran und sieht ausschließlich
+    die per <code>tc mirred</code> reingespiegelten Pakete — kein
+    sonstiger Lab-Verkehr, keine ARP-Stöme, kein DHCP-Lärm.
+  </p>
+  <p>
+    Die Bridge hat <strong>keinen physischen Port</strong> und <strong>keine
+    IP</strong>. Das ist gewollt: Pakete bleiben rein virtuell auf dem
+    Host und kommen nur über das Hookscript-Mirroring rein.
+  </p>
+
+  <p><strong>Per GUI</strong> (Proxmox-Webinterface):</p>
+  <ol>
+    <li><em>Datacenter → &lt;node&gt; → System → Network → Create → Linux Bridge</em></li>
+    <li>Name: <code>vmbr99</code> (oder anderer freier vmbrN — muss in <code>SNIFFER_BRIDGE</code> des Hookscripts matchen)</li>
+    <li>IPv4/IPv6: leer lassen</li>
+    <li>Bridge ports: <em>leer</em> (kein eth/eno/enp drinnenhängen)</li>
+    <li>Comment: z.B. „Cyjan Mirror"</li>
+    <li><em>Create</em>, dann oben <em>Apply Configuration</em> klicken (live ohne Reboot)</li>
+  </ol>
+
+  <p><strong>Oder per Datei</strong> (gleichbedeutend) — direkt in
+    <code>/etc/network/interfaces</code> auf dem Proxmox-Host:</p>
+<pre><code class="lang-bash">cat &gt;&gt; /etc/network/interfaces &lt;&lt;'EOF'
+
+auto vmbr99
+iface vmbr99 inet manual
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+#Cyjan Mirror Bridge (kein physischer Port, keine IP)
+EOF
+
+ifreload -a    # oder: ifup vmbr99</code></pre>
+
+  <p><strong>Verifikation</strong>:</p>
+<pre><code class="lang-bash">ip -br link show vmbr99           # → vmbr99  UP  ...
+bridge link show master vmbr99    # zeigt angeschlossene Taps (anfangs leer)
+brctl show vmbr99                 # alternative Sicht</code></pre>
+
+  <h4>Tap-VM mit der Mirror-Bridge verbinden</h4>
+  <p>
+    Die Tap-VM braucht <strong>zwei</strong> NICs: eine fürs Management
+    (Pairing zum Master, SSH, Updates) und eine an <code>vmbr99</code>
+    fürs reine Mithören. Beide werden im First-Boot-Wizard
+    (<code>ids-setup</code> auf der Tap-VM) als Management- bzw.
+    Mirror-Interface ausgewählt.
+  </p>
+<pre><code class="lang-bash"># Beispiel: VM 108 = Tap. net0 ist Management (vmbr0), net1 wird Mirror.
+qm set 108 --net1 virtio,bridge=vmbr99
+# danach Tap-VM rebooten oder net1 neu anstöpseln, damit das neue Tap
+# (tap108i1) am Bridge auftaucht.
+qm reboot 108
+
+# Innerhalb der Tap-VM: das neue Interface erscheint als ens19 / eth1.
+# Im First-Boot-Wizard (ids-setup) als 'Mirror-Interface' auswählen,
+# nicht als Management.</code></pre>
+  <p>
+    Wichtig: das Mirror-Interface in der Tap-VM bekommt <strong>keine
+    IP</strong> (der Wizard setzt <code>iface eth1 inet manual</code> +
+    promisc-mode). Der Sniffer-Container schluckt es per AF_PACKET
+    direkt — Routing braucht's nicht.
+  </p>
+
   <h4>Hookscript</h4>
   <p>
     <a class="btn-primary" href="assets/proxmox-mirror.sh" download>↓ proxmox-mirror.sh</a>
