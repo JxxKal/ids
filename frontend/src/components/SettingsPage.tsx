@@ -3981,7 +3981,8 @@ function RuleOverridesSettings() {
     return rules.filter(r => {
       const ov = overrides[r.id] ?? {};
       const isDisabled = ov.enabled === false;
-      const hasChange  = ov.enabled === false || (ov.severity != null);
+      const hasParamOverride = ov.parameters && Object.keys(ov.parameters).length > 0;
+      const hasChange  = ov.enabled === false || (ov.severity != null) || hasParamOverride;
       if (filter === 'enabled'  && isDisabled) return false;
       if (filter === 'disabled' && !isDisabled) return false;
       if (filter === 'changed'  && !hasChange) return false;
@@ -4054,6 +4055,21 @@ function RuleOverridesSettings() {
             ) : filtered.map(r => {
               const ov = overrides[r.id] ?? {};
               const isOpen = !!expanded[r.id];
+              // Phase 5: Row-Level Provenance-Indikator. Wenn IRGENDEIN
+              // Param dieser Rule ml-source ODER manuellen Override hat,
+              // zeigen wir das im Header — sonst muss der User aufklappen
+              // um zu sehen ob eine Heuristik vom Tuner angefasst wurde.
+              const ovParams = ov.parameters || {};
+              let mlParamCount = 0;
+              let manualParamCount = 0;
+              for (const v of Object.values(ovParams)) {
+                if (typeof v === 'object' && v !== null) {
+                  if ((v as { source?: string }).source === 'ml') mlParamCount++;
+                  else manualParamCount++;
+                } else if (typeof v === 'number') {
+                  manualParamCount++;
+                }
+              }
               return (
                 <Fragment key={r.id}>
                   <tr
@@ -4064,6 +4080,22 @@ function RuleOverridesSettings() {
                       <span className="text-slate-600 mr-1">{isOpen ? '▾' : '▸'}</span>
                       {r.id}
                       {!r.builtin && <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-cyan-900/40 text-cyan-300 border border-cyan-700/40">CUSTOM</span>}
+                      {mlParamCount > 0 && (
+                        <span
+                          className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-emerald-900/40 text-emerald-300 border border-emerald-700/40"
+                          title={`${mlParamCount} Param(s) vom rule-tuner gesetzt — aufklappen für Werte`}
+                        >
+                          ML×{mlParamCount}
+                        </span>
+                      )}
+                      {manualParamCount > 0 && (
+                        <span
+                          className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-amber-900/40 text-amber-300 border border-amber-700/40"
+                          title={`${manualParamCount} Param(s) manuell gesetzt — Tuner respektiert das`}
+                        >
+                          ✎×{manualParamCount}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2 text-slate-300">{r.name}</td>
                     <td className="px-3 py-2 text-slate-500 font-mono">{r.severity_default}</td>
