@@ -2017,6 +2017,23 @@ function RuleFileEditor() {
   const [confirmDel, setConfirmDel] = useState<RuleFileMeta | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName,  setNewName]  = useState('');
+  // Filter + Custom-First-Sort: bei 70+ emerging-Files ist die Custom-Datei
+  // ohne Suche praktisch unauffindbar.
+  const [search, setSearch] = useState('');
+  const [showBuiltin, setShowBuiltin] = useState(true);
+
+  // Sortierung: Custom zuerst (alphabetisch), dann builtin (alphabetisch).
+  // Plus optionaler Substring-Filter auf den Dateinamen.
+  const filteredFiles = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return [...files]
+      .filter(f => showBuiltin || !f.builtin)
+      .filter(f => !q || f.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        if (a.builtin !== b.builtin) return a.builtin ? 1 : -1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [files, search, showBuiltin]);
 
   const dirty = content !== orig;
 
@@ -2147,11 +2164,31 @@ function RuleFileEditor() {
 
       <div className="grid grid-cols-1 md:grid-cols-[260px_1fr] gap-3">
         {/* Datei-Liste */}
-        <div className="space-y-1 max-h-[480px] overflow-y-auto pr-1">
-          {files.length === 0 && !busy && (
+        <div className="space-y-1.5">
+          <input
+            type="search"
+            className="input w-full text-xs"
+            placeholder={t('settings.rules.editorSearchPlaceholder')}
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          <label className="flex items-center gap-1.5 text-[10px] text-slate-500 px-1">
+            <input
+              type="checkbox"
+              className="accent-cyan-500"
+              checked={showBuiltin}
+              onChange={e => setShowBuiltin(e.target.checked)}
+            />
+            <span>{t('settings.rules.editorShowBuiltin')}</span>
+            <span className="ml-auto tabular-nums">
+              {t('settings.rules.editorShowingCount', { shown: filteredFiles.length, total: files.length })}
+            </span>
+          </label>
+          <div className="space-y-1 max-h-[440px] overflow-y-auto pr-1">
+          {filteredFiles.length === 0 && !busy && (
             <p className="text-[11px] text-slate-500 italic px-2 py-3">{t('settings.rules.noFiles')}</p>
           )}
-          {files.map(f => (
+          {filteredFiles.map(f => (
             <button
               key={f.name}
               type="button"
@@ -2175,6 +2212,7 @@ function RuleFileEditor() {
               </div>
             </button>
           ))}
+          </div>
         </div>
 
         {/* Editor-Spalte */}
