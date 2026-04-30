@@ -1075,6 +1075,8 @@
       "chooseZip": "Choose ZIP …",
       "uploading": "Uploading …",
       "startUpdate": "Start update",
+      "forceButton": "Force apply (force=true)",
+      "forceTitle": "Re-applies the bundle despite the version check — e.g. after image drift or deliberate re-install of the current build",
       "pullImages": "Update base images",
       "pullImagesHint": "(requires internet access)",
       "restartStack": "Restart stack",

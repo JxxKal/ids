@@ -1075,6 +1075,8 @@
       "chooseZip": "ZIP auswählen …",
       "uploading": "Wird hochgeladen …",
       "startUpdate": "Update starten",
+      "forceButton": "Trotzdem ausführen (force=true)",
+      "forceTitle": "Erzwingt Re-Apply trotz Versions-Check — z.B. nach Image-Drift oder bewusstem Re-Install des aktuellen Bundles",
       "pullImages": "Basis-Images aktualisieren",
       "pullImagesHint": "(benötigt Internetzugang)",
       "restartStack": "Stack neu starten",

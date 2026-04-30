@@ -1020,17 +1020,36 @@ export async function testSyslog(body: SyslogTestRequest): Promise<{ status: str
 
 // ── System-Update ─────────────────────────────────────────────────────────────
 
-export async function startSystemUpdate(file: File, pullImages: boolean): Promise<{ status: string }> {
+export interface SystemUpdateStartResponse {
+  status:   string;
+  // Nur gefüllt seit dem Backend-Version-Check (v1.5.2+):
+  incoming?: string;
+  current?:  string;
+}
+
+export async function startSystemUpdate(
+  file: File,
+  pullImages: boolean,
+  force: boolean = false,
+): Promise<SystemUpdateStartResponse> {
   const token = getToken();
   const fd = new FormData();
   fd.append('file', file);
   fd.append('pull_images', String(pullImages));
+  if (force) fd.append('force', 'true');
   const res = await fetch(`${BASE}/api/system/update`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: fd,
   });
-  if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`${res.status}: ${t}`); }
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    // 400 mit 'Downgrade abgelehnt' / 'kein Update notwendig' → der Caller
+    // kann das parsen und einen Force-Retry-Button anbieten. Wir reichen den
+    // Body als Error-Message durch, damit der UI-Layer die Heuristik machen
+    // kann ohne einen separaten Status-Code-Pfad.
+    throw new Error(`${res.status}: ${t}`);
+  }
   return res.json();
 }
 

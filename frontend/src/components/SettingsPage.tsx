@@ -3534,13 +3534,13 @@ function SystemUpdate() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [status.log.length]);
 
-  async function handleStart() {
+  async function handleStart(force: boolean = false) {
     if (!file) return;
     setError(null);
     setUploading(true);
     setRestarting(false);
     try {
-      await startSystemUpdate(file, pullImages);
+      await startSystemUpdate(file, pullImages, force);
       setStatus(s => ({ ...s, phase: 'extracting', log: [], progress: 0, started_at: new Date().toISOString() }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -3548,6 +3548,13 @@ function SystemUpdate() {
       setUploading(false);
     }
   }
+
+  // Erkennt 400-Antworten vom Backend-Version-Check ('Downgrade abgelehnt'
+  // oder 'kein Update notwendig') — nur dort macht der Force-Button Sinn.
+  // Andere 4xx-/5xx-Errors (Validierung, Netzwerkschwund, Disk-Full)
+  // sollen NICHT mit force erneut probieren.
+  const errorAllowsForce = !!(error && /^400:/.test(error)
+    && /(Downgrade|kein Update notwendig)/i.test(error));
 
   async function handleRestart() {
     setConfirmRestart(false);
@@ -3603,7 +3610,7 @@ function SystemUpdate() {
 
         <button
           type="button"
-          onClick={handleStart}
+          onClick={() => handleStart(false)}
           disabled={!file || isRunning || uploading}
           className="flex items-center gap-2 px-4 py-1.5 rounded text-sm font-medium
                      bg-cyan-700 hover:bg-cyan-600 text-white
@@ -3629,7 +3636,20 @@ function SystemUpdate() {
       </label>
 
       {error && (
-        <p className="mt-3 text-sm text-red-400">{error}</p>
+        <div className="mt-3 space-y-2">
+          <p className="text-sm text-red-400">{error}</p>
+          {errorAllowsForce && (
+            <button
+              type="button"
+              onClick={() => handleStart(true)}
+              disabled={uploading || !file}
+              className="px-3 py-1.5 rounded text-xs font-medium border border-amber-700/60 bg-amber-950/30 text-amber-200 hover:bg-amber-900/40 hover:text-amber-100 transition-colors disabled:opacity-50"
+              title={t('settings.update.forceTitle')}
+            >
+              {t('settings.update.forceButton')}
+            </button>
+          )}
+        </div>
       )}
 
       {/* Stack-Neustart */}
