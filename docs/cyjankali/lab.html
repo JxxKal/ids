@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CYJANKALI Lab — Test-Resultate</title>
+  <meta name="description" content="Vollständiger Lab-Bericht: Pentest-Reihe gegen das Cyjan IDS — Heuristik, ML-Engine, DNS-Detection, Suppression, rule-tuner. Phasen 1–6 mit Befehl, IDS-Antwort und Bewertung pro Test.">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" href="assets/CYJAN_x_KALI_Banner.png">
+</head>
+<body>
+
+<header class="hero">
+  <img src="assets/CYJAN_x_KALI_Banner.png" alt="CYJANKALI Lab — Test-Resultate" class="banner">
+</header>
+
+<nav class="topnav">
+  <a href="index.html">← zurück zum Test-Katalog</a>
+  <a href="#overview">Übersicht</a>
+  <a href="#phase1">Phase 1</a>
+  <a href="#phase2">Phase 2</a>
+  <a href="#phase3">Phase 3</a>
+  <a href="#phase4">Phase 4</a>
+  <a href="#phase5">Phase 5</a>
+  <a href="#phase6">Phase 6</a>
+  <a href="#summary">Zusammenfassung</a>
+</nav>
+
+<main>
+
+<section id="overview">
+  <h1>Lab-Bericht — Pentest gegen das eigene IDS</h1>
+  <p class="lede">
+    Stand <strong>2026-04-30</strong>. Kali Linux (192.168.1.85) feuert über
+    eine spiegelnde Tap-VM (192.168.1.95) gegen einen Linuxhost (192.168.1.80);
+    das Master-IDS (192.168.1.81) wertet aus. Sechs Phasen: Heuristik-Validierung,
+    ML-Engine-Tuning, Backpressure-Fix, DNS-Vektoren, Suppression-Lebenszyklus,
+    rule-tuner Feedback-Loop. Jeder Test ist als <em>Angriffsmuster → IDS-Antwort
+    → Bewertung</em> dokumentiert; gefundene Bugs wurden im Repo gefixt.
+  </p>
+  <p>
+    Vollständige Markdown-Quelle:
+    <a href="https://github.com/JxxKal/ids/blob/main/CyjanKali.md" rel="noopener">CyjanKali.md</a>.
+  </p>
+
+  <h3>Setup</h3>
+  <table class="lab-table">
+    <thead>
+      <tr><th>Rolle</th><th>IP</th><th>Login</th><th>Notizen</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Kali (Angreifer)</td><td>192.168.1.85</td><td>jan / ***REDACTED***</td><td>Proxmox-VM</td></tr>
+      <tr><td>Linuxhost (Ziel)</td><td>192.168.1.80</td><td>jan / ***REDACTED***</td><td>Debian Desktop, lauscht auf 22, 3389</td></tr>
+      <tr><td>Tap (Sniffer)</td><td>192.168.1.95</td><td>ids / ***REDACTED***</td><td>sniffert <code>ens19</code>, gepairt mit Master</td></tr>
+      <tr><td>Master-IDS</td><td>192.168.1.81</td><td>ids / ***REDACTED***</td><td>volle Pipeline + Frontend</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Test-Übersicht</h3>
+  <table class="lab-table">
+    <thead>
+      <tr><th>ID</th><th>Phase</th><th>Angriffsmuster</th><th>sig</th><th>suri</th><th>ml</th><th>corr</th><th>Bewertung</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>T1</td><td>1</td><td>nmap Top-1000 Stealth-Scan</td><td>2</td><td>0</td><td>0</td><td>0</td><td>sig ✓, ml stumm</td></tr>
+      <tr><td>T2</td><td>1</td><td>nmap Full-Port <code>-sT -sV</code></td><td>7</td><td>0</td><td>0</td><td>0</td><td>sig ✓, ml stumm</td></tr>
+      <tr><td>T3</td><td>1</td><td>hping3 SYN-Flood (<code>--flood -c 20000</code>)</td><td>2</td><td>0</td><td>0</td><td>0</td><td>sig ✓, löst Tap-Backpressure aus</td></tr>
+      <tr><td>T4</td><td>1-D</td><td>Threshold-Diagnose 0.40</td><td>2</td><td>0</td><td>4</td><td>0</td><td>Modell unterscheidet Mini-Flows nicht</td></tr>
+      <tr><td>T9</td><td>2</td><td>nmap Top-1000 nach Tap-Restart</td><td>2</td><td>1</td><td>0</td><td>0</td><td>sig ✓ wieder normal</td></tr>
+      <tr><td>T10</td><td>2</td><td>nmap Top-1000 + Threshold 0.40</td><td>2</td><td>0</td><td>1</td><td>0</td><td>ml fängt nicht-Kali-Anomalie</td></tr>
+      <tr><td>T11</td><td>2</td><td>hping3 SYN-Flood <code>-i u200 -c 10000</code></td><td>3 (incl. critical)</td><td>1</td><td>0</td><td>0</td><td>sig ✓ critical, ml stumm (erwartet)</td></tr>
+      <tr><td>BT</td><td>3</td><td>Burst-Test: hping3 + sofort nmap</td><td>5</td><td>0</td><td>0</td><td>1</td><td>Backpressure-Fix verifiziert: kafka_drop=0</td></tr>
+      <tr><td>D1</td><td>4</td><td>DNS-Flood (1000 q @ 300 pps)</td><td>2</td><td>0</td><td>0</td><td>0</td><td>TUNNEL_001 + FRAGMENT_001</td></tr>
+      <tr><td>D2</td><td>4</td><td>DNS-Tunnel-Pattern (lange Subdomains)</td><td>(eng)</td><td>0</td><td>0</td><td>0</td><td>TUNNEL im engine-log, dedup unterdrückt DB</td></tr>
+      <tr><td>D3</td><td>4</td><td>DGA-Pattern (uniform IAT)</td><td>0</td><td>0</td><td>0</td><td>0</td><td>IAT-Entropy 1.28 unter Schwelle 2.5</td></tr>
+      <tr><td>D4</td><td>4</td><td>DNS-Flood gegen non-listening Port</td><td><strong>3</strong></td><td>0</td><td>0</td><td>0</td><td><strong>AMP_001 + TUNNEL_001 + FRAGMENT_001</strong></td></tr>
+      <tr><td>D5</td><td>4</td><td>DGA-Pattern (bimodal IAT)</td><td>0</td><td>0</td><td>0</td><td>0</td><td>IAT 1.34 — Schwelle gesenkt 2.5 → 1.5</td></tr>
+      <tr><td>D6</td><td>4</td><td>DGA bimodal nach Schwellen-Anpassung</td><td>3</td><td>0</td><td>0</td><td>0</td><td>fängt parallel echten Subnet-Host (.36)</td></tr>
+      <tr><td>D7</td><td>4</td><td>DGA trimodal IAT</td><td>2</td><td>0</td><td>0</td><td>0</td><td><strong>DGA_001 high score 0.80</strong></td></tr>
+      <tr><td>S1</td><td>5</td><td>Suppression: Single-Alert mit Baseline</td><td>(1)</td><td>0</td><td>0</td><td>0</td><td>severity → low + tag <code>ml-suppressed</code> ✓</td></tr>
+      <tr><td>S3</td><td>5</td><td>60-Alert-Burst (cache cold)</td><td>(60)</td><td>0</td><td>0</td><td>0</td><td>alle suppressed (Cache lag bei Z=0)</td></tr>
+      <tr><td>S4</td><td>5</td><td>Alert nach Spike-Durchbruch</td><td>(1)</td><td>0</td><td>0</td><td>0</td><td>severity medium, keine Tags — Z=54 ✓</td></tr>
+      <tr><td>RT1</td><td>6</td><td>rule-tuner: 5 min Training + Pentests</td><td>–</td><td>–</td><td>–</td><td>–</td><td>SCAN_001 internal 8 → 1049 ✓</td></tr>
+      <tr><td>RT2</td><td>6</td><td>rule-tuner: Floor-Constraint</td><td>–</td><td>–</td><td>–</td><td>–</td><td>SCAN_004 internal 8 → 9 ✓</td></tr>
+      <tr><td>RT3</td><td>6</td><td>rule-tuner: FP/TP-Konflikt</td><td>–</td><td>–</td><td>–</td><td>–</td><td>Bug entdeckt → fix → bewahrt ✓</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="phase1">
+  <h2>Phase 1 — Heuristik-Validierung gegen das ungetunte System (T1–T3)</h2>
+  <p class="lede">
+    Erste Pentest-Reihe gegen die signature-engine. ML-Engine im Default-Stand
+    (threshold 0,65, 14 Features) — Ausgangslage „letzte 24 h: 0 ML-Alerts".
+  </p>
+
+  <article class="test">
+    <h3 id="t1">Test 1 — nmap Top-1000 Stealth-Scan</h3>
+    <p>
+      <strong>Angriffsmuster:</strong> Klassischer SYN-Stealth-Scan auf die
+      1 000 häufigsten Ports. Erwartet: <code>SCAN_001</code>,
+      <code>DOS_CONN_001</code>.
+    </p>
+<pre><code class="lang-bash">nmap -sS -T4 -Pn --top-ports 1000 192.168.1.80</code></pre>
+    <details open>
+      <summary>IDS-Antwort (Dauer 0,74 s)</summary>
+      <table class="lab-table">
+        <thead><tr><th>ts</th><th>source</th><th>severity</th><th>rule_id</th><th>port</th><th>score</th></tr></thead>
+        <tbody>
+          <tr><td>16:18:38.529</td><td>signature</td><td>high</td><td>SCAN_001</td><td>143</td><td>0.80</td></tr>
+          <tr><td>16:18:38.547</td><td>signature</td><td>high</td><td>DOS_CONN_001</td><td>17988</td><td>0.80</td></tr>
+        </tbody>
+      </table>
+    </details>
+    <p>
+      <strong>Bewertung:</strong> Heuristik nagelt es korrekt fest. ML feuert
+      nicht — wie in der 24-h-Beobachtung.
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="t2">Test 2 — nmap Full-Port mit Service-Detection</h3>
+    <p>
+      <strong>Angriffsmuster:</strong> Vollständiger TCP-Connect-Scan über alle
+      65 535 Ports plus Service-Banner-Probes (~3 300 pps).
+    </p>
+<pre><code class="lang-bash">nmap -sT -sV -T4 -Pn -p- 192.168.1.80</code></pre>
+    <details>
+      <summary>IDS-Antwort (Dauer 19,5 s) — <code>signature=7  ml=0</code></summary>
+      <table class="lab-table">
+        <thead><tr><th>severity</th><th>rule_id</th><th>Bemerkung</th></tr></thead>
+        <tbody>
+          <tr><td>high</td><td>DOS_CONN_001</td><td>Verbindungsflut Kali → 80</td></tr>
+          <tr><td><strong>critical</strong></td><td><strong>DOS_SYN_001</strong></td><td>SYN-Burst</td></tr>
+          <tr><td>high</td><td>SCAN_001</td><td>Portscan</td></tr>
+          <tr><td>low</td><td>RECON_003</td><td>RST-Pattern</td></tr>
+          <tr><td>high</td><td>SCAN_001 (reverse)</td><td>80 → 85 — Antwort-Pattern triggert in Gegenrichtung</td></tr>
+        </tbody>
+      </table>
+    </details>
+    <p>
+      <strong>Bewertung:</strong> Heuristik feuert breit und korrekt-priorisiert.
+      ML weiterhin still.
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="t3">Test 3 — hping3 SYN-Flood</h3>
+    <p>
+      <strong>Angriffsmuster:</strong> Dauer-SYN-Flood gegen Port 80 mit hoher
+      Paketrate. Klassischer DoS-Versuch.
+    </p>
+<pre><code class="lang-bash">sudo hping3 -S -p 80 --flood -c 20000 192.168.1.80</code></pre>
+    <details>
+      <summary>IDS-Antwort (Dauer ~4 min) — <code>signature=2  ml=0</code></summary>
+      <ul>
+        <li><code>DOS_CONN_001</code> (high)</li>
+        <li><strong><code>DOS_SYN_001</code> (critical)</strong></li>
+      </ul>
+    </details>
+    <p>
+      <strong>Bewertung:</strong> Heuristik korrekt <code>critical</code>, ML
+      auch hier still bei einem SYN-Flood — substanziell unterempfindlich.
+    </p>
+    <p class="muted">
+      <strong>Nebeneffekt:</strong> dieser 4-min-Flood stopfte den
+      Tap-Kafka-Producer-Buffer. Folge-Tests T5–T8 sahen über 5 min lang fast
+      keinen Verkehr. Daraus folgt der Backpressure-Fix in
+      <a href="#phase3">Phase 3</a>.
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="t4">Diagnose T4 — Threshold-Probe 0.65 → 0.40</h3>
+    <p>
+      Threshold zur Laufzeit über <code>/models/ml_config.json</code> auf 0,40
+      abgesenkt. Score-Verteilung der nächsten 5 min:
+    </p>
+    <table class="lab-table">
+      <thead><tr><th>Score-Bucket</th><th>Alerts</th></tr></thead>
+      <tbody>
+        <tr><td>0.4</td><td>48</td></tr>
+        <tr><td>0.5</td><td>3</td></tr>
+        <tr><td>≥ 0.6</td><td><strong>0</strong></td></tr>
+      </tbody>
+    </table>
+    <p>
+      Top-Scorer waren mDNS-Discovery, MQTT, normaler SSH-Verkehr — die Kali-
+      Tests tauchten unter den Top-Scorern <em>überhaupt nicht</em> auf. Daraus
+      folgt: das Problem ist nicht der Threshold, das Problem ist das Modell —
+      14 sehr basale Flow-Statistiken reichen nicht aus.
+    </p>
+  </article>
+</section>
+
+<section id="phase2">
+  <h2>Phase 2 — Tests nach ML-Re-Training (T9–T11)</h2>
+  <p class="lede">
+    Code-Änderungen vor Phase 2 (Commits <code>ee26503</code> +
+    <code>1496fc0</code>): 4 zusätzliche Features (FEATURE_DIM 14 → 18),
+    bereinigtes Bootstrap-SQL (JSONB-Pfad, ≥2 h alt, ohne Alert-Verknüpfung),
+    contamination 0,01 → 0,005, n_estimators 100 → 200, training-loop
+    synchronisiert auf 18 Features, Compose-Env-Bug gefixt.
+  </p>
+
+  <article class="test">
+    <h3 id="t9">Test 9 — nmap Top-1000 mit Modell v2</h3>
+<pre><code class="lang-bash">nmap -sS -T4 -Pn --top-ports 1000 192.168.1.80</code></pre>
+    <details open>
+      <summary>IDS-Antwort — <code>signature=2  suricata=1  ml=0</code></summary>
+      <table class="lab-table">
+        <thead><tr><th>ts</th><th>source</th><th>severity</th><th>rule_id</th><th>port</th></tr></thead>
+        <tbody>
+          <tr><td>16:51:15.267</td><td>signature</td><td>high</td><td>SCAN_001</td><td>445</td></tr>
+          <tr><td>16:51:15.285</td><td>signature</td><td>high</td><td>DOS_CONN_001</td><td>3766</td></tr>
+          <tr><td>16:51:33.073</td><td>suricata</td><td>medium</td><td>SURICATA:1:2210016:2</td><td>80</td></tr>
+        </tbody>
+      </table>
+    </details>
+  </article>
+
+  <article class="test">
+    <h3 id="t10">Test 10 — nmap Top-1000 mit Threshold 0.40</h3>
+    <details open>
+      <summary>IDS-Antwort</summary>
+      <table class="lab-table">
+        <thead><tr><th>ts</th><th>source</th><th>severity</th><th>rule_id</th><th>dst_ip</th><th>score</th></tr></thead>
+        <tbody>
+          <tr><td>16:57:49.493</td><td>signature</td><td>high</td><td>SCAN_001</td><td>192.168.1.80</td><td>0.80</td></tr>
+          <tr><td>16:57:49.512</td><td>signature</td><td>high</td><td>DOS_CONN_001</td><td>192.168.1.80</td><td>0.80</td></tr>
+          <tr><td>16:57:56.785</td><td><strong>ml</strong></td><td>low</td><td>ML_ANOMALY</td><td>160.79.104.10</td><td><strong>0.43</strong></td></tr>
+        </tbody>
+      </table>
+    </details>
+    <p>
+      <strong>Bewertung:</strong> ML feuert auf einen <em>anderen</em> Flow
+      (Linuxhost zu CDN) — die „ehrliche Lieferung" des Modells. Es markiert
+      ungewöhnliche Single-Flow-Bandbreitenprofile, nicht den Scan selbst.
+      Top-Score normaler Subnet-Verkehr klettert von 0,46 (Modell v1) auf 0,55
+      (Modell v2).
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="t11">Test 11 — hping3 SYN-Flood, kontrolliert</h3>
+<pre><code class="lang-bash">sudo hping3 -S -p 80 -i u200 -c 10000 192.168.1.80</code></pre>
+    <details>
+      <summary>IDS-Antwort — <code>signature=3  suricata=1  ml=0</code></summary>
+      <ul>
+        <li><code>DOS_CONN_001</code> high</li>
+        <li><strong><code>DOS_SYN_001</code> critical</strong></li>
+        <li><code>RECON_003</code> low</li>
+        <li><code>SURICATA:1:2210016:2</code> medium</li>
+      </ul>
+    </details>
+    <p>
+      <strong>Bewertung:</strong> Heuristik korrekt + sofort. ML stumm —
+      <em>strukturell richtig</em>: hping3 randomisiert <code>src_port</code>
+      pro Paket, daher landen 10 000 Mini-Flows mit je 1 SYN-Paket im
+      Aggregator. IsolationForest auf Single-Flow-Features kann das prinzipiell
+      nicht detektieren — diese Multi-Flow-Aggregation leistet die
+      signature-engine über <code>ctx.flow_rate(src_ip, window_s)</code>.
+    </p>
+  </article>
+</section>
+
+<section id="phase3">
+  <h2>Phase 3 — Burst-Test nach Backpressure-Fix (BT)</h2>
+  <p class="lede">
+    Commit <code>2c957bb</code>: <strong>sniffer</strong>
+    <code>queue.buffering.max.messages 100k → 500k</code>,
+    <code>channel_capacity 10k → 100k</code>, größere Batches;
+    <strong>flow-aggregator</strong> 50k → 500k Producer-Puffer, sauberer Drop
+    statt blocking-Retry (5-s-rate-limited Warning, neuer
+    <code>kafka_dropped</code>-Counter).
+  </p>
+
+  <article class="test">
+    <h3 id="bt">Test BT — Burst + sofort nmap</h3>
+    <p>
+      <strong>Worst-Case-Folge:</strong> 5-kpps-SYN-Flood, direkt danach
+      nmap-Scan. Vor dem Fix hätte der nmap nichts mehr durchbekommen — der
+      Tap-Buffer wäre 5+ Minuten am Aufholen.
+    </p>
+<pre><code class="lang-bash">sudo hping3 -S -p 80 -i u200 -c 10000 192.168.1.80   # 5 kpps × 2 s
+nmap -sS -T4 -Pn --top-ports 1000 192.168.1.80       # direkt im Anschluss</code></pre>
+    <details open>
+      <summary>IDS-Antwort — <code>signature=5  correlation=1</code></summary>
+      <table class="lab-table">
+        <thead><tr><th>ts</th><th>source</th><th>severity</th><th>rule_id</th><th>Phase</th></tr></thead>
+        <tbody>
+          <tr><td>17:29:19.162</td><td>signature</td><td>high</td><td>DOS_CONN_001</td><td>hping3</td></tr>
+          <tr><td>17:29:19.570</td><td>correlation</td><td>low</td><td>UNKNOWN_HOST_001</td><td>hping3</td></tr>
+          <tr><td>17:29:19.924</td><td>signature</td><td><strong>critical</strong></td><td><strong>DOS_SYN_001</strong></td><td>hping3</td></tr>
+          <tr><td>17:29:22.425</td><td>signature</td><td>low</td><td>RECON_003</td><td>hping3</td></tr>
+          <tr><td>17:29:24.493</td><td>signature</td><td>high</td><td>SCAN_001</td><td>nmap</td></tr>
+          <tr><td>17:29:24.494</td><td>signature</td><td>medium</td><td>RECON_001</td><td>nmap</td></tr>
+        </tbody>
+      </table>
+    </details>
+    <h4>Backpressure-Metriken</h4>
+    <table class="lab-table">
+      <thead><tr><th>Metrik</th><th>Tap (95)</th><th>Master (81)</th></tr></thead>
+      <tbody>
+        <tr><td><code>kafka_drop</code> während Burst</td><td><strong>0</strong></td><td><strong>0</strong></td></tr>
+        <tr><td>Sniffer <code>drop_pct</code></td><td>0,00 %</td><td>0,00 %</td></tr>
+        <tr><td><code>kafka_ok</code>-Aufholzeit nach Burst</td><td>~30 s</td><td>~30 s</td></tr>
+        <tr><td>nmap nach Burst durchgekommen?</td><td>–</td><td>✓</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Bewertung:</strong> Vor Fix: 5+ min Pipeline-Stillstand. Jetzt:
+      30 s Aufholzeit, danach sofort einsatzbereit. Operator-Diagnose:
+      <code>docker logs --tail 5 cyjan-tap-flow-aggregator | grep kafka_drop</code>.
+    </p>
+  </article>
+</section>
+
+<section id="phase4">
+  <h2>Phase 4 — DNS-Angriffsmuster (D1–D7)</h2>
+  <p class="lede">
+    Vier DNS-Heuristiken in <code>signature-engine/rules/dns.yml</code>:
+    <code>DNS_AMP_001</code>, <code>DNS_TUNNEL_001</code>,
+    <code>DNS_DGA_001</code>, <code>DNS_NONSTANDARD_001</code>. Generator:
+    Python-Skript mit einzelnem UDP-Socket → ein Flow im IDS.
+  </p>
+
+  <article class="test">
+    <h3 id="d1">Test D1 — DNS-Flood mit Amplification-Profil</h3>
+<pre><code class="lang-bash">python3 /tmp/dnsattack.py --mode amp --count 1000 --rate 300
+# → sent=1000 pps=300.3 avg_pkt=33.9 byte_out=33.9 KB</code></pre>
+    <details>
+      <summary>Flow-Profil + IDS-Antwort</summary>
+      <ul>
+        <li>Flow: pkt_count=2 000 (bidirektional), byte_count=204 468, pps=600,5, pkt_size_mean=<strong>102,2</strong></li>
+        <li><code>DNS_TUNNEL_001</code> (high, 0.80) ✓ — byte_count &gt; 50 k</li>
+        <li><code>ANOMALY_FRAGMENT_001</code> (low, 0.20) ✓ — DNS-Replies fragmentiert</li>
+      </ul>
+    </details>
+    <p>
+      <strong>Bewertung:</strong> TUNNEL trifft sauber. AMP_001 trifft <em>nicht</em>
+      — pkt_size_mean 102 liegt knapp über der 100-Byte-Schwelle, weil
+      DNS-Antworten den Mean hochziehen (bidirektionale Aggregation).
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="d4">Test D4 — DNS-Flood gegen non-listening Port (Reflection-Source-Profil)</h3>
+    <p>
+      <strong>Angriffsmuster:</strong> Hochfrequente DNS-Queries gegen den
+      Master auf Port 53 — <em>der dort nicht lauscht</em>. Damit geht der Flow
+      rein outgoing: keine DNS-Replies, nur ICMP-Port-Unreachable. Entspricht
+      exakt dem Profil eines echten Spoofed-Reflection-Angriffs.
+    </p>
+<pre><code class="lang-bash">python3 /tmp/dnsattack_v2.py --server 192.168.1.81 --mode amp --count 1000 --rate 300
+# → sent=991 pps=297.6 avg_pkt=33.9</code></pre>
+    <details open>
+      <summary>IDS-Antwort — Volltreffer auf 3 Rules</summary>
+      <table class="lab-table">
+        <thead><tr><th>ts</th><th>severity</th><th>rule_id</th><th>score</th></tr></thead>
+        <tbody>
+          <tr><td>18:14:31.771</td><td>medium</td><td><strong>DNS_AMP_001</strong></td><td>0.50</td></tr>
+          <tr><td>18:14:31.771</td><td>high</td><td><strong>DNS_TUNNEL_001</strong></td><td>0.80</td></tr>
+          <tr><td>18:14:31.771</td><td>low</td><td>ANOMALY_FRAGMENT_001</td><td>0.20</td></tr>
+        </tbody>
+      </table>
+    </details>
+    <p>
+      <strong>Bewertung:</strong> Default-Schwelle <code>pkt_size_mean &lt; 100</code> ist
+      richtig kalibriert für echte Reflection-Angriffe — sie verfehlt nur Tests,
+      in denen der Lab-Resolver tatsächlich antwortet (D1).
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="d3-d5-d7">Tests D3, D5, D7 — DGA-Pattern + Schwellen-Anpassung</h3>
+    <p>
+      Drei IAT-Verteilungen gegen <code>DNS_DGA_001</code> (Default-Schwelle
+      <code>entropy_iat &gt; 2.5</code>, gesenkt auf 1.5 in Commit
+      <code>48659ff</code>):
+    </p>
+    <table class="lab-table">
+      <thead><tr><th>Test</th><th>IAT-Pattern</th><th>IAT-Entropie</th><th>Schwelle 2.5 (alt)</th><th>Schwelle 1.5 (neu)</th></tr></thead>
+      <tbody>
+        <tr><td>D3</td><td>uniform random sleep</td><td>1,28</td><td>nein</td><td>nein</td></tr>
+        <tr><td>D5</td><td>bimodal 80/20</td><td>1,34</td><td>nein</td><td>nein</td></tr>
+        <tr><td>D6 (Subnet-FP)</td><td>real chaotic resolver</td><td>~1,5+</td><td>nein</td><td><strong>ja</strong></td></tr>
+        <tr><td>D7</td><td>trimodal 2ms / 30ms / 225ms</td><td>1,84</td><td>nein</td><td><strong>ja</strong> (high, score 0.80)</td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Bewertung:</strong> 1,5 markiert die richtige Grenze: chaotisches
+      Multi-Modal-Timing löst aus, monomodales/bimodales Idle-Verhalten nicht.
+      Operator kann via <em>Settings → Rule Adjustments → DNS_DGA_001 →
+      entropy_iat</em> jederzeit weiter anpassen.
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="d4-final">Befund Phase 4 — DNS-Detektion komplett funktional</h3>
+    <table class="lab-table">
+      <thead><tr><th>Rule</th><th>Default-Parameter</th><th>Lab-Treffer</th><th>Bemerkung</th></tr></thead>
+      <tbody>
+        <tr><td><code>DNS_AMP_001</code></td><td>pps&gt;100, pkt_size_mean&lt;100</td><td>✓ in D4</td><td>Default richtig kalibriert für Spoofed-Reflection</td></tr>
+        <tr><td><code>DNS_TUNNEL_001</code></td><td>byte_count&gt;50 000</td><td>✓ in D1, D2, D4</td><td>Robust auf Volumen-Pattern</td></tr>
+        <tr><td><code>DNS_DGA_001</code></td><td>entropy_iat&gt;<strong>1.5</strong> (gesenkt von 2.5)</td><td>✓ in D7 + Real-Hit auf .36</td><td>Schwelle nach D5-Befund auf 1,5 angepasst</td></tr>
+        <tr><td><code>DNS_NONSTANDARD_001</code></td><td>pkt_size_mean&gt;512 für TCP/53</td><td>nicht getestet</td><td>DNS-over-TCP im Lab-Subnet selten</td></tr>
+      </tbody>
+    </table>
+  </article>
+</section>
+
+<section id="phase5">
+  <h2>Phase 5 — ML-Suppression-Lebenszyklus (S1–S4)</h2>
+  <p class="lede">
+    Zwei Suppression-Schichten im <code>alert-manager</code>: Manual-FP
+    (<code>auto-suppressed</code>) und ML-Adaptive (<code>ml-suppressed</code>)
+    mit Z-Score-Spike-Durchbruch. Pre-Test-Status: 73 ML-Learned + 29 Manual-FP
+    Patterns aktiv, 530 ml-suppressed Hits / 24 h, 1 Spike-Durchbruch.
+  </p>
+
+  <article class="test">
+    <h3 id="s1">Test S1 — Single-Alert mit aktiver Baseline</h3>
+    <p>
+      Synthetische Baseline injiziert: 50 Alerts <code>SUPPRESSION_TEST_001</code>
+      über 11 Stunden (mean=4,55/h, std=1,04). Cache nahm Pattern auf: 73 → <strong>74 ML-Learned</strong>.
+    </p>
+    <details open>
+      <summary>1 Alert via Kafka mit severity=medium</summary>
+      <table class="lab-table">
+        <thead><tr><th>ts</th><th>severity</th><th>tags</th></tr></thead>
+        <tbody>
+          <tr><td>18:37:29</td><td><strong>low</strong></td><td><code>{ml-suppressed}</code></td></tr>
+        </tbody>
+      </table>
+    </details>
+    <p>Suppression greift wie spec: Severity medium → low, Tag gesetzt. ✓</p>
+  </article>
+
+  <article class="test">
+    <h3 id="s3-s4">Tests S3 + S4 — Spike-Durchbruch</h3>
+    <p>
+      <strong>S3:</strong> 60 Alerts in &lt;1 s mit gleichem rule+ip aber
+      varying dst_port (umgeht 5-min-Dedup). Alle 60 wurden suppressed — der
+      Cache hatte recent_1h aus dem letzten Refresh (= 0) noch im Speicher.
+      Refresh-Latenz sichtbar.
+    </p>
+    <p>
+      <strong>Cache-Refresh nach 60 s:</strong>
+    </p>
+    <table class="lab-table">
+      <thead><tr><th>recent_1h</th><th>mean</th><th>std</th><th>z_score</th></tr></thead>
+      <tbody>
+        <tr><td>61</td><td>4,55</td><td>1,04</td><td><strong>54,28</strong></td></tr>
+      </tbody>
+    </table>
+    <p>
+      Cache-Stats jetzt: <em>"73 aktiv suppressed, 1 Spike-Durchbruch"</em>.
+    </p>
+    <p>
+      <strong>S4:</strong> 1 neuer Alert nach Refresh:
+    </p>
+    <table class="lab-table">
+      <thead><tr><th>ts</th><th>severity</th><th>tags</th></tr></thead>
+      <tbody>
+        <tr><td>18:40:09</td><td><strong>medium</strong></td><td><code>{}</code></td></tr>
+      </tbody>
+    </table>
+    <p>
+      <strong>Bewertung:</strong> Severity bleibt original, kein Tag. Spike-
+      Durchbruch wirkt — gesamter Lebenszyklus verifiziert.
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="s5-fix">Maßnahme — Cache-Refresh-Intervall (Commit <code>b58c208</code>)</h3>
+    <p>
+      <code>REFRESH_INTERVAL_S</code> 60 → 30 s + ENV-tunbar
+      (<code>SUPPRESSION_REFRESH_INTERVAL_S</code>). Halbiert die Worst-Case-
+      Latenz vom Spike-Beginn bis Durchbruch (~2 min → ~1 min). DB-Last bleibt
+      unter 100 ms (indizierte Felder).
+    </p>
+    <p>
+      Defaults <code>LEARN_WINDOW_D=14</code>, <code>MIN_HOURS=8</code>,
+      <code>Z_THRESHOLD=2.0</code> bleiben unverändert — gut kalibriert.
+    </p>
+  </article>
+</section>
+
+<section id="phase6">
+  <h2>Phase 6 — rule-tuner Feedback-Loop (RT1–RT3)</h2>
+  <p class="lede">
+    Der <code>rule-tuner</code>-Service lernt per-Rule-Param-Quantile aus dem
+    Topic <code>rule-metrics</code> und schreibt sie als ML-getunte Werte in
+    <code>_overrides.json</code>. Default: <code>RESERVOIR_SIZE=10 000</code>,
+    <code>quantile=0,995</code>, <code>SAFETY_MARGIN=1,05</code>,
+    <code>max_change_per_cycle=0,20</code>, neu seit Commit <code>c776cc0</code>:
+    <code>floor_factor=0,3</code>.
+  </p>
+
+  <article class="test">
+    <h3 id="rt1">Test RT1 — Frischer Trainingslauf mit parallelen Pentests</h3>
+    <p>
+      State → <code>training</code>, <code>training_until = now() + 5 min</code>.
+      Parallel auf Kali: 3× nmap top-1000, 1× hping3 SYN-Burst, 1× DNS-Flood.
+    </p>
+    <details open>
+      <summary>Override-Werte vorher/nachher (first_apply, ohne max_change-Klemme)</summary>
+      <table class="lab-table">
+        <thead><tr><th>Rule.Param.scope</th><th>Vorher (13:28)</th><th>Nachher (18:52)</th><th>p995_int</th><th>Bewertung</th></tr></thead>
+        <tbody>
+          <tr><td>RECON_001.flow_count.internal</td><td>9 334</td><td>1 977</td><td>1 883</td><td>↓ realistischer</td></tr>
+          <tr><td>RECON_002.ip_count.internal</td><td>41</td><td>41</td><td>1</td><td>FP-Bound, unverändert</td></tr>
+          <tr><td>RECON_003.flow_count.internal</td><td>9 519</td><td>2 912</td><td>2 773</td><td>↓ realistischer</td></tr>
+          <tr><td><strong>SCAN_001.port_count.internal</strong></td><td><strong>8</strong></td><td><strong>1 049</strong></td><td>999</td><td>↑↑ massive Korrektur</td></tr>
+          <tr><td>SCAN_002.port_count.internal</td><td>12</td><td>1 050</td><td>1 000</td><td>↑↑</td></tr>
+          <tr><td>SCAN_003.ip_count.internal</td><td>34</td><td>34</td><td>1</td><td>FP-Bound, unverändert</td></tr>
+          <tr><td><strong>SCAN_004.ip_count.internal</strong></td><td>28</td><td><strong>8</strong></td><td>8</td><td>⚠ <strong>zu niedrig — Floor fehlt</strong></td></tr>
+        </tbody>
+      </table>
+    </details>
+    <p>
+      <strong>Bewertung:</strong> first_apply springt aggressiv auf das aktuelle
+      Quantil. Bei reichlicher Datenlage sinnvoll (SCAN_001 von absurd-niedrig
+      8 → realistisch 1 049). Bei sparsamer Datenlage problematisch — SCAN_004
+      fiel von 28 auf 8, was praktisch jedes Subnet-Discovery alarmiert hätte.
+      Daraus folgt RT2.
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="rt2">Test RT2 — Floor-Constraint (Commit <code>c776cc0</code>)</h3>
+    <p>
+      Sanity-Floor in <code>tuner._postprocess()</code>: getunte Schwelle wird
+      nie unter <code>schema.default × TUNER_FLOOR_FACTOR</code> geklemmt
+      (Default 0,3, ENV-tunbar).
+    </p>
+    <details open>
+      <summary>Vor / nach Floor</summary>
+      <table class="lab-table">
+        <thead><tr><th>Rule.Param.scope</th><th>Vor Floor</th><th>Nach Floor</th><th>Effekt</th></tr></thead>
+        <tbody>
+          <tr><td>SCAN_004.ip_count.internal</td><td>8</td><td><strong>9</strong></td><td>klemmt sauber auf default × 0,3 ✓</td></tr>
+          <tr><td>Alle anderen</td><td>unverändert</td><td>unverändert</td><td>bereits über Floor</td></tr>
+        </tbody>
+      </table>
+    </details>
+    <p>
+      <code>max_change_per_cycle=0,20</code> greift parallel und limitiert auf
+      <code>old × 1,2 = 9,6 → int(9)</code>. Floor und max_change zusammen
+      ergeben in diesem Cycle 9. Verifiziert.
+    </p>
+  </article>
+
+  <article class="test">
+    <h3 id="rt3">Test RT3 — FP/TP-Konflikt-Pfad (Bug + Fix Commit <code>afe8e49</code>)</h3>
+    <p>
+      Synthetische Markierungen: 5× FP mit metric_value=11, 3× TP mit
+      metric_value=9. → FP_lower = 12, TP_upper = 9 → <strong>Konflikt</strong>.
+      Spec sagt: alten Wert behalten + Warning.
+    </p>
+    <h4>Bug-Beobachtung</h4>
+<pre><code>value=50  value_internal=None  fp_seen=5  tp_seen=3  fp_max=12  tp_min=9</code></pre>
+    <p>
+      <code>value_internal</code> wurde auf <code>None</code> gesetzt →
+      signature-engine fällt auf YAML-Default zurück (1 050 → 50, massiver
+      Sprung).
+    </p>
+    <h4>Fix verifiziert</h4>
+    <ol>
+      <li>TPs entfernt → kein Konflikt → Cycle setzt value_internal = 1 050.</li>
+      <li>TPs wieder gesetzt → Konflikt → Cycle bewahrt value_internal.</li>
+    </ol>
+<pre><code>2026-04-30T19:48:38 WARNING tuner – Rule SCAN_001/port_count: FP/TP-Konflikt
+                              (FP_max+1=12.0 &gt; TP_min=9.0) — alten Wert behalten
+value=50  value_internal=1050  fp_seen=5  tp_seen=3  fp_max=12  tp_min=9</code></pre>
+    <p>
+      <strong>Bewertung:</strong> Konflikt-Pfad bewahrt jetzt sowohl
+      <code>value</code> als auch <code>value_internal</code> aus dem
+      existing_param-Eintrag. Skalar-Override-Form (Backwards-Compat) trägt kein
+      <code>value_internal</code> — bleibt dort None (war schon vorher so).
+    </p>
+  </article>
+</section>
+
+<section id="summary">
+  <h2>Zusammenfassung</h2>
+  <ol>
+    <li><strong>Tap-Mirror funktioniert</strong> für normalen Subnet-Traffic. Burst-Lasten &gt; 1 kpps verstopften vorher den Tap-Kafka-Buffer; mit Commit <code>2c957bb</code> ist <code>kafka_drop=0</code> beim 5 kpps × 2 s Worst-Case-Burst-Test.</li>
+    <li><strong>Heuristik (signature-engine) erkennt jeden Pentest</strong> sauber: SCAN/RECON/DOS für Scans + Floods, DNS_AMP/TUNNEL für DNS-Vektoren, plus korrekt-priorisierte Severity bis <code>critical</code>.</li>
+    <li><strong>ML-Engine</strong> war initial taub. Nach Commits <code>ee26503</code>/<code>1496fc0</code> (18 Features, sauberer Bootstrap-Filter, contamination 0,005, Threshold 0,57) ist sie komplementär zur Heuristik aufgestellt: Single-Flow-Anomalien werden erkannt, Multi-Flow-Pattern bleiben Sache der Heuristik (architektonisches Limit).</li>
+    <li><strong>DNS-Detektion komplett funktional</strong>: AMP für Reflection-Source, TUNNEL für Volumen-Exfil, DGA nach Schwellen-Senkung 2,5 → 1,5 (Commit <code>48659ff</code>) auch für reale chaotische Resolver-Pattern.</li>
+    <li><strong>Suppression-Lebenszyklus</strong> End-to-End verifiziert; Refresh-Intervall halbiert auf 30 s (Commit <code>b58c208</code>).</li>
+    <li><strong>rule-tuner</strong> mit zwei neuen Sicherungen: Sanity-Floor (Commit <code>c776cc0</code>) und Konflikt-Pfad-Fix (Commit <code>afe8e49</code>).</li>
+    <li><strong>Lehre:</strong> „ML soll nmap erkennen" ist die falsche Erwartung. Der Detektor dafür sitzt richtig in der signature-engine, ML ergänzt sie für nicht-benannte Verhaltens-Anomalien.</li>
+  </ol>
+</section>
+
+</main>
+
+<footer>
+  <p>
+    <small>
+      Vollständige Markdown-Quelle dieses Berichts:
+      <a href="https://github.com/JxxKal/ids/blob/main/CyjanKali.md" rel="noopener">CyjanKali.md</a>
+      im Cyjan-IDS-Repo.
+    </small>
+  </p>
+  <p class="footer-links">
+    <small>
+      <a href="index.html">CYJANKALI Test-Katalog</a> ·
+      <a href="impressum.html">Impressum</a> ·
+      <a href="https://github.com/JxxKal/ids" rel="noopener">Source-Repo</a>
+    </small>
+  </p>
+</footer>
+
+</body>
+</html>

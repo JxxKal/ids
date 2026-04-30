@@ -12,9 +12,10 @@ Pentest-Reihe vom 2026-04-30 mit **Kali Linux** (192.168.1.85) gegen einen **Lin
 6. [Phase 3 — Burst-Test nach Backpressure-Fix](#phase-3--burst-test-nach-backpressure-fix-bt)
 7. [Phase 4 — DNS-Angriffsmuster](#phase-4--dns-angriffsmuster-d1d5)
 8. [Phase 5 — ML-Suppression-Lebenszyklus](#phase-5--ml-suppression-lebenszyklus-s1s4)
-9. [Befunde & Maßnahmen](#befunde--maßnahmen)
-10. [Operator-Cheatsheet](#operator-cheatsheet)
-11. [Zusammenfassung](#zusammenfassung)
+9. [Phase 6 — rule-tuner Feedback-Loop](#phase-6--rule-tuner-feedback-loop-rt1rt3)
+10. [Befunde & Maßnahmen](#befunde--maßnahmen)
+11. [Operator-Cheatsheet](#operator-cheatsheet)
+12. [Zusammenfassung](#zusammenfassung)
 
 ## Setup & Pipeline-Stand
 
@@ -79,6 +80,9 @@ Vor jedem Testblock wird geprüft, ob Kali-IP (.85) in den Master-Flows auftauch
 | S1 | 5 | Suppression: Single-Alert mit Baseline | (1) | 0 | 0 | 0 | severity medium → low + tag `ml-suppressed` ✓ |
 | S3 | 5 | Suppression: 60-Alert-Burst (cache cold) | (60) | 0 | 0 | 0 | alle suppressed (Cache lag bei Z=0) — Refresh-Latenz sichtbar |
 | S4 | 5 | Suppression: Alert nach Spike-Durchbruch | (1) | 0 | 0 | 0 | severity medium, **keine Tags** — Z=54 → durchbricht ✓ |
+| RT1 | 6 | rule-tuner: 5 min Training + parallele Pentests | – | – | – | – | first_apply schreibt Overrides, SCAN_001 internal 8 → 1049 ✓ |
+| RT2 | 6 | rule-tuner: Floor-Constraint-Verifikation | – | – | – | – | SCAN_004 internal 8 → 9 (default 30 × 0.3) ✓ |
+| RT3 | 6 | rule-tuner: FP/TP-Konflikt-Pfad | – | – | – | – | Bug entdeckt: value_internal verschwand → fix → bewahrt ✓ |
 
 ## Phase 1 — Tests gegen das ungetunte System (T1–T3)
 
@@ -694,6 +698,136 @@ Z-Stat-Snapshot für unser Pattern:
 
 Synthetische Test-Daten (`SUPPRESSION_TEST_001` × 112 Rows) wurden nach dem Lauf wieder entfernt.
 
+## Phase 6 — rule-tuner Feedback-Loop (RT1–RT3)
+
+Der `rule-tuner`-Service lernt aus dem Topic `rule-metrics` per-Rule-Param-Quantile und schreibt sie als ML-getunte Werte in `_overrides.json`. Spec siehe [CLAUDE.md → Phasenplan rule-tuner](CLAUDE.md). Default-Parameter:
+
+| Parameter | Wert | Bedeutung |
+|---|---|---|
+| `RESERVOIR_SIZE` | 10 000 | Algorithm-R Sample pro `(rule, param, scope)` |
+| `MIN_SAMPLES` | 100 | unter dieser Zahl wird keine Schwelle berechnet |
+| `TUNING_CYCLE_S` | 21 600 (6 h) | Abstand zwischen Override-Writes |
+| `quantile` | 0,995 | Schwellwert über Reservoir |
+| `SAFETY_MARGIN` | 1,05 | Quantil × 1,05 (knappe Treffer nicht alarmieren) |
+| `max_change_per_cycle` | 0,20 | ±20 % pro Cycle (außer first_apply nach Training) |
+| `floor_factor` | **0,3** (NEU, Commit `c776cc0`) | Schwelle ≥ default × 0,3 |
+| `FP_TP_MIN_FEEDBACK` | 3 | mind. 3 Markierungen pro Rule, sonst kein FP/TP-Constraint |
+
+Pre-Test-Status: Tuner war im `tuning`-State seit dem letzten Trainingslauf vom 13:28 (2 h), 22 Baselines aktiv, 110 552 Samples gesammelt.
+
+---
+
+### Test RT1 — Frischer Trainingslauf mit parallelen Pentests
+
+**Vorgehen.** State → `training`, `training_until = now() + 5 min`. Während dieser 5 min auf der Kali-Box: 3 × `nmap -sS -T4 --top-ports 1000 192.168.1.80`, 1 × `hping3 SYN-Burst`, 1 × `dnsattack_v2.py amp`. Damit Reservoir mit "scan-/flood-typischen" Werten gefüttert.
+
+**Beobachtung.** Beim Erreichen von `training_until` triggerte der Tuner den `first_apply`-Cycle:
+
+```
+2026-04-30T18:52:54  tuner – Training abgeschlossen — schalte auf tuning + erster Override-Write
+2026-04-30T18:52:54  tuner – Override-Write: 7 Param-Einträge auf 7 Rules aktualisiert
+```
+
+**Override-Werte (Vergleich vorher/nachher):**
+
+| Rule.Param | Vorher (13:28) | Nachher (18:52) | p995_int (Reservoir) | Bewertung |
+|---|---|---|---|---|
+| RECON_001.flow_count.internal | 9 334 | 1 977 | 1 883 | ↓ realistischer |
+| RECON_002.ip_count.internal | 41 | 41 | 1 | unverändert (FP-Bound) |
+| RECON_003.flow_count.internal | 9 519 | 2 912 | 2 773 | ↓ realistischer |
+| **SCAN_001.port_count.internal** | **8** | **1 049** | **999** | ↑↑ massive Korrektur durch nmap-Daten |
+| SCAN_002.port_count.internal | 12 | 1 050 | 1 000 | ↑↑ |
+| SCAN_003.ip_count.internal | 34 | 34 | 1 | unverändert (FP-Bound) |
+| **SCAN_004.ip_count.internal** | 28 | **8** | 8 | ⚠ **zu niedrig — Floor fehlt** |
+
+**Bewertung.** Der `first_apply`-Cycle (ohne `max_change_per_cycle`-Klemme) springt aggressiv auf das aktuelle Quantil. Bei reichlicher Datenlage sinnvoll (SCAN_001 von absurd-niedrig 8 → realistischer 1 049). Bei sparsamer Datenlage problematisch — SCAN_004 fiel von 28 auf 8, was praktisch bei jedem Subnet-Discovery-Burst alarmiert hätte. Daraus folgt der Maßnahmen-Block "Floor-Constraint" (RT2).
+
+---
+
+### Test RT2 — Floor-Constraint (Verbesserung Commit `c776cc0`)
+
+**Maßnahme.** Sanity-Floor in `tuner._postprocess()`: getunte Schwelle wird nie unter `schema.default × TUNER_FLOOR_FACTOR` geklemmt (Default 0,3, ENV-tunbar). Das verhindert dass eine flach verteilte Sample-Population die Schwelle auf semantisch unsinnige Werte drückt.
+
+**Erwartete Floors** (default × 0,3):
+
+| Rule | default | Floor |
+|---|---|---|
+| SCAN_001 | 50 | 15 |
+| SCAN_002 | 50 | 15 |
+| SCAN_003 | 20 | 6 |
+| SCAN_004 | 30 | 9 |
+| RECON_001 | 30 | 9 |
+| RECON_002 | 10 | 3 |
+| RECON_003 | 50 | 15 |
+
+**Test.** Nach Tuner-Rebuild + Restart: Pentests parallel, dann erzwungener Cycle. Ergebnis:
+
+| Rule.Param | Vor Floor | Nach Floor | Effekt |
+|---|---|---|---|
+| SCAN_004.ip_count.internal | 8 | **9** | klemmt sauber auf default × 0,3 ✓ |
+| Alle anderen | unverändert | unverändert | Werte bereits über Floor |
+
+`max_change_per_cycle = 0,20` greift parallel und limitiert auf `old × 1,2 = 9,6` → int(9). Floor und max_change zusammen geben in diesem Cycle 9. **Verifiziert.**
+
+---
+
+### Test RT3 — FP/TP-Konflikt-Pfad (Bug + Fix, Commit `afe8e49`)
+
+**Test-Aufbau.** Synthetische Markierungen für `SCAN_001.port_count`:
+- 5 Alerts mit `metric_value=11` als `feedback='fp'`
+- 3 Alerts mit `metric_value=9` als `feedback='tp'`
+
+→ FP_lower = max(FP) + 1 = **12**, TP_upper = min(TP) = **9**. Konflikt: FP_lower (12) > TP_upper (9).
+
+**Erwartung laut Spec.** *"Bei Konflikt: alten Wert behalten + Warning loggen."*
+
+**Erste Beobachtung (Bug).** Override-Eintrag nach Konflikt-Cycle:
+
+```
+value=50  value_internal=None  fp_seen=5  tp_seen=3  fp_max=12  tp_min=9
+```
+
+**`value_internal` wurde auf `None` gesetzt.** signature-engine fällt damit auf den YAML-Default zurück, also **value_internal=1050 → effektiv 50**, ein massiver Sprung. Das war ein Bug — laut spec sollte beides bewahrt bleiben.
+
+**Fix** (`tuner.py`): bei Konflikt wird `value_internal` aus dem `existing_param`-Eintrag (Object-Form) übernommen statt None gesetzt.
+
+**Verifikation nach Fix.**
+
+```
+Step 1: TPs entfernt → kein Konflikt → Cycle setzt value_internal=1050.
+Step 2: TPs wieder → Konflikt → Cycle muss value_internal bewahren.
+```
+
+Ergebnis Step 2:
+
+```
+2026-04-30T19:48:38 WARNING tuner – Rule SCAN_001/port_count: FP/TP-Konflikt
+                              (FP_max+1=12.0 > TP_min=9.0) — alten Wert behalten
+value=50  value_internal=1050  fp_seen=5  tp_seen=3  fp_max=12  tp_min=9
+```
+
+`value_internal=1050` blieb erhalten. **Fix verifiziert.**
+
+### Befund Phase 6 — rule-tuner
+
+| Aspekt | Status |
+|---|---|
+| Reservoir-Sampling (Algorithm R) | funktioniert, ~110 k Samples persistiert |
+| `rule_baselines` DB-Persistenz alle 60 s | aktiv, 22 Zeilen |
+| State-Maschine idle/training/tuning/paused | sauber, Transitions im Tuner-Log dokumentiert |
+| `first_apply` ohne `max_change_per_cycle` | wirkt — kann aber zu niedrigen Werten landen, daher Floor nötig |
+| `max_change_per_cycle = 0,20` | zu langsam für massive Korrektur (8 → 1000 dauert ~14 Cycles) |
+| **Floor-Constraint** (NEU) | wirkt: SCAN_004 internal 8 → 9 |
+| FP/TP-Bound (FP_lower, TP_upper) | mechanisch korrekt — fp_max+1, tp_min |
+| FP/TP-Konflikt → alten Wert behalten | **vorher buggy** (value_internal verloren), Fix Commit `afe8e49` |
+
+### Maßnahmen Phase 6 — Commits
+
+| Commit | Inhalt |
+|---|---|
+| `c776cc0` | Sanity-Floor `default × TUNER_FLOOR_FACTOR` (Default 0,3) im `_postprocess()`. ENV-tunbar. Verhindert dass das Quantil-Tuning auf unsinnig niedrige Werte rutscht. |
+| `afe8e49` | FP/TP-Konflikt-Pfad bewahrt jetzt `value_internal` aus dem existing_param-Eintrag. Vorher wurde es auf `None` gesetzt → signature-engine fiel auf YAML-Default zurück. |
+
 ## Befunde & Maßnahmen
 
 ### Befund 1 — ML war initial taub
@@ -820,4 +954,5 @@ ORDER BY ts;
 4. **Tap-Backpressure** war Pipeline-Killer bei Pentest-Bursts (5+ min Stillstand nach hping3-Flood). Mit größerem Producer-Buffer und Drop-Policy statt blocking-Retry: `kafka_drop=0` und 30 s Aufholzeit beim Worst-Case-Burst-Test.
 5. **DNS-Detektion komplett funktional:** AMP_001 trifft das Reflection-Source-Profil sauber, TUNNEL_001 robust auf Volumen-Pattern. **DGA_001 nach Schwellen-Anpassung 2,5 → 1,5** (Commit `48659ff`) trifft auch trimodale Generatoren und reale chaotische Resolver-Pattern, ohne Idle-Multiplexer (0,5–1,0) zu erfassen. Verifiziert in D7.
 6. **Suppression-Lebenszyklus** (Phase 5, S1–S4) End-to-End verifiziert: Manual-FP- und ML-Adaptive-Suppression markieren wiederkehrende Patterns als `low + ml-suppressed`, ein echter Spike (Z=54) durchbricht die Suppression sauber. Refresh-Intervall halbiert auf 30 s (Commit `b58c208`) für schnellere Spike-Reaktion. Defaults `LEARN_WINDOW_D=14`, `MIN_HOURS=8`, `Z_THRESHOLD=2.0` sind richtig kalibriert.
-7. **Lehre:** "ML soll nmap erkennen" ist die falsche Erwartung. Der Detektor dafür sitzt richtig in der signature-engine, ML ergänzt sie für nicht-benannte Verhaltens-Anomalien.
+7. **rule-tuner Feedback-Loop** (Phase 6, RT1–RT3): Reservoir-Sampling + Quantile-basiertes Threshold-Tuning funktioniert — `first_apply` korrigiert SCAN_001 internal von 8 → 1 049 nach Pentest-Bereicherung. Zwei Schwächen entdeckt + gefixt: **Floor-Constraint** (Commit `c776cc0`) verhindert dass die Schwelle unter `default × 0,3` rutscht (war SCAN_004=8 → jetzt ≥9), **FP/TP-Konflikt** (Commit `afe8e49`) bewahrt jetzt `value_internal` statt es auf None zu setzen.
+8. **Lehre:** "ML soll nmap erkennen" ist die falsche Erwartung. Der Detektor dafür sitzt richtig in der signature-engine, ML ergänzt sie für nicht-benannte Verhaltens-Anomalien.

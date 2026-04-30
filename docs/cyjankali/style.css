@@ -373,3 +373,38 @@ footer a:hover { color: var(--cyjan-2); }
   margin-top: 6px;
 }
 .footer-links a { margin: 0 6px; }
+
+/* ── Lab-Tabellen (lab.html) ──────────────────────────────────────────────── */
+
+.lab-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 14px;
+  background: var(--panel);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.lab-table th,
+.lab-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  vertical-align: top;
+}
+.lab-table thead th {
+  background: var(--bg-deep);
+  color: var(--cyjan-2);
+  font-weight: 600;
+  border-bottom: 2px solid rgba(56, 189, 248, 0.3);
+}
+.lab-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.lab-table tbody tr:hover {
+  background: rgba(56, 189, 248, 0.04);
+}
+.lab-table code {
+  font-size: 12px;
+}
