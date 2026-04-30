@@ -42,7 +42,7 @@ import psycopg2
 
 log = logging.getLogger(__name__)
 
-REFRESH_INTERVAL_S = 60.0
+REFRESH_INTERVAL_S  = float(os.environ.get("SUPPRESSION_REFRESH_INTERVAL_S", "30"))
 
 # ── Adaptive Thresholds (ENV-konfigurierbar) ─────────────────────────────────
 LEARN_WINDOW_D      = int(os.environ.get("SUPPRESSION_LEARN_WINDOW_D", "14"))
