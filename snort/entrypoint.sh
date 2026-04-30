@@ -10,7 +10,10 @@
 # Laufzeit-Update (via Rules Engine UI):
 #   - API schreibt /etc/suricata/rules/update-sources.txt  (eine URL pro Zeile)
 #   - API schreibt /etc/suricata/rules/update.trigger
-#   - Polling-Schleife erkennt Trigger, lädt Regeln, sendet SIGUSR2 (Live-Reload)
+#   - Polling-Schleife erkennt Trigger und triggert ruleset-reload-rules
+#     über den Unix-Command-Socket (suricatasc).
+# Hinweis: SIGUSR2 ist in Suricata nur für eve-Logfile-Rotation, NICHT
+# für Rule-Reload — das war ein historisches Missverständnis.
 # ══════════════════════════════════════════════════════════════════════════════
 set -e
 
@@ -137,6 +140,10 @@ app-layer:
 
 classification-file: /etc/suricata/classification.config
 reference-config-file: /etc/suricata/reference.config
+
+unix-command:
+  enabled: yes
+  filename: /var/run/suricata-command.socket
 YAML
 
 echo "[suricata] Starte auf Interface ${IFACE}"
@@ -170,8 +177,12 @@ while kill -0 "$SURICATA_PID" 2>/dev/null; do
         fi
 
         COUNT=$(cat "$RULES_DIR"/*.rules 2>/dev/null | grep -c '^alert\|^drop' || echo '?')
-        echo "[suricata] ${COUNT} Regeln geladen – sende SIGUSR2 für Live-Reload"
-        kill -USR2 "$SURICATA_PID" 2>/dev/null || true
+        echo "[suricata] ${COUNT} Regeln geladen – triggere ruleset-reload-rules"
+        if suricatasc -c ruleset-reload-rules >/dev/null 2>&1; then
+            echo "[suricata] Live-Reload abgeschlossen"
+        else
+            echo "[suricata] WARNUNG: ruleset-reload-rules fehlgeschlagen – Socket nicht ready?"
+        fi
     fi
 done
 

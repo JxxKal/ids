@@ -354,21 +354,56 @@ def _extract_tar_safely(data: bytes, dest: Path) -> list[str]:
 
 
 def _signal_suricata_reload() -> tuple[bool, str]:
-    """SIGUSR2 an ids-snort triggert Live-Rule-Reload ohne Restart.
-    Wenn Suricata noch nicht läuft (z.B. erstes Setup ohne snort-Profil),
-    geben wir das als Hinweis zurück, ohne Fehler zu werfen."""
+    """Triggert Live-Rule-Reload ohne Container-Restart.
+
+    Wichtig: SIGUSR2 ist in Suricata NICHT für Rule-Reload zuständig
+    (das war eine Fehlannahme aus früheren Versionen) — SIGUSR2 rotiert
+    nur die eve-Logfiles. Für Rule-Reload braucht man den Unix-Socket
+    via `suricatasc -c ruleset-reload-rules`.
+
+    Pfad: Suricata legt den Socket als /var/run/suricata/suricata-command.socket
+    im Container an. Wir rufen suricatasc innerhalb des ids-snort-Containers
+    auf — die docker-CLI im api-Container kann via /var/run/docker.sock
+    'docker exec' aufrufen.
+
+    Fallback bei alten Suricata-Versionen ohne Socket: SIGHUP (auch ohne
+    Effekt in 6+, aber unschädlich); echter Last-Resort wäre Container-
+    Restart, das überlassen wir aber bewusst dem Operator (würde Pakete
+    während des Boots verlieren).
+    """
+    # 1. suricatasc über docker exec in ids-snort
     try:
         r = subprocess.run(
-            ["docker", "kill", "--signal=SIGUSR2", "ids-snort"],
-            capture_output=True, text=True, timeout=5,
+            ["docker", "exec", "ids-snort",
+             "suricatasc", "-c", "ruleset-reload-rules"],
+            capture_output=True, text=True, timeout=30,
         )
         if r.returncode == 0:
-            return True, "SIGUSR2 an ids-snort gesendet (Live-Reload)"
-        return False, (r.stderr or r.stdout or "docker kill fehlgeschlagen").strip()
+            # suricatasc gibt {"return": "OK"} aus — wir wollen das im Log
+            out = (r.stdout or "").strip()
+            return True, f"ruleset-reload-rules an ids-snort: {out or 'OK'}"
+        # suricatasc kann fehlen oder Suricata noch nicht ready sein
+        err = (r.stderr or r.stdout or "").strip()
+        # Continue zu Fallback
     except FileNotFoundError:
         return False, "docker-CLI im API-Container nicht verfügbar"
+    except subprocess.TimeoutExpired:
+        return False, "suricatasc-Reload nach 30s nicht zurück (Suricata blockiert?)"
     except Exception as exc:                       # noqa: BLE001
-        return False, f"{type(exc).__name__}: {exc}"
+        err = f"{type(exc).__name__}: {exc}"
+
+    # 2. Container nicht da? → Hinweis statt Fehler.
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "ids-snort"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode != 0:
+            return False, "ids-snort-Container nicht gestartet (Profil 'snort' aktiv?)"
+    except Exception:
+        pass
+
+    return False, f"suricatasc-Reload fehlgeschlagen: {err}"
 
 
 @router.post(
