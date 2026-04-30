@@ -296,6 +296,16 @@ def _make_alert(rule: Rule, flow: dict, ctx: RuleContext, fparams: "_FlowParams"
         except Exception:  # nosec - cleaner Fallback als crash im Alert-Pfad
             pass
 
+    # Phase 7 (Suppression-Refactor): tunable=True markiert Alerts, deren Rule
+    # vom rule-tuner via Threshold-Anpassung verwaltet werden kann (mind. ein
+    # Param mit metric:-Deklaration). alert-manager nutzt das, um Suppression
+    # für solche Alerts zu skippen — sonst würde der Tuner an einem Knopf und
+    # die Suppression am anderen ziehen, was zu Severity-Drop trotz zukünftig
+    # angepasstem Threshold führt.
+    tunable = any(
+        bool(s.get("metric")) for s in rule.parameters_schema.values()
+    )
+
     return {
         "rule_id":      rule.id,
         "rule_name":    rule.name,
@@ -311,4 +321,5 @@ def _make_alert(rule: Rule, flow: dict, ctx: RuleContext, fparams: "_FlowParams"
         "ts":           float(flow.get("end_ts") or time.time()),
         "is_test":      bool(flow.get("is_test", False)),
         "metric_values": metric_values or None,
+        "tunable":      tunable,
     }

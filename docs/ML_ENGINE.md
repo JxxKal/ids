@@ -1,12 +1,19 @@
 # ML-Engine — Dokumentation
 
-> Die ML-Engine ist das lernende Herzstück von Cyjan IDS. Sie ergänzt die
-> signaturbasierte Erkennung um **anomaliebasierte Detektion** und
-> **adaptive Fehlalarm-Filterung**.
+> Cyjan IDS hat **drei** lernende Komponenten, die unterschiedliche Aspekte
+> der Erkennung adressieren und sich gegenseitig ergänzen:
+>
+> 1. **ML-Engine (IsolationForest)** — anomaliebasierte Detektion auf Flow-Features.
+> 2. **Rule-Tuner (Reservoir + Quantile)** — passt Schwellwerte tunbarer
+>    Heuristiken an die Verteilung im konkreten Netzwerk an.
+> 3. **Adaptive Suppression** — drosselt FP-Pattern, die nicht über
+>    Schwellwert-Tuning erreicht werden können (z.B. Suricata-SIDs,
+>    pattern-only Heuristiken).
 
 ## Inhalt
 
-- [1. Architektur-Überblick](#1-architektur-überblick)
+- [0. Überblick: Drei Lern-Komponenten und ihr Zusammenspiel](#0-überblick-drei-lern-komponenten-und-ihr-zusammenspiel)
+- [1. Architektur-Überblick (ML-Engine)](#1-architektur-überblick)
 - [2. Flow-Feature-Extraktion](#2-flow-feature-extraktion)
 - [3. Anomalie-Modell (IsolationForest)](#3-anomalie-modell-isolationforest)
 - [4. Lifecycle: Bootstrap → Inference → Retrain](#4-lifecycle-bootstrap--inference--retrain)
@@ -15,6 +22,67 @@
 - [7. Adaptive Suppression (Layer 1 + Layer 2)](#7-adaptive-suppression-layer-1--layer-2)
 - [8. Konfiguration (ENV + Runtime-Config)](#8-konfiguration-env--runtime-config)
 - [9. Betrieb & Debugging](#9-betrieb--debugging)
+- [10. Rule-Tuner: ML-Threshold-Anpassung für Heuristiken](#10-rule-tuner-ml-threshold-anpassung-für-heuristiken)
+- [11. Zusammenspiel rule-tuner ↔ Suppression](#11-zusammenspiel-rule-tuner--suppression)
+
+---
+
+## 0. Überblick: Drei Lern-Komponenten und ihr Zusammenspiel
+
+Cyjan IDS lernt an drei Stellen **gleichzeitig**, ohne dass die Modelle
+sich gegenseitig stören. Jede Komponente hat ein klar abgegrenztes
+Wirkungsfeld:
+
+| Komponente       | Was es lernt                                          | Worauf es wirkt                                                   |
+|------------------|-------------------------------------------------------|-------------------------------------------------------------------|
+| **ML-Engine**    | Was sieht "normaler" Flow im Feature-Raum aus?        | Erzeugt **neue** Alerts (`source=ml`) bei Anomalien.              |
+| **rule-tuner**   | Welche Werte sehen tunbare Heuristik-Metriken (P99,5)?| Passt **bestehende Heuristik-Schwellwerte** an (z.B. SCAN_001 port_count). |
+| **Suppression**  | Welche Alert-Pattern flooded gerade ohne TP-Tag?      | Drosselt **bestehende Alerts** zu `severity=low` — pro IP-Paar.   |
+
+Die drei greifen **nicht** auf dieselben Hebel:
+
+```
+                ┌─────────────────────────────────────────────────┐
+                │  Flow-Aggregator                                 │
+                └──────────────┬──────────────────────────────────┘
+                               │ flows
+                ┌──────────────▼──────────────┐  ┌─────────────────┐
+                │  signature-engine            │  │  ML-Engine       │
+                │  (Heuristik-Rules + YAML)   │  │  (IsolationFor.) │
+                └──────┬──────────────────────┘  └────────┬────────┘
+   metric-Sample (1%)  │ alerts-raw                       │ alerts-raw
+   ┌──── rule-metrics ─┘ + tunable=bool                   │ source=ml
+   │
+   ▼                              ┌────────────────────────┴────────────┐
+┌──────────┐                      │           Alert-Manager              │
+│rule-tuner│                      │           ┌──────────────────────┐   │
+│(Reservoir│                      │           │   Suppression        │   │
+│ +Quantile│  PUT /api/sig-rules/ │           │   (skip wenn ml      │   │
+│ +Bounds) │ ──overrides──────────┼──── auto-fp-────source=external,│   │
+└────┬─────┘                      │  feedback   tunable=true)        │   │
+     │                            │           │                      │   │
+     │ liest alerts.feedback,     │           │ tag 'auto-fp-pattern'│   │
+     │ inkl. auto-suppression     │           │ → severity=low       │   │
+     │                            │           └──────────────────────┘   │
+     ▼                            └─────────────────┬────────────────────┘
+  /sig-rules/_overrides.json                        │
+  (Threshold pro Param,                             ▼
+   scope-aware extern/intern,                  TimescaleDB alerts
+   Provenance ml/manual)                       Frontend AlertFeed
+```
+
+**Wer macht was bei welchem Alert?**
+
+- **`source=ml`** (vom IsolationForest): Suppression skip, rule-tuner irrelevant. Nur ML-Engine retrain via `feedback`-Topic.
+- **`source=signature`, Heuristik mit `metric:`** (z.B. SCAN_001): rule-tuner aktiv, Suppression skip. Auto-FP-Feedback wird in `alerts.feedback` geschrieben, damit der Tuner es als FP-Bound aufnimmt. Loop-Schließung.
+- **`source=signature`, Heuristik ohne `metric:`** (z.B. SCAN_005 Xmas, ANOMALY_FRAGMENT_001): rule-tuner irrelevant (nicht tunbar), Suppression aktiv.
+- **`source=signature`, `rule_id` startet mit `SURICATA:`**: rule-tuner irrelevant (Pattern-Rule), Suppression aktiv. Statisches `_suricata_overrides.json` ist die manuelle Severity/Disable-Schiene.
+- **`source=external`** (IRMA/ASSET::*): externe Aussagen, keine Detection-Noise. Suppression skip, rule-tuner irrelevant.
+
+**Konsequenz** für jeden, der Alerts triagt:
+- Eine `SCAN_001`-Flood bekommt der rule-tuner durch Threshold-Hochsetzen unter Kontrolle. Severity bleibt erhalten — **echte Treffer mit hohem unique_dst_ports kommen weiter als `high` durch**, niedrige Werte feuern gar nicht erst.
+- Eine `ANOMALY_FRAGMENT_001`-Flood greift Suppression als `severity=low` ab. Der Spike-Durchbruch (Z-Score ≥ 2.0) bringt echte Anomalien zurück.
+- Eine `SURICATA:1:9000001:1`-Flood: gleiches Spiel wie ANOMALY — Suppression macht's leise, statisch könnte man die SID auch im UI auf `severity=low` schieben.
 
 ---
 
@@ -486,6 +554,244 @@ m = joblib.load('/models/iforest.joblib')
 print(f'n_estimators={m.n_estimators} contamination={m.contamination_}')
 "
 ```
+
+---
+
+## 10. Rule-Tuner: ML-Threshold-Anpassung für Heuristiken
+
+### 10.1 Was er macht — und was nicht
+
+Der `rule-tuner`-Service (Master-only, Compose-Profil `prod`) lernt die
+Verteilung der Metrik-Werte hinter jeder **tunbaren** Heuristik-Rule und
+setzt deren Schwellwerte automatisch so, dass sie zur konkreten Verteilung
+des Netzes passen. Im Gegensatz zur ML-Engine erzeugt er **keine neuen
+Alerts** — er passt nur Schwellwerte bestehender Rules an.
+
+Eine Heuristik ist tunbar, wenn ihr YAML-File mindestens einen Parameter
+mit `metric:`-Deklaration hat. Beispiel `SCAN_001`:
+
+```yaml
+parameters:
+  port_count:
+    type: int
+    default: 50
+    min: 5
+    max: 65535
+    metric: unique_dst_ports   # ← markiert als rule-tuner-verwaltet
+  window_s:
+    type: int
+    default: 60
+    # kein metric: → manuell-only
+eligibility: |
+  flow.get('proto') == 'TCP' and flow.get('tcp_flags_abs', {}).get('SYN', 0) > 0
+```
+
+Pattern-only Heuristiken ohne `parameters:`-Block (SCAN_005 Xmas, SCAN_006 NULL,
+ANOMALY_FRAGMENT_001) sind **nicht tunbar** — dort hilft nur Suppression
+oder manuelles `severity`-Override.
+
+### 10.2 Daten-Pipeline
+
+```
+signature-engine                      rule-tuner
+─────────────────                     ─────────────
+für jeden Flow                        Kafka-Consumer
+  └─ eligibility-Filter                  └─ rule-metrics
+      (z.B. nur TCP+SYN für SCAN_001)        ├─ Reservoir-Sampling pro
+  └─ compute_metrics()                       │     (rule, param, scope)
+      └─ 1% Bernoulli-Sample                 │     [Algorithm R, 10k cap]
+          → Kafka rule-metrics               │
+                                             ├─ alle 60s: persist Quantile
+                                             │     (P50/P99/P995/P999)
+                                             │     in rule_baselines
+                                             │
+                                             └─ State-Loop (alle 30s):
+  alerts-raw                                       liest /api/sig-rules/ml/status
+  └─ alert-manager                                 │
+      └─ feedback (manuell + auto-FP)              ├─ training: nur sammeln
+          → DB alerts.feedback,                    ├─ tuning: alle 6h
+            alerts.metric_values                   │   ├─ liest alerts.feedback
+                                                   │   │     mit metric_values
+                                                   │   ├─ Quantil × 1.05
+                                                   │   ├─ FP-Bound (max+1)
+                                                   │   ├─ TP-Bound (min)
+                                                   │   ├─ schema-clamp + cast
+                                                   │   └─ PUT /api/sig-rules/
+                                                   │         overrides
+                                                   │         source=ml
+                                                   │
+                                                   └─ paused/idle: nichts
+```
+
+### 10.3 State-Maschine
+
+Der Tuner lebt in einem von vier States. Übergänge sind teils user-, teils
+automatik-getrieben:
+
+| State      | User-Aktion → State          | Tuner-Verhalten                                  |
+|------------|------------------------------|--------------------------------------------------|
+| `idle`     | start-training → `training`  | Sampling läuft, kein Override-Write.             |
+| `training` | pause → `paused`             | Sammelt Reservoir-Samples bis `training_until`.  |
+|            | (auto: training_until ≤ now → `tuning` + erster Override-Write) |          |
+| `tuning`   | pause → `paused`             | Alle 6 h: Quantile→Override aus aktuellem Reservoir. |
+| `paused`   | resume → vorheriger State    | Sampling steht still, keine Schreibe.            |
+
+UI: *Einstellungen → Regelwerk → Regel-Anpassungen → ML-Tuning*. Live-Status
+mit Restzeit, Sample-Count, Start/Pause/Resume.
+
+### 10.4 Schwellwert-Algorithmus
+
+Pro `(rule, param)` und Scope (`internal`/`external`/`global`):
+
+1. **Quantil**: P99,5 aus dem Reservoir (Default; per `quantile`-Config änderbar).
+2. **Safety-Margin**: × 1.05 — knappe Treffer alarmieren nicht versehentlich.
+3. **FP/TP-Constraints** (Phase 4.5): wenn ≥ 3 Markierungen für die Rule existieren:
+   - `threshold ≥ max(metric_values_at_FP) + 1` (FP-Untergrenze, int) bzw. `+ epsilon` (float).
+   - `threshold ≤ min(metric_values_at_TP)` (TP-Obergrenze).
+   - Konflikt (FP+1 > TP_min) → alten Wert behalten + Warning.
+4. **Schema-Clamp**: gegen min/max aus YAML.
+5. **`max_change_per_cycle`-Klemme** (außer first-apply nach Trainingsende):
+   neuer Wert in `[old × (1-mc), old × (1+mc)]`, Default mc=0.20.
+
+`scope_split_enabled=true`: separate Werte für `value` (extern) und
+`value_internal` (intern). signature-engine wählt zur Laufzeit anhand
+`flow.src_ip ∈ known_networks`.
+
+### 10.5 Manueller Lock
+
+Pro Param hat der Override eine `source`-Provenance:
+- `source: "ml"` — vom Tuner gesetzt, wird beim nächsten Cycle aktualisiert.
+- `source: "manual"` — User hat im UI editiert. Tuner **fasst diesen Param nicht
+  an**, bis der User in der UI den ↺-Reset-Button drückt (entfernt den Skalar-Override
+  → fällt zurück auf YAML-Default → Tuner schreibt im nächsten Cycle wieder mit
+  `source=ml`).
+- Skalar-Form ohne Provenance (Bestandsdaten von vor Phase 1) gilt als impliziter
+  manual-Lock — sicherer Default.
+
+UI rendert Badges: `tunbar` (grau), `ML` (grün), `manuell` (amber). Tabellen-
+zeilen-Header zeigen `ML×n` / `✎×n`-Counter ohne Aufklappen.
+
+### 10.6 Konfiguration
+
+| Env (rule-tuner)        | Default | Bedeutung                                                   |
+|-------------------------|---------|-------------------------------------------------------------|
+| `RESERVOIR_SIZE`        | 10000   | Algorithm-R-Reservoir pro `(rule, param, scope)`.           |
+| `PERSIST_INTERVAL_S`    | 60      | UPSERT in `rule_baselines`.                                 |
+| `STATE_POLL_INTERVAL_S` | 30      | Polling von `/api/sig-rules/ml/status`.                     |
+| `TUNING_CYCLE_S`        | 21600   | Tuner-Cycle-Cadence (= 6 h).                                |
+| `MIN_SAMPLES`           | 100     | Min-Sample-Count pro Scope, sonst kein Threshold-Update.    |
+
+Trainingskonfig (DB `system_config.ml_tuning_config`, GUI-editierbar):
+`window_s` (Trainingsdauer), `quantile`, `scope_split_enabled`,
+`max_change_per_cycle`, `blacklist[]`, `target_alert_rate_per_hour`.
+
+---
+
+## 11. Zusammenspiel rule-tuner ↔ Suppression
+
+### 11.1 Aufgabenteilung
+
+Beide Komponenten beobachten dasselbe Symptom (Alerts mit hoher Frequenz),
+greifen aber an unterschiedlichen Stellen ein:
+
+| Aspekt                          | rule-tuner                  | Suppression                       |
+|---------------------------------|-----------------------------|-----------------------------------|
+| **Greift wann?**                | Cycle (alle 6h) bzw. nach Training-Ende | Pro Alert, sofort.    |
+| **Wirkt auf**                   | Schwellwerte tunbarer Heuristiken | Severity-Tag pro `(rule, ip-paar)`. |
+| **Behält Severity?**            | Ja (Rule feuert nur über Threshold) | Nein (degradiert auf `low`).  |
+| **Skaliert mit Pattern-Anzahl** | Linear in Anzahl `metric:`-deklarierter Params | Pro IP-Paar — passt sich an. |
+| **Wirkt auf Suricata?**         | Nein                        | Ja                                |
+| **Wirkt auf ML-Engine-Alerts?** | Nein                        | Ja (V1) → **Nein** (Phase 7)      |
+
+### 11.2 Kollisions-Zonen — und wie sie aufgelöst sind
+
+Vor Phase 7 liefen rule-tuner und Suppression parallel auf denselben Heuristik-
+Alerts und konnten gegenseitig Schaden anrichten:
+
+- Tuner setzt Threshold passend → Heuristik feuert nur noch bei echten Anomalien.
+- Suppression sieht "trotzdem ein paar FPs in den letzten 14 Tagen" → setzt
+  Severity auf `low`.
+- Echter Treffer kommt durch (Threshold ist sauber), wird aber von Suppression
+  als `low` markiert → Analyst sieht ihn im Noise-Slum.
+
+**Phase 7 Skip-Liste** (`alert-manager/src/main.py`): Suppression-Action wird übersprungen für:
+
+```python
+suppress_eligible = (
+    source not in ("ml", "external")  # ML-Engine + IRMA: kein zweites ML-Filter
+    and not alert.tunable             # rule-tuner ist zuständig
+)
+```
+
+Die Suppression-CLASSIFY-Logik läuft trotzdem für tunable Rules — der
+Output wird aber nicht als severity-Drop angewandt, sondern als
+**Auto-FP-Feedback** in `alerts.feedback` geschrieben:
+
+```python
+alert["feedback"]      = "fp"
+alert["feedback_note"] = f"auto-suppression:{kind}"  # 'manual' oder 'learned'
+alert["tags"]         += ["auto-fp-pattern"]
+```
+
+### 11.3 Loop-Schließung: Suppression-Signal als rule-tuner-Input
+
+Der `rule-tuner` liest in `_load_feedback_metrics()` alle Alerts mit
+`feedback IS NOT NULL AND metric_values IS NOT NULL` und nutzt sie für die
+FP/TP-Bounds (siehe 10.4). Auto-Suppression-Markierungen sind dort
+inkludiert — der Tuner sieht sie als FP-Hinweis und hebt den Threshold
+beim nächsten Cycle so an, dass diese Pattern nicht mehr feuern.
+
+Damit verstärken sich beide Loops gegenseitig:
+
+1. Heuristik fired auf 192.168.1.66 → SCAN_001-Alert.
+2. Suppression-Cache lernt das als Pattern (kein TP-Mark, häufig).
+3. Layer-2-Klassifikation `learned` triggert.
+4. alert-manager: tunable=true → kein severity=low. Stattdessen feedback='fp', tag 'auto-fp-pattern'.
+5. Alert mit metric_values + feedback='fp' in DB.
+6. rule-tuner Cycle: addiert metric_value zu fp_max für SCAN_001/port_count.
+7. Threshold steigt → SCAN_001 feuert für dieses Pattern nicht mehr.
+8. Reale Scans aus anderen Quellen mit `unique_dst_ports > new_threshold` feuern
+   weiter mit voller Severity.
+
+**User-Override**: setzt der User explizit `feedback='tp'` über die UI, ersetzt
+das den Auto-FP-Stand (gleiche Spalte, jüngeres `feedback_ts`). Beim nächsten
+Tuner-Cycle wird der Wert in TP-Bound-Berechnung einbezogen — bremst eine
+fälschliche Threshold-Erhöhung.
+
+### 11.4 Anti-Pattern: was wir bewusst NICHT tun
+
+- **Suppression auf ML-Engine-Output**: einer der Detektoren (IsolationForest)
+  wird nicht durch einen anderen ML-Filter (Suppression) gedrosselt. Sonst
+  gehen Anomalien doppelt verloren.
+- **Suppression auf `source=external` (IRMA)**: externe Aussagen sind keine
+  Detection-Noise und gehören nicht in eine Frequenz-basierte Drosselung.
+- **Tuner-Threshold-Override** für nicht-`metric:`-Params: weder `window_s`
+  noch pattern-only Rules werden vom Tuner angefasst.
+- **Auto-TP-Feedback**: Suppression schreibt **nur FP**, niemals TP. Eine
+  Spike-Durchbruch-Klassifikation bedeutet "Pattern hat sich verändert,
+  Analyst muss schauen" — nicht "Pattern ist ein TP".
+
+### 11.5 Diagnose-Pfade
+
+**"Heuristik feuert weiter trotz Tuner-Lauf":**
+- `_overrides.json` checken — hat der Param `source: "ml"`?
+- `last_tuning_at` im UI — wann war der letzte Cycle?
+- `MIN_SAMPLES` (default 100) für die Scope erreicht? Tunner-Logs zeigen
+  "Tuning-Cycle ohne Updates" wenn nicht.
+- `fp_seen` / `tp_seen` in der ml-Metadata des Override-Eintrags — ggf.
+  konfligierende Markierungen?
+
+**"Auto-FP-Pattern landet am User trotz Suppression-Skip":**
+- Erwartet — der Alert wird mit `feedback='fp'` + `tag='auto-fp-pattern'`
+  gespeichert. UI-Filter "False Positive" zeigt ihn. Severity bleibt
+  original — der User kann jederzeit auf `tp` flippen, wenn es ein echter
+  Treffer war.
+
+**"Suppression unterdrückt einen echten TP einer tunbaren Heuristik":**
+- Sollte nach Phase 7 nicht mehr passieren. Falls doch: prüfen ob
+  `alert.tunable` korrekt vom signature-engine gesetzt wird (Test:
+  `docker compose logs signature-engine` und Alert mit `metric:`-Param
+  im YAML inspizieren).
 
 ---
 

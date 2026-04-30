@@ -189,11 +189,33 @@ def run(cfg: Config) -> None:
             enrich_score(alert)
 
             # 2b. Suppression: manuelle FP + ML-gelernte Muster → low
+            #
+            # Phase 7 (Suppression-Refactor): Suppression-Action wird für Rules
+            # geskipt, die der rule-tuner via Threshold tuned (alert.tunable),
+            # sowie für ML-Engine-Alerts und externe Quellen (IRMA). Begründung:
+            # - tunable: rule-tuner ist das präzisere Werkzeug. Severity-Drop
+            #   plus Threshold-Anpassung ergibt Doppel-Defensive — echte TPs
+            #   nach erfolgreichem Tuning werden trotzdem 'low' getaggt.
+            # - source=ml: Output der ML-Engine durch zweites ML drosseln
+            #   würde sie blind machen.
+            # - source=external (IRMA): externe Aussagen sind keine Detection-
+            #   Noise und gehören nicht in eine Frequenz-basierte Suppression.
+            #
+            # Suppression-CLASSIFY läuft trotzdem für tunable Rules — der
+            # Output wird unten als 'auto-suppression'-Feedback in die DB
+            # gespiegelt, damit der rule-tuner es als FP-Hinweis lesen kann
+            # (siehe rule-tuner/src/tuner.py _load_feedback_metrics).
             suppression.maybe_refresh()
             kind = suppression.classify(
                 alert.get("rule_id"), alert.get("src_ip"), alert.get("dst_ip"),
             )
-            if kind is not None:
+            source_for_skip = alert.get("source") or "signature"
+            tunable = bool(alert.get("tunable"))
+            suppress_eligible = (
+                source_for_skip not in ("ml", "external")
+                and not tunable
+            )
+            if kind is not None and suppress_eligible:
                 tag = "auto-suppressed" if kind == "manual" else "ml-suppressed"
                 if alert.get("severity") != "low":
                     log.info(
@@ -205,6 +227,25 @@ def run(cfg: Config) -> None:
                     if tag not in tags:
                         tags.append(tag)
                     alert["tags"] = tags
+            elif kind is not None and tunable:
+                # (B) Loop-Closure: Suppression hat das Pattern als FP-verdächtig
+                # eingestuft, aber wir greifen nicht ein (rule-tuner ist
+                # zuständig). Stattdessen markieren wir den Alert mit
+                # feedback='fp' + feedback_note='auto-suppression', damit der
+                # Tuner ihn beim nächsten Cycle in seine FP-Bounds zieht.
+                # User-Manuelles Feedback überschreibt das später (gleicher
+                # Spaltenwert, jüngeres feedback_ts).
+                alert.setdefault("feedback", "fp")
+                if alert.get("feedback") == "fp":
+                    alert.setdefault("feedback_note", f"auto-suppression:{kind}")
+                tags = list(alert.get("tags") or [])
+                if "auto-fp-pattern" not in tags:
+                    tags.append("auto-fp-pattern")
+                alert["tags"] = tags
+                log.info(
+                    "Auto-FP (tunable, %s): %s %s → %s — feedback gesetzt für rule-tuner",
+                    kind, alert.get("rule_id"), alert.get("src_ip"), alert.get("dst_ip"),
+                )
 
             # ts auf ISO-String normieren (Signature-Engine liefert Unix-Float)
             ts_raw = alert.get("ts") or time.time()

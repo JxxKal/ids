@@ -71,6 +71,13 @@ class AlertWriter:
             # Python-dict via JSON-Adapter, hier sicherheitshalber explizit
             # serialisieren damit kein NULL/Object-Mix die Spalte zerschießt.
             mv_json = _json.dumps(mv) if isinstance(mv, dict) and mv else None
+            # Phase 7: feedback + feedback_note werden bei Auto-FP-Suppression
+            # bereits beim Initial-Insert gesetzt (siehe alert-manager main.py).
+            # User-Manuelles Feedback überschreibt das später via PATCH /api/
+            # alerts/{id}/feedback (Spaltenwert wird ersetzt, feedback_ts neu).
+            fb = a.get("feedback")
+            fb_note = a.get("feedback_note") if fb else None
+            fb_ts = (a.get("ts") or time.time()) if fb else None
             rows.append((
                 str(a.get("alert_id") or uuid.uuid4()),
                 a.get("ts") or time.time(),
@@ -89,6 +96,9 @@ class AlertWriter:
                 list(a.get("tags") or []),
                 a.get("tap_id"),
                 mv_json,
+                fb,
+                fb_ts,
+                fb_note,
             ))
 
         psycopg2.extras.execute_values(
@@ -98,7 +108,8 @@ class AlertWriter:
                 alert_id, ts, flow_id, source, rule_id,
                 severity, score,
                 src_ip, src_port, dst_ip, proto, dst_port,
-                description, is_test, tags, tap_id, metric_values
+                description, is_test, tags, tap_id, metric_values,
+                feedback, feedback_ts, feedback_note
             ) VALUES %s
             """,
             rows,
@@ -106,7 +117,8 @@ class AlertWriter:
                 %s, %s::timestamptz, %s, %s, %s,
                 %s, %s,
                 %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s::jsonb
+                %s, %s, %s, %s, %s::jsonb,
+                %s, %s::timestamptz, %s
             )""",
         )
 
