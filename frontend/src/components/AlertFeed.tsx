@@ -435,6 +435,38 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
     [taps],
   );
 
+  // Spalten-Sichtbarkeit (persistiert in localStorage). Time + Actions
+  // bleiben immer sichtbar — sonst wird die Tabelle unleserlich.
+  type ColKey = 'severity' | 'boundary' | 'tap' | 'rule' | 'proto' | 'description' | 'tags' | 'source' | 'destination' | 'hits';
+  const ALL_COLS: { key: ColKey; label: string }[] = [
+    { key: 'severity',    label: t('alertFeed.columns.severity') },
+    { key: 'boundary',    label: t('alertFeed.columns.boundary') },
+    { key: 'tap',         label: t('alertFeed.columns.tap') },
+    { key: 'rule',        label: t('alertFeed.columns.rule') },
+    { key: 'proto',       label: t('alertFeed.columns.proto') },
+    { key: 'description', label: t('alertFeed.columns.description') },
+    { key: 'tags',        label: t('alertFeed.columns.tags') },
+    { key: 'source',      label: t('alertFeed.columns.source') },
+    { key: 'destination', label: t('alertFeed.columns.destination') },
+    { key: 'hits',        label: t('alertFeed.columns.hits') },
+  ];
+  const [hiddenCols, setHiddenCols] = useState<Set<ColKey>>(() => {
+    try {
+      const raw = localStorage.getItem('cyjan-alert-hidden-cols');
+      if (raw) return new Set(JSON.parse(raw) as ColKey[]);
+    } catch { /* corrupted — Default leer */ }
+    return new Set();
+  });
+  useEffect(() => {
+    try { localStorage.setItem('cyjan-alert-hidden-cols', JSON.stringify([...hiddenCols])); } catch { /* quota */ }
+  }, [hiddenCols]);
+  const showCol = (k: ColKey): boolean => !hiddenCols.has(k);
+  const toggleCol = (k: ColKey) => setHiddenCols(prev => {
+    const next = new Set(prev);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    return next;
+  });
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     const PRIORITY_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
@@ -647,6 +679,52 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           ↓ CSV
         </a>
 
+        {/* Spalten-Auswahl: details/summary statt React-Dropdown spart UI-State.
+            User toggelt Checkboxen, hiddenCols schreibt sich automatisch in
+            localStorage und persistiert über Reloads. */}
+        <details className="relative">
+          <summary
+            className="cursor-pointer list-none px-2.5 py-1 rounded text-xs font-medium border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors select-none"
+            title="Spalten der Alarmtabelle ein-/ausblenden"
+          >
+            ⚙ Spalten {hiddenCols.size > 0 && <span className="text-amber-400">({hiddenCols.size})</span>}
+          </summary>
+          <div className="absolute right-0 mt-1 z-20 bg-slate-900 border border-slate-700 rounded shadow-lg p-2 min-w-48">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 px-1">
+              Spalten anzeigen
+            </div>
+            {ALL_COLS.map(c => {
+              // Bedingungs-abhängige Spalten greyen wir aus, wenn der Auslöser
+              // (egressMode/showTapColumn) gerade nicht aktiv ist — dann ist
+              // der Toggle wirkungslos.
+              const dimmed = (c.key === 'boundary' && egressMode === 'off')
+                          || (c.key === 'tap' && !showTapColumn);
+              return (
+                <label key={c.key}
+                  className={`flex items-center gap-2 px-1 py-0.5 text-xs cursor-pointer hover:bg-slate-800/60 rounded ${dimmed ? 'text-slate-600' : 'text-slate-300'}`}
+                >
+                  <input
+                    type="checkbox"
+                    className="accent-cyan-500"
+                    checked={showCol(c.key)}
+                    onChange={() => toggleCol(c.key)}
+                  />
+                  <span>{c.label}</span>
+                  {dimmed && <span className="ml-auto text-[9px] text-slate-600">(inaktiv)</span>}
+                </label>
+              );
+            })}
+            {hiddenCols.size > 0 && (
+              <button
+                className="mt-1.5 w-full text-[10px] text-slate-500 hover:text-slate-300 px-1 py-0.5 border-t border-slate-800 pt-1.5"
+                onClick={() => setHiddenCols(new Set())}
+              >
+                Alle einblenden
+              </button>
+            )}
+          </div>
+        </details>
+
         <span className="text-sm font-medium text-slate-300 shrink-0">
           {rowCount} <span className="text-xs font-normal text-slate-500">{grouped && groups!.some(g => g.count > 1) ? t('alertFeed.counts.groups') : t('alertFeed.counts.alerts')}</span>
         </span>
@@ -660,16 +738,16 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             <thead className="cyjan-table-head sticky top-0 z-10">
               <tr className="text-left">
                 <th className="px-3 py-2">{t('alertFeed.columns.lastSeen')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>
-                {egressMode !== 'off' && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
-                {showTapColumn && <th className="px-3 py-2">{t('alertFeed.columns.tap')}</th>}
-                <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.tags')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.source')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.destination')}</th>
-                <th className="px-3 py-2 text-right">{t('alertFeed.columns.hits')}</th>
+                {showCol('severity')    && <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>}
+                {egressMode !== 'off' && showCol('boundary') && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
+                {showTapColumn && showCol('tap') && <th className="px-3 py-2">{t('alertFeed.columns.tap')}</th>}
+                {showCol('rule')        && <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>}
+                {showCol('proto')       && <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>}
+                {showCol('description') && <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>}
+                {showCol('tags')        && <th className="px-3 py-2">{t('alertFeed.columns.tags')}</th>}
+                {showCol('source')      && <th className="px-3 py-2">{t('alertFeed.columns.source')}</th>}
+                {showCol('destination') && <th className="px-3 py-2">{t('alertFeed.columns.destination')}</th>}
+                {showCol('hits')        && <th className="px-3 py-2 text-right">{t('alertFeed.columns.hits')}</th>}
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -691,55 +769,71 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                       </div>
                     )}
                   </td>
-                  <td className="px-3 py-2">
-                    <SeverityBadge severity={g.severity} />
-                  </td>
-                  {egressMode !== 'off' && (
+                  {showCol('severity') && (
+                    <td className="px-3 py-2">
+                      <SeverityBadge severity={g.severity} />
+                    </td>
+                  )}
+                  {egressMode !== 'off' && showCol('boundary') && (
                     <td className="px-3 py-2"><BoundaryCell alert={g.latest} /></td>
                   )}
-                  {showTapColumn && (
+                  {showTapColumn && showCol('tap') && (
                     <td className="px-3 py-2 text-[11px] font-mono text-slate-400 whitespace-nowrap">
                       {g.latest.tap_id
                         ? (tapsById[g.latest.tap_id]?.name ?? g.latest.tap_id.slice(0, 8))
                         : <span className="text-slate-600">–</span>}
                     </td>
                   )}
-                  <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
-                    {g.rule_id ?? '–'}
-                    {g.latest.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
-                    {g.latest.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap">
-                    {appProto(g.proto, g.dst_port, g.latest.src_port)}
-                  </td>
-                  <td className="px-3 py-2 text-slate-400 max-w-sm">
-                    <span className="line-clamp-2" title={g.description ?? undefined}>
-                      {g.description ?? '–'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 max-w-[140px]">
-                    <TagList tags={g.tags} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
-                      {g.bidirectional && (
-                        <span title={t('alertFeed.bidirectional')} className="text-cyan-500 text-sm shrink-0">↔</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" />
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {g.latest.feedback && <FeedbackBadge feedback={g.latest.feedback} />}
-                      {g.count > 1
-                        ? <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-mono">×{g.count}</span>
-                        : <span className="text-slate-600">1</span>
-                      }
-                    </div>
-                  </td>
+                  {showCol('rule') && (
+                    <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
+                      {g.rule_id ?? '–'}
+                      {g.latest.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
+                      {g.latest.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
+                    </td>
+                  )}
+                  {showCol('proto') && (
+                    <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap">
+                      {appProto(g.proto, g.dst_port, g.latest.src_port)}
+                    </td>
+                  )}
+                  {showCol('description') && (
+                    <td className="px-3 py-2 text-slate-400 max-w-sm">
+                      <span className="line-clamp-2" title={g.description ?? undefined}>
+                        {g.description ?? '–'}
+                      </span>
+                    </td>
+                  )}
+                  {showCol('tags') && (
+                    <td className="px-3 py-2 max-w-[140px]">
+                      <TagList tags={g.tags} />
+                    </td>
+                  )}
+                  {showCol('source') && (
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
+                        {g.bidirectional && (
+                          <span title={t('alertFeed.bidirectional')} className="text-cyan-500 text-sm shrink-0">↔</span>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                  {showCol('destination') && (
+                    <td className="px-3 py-2">
+                      <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" />
+                    </td>
+                  )}
+                  {showCol('hits') && (
+                    <td className="px-3 py-2 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {g.latest.feedback && <FeedbackBadge feedback={g.latest.feedback} />}
+                        {g.count > 1
+                          ? <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 font-mono">×{g.count}</span>
+                          : <span className="text-slate-600">1</span>
+                        }
+                      </div>
+                    </td>
+                  )}
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1.5">
                       <PcapButton alertId={g.latest.alert_id} available={g.latest.pcap_available} />
@@ -764,16 +858,16 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
             <thead className="cyjan-table-head sticky top-0 z-10">
               <tr className="text-left">
                 <th className="px-3 py-2">{t('alertFeed.columns.time')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>
-                {egressMode !== 'off' && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
-                {showTapColumn && <th className="px-3 py-2">{t('alertFeed.columns.tap')}</th>}
-                <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.tags')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.source')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.destination')}</th>
-                <th className="px-3 py-2">{t('alertFeed.columns.score')}</th>
+                {showCol('severity')    && <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>}
+                {egressMode !== 'off' && showCol('boundary') && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
+                {showTapColumn && showCol('tap') && <th className="px-3 py-2">{t('alertFeed.columns.tap')}</th>}
+                {showCol('rule')        && <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>}
+                {showCol('proto')       && <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>}
+                {showCol('description') && <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>}
+                {showCol('tags')        && <th className="px-3 py-2">{t('alertFeed.columns.tags')}</th>}
+                {showCol('source')      && <th className="px-3 py-2">{t('alertFeed.columns.source')}</th>}
+                {showCol('destination') && <th className="px-3 py-2">{t('alertFeed.columns.destination')}</th>}
+                {showCol('hits')        && <th className="px-3 py-2">{t('alertFeed.columns.score')}</th>}
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -790,40 +884,56 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
                     {fmtTime(a.ts)}
                   </td>
-                  <td className="px-3 py-2"><SeverityBadge severity={a.severity} /></td>
-                  {egressMode !== 'off' && (
+                  {showCol('severity') && (
+                    <td className="px-3 py-2"><SeverityBadge severity={a.severity} /></td>
+                  )}
+                  {egressMode !== 'off' && showCol('boundary') && (
                     <td className="px-3 py-2"><BoundaryCell alert={a} /></td>
                   )}
-                  {showTapColumn && (
+                  {showTapColumn && showCol('tap') && (
                     <td className="px-3 py-2 text-[11px] font-mono text-slate-400 whitespace-nowrap">
                       {a.tap_id
                         ? (tapsById[a.tap_id]?.name ?? a.tap_id.slice(0, 8))
                         : <span className="text-slate-600">–</span>}
                     </td>
                   )}
-                  <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
-                    {a.rule_id}
-                    {a.is_test && <span className="ml-1 text-blue-400 text-xs">[TEST]</span>}
-                    {a.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap">
-                    {appProto(a.proto, a.dst_port, a.src_port)}
-                  </td>
-                  <td className="px-3 py-2 text-slate-400 max-w-sm">
-                    <span className="line-clamp-2" title={a.description ?? undefined}>
-                      {a.description ?? '–'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 max-w-[140px]">
-                    <TagList tags={a.tags ?? []} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <IpCell ip={a.src_ip} enrichment={a.enrichment} dir="src" />
-                  </td>
-                  <td className="px-3 py-2">
-                    <IpCell ip={a.dst_ip} port={a.dst_port} enrichment={a.enrichment} dir="dst" />
-                  </td>
-                  <td className="px-3 py-2 tabular-nums text-slate-400">{(a.score ?? 0).toFixed(2)}</td>
+                  {showCol('rule') && (
+                    <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
+                      {a.rule_id}
+                      {a.is_test && <span className="ml-1 text-blue-400 text-xs">[TEST]</span>}
+                      {a.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
+                    </td>
+                  )}
+                  {showCol('proto') && (
+                    <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap">
+                      {appProto(a.proto, a.dst_port, a.src_port)}
+                    </td>
+                  )}
+                  {showCol('description') && (
+                    <td className="px-3 py-2 text-slate-400 max-w-sm">
+                      <span className="line-clamp-2" title={a.description ?? undefined}>
+                        {a.description ?? '–'}
+                      </span>
+                    </td>
+                  )}
+                  {showCol('tags') && (
+                    <td className="px-3 py-2 max-w-[140px]">
+                      <TagList tags={a.tags ?? []} />
+                    </td>
+                  )}
+                  {showCol('source') && (
+                    <td className="px-3 py-2">
+                      <IpCell ip={a.src_ip} enrichment={a.enrichment} dir="src" />
+                    </td>
+                  )}
+                  {showCol('destination') && (
+                    <td className="px-3 py-2">
+                      <IpCell ip={a.dst_ip} port={a.dst_port} enrichment={a.enrichment} dir="dst" />
+                    </td>
+                  )}
+                  {showCol('hits') && (
+                    <td className="px-3 py-2 tabular-nums text-slate-400">{(a.score ?? 0).toFixed(2)}</td>
+                  )}
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1.5">
                       {a.feedback && <FeedbackBadge feedback={a.feedback} />}
