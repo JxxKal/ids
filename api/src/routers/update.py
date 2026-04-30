@@ -271,19 +271,84 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
             _state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
+def _peek_zip_version(zip_bytes: bytes) -> str | None:
+    """Liest VERSION aus dem ZIP ohne zu extrahieren. Gibt None zurück
+    wenn das Bundle keinen lesbaren Marker hat (z.B. uralte Builds vor
+    dem VERSION-File-Pinning) — in dem Fall lassen wir das Update zu."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            members = zf.namelist()
+            if not members:
+                return None
+            prefix = members[0].split("/")[0] + "/"
+            candidate = f"{prefix}VERSION"
+            if candidate in members:
+                with zf.open(candidate) as fh:
+                    return fh.read().decode("utf-8", errors="replace").strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def _parse_semver(s: str) -> tuple[int, int, int] | None:
+    """v1.5.1 → (1, 5, 1). Alles was nicht passt → None.
+    Ignoriert nachgehängte Suffixe wie '-iso', '-rc1' (alphabetischer
+    Vergleich auf Suffix wäre fragil; wir vergleichen rein numerisch
+    und behandeln gleich-numerische Tags als 'gleichwertig')."""
+    s = s.strip().lstrip("vV")
+    # Trim alles ab dem ersten Nicht-[0-9.]
+    import re
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)", s)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+
 @router.post("/update", summary="Offline-Update via ZIP")
 async def start_update(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     pull_images: bool = Form(False),
+    force: bool = Form(False),
 ) -> dict:
+    """Offline-Update via Update-ZIP. Validiert die VERSION im ZIP gegen
+    die installierte Version — Downgrades + Same-Version-Re-Plays werden
+    abgewiesen, es sei denn `force=true`. Damit verhindert wir Fälle wie
+    'eine v1.4.0-ZIP auf eine v1.5.1-Maschine geladen → System sieht aus
+    als wär es 1.5.1 (VERSION-File wurde überschrieben), aber die Docker-
+    Images sind älter und Migrations bleiben aus'.
+    """
     if _state["phase"] not in ("idle", "done", "error"):
         raise HTTPException(409, "Ein Update läuft bereits")
     if not (file.filename or "").endswith(".zip"):
         raise HTTPException(400, "Nur ZIP-Dateien erlaubt")
     zip_bytes = await file.read()
+
+    incoming = _peek_zip_version(zip_bytes)
+    current = _read_version()
+    if incoming and current and not force:
+        in_sv = _parse_semver(incoming)
+        cur_sv = _parse_semver(current)
+        if in_sv and cur_sv:
+            if in_sv < cur_sv:
+                raise HTTPException(
+                    400,
+                    f"ZIP enthält {incoming}, installiert ist {current} — Downgrade abgelehnt. "
+                    f"Mit force=true erzwingbar.",
+                )
+            if in_sv == cur_sv:
+                raise HTTPException(
+                    400,
+                    f"ZIP-Version {incoming} entspricht der installierten — kein Update notwendig. "
+                    f"Mit force=true erzwingbar.",
+                )
+
     background_tasks.add_task(_run_update, zip_bytes, pull_images)
-    return {"status": "started"}
+    return {
+        "status":   "started",
+        "incoming": incoming or "?",
+        "current":  current,
+    }
 
 
 @router.get("/update/status", summary="Update-Status abfragen")
