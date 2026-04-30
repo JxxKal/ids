@@ -24,6 +24,8 @@
       min: 1
       max: 600
       label: "Zeitfenster (Sekunden)"
+  eligibility: |
+    flow.get('proto') == 'TCP'
   condition: |
     flow.get('proto') == 'TCP'
     and ctx.syn_count(flow.get('src_ip', ''), params.window_s) > params.syn_count
@@ -48,6 +50,7 @@
       min: 1
       max: 600
       label: "Zeitfenster (Sekunden)"
+  # Keine eligibility: — Verbindungsflut ist proto-agnostisch.
   condition: |
     ctx.flow_rate(flow.get('src_ip', ''), params.window_s) > params.flow_count
 
@@ -65,6 +68,8 @@
       max: 10000000
       label: "Mindest-Paketrate (Pakete/Sekunde)"
       metric: pps
+  eligibility: |
+    flow.get('proto') == 'UDP'
   condition: |
     flow.get('proto') == 'UDP'
     and flow.get('pps', 0) > params.pps
@@ -83,6 +88,8 @@
       max: 10000000
       label: "Mindest-Paketrate (Pakete/Sekunde)"
       metric: pps
+  eligibility: |
+    flow.get('proto') == 'ICMP'
   condition: |
     flow.get('proto') == 'ICMP'
     and flow.get('pps', 0) > params.pps

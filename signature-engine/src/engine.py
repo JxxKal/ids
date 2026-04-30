@@ -199,6 +199,27 @@ class SignatureEngine:
         for rule in self._loader.rules:
             if not rule.parameters_schema:
                 continue
+            # Phase 6: Eligibility-Filter — wenn die Rule eine eligibility:
+            # deklariert, samplen wir nur Flows die zur Rule überhaupt passen.
+            # Verhindert Reservoir-Kontamination (z.B. UDP-Flows im Reservoir
+            # einer TCP-SYN-Scan-Rule). Rules ohne eligibility samplen alles
+            # weiter — Backwards-Compat.
+            if rule.eligibility_code is not None:
+                fparams_eli: _FlowParams | None = None
+                try:
+                    if fparams_eli is None:
+                        fparams_eli = _FlowParams(rule.parameters, is_internal)
+                    elig = eval(  # noqa: S307
+                        rule.eligibility_code,
+                        _EVAL_GLOBALS,
+                        {"flow": flat, "ctx": self._ctx, "params": fparams_eli},
+                    )
+                except Exception as exc:
+                    log.debug("Rule %s eligibility eval error: %s — sample skipped",
+                              rule.id, exc)
+                    continue
+                if not elig:
+                    continue
             fparams: _FlowParams | None = None
             for pname, schema in rule.parameters_schema.items():
                 metric_name = schema.get("metric")

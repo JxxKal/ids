@@ -76,6 +76,13 @@ class Rule:
     condition_src: str
     condition_code: Any   # compiled code object
     cooldown_s: int = 60  # Sekunden zwischen zwei Alerts derselben Regel+Src-IP
+    # Phase 6: Eligibility-Filter — wenn gesetzt, werden Metric-Samples
+    # (Phase 2 compute_metrics) nur emittiert, wenn dieser Filter true
+    # ergibt. Verhindert Reservoir-Kontamination aus Flows, die zur Rule
+    # protokollarisch nie passen würden (z.B. UDP-Flow für TCP-SYN-Scan).
+    # Default: None → keine Filterung (Verhalten wie pre-Phase-6).
+    eligibility_src: str | None = None
+    eligibility_code: Any = None  # compiled code object oder None
     # Parameter-Schema (aus YAML) und effektive Werte.
     # parameters_schema: { name: {type, default, min, max, label, metric} }
     #   metric (optional, Phase 2): symbolischer Name der Counting-Funktion,
@@ -188,6 +195,30 @@ def _compile_rule(raw: dict, source_file: str) -> Rule | None:
         # damit Python-eval Zeilenumbrüche bei and/or-Ketten akzeptiert.
         code = compile(f"(\n{condition_src}\n)", f"<rule:{rule_id}>", "eval")
 
+        # Phase 6: optionaler Eligibility-Filter für die Shadow-Metrik-Pipeline.
+        # Selbe Sprache wie `condition`, separat compiled — Sample-Emit darf
+        # auch dann unterdrückt werden, wenn die Condition (mit threshold) nicht
+        # feuert.
+        eligibility_src_raw = raw.get("eligibility")
+        eligibility_src: str | None = None
+        eligibility_code = None
+        if eligibility_src_raw:
+            eligibility_src = str(eligibility_src_raw).strip()
+            if eligibility_src:
+                try:
+                    eligibility_code = compile(
+                        f"(\n{eligibility_src}\n)",
+                        f"<rule:{rule_id}:eligibility>",
+                        "eval",
+                    )
+                except SyntaxError as exc:
+                    log.error(
+                        "Rule %s: eligibility hat Syntax-Fehler: %s – ignoriert",
+                        rule_id, exc,
+                    )
+                    eligibility_src = None
+                    eligibility_code = None
+
         params_schema = _parse_param_schema(rule_id, raw.get("parameters"))
         params_default = {n: _new_param_entry(s["default"]) for n, s in params_schema.items()}
 
@@ -200,6 +231,8 @@ def _compile_rule(raw: dict, source_file: str) -> Rule | None:
             condition_src=condition_src,
             condition_code=code,
             cooldown_s=int(raw.get("cooldown_s", 60)),
+            eligibility_src=eligibility_src,
+            eligibility_code=eligibility_code,
             parameters_schema=params_schema,
             parameters=params_default,
         )
@@ -576,6 +609,8 @@ class RuleLoader:
                     severity=new_severity, tags=r.tags,
                     condition_src=r.condition_src, condition_code=r.condition_code,
                     cooldown_s=r.cooldown_s,
+                    eligibility_src=r.eligibility_src,
+                    eligibility_code=r.eligibility_code,
                     parameters_schema=r.parameters_schema,
                     parameters=new_params,
                 )

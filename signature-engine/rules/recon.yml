@@ -23,6 +23,9 @@
       min: 5
       max: 3600
       label: "Zeitfenster (Sekunden)"
+  eligibility: |
+    flow.get('proto') == 'TCP'
+    and flow.get('half_open', False)
   condition: |
     flow.get('proto') == 'TCP'
     and flow.get('half_open', False)
@@ -48,6 +51,10 @@
       min: 5
       max: 3600
       label: "Zeitfenster (Sekunden)"
+  eligibility: |
+    flow.get('proto') == 'TCP'
+    and (flow.get('dst_port') or 9999) < 1024
+    and flow.get('connection_state') in ('SYN_ONLY', 'RESET')
   condition: |
     flow.get('proto') == 'TCP'
     and (flow.get('dst_port') or 9999) < 1024
@@ -74,6 +81,9 @@
       min: 5
       max: 3600
       label: "Zeitfenster (Sekunden)"
+  eligibility: |
+    flow.get('proto') == 'TCP'
+    and flow.get('connection_state') == 'RESET'
   condition: |
     flow.get('proto') == 'TCP'
     and flow.get('connection_state') == 'RESET'

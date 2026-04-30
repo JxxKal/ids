@@ -410,6 +410,30 @@ Im bestehenden Tab "Regel-Anpassungen" oben in der Section sitzt jetzt eine **ML
 
 **Test (mit Browser)**: Login → Einstellungen → Regelwerk → Regel-Anpassungen → ML-Tuning-Card oben sichtbar. SCAN_001 ausklappen zeigt `port_count tunbar`-Badge. Nach `start-training`-Klick wechselt der State auf `training`, Restzeit zählt herunter, beim Ablauf springt er auf `tuning` und der ML-Badge erscheint an den getunten Params.
 
+**Phase 6 — Eligibility-Filter — ✅ erledigt 2026-04-30**
+
+Erste reale Trainingsläufe haben gezeigt: Reservoirs sind kontaminiert. Konkretes Beispiel — SCAN_001 wurde auf `port_count_internal=9` getuned (also: schon 10 distinct ports lösen Alarm), während external höher ausfiel. Das ist semantisch verkehrt (interne Workstations sind keine Scanner) und sorgte für FPs auf normalem User-Verkehr. Ursache: das Reservoir für SCAN_001 enthielt UDP- und ICMP-Flows desselben internen Hosts (DNS, mDNS, ARP), und P99,5 dieser Mischverteilung lag niedrig. Die Rule selbst feuert nur auf TCP+SYN — aber das Sampling tat das nicht.
+
+- ✅ Rule-Schema (`signature-engine/src/loader.py`): Neues optionales Feld `eligibility:` in YAML — selbe Sprache wie `condition`, separat compiled. Wenn gesetzt, samplet `compute_metrics()` nur Flows die diesen Filter passieren.
+- ✅ engine `compute_metrics()`: vor jedem Param-Eintrag wird `eligibility` evaluiert, false → continue. Eval-Fehler werden als debug geloggt und droppen das Sample (kein Crash).
+- ✅ YAML-Rules angepasst (`scan.yml`, `dos.yml`, `recon.yml`):
+  - SCAN_001: `proto=='TCP' and tcp_flags_abs.SYN > 0`
+  - SCAN_002: `proto=='UDP'`
+  - SCAN_003: `proto=='ICMP'`
+  - SCAN_004: keine eligibility (proto-agnostisch — "Verbindungen zu vielen IPs", egal welches Protokoll)
+  - DOS_SYN_001: `proto=='TCP'`
+  - DOS_CONN_001: keine eligibility (Verbindungsflut ist proto-agnostisch)
+  - DOS_UDP_001: `proto=='UDP'`
+  - DOS_ICMP_001: `proto=='ICMP'`
+  - RECON_001: `proto=='TCP' and half_open`
+  - RECON_002: `proto=='TCP' and dst_port<1024 and connection_state in ('SYN_ONLY','RESET')`
+  - RECON_003: `proto=='TCP' and connection_state=='RESET'`
+- ✅ 4 Smoketest-Cases grün: UDP-Flow → SCAN_001 skip + SCAN_002 sample, TCP-SYN → SCAN_001 sample + SCAN_002 skip, TCP-ohne-SYN → SCAN_001 skip, ICMP → SCAN_003 sample + SCAN_001 skip.
+
+**Cleanup nach Deploy**: bestehende kontaminierte ml-Overrides müssen entfernt werden, sonst bleiben sie mit den verzerrten Werten aktiv bis zum nächsten Tuning-Cycle (erst nach `start-training` und `training_until`). Schnellster Weg: in der GUI unter Settings → Regel-Anpassungen die betroffenen Rules aufklappen und pro Param den Reset-↺-Button drücken (ml-Eintrag wird raus, default kommt zurück), dann `start-training` neu starten — der erste Cycle nach Trainingsende schreibt frische Werte aus dem nun korrekt gefilterten Reservoir.
+
+**Bekannte Restbias** (nicht in Phase 6 adressiert, V2-Backlog): `unique_dst_ports(src, window)` zählt port-aggregiert über ALLE Flows der Quelle, nicht nur über die SYN-getriggerten. Ein User mit 10 Browser-Tabs zählt also als `unique_dst_ports >= 5` (53, 80, 443, 22, 8080 …). Akkurater wäre eine SYN-gefilterte Variante der Counting-Methode. Aktuelles Workaround: bei Bedarf manuell höher setzen, der Tuner respektiert das per source=manual.
+
 **Phase 6 — Reverse-Channel + Verteilung**
 - Existierender Master-uplink `/config`-Endpoint serviert die erweiterte `_overrides.json` ohne Änderung — Tap-side signature-engine versteht das neue Schema bereits aus Phase 1.
 - WebSocket-Push nach Override-Update (`feedback_updated` analog) → Frontend re-fetcht.

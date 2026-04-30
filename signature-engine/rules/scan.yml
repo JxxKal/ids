@@ -25,6 +25,12 @@
       min: 5
       max: 3600
       label: "Zeitfenster (Sekunden)"
+  # Phase 6: Reservoir nur mit Flows befüllen, die zur Rule überhaupt passen
+  # könnten (TCP + SYN gesetzt). Sonst landen UDP/ICMP-Flows im Reservoir
+  # und ziehen P99,5 für den internen Scope unrealistisch nach unten.
+  eligibility: |
+    flow.get('proto') == 'TCP'
+    and flow.get('tcp_flags_abs', {}).get('SYN', 0) > 0
   condition: |
     flow.get('proto') == 'TCP'
     and flow.get('tcp_flags_abs', {}).get('SYN', 0) > 0
@@ -50,6 +56,8 @@
       min: 5
       max: 3600
       label: "Zeitfenster (Sekunden)"
+  eligibility: |
+    flow.get('proto') == 'UDP'
   condition: |
     flow.get('proto') == 'UDP'
     and ctx.unique_dst_ports(flow.get('src_ip', ''), params.window_s) > params.port_count
@@ -74,6 +82,8 @@
       min: 5
       max: 3600
       label: "Zeitfenster (Sekunden)"
+  eligibility: |
+    flow.get('proto') == 'ICMP'
   condition: |
     flow.get('proto') == 'ICMP'
     and ctx.unique_dst_ips(flow.get('src_ip', ''), params.window_s) > params.ip_count
