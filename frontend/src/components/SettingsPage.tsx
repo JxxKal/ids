@@ -898,7 +898,19 @@ function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => voi
         </h3>
         <pre className="text-[10px] font-mono text-slate-400 leading-relaxed overflow-x-auto whitespace-pre">{diagramText}</pre>
         <p className="text-[10px] text-slate-500 mt-2">
-          <Trans i18nKey="settings.mlOverview.diagram.footer" components={{ code: <code className="text-cyan-300" /> }} />
+          <Trans
+            i18nKey="settings.mlOverview.diagram.footer"
+            components={{
+              a: (
+                <a
+                  href="https://github.com/JxxKal/ids/blob/main/docs/ML_ENGINE.md"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-cyan-300 underline hover:text-cyan-200 font-mono"
+                />
+              ),
+            }}
+          />
         </p>
       </div>
     </div>

@@ -768,7 +768,7 @@
       },
       "diagram": {
         "title": "So arbeiten die drei zusammen",
-        "footer": "Detail-Architektur in <code>docs/ML_ENGINE.md</code> Sections 10 + 11."
+        "footer": "Detail-Architektur in <a>docs/ML_ENGINE.md</a> Sections 10 + 11."
       }
     },
     "ruleOverrides": {

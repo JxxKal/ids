@@ -768,7 +768,7 @@
       },
       "diagram": {
         "title": "How the three work together",
-        "footer": "Detailed architecture in <code>docs/ML_ENGINE.md</code> sections 10 + 11."
+        "footer": "Detailed architecture in <a>docs/ML_ENGINE.md</a> sections 10 + 11."
       }
     },
     "ruleOverrides": {
