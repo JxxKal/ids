@@ -29,6 +29,6 @@ class Config:
             bootstrap_min_samples=int(os.environ.get("BOOTSTRAP_MIN_SAMPLES", "500")),
             partial_fit_interval=int(os.environ.get("PARTIAL_FIT_INTERVAL", "200")),
             save_interval=int(os.environ.get("SAVE_INTERVAL", "1000")),
-            contamination=float(os.environ.get("CONTAMINATION", "0.01")),
+            contamination=float(os.environ.get("CONTAMINATION", "0.005")),
             test_mode=os.environ.get("TEST_MODE", "false").lower() == "true",
         )

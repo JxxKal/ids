@@ -34,23 +34,41 @@ _IFOREST_FILE = "iforest.joblib"
 _META_FILE    = "meta.json"
 
 
+# Muss synchron zu ml-engine/src/features.py FEATURE_DIM=18 bleiben
+_KNOWN_PORTS = {22, 80, 443, 53, 25, 3389, 21, 23, 110, 143, 8080, 8443, 587, 465, 161}
+
+
 def _flow_to_vec(flow: dict) -> np.ndarray:
-    """Konvertiert einen Flow-Dict in einen Feature-Vektor (14-dimensional)."""
+    """Konvertiert einen Flow-Dict in einen Feature-Vektor (18-dimensional).
+
+    WICHTIG: muss exakt mit ml-engine/src/features.py:extract() übereinstimmen,
+    sonst lädt ml-engine das Modell mit shape-mismatch."""
+    pkt_count = float(flow.get("pkt_count") or 0)
+    syn = float(flow.get("syn_ratio") or 0)
+    rst = float(flow.get("rst_ratio") or 0)
+    fin = float(flow.get("fin_ratio") or 0)
+    dst_port = flow.get("dst_port")
+
+    is_short_flow     = 1.0 if pkt_count <= 2.0 else 0.0
+    is_syn_only       = 1.0 if (syn >= 0.99 and rst < 0.01 and fin < 0.01) else 0.0
+    dst_port_known    = 1.0 if (dst_port is not None and int(dst_port) in _KNOWN_PORTS) else 0.0
+    is_privileged_dst = 1.0 if (dst_port is not None and 0 < int(dst_port) < 1024) else 0.0
+    dst_port_norm     = float(dst_port) / 65535.0 if dst_port is not None else 0.0
+
     return np.array([
         float(flow.get("duration_s")    or 0),
-        float(flow.get("pkt_count")     or 0),
+        pkt_count,
         float(flow.get("byte_count")    or 0),
-        float(flow.get("pps")           or flow.get("bps") or 0),   # pps bevorzugt
+        float(flow.get("pps")           or 0),
         float(flow.get("bps")           or 0),
         float(flow.get("pkt_size_mean") or 0),
         float(flow.get("pkt_size_std")  or 0),
         float(flow.get("iat_mean")      or 0),
         float(flow.get("iat_std")       or 0),
         float(flow.get("entropy_iat")   or 0),
-        float(flow.get("syn_ratio")     or 0),
-        float(flow.get("rst_ratio")     or 0),
-        float(flow.get("fin_ratio")     or 0),
-        float(flow.get("dst_port") or 0) / 65535.0,
+        syn, rst, fin,
+        dst_port_norm,
+        is_short_flow, is_syn_only, dst_port_known, is_privileged_dst,
     ], dtype=np.float32)
 
 
@@ -128,7 +146,7 @@ def retrain(
     X_scaled = scaler.fit_transform(X_all)
 
     iforest = IsolationForest(
-        n_estimators=100,
+        n_estimators=200,
         contamination=actual_contamination,
         random_state=42,
         n_jobs=-1,

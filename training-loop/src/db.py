@@ -92,6 +92,9 @@ class TrainingDB:
         """
         Lädt normale Flows aus der flows-Tabelle für semi-supervised Bootstrap.
         Gibt Flow-Feature-Dicts zurück (kompatibel mit features.extract).
+
+        Bereinigt: nur Flows mind. 2 h alt (Schutz vor Test-Bias) und ohne
+        zugehörigen Alert (Heuristik/ML/Suricata).
         """
         try:
             self._connect()
@@ -99,21 +102,26 @@ class TrainingDB:
                 cur.execute(
                     """
                     SELECT
-                        EXTRACT(EPOCH FROM (end_ts - start_ts)) AS duration_s,
-                        pkt_count, byte_count,
-                        (stats->>'pps')::float         AS pps,
-                        (stats->>'bps')::float         AS bps,
-                        (stats->'pkt_size'->>'mean')::float AS pkt_size_mean,
-                        (stats->'pkt_size'->>'std')::float  AS pkt_size_std,
-                        (stats->'iat'->>'mean')::float      AS iat_mean,
-                        (stats->'iat'->>'std')::float       AS iat_std,
-                        (stats->>'entropy_iat')::float      AS entropy_iat,
-                        (stats->'tcp_flags'->>'SYN')::float AS syn_ratio,
-                        (stats->'tcp_flags'->>'RST')::float AS rst_ratio,
-                        (stats->'tcp_flags'->>'FIN')::float AS fin_ratio,
-                        dst_port
-                    FROM flows
-                    ORDER BY start_ts DESC
+                        EXTRACT(EPOCH FROM (f.end_ts - f.start_ts)) AS duration_s,
+                        f.pkt_count, f.byte_count,
+                        (f.stats->>'pps')::float         AS pps,
+                        (f.stats->>'bps')::float         AS bps,
+                        (f.stats->'pkt_size'->>'mean')::float AS pkt_size_mean,
+                        (f.stats->'pkt_size'->>'std')::float  AS pkt_size_std,
+                        (f.stats->'iat'->>'mean')::float      AS iat_mean,
+                        (f.stats->'iat'->>'std')::float       AS iat_std,
+                        (f.stats->>'entropy_iat')::float      AS entropy_iat,
+                        (f.stats->'tcp_flags'->>'SYN')::float AS syn_ratio,
+                        (f.stats->'tcp_flags'->>'RST')::float AS rst_ratio,
+                        (f.stats->'tcp_flags'->>'FIN')::float AS fin_ratio,
+                        f.dst_port
+                    FROM flows f
+                    WHERE f.start_ts < now() - interval '2 hours'
+                      AND f.stats IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM alerts a WHERE a.flow_id = f.flow_id
+                      )
+                    ORDER BY f.start_ts DESC
                     LIMIT %s
                     """,
                     (limit,),

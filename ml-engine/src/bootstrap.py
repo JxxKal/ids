@@ -30,25 +30,34 @@ def load_flows(postgres_dsn: str, limit: int = MAX_ROWS) -> list[dict]:
 
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Bereinigt: nur Flows die mind. 2h alt sind (kein Test-Bias) und
+            # die nicht mit einem Heuristik-/ML-Alert verknüpft waren.
+            # Statistik-Felder leben in der JSONB-Spalte `stats`.
             cur.execute(
                 """
                 SELECT
-                    EXTRACT(EPOCH FROM (end_ts - start_ts)) AS duration_s,
-                    pkt_count,
-                    byte_count,
-                    pps,
-                    bps,
-                    pkt_size_mean   AS "pkt_size.mean",
-                    pkt_size_std    AS "pkt_size.std",
-                    iat_mean        AS "iat.mean",
-                    iat_std         AS "iat.std",
-                    entropy_iat,
-                    syn_ratio       AS "tcp_flags.SYN",
-                    rst_ratio       AS "tcp_flags.RST",
-                    fin_ratio       AS "tcp_flags.FIN",
-                    dst_port
-                FROM flows
-                ORDER BY start_ts DESC
+                    EXTRACT(EPOCH FROM (f.end_ts - f.start_ts))     AS duration_s,
+                    f.pkt_count,
+                    f.byte_count,
+                    (f.stats->>'pps')::float                        AS pps,
+                    (f.stats->>'bps')::float                        AS bps,
+                    (f.stats->'pkt_size'->>'mean')::float           AS pkt_size_mean,
+                    (f.stats->'pkt_size'->>'std')::float            AS pkt_size_std,
+                    (f.stats->'iat'->>'mean')::float                AS iat_mean,
+                    (f.stats->'iat'->>'std')::float                 AS iat_std,
+                    (f.stats->>'entropy_iat')::float                AS entropy_iat,
+                    (f.stats->'tcp_flags'->>'SYN')::float           AS syn_ratio,
+                    (f.stats->'tcp_flags'->>'RST')::float           AS rst_ratio,
+                    (f.stats->'tcp_flags'->>'FIN')::float           AS fin_ratio,
+                    f.dst_port
+                FROM flows f
+                WHERE f.start_ts < now() - interval '2 hours'
+                  AND f.stats IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM alerts a
+                      WHERE a.flow_id = f.flow_id
+                  )
+                ORDER BY f.start_ts DESC
                 LIMIT %s
                 """,
                 (limit,),
@@ -70,18 +79,18 @@ def load_flows(postgres_dsn: str, limit: int = MAX_ROWS) -> list[dict]:
             "pps":          row.get("pps"),
             "bps":          row.get("bps"),
             "pkt_size":     {
-                "mean": row.get("pkt_size.mean"),
-                "std":  row.get("pkt_size.std"),
+                "mean": row.get("pkt_size_mean"),
+                "std":  row.get("pkt_size_std"),
             },
             "iat":          {
-                "mean": row.get("iat.mean"),
-                "std":  row.get("iat.std"),
+                "mean": row.get("iat_mean"),
+                "std":  row.get("iat_std"),
             },
             "entropy_iat":  row.get("entropy_iat"),
             "tcp_flags":    {
-                "SYN": row.get("tcp_flags.SYN"),
-                "RST": row.get("tcp_flags.RST"),
-                "FIN": row.get("tcp_flags.FIN"),
+                "SYN": row.get("syn_ratio"),
+                "RST": row.get("rst_ratio"),
+                "FIN": row.get("fin_ratio"),
             },
             "dst_port":     row.get("dst_port"),
         })

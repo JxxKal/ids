@@ -92,7 +92,7 @@ class AnomalyModel:
         X_scaled = scaler.fit_transform(X)
 
         iforest = IsolationForest(
-            n_estimators=100,
+            n_estimators=200,
             contamination=self._contamination,
             random_state=42,
             n_jobs=-1,
