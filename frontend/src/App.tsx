@@ -22,7 +22,7 @@ import { TopProtocolsCard } from './components/TopProtocolsCard';
 import { useWebSocket } from './hooks/useWebSocket';
 import type { Alert, User } from './types';
 
-type TimeWindow = 'live' | '1m' | '15m' | '1h' | '4h' | '1d';
+type TimeWindow = 'live' | '1m' | '15m' | '1h' | '4h' | '1d' | '2d' | '7d' | 'custom';
 
 const TIME_WINDOWS: { id: TimeWindow; seconds?: number }[] = [
   { id: 'live'                     },
@@ -31,7 +31,26 @@ const TIME_WINDOWS: { id: TimeWindow; seconds?: number }[] = [
   { id: '1h',  seconds: 3_600      },
   { id: '4h',  seconds: 14_400     },
   { id: '1d',  seconds: 86_400     },
+  { id: '2d',  seconds: 172_800    },
+  { id: '7d',  seconds: 604_800    },
+  { id: 'custom'                   },
 ];
+
+interface CustomRange {
+  from: number;  // unix seconds
+  to:   number;
+}
+
+// "yyyy-MM-ddTHH:mm" für datetime-local. Lokale Zeitzone — JS-Browser-Default.
+function unixToLocalDtInput(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function localDtInputToUnix(s: string): number {
+  return Math.floor(new Date(s).getTime() / 1000);
+}
 
 export default function App() {
   const { t } = useTranslation();
@@ -85,6 +104,16 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
     () => localStorage.getItem('mlOnly') === 'true'
   );
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('live');
+  // Custom-Range: nur ausgewertet wenn timeWindow === 'custom'. Default ist
+  // letzte 24 h, der User kann beide Endpunkte verstellen.
+  const [customRange, setCustomRange] = useState<CustomRange>(() => {
+    const now = Math.floor(Date.now() / 1000);
+    return { from: now - 86_400, to: now };
+  });
+  const [customDraft, setCustomDraft] = useState<CustomRange>(() => {
+    const now = Math.floor(Date.now() / 1000);
+    return { from: now - 86_400, to: now };
+  });
   const [historicAlerts, setHistoricAlerts] = useState<Alert[]>([]);
   const [isLoading, setIsLoading]   = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -123,14 +152,23 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   useEffect(() => {
     if (timeWindow === 'live') return;
-    const win = TIME_WINDOWS.find(w => w.id === timeWindow);
-    if (!win?.seconds) return;
+    let tsFrom: number;
+    let tsTo:   number | undefined;
+    if (timeWindow === 'custom') {
+      tsFrom = customRange.from;
+      tsTo   = customRange.to;
+    } else {
+      const win = TIME_WINDOWS.find(w => w.id === timeWindow);
+      if (!win?.seconds) return;
+      tsFrom = Date.now() / 1000 - win.seconds;
+    }
 
     let cancelled = false;
     setIsLoading(true);
 
     fetchAlerts({
-      ts_from: Date.now() / 1000 - win.seconds,
+      ts_from: tsFrom,
+      ts_to:   tsTo,
       limit: 5000,
       is_test: showTest ? null : false,
       source: mlOnly ? 'ml' : undefined,
@@ -141,7 +179,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
       .finally(() => { if (!cancelled) setIsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [timeWindow, refreshKey, showTest, mlOnly, tapFilter]);
+  }, [timeWindow, customRange, refreshKey, showTest, mlOnly, tapFilter]);
 
   const handleWindowSelect = (w: TimeWindow) => {
     if (w === timeWindow && w !== 'live') {
@@ -202,7 +240,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                       <button
                         key={w.id}
                         onClick={() => handleWindowSelect(w.id)}
-                        title={w.id !== 'live' && isActive ? t('dashboard.timeWindows.clickToRefresh') : undefined}
+                        title={w.id !== 'live' && w.id !== 'custom' && isActive ? t('dashboard.timeWindows.clickToRefresh') : undefined}
                         className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-slate-800 last:border-r-0 font-mono ${
                           isActive
                             ? 'bg-cyan-500/15 text-cyan-200'
@@ -224,6 +262,38 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                   })}
                 </div>
                 </HelpTip>
+
+                {/* Custom-Range-Picker — nur sichtbar bei timeWindow='custom' */}
+                {timeWindow === 'custom' && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <input
+                      type="datetime-local"
+                      className="input bg-slate-900 border border-slate-700 px-2 py-1 rounded font-mono text-slate-200"
+                      value={unixToLocalDtInput(customDraft.from)}
+                      onChange={e => setCustomDraft(d => ({ ...d, from: localDtInputToUnix(e.target.value) }))}
+                      title={t('dashboard.timeWindows.customFrom')}
+                    />
+                    <span className="text-slate-500">→</span>
+                    <input
+                      type="datetime-local"
+                      className="input bg-slate-900 border border-slate-700 px-2 py-1 rounded font-mono text-slate-200"
+                      value={unixToLocalDtInput(customDraft.to)}
+                      onChange={e => setCustomDraft(d => ({ ...d, to: localDtInputToUnix(e.target.value) }))}
+                      title={t('dashboard.timeWindows.customTo')}
+                    />
+                    <button
+                      onClick={() => {
+                        if (customDraft.from < customDraft.to) {
+                          setCustomRange(customDraft);
+                        }
+                      }}
+                      disabled={customDraft.from >= customDraft.to}
+                      className="px-2.5 py-1 rounded text-xs font-medium border bg-cyan-500/15 text-cyan-200 border-cyan-500/50 hover:bg-cyan-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {t('dashboard.timeWindows.apply')}
+                    </button>
+                  </div>
+                )}
 
                 <HelpTip helpKey="alertCount">
                   <span className="text-xs text-slate-500 font-mono">

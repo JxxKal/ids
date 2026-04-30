@@ -292,6 +292,12 @@
       "1h": "1 h",
       "4h": "4 h",
       "1d": "1 day",
+      "2d": "2 days",
+      "7d": "7 days",
+      "custom": "Custom",
+      "customFrom": "From (local time)",
+      "customTo": "To (local time)",
+      "apply": "Apply",
       "clickToRefresh": "Click to refresh"
     },
     "alertCount": "{{count}} alerts",

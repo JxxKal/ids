@@ -292,6 +292,12 @@
       "1h": "1 Std",
       "4h": "4 Std",
       "1d": "1 Tag",
+      "2d": "2 Tage",
+      "7d": "7 Tage",
+      "custom": "Frei",
+      "customFrom": "Von (lokale Zeit)",
+      "customTo": "Bis (lokale Zeit)",
+      "apply": "Anwenden",
       "clickToRefresh": "Klick zum Aktualisieren"
     },
     "alertCount": "{{count}} Alerts",
