@@ -772,20 +772,18 @@ function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => voi
     }
   }
 
-  // Diagramm: Sprache-agnostisch lassen wir den ASCII-Aufbau, ersetzen aber
-  // die Beschriftungen über Übersetzungen (i18n-Werte als Mini-Pseudo-Diagram).
-  const diagramText =
-`Flow-Aggregator ─► signature-engine ─► alerts-raw ─► alert-manager ─► alerts (DB)
-                ─► ML-Engine (IsolationForest) ─┘                       │
-                                                                          │
-   ┌──────────────────────────────────────────────────────────────────────┘
-   ▼
-1) source=ml (IsolationForest)         → Suppression skip   · ML-Retrain via feedback-Topic
-2) signature heuristic + metric:       → Suppression skip   · rule-tuner verwaltet Threshold
-                                                              + Auto-FP feedback when pattern floods
-3) signature heuristic, no metric:     → Suppression active · pattern-only rules (SCAN_005, ANOMALY_*)
-4) signature SURICATA:*                → Suppression active · static _suricata_overrides.json
-5) source=external (IRMA/ASSET::*)     → Suppression skip   · external statements, not detection noise`;
+  // Pipeline-Diagramm: ml-flow.png liegt in frontend/public/ und wird unter
+  // /ml-flow.png ausgeliefert. Vite stellt das so durch ohne Hash-Suffix.
+  // Fallback-Liste (5-Pfad-Aufzählung) bleibt darunter sichtbar — sowohl
+  // für Screenreader als auch falls das Bild aus irgendeinem Grund nicht
+  // lädt.
+  const flowItems: { idx: string; pathClass: string; text: string }[] = [
+    { idx: '1', pathClass: 'text-cyan-300',    text: 'source=ml (IsolationForest) → Suppression skip · ML-Retrain via feedback-Topic' },
+    { idx: '2', pathClass: 'text-emerald-300', text: 'signature heuristic + metric: → Suppression skip · rule-tuner verwaltet Threshold · Auto-FP wenn Pattern floodet' },
+    { idx: '3', pathClass: 'text-violet-300',  text: 'signature heuristic, no metric: → Suppression aktiv · pattern-only rules (SCAN_005, ANOMALY_*)' },
+    { idx: '4', pathClass: 'text-violet-300',  text: 'signature SURICATA:* → Suppression aktiv · _suricata_overrides.json statisch' },
+    { idx: '5', pathClass: 'text-slate-400',   text: 'source=external (IRMA/ASSET::*) → Suppression skip · externe Aussagen, kein Detection-Noise' },
+  ];
 
   return (
     <div className="space-y-4">
@@ -892,12 +890,25 @@ function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => voi
       </div>
 
       {/* ── Pipeline-Diagramm ─────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-4">
-        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">
+      <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-4 space-y-3">
+        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
           {t('settings.mlOverview.diagram.title')}
         </h3>
-        <pre className="text-[10px] font-mono text-slate-400 leading-relaxed overflow-x-auto whitespace-pre">{diagramText}</pre>
-        <p className="text-[10px] text-slate-500 mt-2">
+        <img
+          src="/ml-flow.png"
+          alt={t('settings.mlOverview.diagram.title')}
+          className="w-full max-w-3xl mx-auto rounded border border-slate-800/60"
+          loading="lazy"
+        />
+        <ul className="text-[10px] text-slate-400 space-y-1 leading-relaxed pl-1">
+          {flowItems.map(it => (
+            <li key={it.idx} className="flex gap-2">
+              <span className={`font-mono shrink-0 ${it.pathClass}`}>{it.idx}.</span>
+              <span>{it.text}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-[10px] text-slate-500">
           <Trans
             i18nKey="settings.mlOverview.diagram.footer"
             components={{
