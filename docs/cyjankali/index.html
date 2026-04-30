@@ -80,6 +80,96 @@
     (.ova / .vmx) sparen einen kompletten Installer-Lauf. Default-Login
     <code>kali / kali</code> sofort ändern.
   </p>
+
+  <h3>Proxmox: VM-Mirror per Hookscript (kein physischer SPAN-Port nötig)</h3>
+  <p>
+    Wer einen Proxmox-Host nutzt, kann den gesamten Verkehr einer Ziel-VM
+    auf eine Sniffer-VM spiegeln — ohne Switch-Konfiguration, ohne
+    Promiscuous-Mode am vSwitch. Das Script unten klemmt sich beim
+    VM-Start als Hook ein und legt per <code>tc mirred</code> ein
+    bidirektionales Spiegel auf das Tap-Device der Sniffer-VM.
+  </p>
+  <p>
+    Damit läuft das ganze Lab-Setup als <strong>3 VMs auf einem
+    Proxmox-Host</strong>:
+  </p>
+  <ul class="topology">
+    <li><strong>Master-IDS-VM</strong> — Cyjan-IDS-ISO, regulär an deinem Management-Netz. Braucht <em>kein</em> Mirror-Interface.</li>
+    <li><strong>Tap-VM</strong> — Cyjan-Tap-ISO, zwei NICs: Management-NIC + Mirror-NIC an einer eigenen Bridge (z.B. <code>vmbr99</code>). Per <code>cyjan-tap pair</code> mit dem Master gekoppelt.</li>
+    <li><strong>Kali-Angreifer-VM</strong> — generiert den Angriffsverkehr. Hängt am normalen Lab-Netz <em>und</em> wird vom Hookscript automatisch auf die Tap-VM gespiegelt.</li>
+  </ul>
+  <p>
+    Der Tap forwarded die Alerts via mTLS-WSS an den Master. Das
+    Master-Frontend zeigt die Alarme genauso wie bei einer
+    Hardware-SPAN-Erfassung — nur dass alles in einer einzigen
+    Lab-Topologie steckt.
+  </p>
+
+  <h4>Hookscript</h4>
+  <p>
+    <a class="btn-primary" href="assets/proxmox-mirror.sh" download>↓ proxmox-mirror.sh</a>
+  </p>
+  <p>
+    Drei Variablen oben anpassen:
+    <code>TARGET_VM</code> (die Quell-VM, die du spiegelst),
+    <code>SNIFFER_VM</code> (deine Tap-VM-ID) und
+    <code>SNIFFER_BRIDGE</code> (Proxmox-Bridge der Mirror-NIC der Tap-VM).
+  </p>
+
+  <h4>Installation am Proxmox-Host</h4>
+  <p>
+    Per SSH als <code>root</code> auf den Proxmox-Host:
+  </p>
+<pre><code class="lang-bash"># 1. Skript ablegen — der Snippet-Pfad muss exakt unter /var/lib/vz/snippets/
+#    liegen, da Proxmox dort nach Hookscripts sucht (lokaler Storage 'local').
+mkdir -p /var/lib/vz/snippets
+cp proxmox-mirror.sh /var/lib/vz/snippets/mirror.sh
+chmod +x /var/lib/vz/snippets/mirror.sh
+
+# 2. KONFIG im Skript anpassen — TARGET_VM/SNIFFER_VM/SNIFFER_BRIDGE
+nano /var/lib/vz/snippets/mirror.sh
+
+# 3. Hookscript an die TARGET-VM binden (VMID = ID der Kali- bzw. Ziel-VM)
+qm set 109 --hookscript local:snippets/mirror.sh
+
+# 4. Pre-Check: läuft die Tap-VM, hängt sie an SNIFFER_BRIDGE?
+qm config 108 | grep ^net   # → muss eine NIC mit bridge=vmbr99 haben
+
+# 5. Trigger: Target-VM neu starten — der post-start-Hook richtet das
+#    Mirroring automatisch ein (und startet die Tap-VM ggf. mit, wenn
+#    AUTO_START_SNIFFER=1).
+qm reboot 109
+
+# 6. Verifikation: tc-Regeln am Quell-Tap prüfen
+tc qdisc show dev tap109i0
+tc filter show dev tap109i0 ingress
+journalctl -t mirror-hook -n 50</code></pre>
+
+  <h4>Wie das Mirroring tatsächlich passiert</h4>
+  <p>
+    Proxmox legt für jede VM-NIC ein <code>tap&lt;VMID&gt;i&lt;index&gt;</code>-
+    Device an, das an der konfigurierten Bridge hängt. Das Skript:
+  </p>
+  <ol>
+    <li>Setzt eine <code>ingress</code>-qdisc auf das Quell-Tap, damit Pakete <em>von</em> der VM in Richtung Bridge mitgespiegelt werden.</li>
+    <li>Setzt eine <code>root prio</code>-qdisc auf das Quell-Tap, damit Pakete <em>aus</em> der Bridge in Richtung VM ebenfalls mitgespiegelt werden.</li>
+    <li>Beide qdiscs bekommen einen <code>matchall</code>-Filter mit <code>mirred egress mirror dev &lt;sniffer-tap&gt;</code> — Kernel kopiert jedes Paket auf das Tap der Sniffer-VM.</li>
+    <li>Die Sniffer-NIC der Tap-VM sieht den Verkehr wie an einem echten SPAN-Port. Der Sniffer-Container (<code>cyjan-tap-sniffer</code>) liest mit AF_PACKET und reicht durch die Pipeline.</li>
+  </ol>
+  <p>
+    Funktioniert mit und ohne aktivierte Proxmox-Firewall — das Skript
+    erkennt die zusätzliche <code>fwbr</code>/<code>fwpr</code>-Kette und
+    findet das Tap der Sniffer-VM trotzdem.
+  </p>
+
+  <h4>Aufräumen</h4>
+  <p>
+    Beim regulären <code>qm shutdown</code>/<code>stop</code> der Target-VM
+    werden die <code>tc</code>-Regeln per <code>pre-stop</code>-Hook
+    automatisch entfernt. Hookscript wieder abklemmen:
+  </p>
+<pre><code class="lang-bash">qm set 109 --delete hookscript
+rm /var/lib/vz/snippets/mirror.sh</code></pre>
 </section>
 
 <section id="tests">

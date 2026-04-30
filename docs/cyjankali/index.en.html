@@ -79,6 +79,93 @@
     (.ova / .vmx) save you a full installer run. Change the default login
     <code>kali / kali</code> immediately.
   </p>
+
+  <h3>Proxmox: VM mirror via hookscript (no physical SPAN port required)</h3>
+  <p>
+    On a Proxmox host you can mirror all traffic of a target VM to a
+    sniffer VM — without switch configuration and without putting the
+    vSwitch into promiscuous mode. The script below registers as a
+    Proxmox VM hook and applies a bidirectional <code>tc mirred</code>
+    rule that copies every packet to the tap device of the sniffer VM.
+  </p>
+  <p>
+    The whole lab runs as <strong>3 VMs on a single Proxmox host</strong>:
+  </p>
+  <ul class="topology">
+    <li><strong>Master IDS VM</strong> — Cyjan IDS ISO on your management network. <em>No</em> mirror interface needed.</li>
+    <li><strong>Tap VM</strong> — Cyjan Tap ISO with two NICs: management + mirror NIC on a dedicated bridge (e.g. <code>vmbr99</code>). Paired to the master via <code>cyjan-tap pair</code>.</li>
+    <li><strong>Kali attacker VM</strong> — generates the offensive traffic. Sits on the regular lab network <em>and</em> is auto-mirrored to the tap VM by the hookscript.</li>
+  </ul>
+  <p>
+    The tap forwards alerts to the master via mTLS-WSS. The master frontend
+    shows them just like with a hardware SPAN port — except the entire
+    topology lives in one host.
+  </p>
+
+  <h4>Hookscript</h4>
+  <p>
+    <a class="btn-primary" href="assets/proxmox-mirror.sh" download>↓ proxmox-mirror.sh</a>
+  </p>
+  <p>
+    Adjust three variables at the top:
+    <code>TARGET_VM</code> (the source VM you mirror),
+    <code>SNIFFER_VM</code> (your tap VM ID) and
+    <code>SNIFFER_BRIDGE</code> (Proxmox bridge of the tap VM's mirror NIC).
+  </p>
+
+  <h4>Install on the Proxmox host</h4>
+  <p>
+    Via SSH as <code>root</code> on the Proxmox host:
+  </p>
+<pre><code class="lang-bash"># 1. Drop the script — Proxmox looks for hookscripts under
+#    /var/lib/vz/snippets/ on the local 'local' storage.
+mkdir -p /var/lib/vz/snippets
+cp proxmox-mirror.sh /var/lib/vz/snippets/mirror.sh
+chmod +x /var/lib/vz/snippets/mirror.sh
+
+# 2. Edit the CONFIG block — TARGET_VM/SNIFFER_VM/SNIFFER_BRIDGE
+nano /var/lib/vz/snippets/mirror.sh
+
+# 3. Bind the hookscript to the TARGET VM (VMID = the Kali / target VM)
+qm set 109 --hookscript local:snippets/mirror.sh
+
+# 4. Pre-check: tap VM must have a NIC on SNIFFER_BRIDGE
+qm config 108 | grep ^net   # → expects 'bridge=vmbr99' on one NIC
+
+# 5. Trigger: reboot target VM. The post-start hook sets up the mirror
+#    automatically (and starts the tap VM if AUTO_START_SNIFFER=1).
+qm reboot 109
+
+# 6. Verify: check tc rules on the source tap
+tc qdisc show dev tap109i0
+tc filter show dev tap109i0 ingress
+journalctl -t mirror-hook -n 50</code></pre>
+
+  <h4>How the mirroring actually works</h4>
+  <p>
+    Proxmox creates a <code>tap&lt;VMID&gt;i&lt;index&gt;</code> device for
+    every VM NIC and attaches it to the configured bridge. The script:
+  </p>
+  <ol>
+    <li>Adds an <code>ingress</code> qdisc to the source tap so packets <em>from</em> the VM toward the bridge get mirrored.</li>
+    <li>Adds a <code>root prio</code> qdisc to mirror packets <em>from</em> the bridge toward the VM as well.</li>
+    <li>Both qdiscs get a <code>matchall</code> filter with <code>mirred egress mirror dev &lt;sniffer-tap&gt;</code> — the kernel copies every packet onto the tap of the sniffer VM.</li>
+    <li>The sniffer NIC of the tap VM sees the traffic exactly like a real SPAN port. The sniffer container (<code>cyjan-tap-sniffer</code>) reads via AF_PACKET and feeds the pipeline.</li>
+  </ol>
+  <p>
+    Works with and without the Proxmox firewall enabled — the script
+    detects the extra <code>fwbr</code>/<code>fwpr</code> chain and finds
+    the sniffer VM's tap regardless.
+  </p>
+
+  <h4>Cleanup</h4>
+  <p>
+    A regular <code>qm shutdown</code>/<code>stop</code> of the target VM
+    removes the <code>tc</code> rules via the <code>pre-stop</code> hook
+    automatically. To unbind the hookscript:
+  </p>
+<pre><code class="lang-bash">qm set 109 --delete hookscript
+rm /var/lib/vz/snippets/mirror.sh</code></pre>
 </section>
 
 <section id="tests">
