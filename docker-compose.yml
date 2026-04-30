@@ -252,6 +252,8 @@ services:
       POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
       MODELS_DIR: /models
       TEST_MODE: ${TEST_MODE:-false}
+      BOOTSTRAP_MIN_SAMPLES: ${ML_BOOTSTRAP_MIN:-25000}
+      CONTAMINATION: ${ML_CONTAMINATION:-0.005}
 
   alert-manager:
     build: ./alert-manager
