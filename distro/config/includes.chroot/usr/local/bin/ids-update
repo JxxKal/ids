@@ -43,22 +43,38 @@ if [ -z "${IDS_UPDATE_RELOADED:-}" ]; then
   fi
 fi
 
-# Profil laden – /etc/cyjan/profile speichert ggf. "prod,snort" als komma-
-# separierten String. Compose interpretiert `--profile "a,b"` als einen
-# einzigen Profilnamen, deshalb pro Profil ein eigenes --profile-Flag in
-# einem Array sammeln.
-PROFILE=$(cat "$CYJAN_STATE/profile" 2>/dev/null || echo "prod")
+# Mode + Profil laden — gleiche Logik wie cyjan-stack-up:
+#   /etc/cyjan/mode  (optional, Default 'master')
+#     master → docker-compose.yml mit --profile aus /etc/cyjan/profile
+#     tap    → docker-compose.tap.yml (kein --profile, schmaler Stack)
+# Tap-Hosts haben kein MIRROR_IFACE in der .env (kommt aus /etc/cyjan/profile),
+# nutzen aber eine eigene Compose-Datei. Ohne -f -Flag würde docker compose
+# die Master-docker-compose.yml laden und mit "MIRROR_IFACE missing" abbrechen.
+MODE=$(cat "$CYJAN_STATE/mode" 2>/dev/null | tr -d '[:space:]')
+[ -z "$MODE" ] && MODE="master"
+
+COMPOSE_ARGS=()
 PROFILE_FLAGS=()
-IFS=',' read -ra _profile_list <<< "$PROFILE"
-for _p in "${_profile_list[@]}"; do
-  [ -n "$_p" ] && PROFILE_FLAGS+=(--profile "$_p")
-done
+case "$MODE" in
+  tap)
+    COMPOSE_ARGS=(-f docker-compose.tap.yml)
+    ;;
+  master|*)
+    PROFILE=$(cat "$CYJAN_STATE/profile" 2>/dev/null || echo "prod")
+    IFS=',' read -ra _profile_list <<< "$PROFILE"
+    for _p in "${_profile_list[@]}"; do
+      [ -n "$_p" ] && PROFILE_FLAGS+=(--profile "$_p")
+    done
+    ;;
+esac
+
+echo "[update] Mode=$MODE  Compose=${COMPOSE_ARGS[*]:-default}  Profile=${PROFILE_FLAGS[*]:-none}" | tee -a "$LOG"
 
 echo "[update] Baue geänderte Images..."
-docker compose "${PROFILE_FLAGS[@]}" build | tee -a "$LOG"
+docker compose "${COMPOSE_ARGS[@]}" "${PROFILE_FLAGS[@]}" build | tee -a "$LOG"
 
 echo "[update] Starte geänderte Dienste neu..."
-docker compose "${PROFILE_FLAGS[@]}" up -d | tee -a "$LOG"
+docker compose "${COMPOSE_ARGS[@]}" "${PROFILE_FLAGS[@]}" up -d | tee -a "$LOG"
 
 # Nachzügler-Sync: System-Dateien, die im ISO-Hook landen, kommen via reinem
 # git-pull nicht an. Wir spiegeln idempotent die wenigen Stellen, deren
