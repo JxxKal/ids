@@ -434,6 +434,23 @@ Erste reale Trainingsläufe haben gezeigt: Reservoirs sind kontaminiert. Konkret
 
 **Bekannte Restbias** (nicht in Phase 6 adressiert, V2-Backlog): `unique_dst_ports(src, window)` zählt port-aggregiert über ALLE Flows der Quelle, nicht nur über die SYN-getriggerten. Ein User mit 10 Browser-Tabs zählt also als `unique_dst_ports >= 5` (53, 80, 443, 22, 8080 …). Akkurater wäre eine SYN-gefilterte Variante der Counting-Methode. Aktuelles Workaround: bei Bedarf manuell höher setzen, der Tuner respektiert das per source=manual.
 
+### Tuner-Untauglichkeit für DOS-Schwellwerte (DOS-Default-Blacklist + V2-Plan)
+
+Quantile-basiertes Threshold-Tuning funktioniert sauber für SCAN/RECON, weil dort die Metriken (`unique_dst_ports`, `unique_dst_ips`, `flow_rate` mit `connection_state`-Guard) normale User von Scannern klar trennen.
+
+Bei DOS-Rules (`DOS_SYN_001`, `DOS_CONN_001`, `DOS_UDP_001`, `DOS_ICMP_001`) ist das nicht so: die Metriken `syn_count`, `flow_rate`, `pps` sind kontinuierlich, und der **obere Tail normaler Auslastung** (Streaming, VoIP, mDNS-Bursts, Game-Server, IPMI-Heartbeats) **überlappt direkt** mit der unteren Kante schwacher Floods. Konkretes Beispiel aus dem ersten Tuning-Cycle: DOS_UDP_001 landete auf `value_internal=4200 pps` (von Default 10000) — Streaming-Server feuern damit als kritischer UDP-Flood. P99,5 der Verteilung war ~4000, mathematisch korrekt, aber semantisch "Top-0,5 % normaler Last" statt "Flood-Beginn".
+
+**V1-Lösung — Migration 014 + 012-Seed (✅ deployed):**
+- `system_config.ml_tuning_config.blacklist` initialisiert mit `["DOS_SYN_001","DOS_CONN_001","DOS_UDP_001","DOS_ICMP_001"]` für Fresh-Installs.
+- Migration 014 patcht bestehende Installs nur dann, wenn die Blacklist aktuell leer/null ist (User-customized Blacklists bleiben unangetastet).
+- DOS-Rules behalten ihre konservativen YAML-Defaults. User kann sie via GUI (Settings → Regel-Anpassungen → ML-Tuning-Card → Blacklist) bewusst rausnehmen, wenn er das Risiko explizit will.
+- Existierende ml-Overrides für DOS-Rules müssen einmal manuell zurückgesetzt werden (UI ↺-Button pro Param oder per `PUT /api/sig-rules/overrides`).
+
+**V2-Backlog — Per-Rule-Quantile + Floor-Constraint:**
+1. **`tuner_quantile:`-Override im YAML pro Rule.** SCAN/RECON nutzen weiter 0,995 (Default), DOS deklariert `tuner_quantile: 0.9999` — der absolute Tail jenseits aller Streaming-Spitzen. Der Tuner liest pro Rule (statt global aus der Config) das Quantil. Damit könnten DOS-Rules tunbar werden, ohne Floor-Constraint zu brauchen.
+2. **Severity-basierter Floor-Constraint.** `Threshold ≥ YAML_default × 0,5` für `severity ∈ {critical, high}`. Konservative Sanity-Bremse, die unabhängig vom Quantil greift. SCAN/RECON mit `severity=medium` bleiben uneingeschränkt.
+3. Beides zusammen würde DOS-Rules sicher tunbar machen — V1-Blacklist ersetzbar, sobald implementiert.
+
 **Phase 6 — Reverse-Channel + Verteilung**
 - Existierender Master-uplink `/config`-Endpoint serviert die erweiterte `_overrides.json` ohne Änderung — Tap-side signature-engine versteht das neue Schema bereits aus Phase 1.
 - WebSocket-Push nach Override-Update (`feedback_updated` analog) → Frontend re-fetcht.

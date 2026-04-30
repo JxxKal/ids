@@ -67,6 +67,11 @@ INSERT INTO system_config (key, value) VALUES (
   '{"state": "idle", "started_at": null, "training_until": null, "last_tuning_at": null, "paused_from": null}'::jsonb
 ) ON CONFLICT (key) DO NOTHING;
 
+-- Blacklist enthält DOS-Rules per Default (siehe Migration 014 für die
+-- Begründung). Quantile-basiertes Tuning ist für DOS-Schwellwerte
+-- ungeeignet, weil normale High-pps-Streams den oberen Tail dominieren
+-- und das Tuning unter den Flood-Bereich rutscht. SCAN/RECON bleiben
+-- tunbar, da deren Metriken normalen User klar trennen.
 INSERT INTO system_config (key, value) VALUES (
   'ml_tuning_config',
   '{
@@ -75,6 +80,6 @@ INSERT INTO system_config (key, value) VALUES (
     "scope_split_enabled": true,
     "quantile": 0.995,
     "max_change_per_cycle": 0.20,
-    "blacklist": []
+    "blacklist": ["DOS_SYN_001","DOS_CONN_001","DOS_UDP_001","DOS_ICMP_001"]
   }'::jsonb
 ) ON CONFLICT (key) DO NOTHING;
