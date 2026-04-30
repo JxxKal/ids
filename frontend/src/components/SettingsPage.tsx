@@ -709,6 +709,200 @@ function buildParamDocs(t: TFn) {
   ];
 }
 
+// ── ML-Übersicht: Single-Pane-of-Glass für alle drei ML-Komponenten ─────────
+//
+// Zeigt Status + Quick-Action-Links für IsolationForest, rule-tuner und
+// Suppression nebeneinander. Damit der User nicht durch drei Seiten klicken
+// muss, um zu sehen ob alles im erwarteten Zustand ist. Das Pipeline-
+// Diagramm darunter spiegelt docs/ML_ENGINE.md Section 0.
+function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => void }) {
+  const [mlStatus, setMlStatus] = useState<MLStatus | null>(null);
+  const [tunerStatus, setTunerStatus] = useState<MlTuningStatus | null>(null);
+  const [learnedCount, setLearnedCount] = useState<{ manual: number; ml: number } | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const reload = () => {
+      Promise.all([
+        fetchMLStatus().catch(() => null),
+        fetchMlStatus().catch(() => null),
+        fetchLearnedPatterns().catch(() => null),
+      ]).then(([m, t, lp]) => {
+        if (cancelled) return;
+        setMlStatus(m);
+        setTunerStatus(t);
+        if (lp) {
+          setLearnedCount({
+            manual: lp.patterns.filter(p => p.source === 'manual').length,
+            ml:     lp.patterns.filter(p => p.source === 'learned').length,
+          });
+        }
+        setError('');
+      }).catch(e => setError(String(e)));
+    };
+    reload();
+    const id = window.setInterval(reload, 15_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  // Phase-Farben für IsolationForest
+  const ifColor = !mlStatus ? 'text-slate-500'
+    : mlStatus.phase === 'active'      ? 'text-emerald-300 border-emerald-700/40 bg-emerald-900/20'
+    : mlStatus.phase === 'learning'    ? 'text-cyan-300 border-cyan-700/40 bg-cyan-900/20'
+    :                                    'text-slate-400 border-slate-700/40 bg-slate-800/40';
+
+  // Tuner-Farben (gleiche Skala wie in der Card im Regel-Anpassungs-Tab)
+  const tnState = tunerStatus?.state.state ?? 'idle';
+  const tnColor = tnState === 'training' ? 'text-cyan-300 border-cyan-700/40 bg-cyan-900/20'
+    : tnState === 'tuning'  ? 'text-emerald-300 border-emerald-700/40 bg-emerald-900/20'
+    : tnState === 'paused'  ? 'text-amber-300 border-amber-700/40 bg-amber-900/20'
+    :                         'text-slate-400 border-slate-700/40 bg-slate-800/40';
+
+  let trainingRest = '';
+  if (tnState === 'training' && tunerStatus?.state.training_until) {
+    const ms = new Date(tunerStatus.state.training_until).getTime() - Date.now();
+    if (ms > 0) {
+      const h = Math.floor(ms / 3_600_000);
+      const m = Math.floor((ms % 3_600_000) / 60_000);
+      trainingRest = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    } else {
+      trainingRest = 'gleich';
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-200">KI / ML — Übersicht</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Drei lernende Komponenten arbeiten parallel und ergänzen sich. Diese Seite
+          zeigt den Status auf einen Blick — Detail-Konfiguration jeweils über die Quick-Links.
+        </p>
+      </div>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {/* ── Card 1: IsolationForest ────────────────────────────────────── */}
+        <div className={`rounded-lg border p-3 space-y-2 ${ifColor}`}>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider">Anomalie-Engine</h3>
+            <span className="text-[10px] font-mono opacity-70">IsolationForest</span>
+          </div>
+          {mlStatus ? (
+            <>
+              <div className="text-lg font-medium">{mlStatus.phase_label || mlStatus.phase}</div>
+              <div className="text-[10px] space-y-0.5 text-slate-400">
+                <div>Bootstrap: <span className="text-slate-200 tabular-nums">{mlStatus.bootstrap.current_flows.toLocaleString('de-DE')}</span> / {mlStatus.bootstrap.required.toLocaleString('de-DE')} ({mlStatus.bootstrap.progress_pct}%)</div>
+                <div>Alerts (24h): <span className="text-slate-200 tabular-nums">{mlStatus.stats_24h.ml_alerts}</span> · Filter-Rate: {mlStatus.stats_24h.filter_rate_pct}%</div>
+                <div>Schwellwert: <span className="text-slate-200 tabular-nums">{mlStatus.stats_24h.alert_threshold.toFixed(2)}</span></div>
+              </div>
+              <p className="text-[10px] leading-relaxed text-slate-400">
+                Erzeugt <strong>neue</strong> Alerts (<code className="text-cyan-300">source=ml</code>) bei
+                Flows, die sich vom Normalverhalten unterscheiden.
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">Lade…</p>
+          )}
+          <button
+            onClick={() => onNavigate('ml-status')}
+            className="w-full text-[11px] px-2 py-1 rounded border border-slate-700 hover:border-slate-500 hover:text-slate-200 text-slate-400 transition-colors"
+          >
+            Konfigurieren →
+          </button>
+        </div>
+
+        {/* ── Card 2: rule-tuner ─────────────────────────────────────────── */}
+        <div className={`rounded-lg border p-3 space-y-2 ${tnColor}`}>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider">Threshold-Tuner</h3>
+            <span className="text-[10px] font-mono opacity-70">Reservoir + Quantile</span>
+          </div>
+          {tunerStatus ? (
+            <>
+              <div className="text-lg font-medium">
+                {tnState}
+                {trainingRest && <span className="ml-2 text-xs opacity-70">noch {trainingRest}</span>}
+              </div>
+              <div className="text-[10px] space-y-0.5 text-slate-400">
+                <div>Samples gesamt: <span className="text-slate-200 tabular-nums">{tunerStatus.total_samples.toLocaleString('de-DE')}</span></div>
+                <div>Letzter Tuner-Schreib: <span className="text-slate-200">{tunerStatus.state.last_tuning_at ? new Date(tunerStatus.state.last_tuning_at).toLocaleString('de-DE') : '–'}</span></div>
+                <div>Quantil: P{(tunerStatus.config.quantile * 100).toFixed(1).replace(/\.0$/, '')} · Blacklist: {tunerStatus.config.blacklist.length}</div>
+              </div>
+              <p className="text-[10px] leading-relaxed text-slate-400">
+                Passt <strong>Schwellwerte</strong> tunbarer Heuristik-Rules an die
+                Verteilung des Netzes an. Erhält Severity, statt sie zu degradieren.
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">Lade…</p>
+          )}
+          <button
+            onClick={() => onNavigate('rules-overrides')}
+            className="w-full text-[11px] px-2 py-1 rounded border border-slate-700 hover:border-slate-500 hover:text-slate-200 text-slate-400 transition-colors"
+          >
+            Konfigurieren → (in Regel-Anpassungen)
+          </button>
+        </div>
+
+        {/* ── Card 3: Suppression ────────────────────────────────────────── */}
+        <div className="rounded-lg border border-violet-700/40 bg-violet-900/20 text-violet-300 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wider">Pattern-Suppression</h3>
+            <span className="text-[10px] font-mono opacity-70">Layer 1 + 2</span>
+          </div>
+          {learnedCount ? (
+            <>
+              <div className="text-lg font-medium">{(learnedCount.manual + learnedCount.ml).toLocaleString('de-DE')} Pattern</div>
+              <div className="text-[10px] space-y-0.5 text-slate-400">
+                <div>Manual FPs (Layer 1): <span className="text-slate-200 tabular-nums">{learnedCount.manual}</span></div>
+                <div>ML-gelernt (Layer 2): <span className="text-slate-200 tabular-nums">{learnedCount.ml}</span></div>
+              </div>
+              <p className="text-[10px] leading-relaxed text-slate-400">
+                Drosselt <strong>FP-Pattern pro IP-Paar</strong> auf <code className="text-amber-300">low</code>.
+                Skip für ML-Engine-Output und tunbare Heuristiken (rule-tuner ist da zuständig).
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-slate-500">Lade…</p>
+          )}
+          <button
+            onClick={() => onNavigate('ml-learned')}
+            className="w-full text-[11px] px-2 py-1 rounded border border-slate-700 hover:border-slate-500 hover:text-slate-200 text-slate-400 transition-colors"
+          >
+            Patterns ansehen →
+          </button>
+        </div>
+      </div>
+
+      {/* ── Pipeline-Diagramm ─────────────────────────────────────────────── */}
+      <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-4">
+        <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-3">
+          So arbeiten die drei zusammen
+        </h3>
+        <pre className="text-[10px] font-mono text-slate-400 leading-relaxed overflow-x-auto whitespace-pre">
+{`Flow-Aggregator ─► signature-engine ─► alerts-raw ─► alert-manager ─► alerts (DB)
+                ─► ML-Engine (IsolationForest) ─┘                       │
+                                                                          │
+   ┌──────────────────────────────────────────────────────────────────────┘
+   ▼
+1) source=ml (IsolationForest)         → Suppression skip   · ML-Retrain via feedback-Topic
+2) signature heuristic mit metric:     → Suppression skip   · rule-tuner verwaltet Threshold
+                                                              Auto-FP-Feedback wenn Pattern floodet
+3) signature heuristic ohne metric:    → Suppression aktiv  · pattern-only Rules (SCAN_005, ANOMALY_*)
+4) signature SURICATA:*                → Suppression aktiv  · _suricata_overrides.json statisch
+5) source=external (IRMA/ASSET::*)     → Suppression skip   · externe Aussagen, kein Detection-Noise`}
+        </pre>
+        <p className="text-[10px] text-slate-500 mt-2">
+          Detail-Architektur in <code className="text-cyan-300">docs/ML_ENGINE.md</code>
+          {' '}Sections 10 + 11.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function MLStatusDisplay() {
   const { t } = useTranslation();
   const [status,  setStatus]  = useState<MLStatus | null>(null);
@@ -4900,7 +5094,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'general' | 'users' | 'saml' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -4927,9 +5121,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'ml',
     items: [
-      { id: 'ml-status',  icon: <Activity {...ICON_PROPS} /> },
-      { id: 'ml-config',  icon: <Sliders  {...ICON_PROPS} /> },
-      { id: 'ml-learned', icon: <Sparkles {...ICON_PROPS} /> },
+      { id: 'ml-overview', icon: <Sparkles {...ICON_PROPS} /> },
+      { id: 'ml-status',   icon: <Activity {...ICON_PROPS} /> },
+      { id: 'ml-config',   icon: <Sliders  {...ICON_PROPS} /> },
+      { id: 'ml-learned',  icon: <Sparkles {...ICON_PROPS} /> },
     ],
   },
   {
@@ -5056,6 +5251,7 @@ export function SettingsPage() {
             {active === 'general'       && <GeneralSettings />}
             {active === 'users'         && <UserManagement />}
             {active === 'saml'          && <SamlSettings />}
+            {active === 'ml-overview'   && <MLOverviewSettings onNavigate={setActive} />}
             {active === 'ml-status'     && <MLStatusDisplay />}
             {active === 'ml-config'     && <MLFilterConfig />}
             {active === 'ml-learned'    && <MLLearnedPatterns />}
