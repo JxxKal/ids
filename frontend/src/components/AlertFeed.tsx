@@ -743,7 +743,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
           }`}
           title={t('alertFeed.irmaAssetToggle.title')}
         >
-          {suppressIrmaAsset ? '∅ ASSET' : 'ASSET'}
+          {suppressIrmaAsset ? '∅ IRMA filter Warnings' : 'IRMA filter Warnings'}
         </button>
 
         {/* CSV-Export */}
