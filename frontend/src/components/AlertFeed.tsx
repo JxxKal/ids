@@ -467,6 +467,65 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
     return next;
   });
 
+  // Spalten-Breiten (persistiert in localStorage). 'time' ist nicht
+  // ausblendbar, aber resizable. Werte in Pixeln; ohne Eintrag nutzt der
+  // Browser sein Auto-Layout. Min-Breite 40px, sonst lassen sich Spalten
+  // versehentlich auf 0 ziehen.
+  type ResizeKey = 'time' | ColKey;
+  const [colWidths, setColWidths] = useState<Partial<Record<ResizeKey, number>>>(() => {
+    try {
+      const raw = localStorage.getItem('cyjan-alert-col-widths');
+      if (raw) return JSON.parse(raw) as Partial<Record<ResizeKey, number>>;
+    } catch { /* corrupted — Default leer */ }
+    return {};
+  });
+  useEffect(() => {
+    try { localStorage.setItem('cyjan-alert-col-widths', JSON.stringify(colWidths)); } catch { /* quota */ }
+  }, [colWidths]);
+  const colStyle = (k: ResizeKey): React.CSSProperties => {
+    const w = colWidths[k];
+    return w ? { width: `${w}px`, minWidth: `${w}px`, maxWidth: `${w}px` } : {};
+  };
+  const startResize = (k: ResizeKey, e: React.MouseEvent<HTMLSpanElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const th = (e.currentTarget.parentElement as HTMLElement | null);
+    const startW = colWidths[k] ?? (th?.getBoundingClientRect().width ?? 120);
+    const onMove = (ev: MouseEvent) => {
+      const newW = Math.max(40, Math.round(startW + (ev.clientX - startX)));
+      setColWidths(prev => ({ ...prev, [k]: newW }));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+  // Helper: rendert ein <th> mit Drag-Handle. ckey identifiziert die
+  // Spalte für Width-Persistierung. Inhalt als children. extraClass
+  // erweitert die Standard-Klassen (z.B. text-right für hits).
+  const ResizableTh = ({ ckey, children, extraClass = '' }: {
+    ckey: ResizeKey; children: React.ReactNode; extraClass?: string;
+  }) => (
+    <th className={`px-3 py-2 relative ${extraClass}`} style={colStyle(ckey)}>
+      {children}
+      <span
+        className="absolute right-0 top-1 bottom-1 w-1 cursor-col-resize bg-transparent hover:bg-cyan-500/40 active:bg-cyan-500/60"
+        onMouseDown={e => startResize(ckey, e)}
+        title="Ziehen zum Anpassen der Spaltenbreite"
+      />
+    </th>
+  );
+  // td-Style spiegelt den th-Wert, sonst rendert table-auto u.U. anders
+  // breit als der Header.
+  const tdStyle = colStyle;
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     const PRIORITY_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
@@ -714,14 +773,28 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                 </label>
               );
             })}
-            {hiddenCols.size > 0 && (
-              <button
-                className="mt-1.5 w-full text-[10px] text-slate-500 hover:text-slate-300 px-1 py-0.5 border-t border-slate-800 pt-1.5"
-                onClick={() => setHiddenCols(new Set())}
-              >
-                Alle einblenden
-              </button>
-            )}
+            <div className="mt-1.5 border-t border-slate-800 pt-1.5 space-y-0.5">
+              {hiddenCols.size > 0 && (
+                <button
+                  className="w-full text-[10px] text-slate-500 hover:text-slate-300 px-1 py-0.5 text-left"
+                  onClick={() => setHiddenCols(new Set())}
+                >
+                  ↺ Alle einblenden
+                </button>
+              )}
+              {Object.keys(colWidths).length > 0 && (
+                <button
+                  className="w-full text-[10px] text-slate-500 hover:text-slate-300 px-1 py-0.5 text-left"
+                  onClick={() => setColWidths({})}
+                  title="Setzt alle Spaltenbreiten auf Auto-Layout zurück"
+                >
+                  ↺ Spalten-Breiten zurücksetzen
+                </button>
+              )}
+              <p className="text-[9px] text-slate-600 px-1 leading-relaxed">
+                Tipp: Spalten lassen sich am rechten Rand des Headers ziehen.
+              </p>
+            </div>
           </div>
         </details>
 
@@ -737,17 +810,17 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           <table className="w-full text-xs">
             <thead className="cyjan-table-head sticky top-0 z-10">
               <tr className="text-left">
-                <th className="px-3 py-2">{t('alertFeed.columns.lastSeen')}</th>
-                {showCol('severity')    && <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>}
-                {egressMode !== 'off' && showCol('boundary') && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
-                {showTapColumn && showCol('tap') && <th className="px-3 py-2">{t('alertFeed.columns.tap')}</th>}
-                {showCol('rule')        && <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>}
-                {showCol('proto')       && <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>}
-                {showCol('description') && <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>}
-                {showCol('tags')        && <th className="px-3 py-2">{t('alertFeed.columns.tags')}</th>}
-                {showCol('source')      && <th className="px-3 py-2">{t('alertFeed.columns.source')}</th>}
-                {showCol('destination') && <th className="px-3 py-2">{t('alertFeed.columns.destination')}</th>}
-                {showCol('hits')        && <th className="px-3 py-2 text-right">{t('alertFeed.columns.hits')}</th>}
+                <ResizableTh ckey="time">{t('alertFeed.columns.lastSeen')}</ResizableTh>
+                {showCol('severity')    && <ResizableTh ckey="severity">{t('alertFeed.columns.severity')}</ResizableTh>}
+                {egressMode !== 'off' && showCol('boundary') && <ResizableTh ckey="boundary">{t('alertFeed.columns.boundary')}</ResizableTh>}
+                {showTapColumn && showCol('tap') && <ResizableTh ckey="tap">{t('alertFeed.columns.tap')}</ResizableTh>}
+                {showCol('rule')        && <ResizableTh ckey="rule">{t('alertFeed.columns.rule')}</ResizableTh>}
+                {showCol('proto')       && <ResizableTh ckey="proto">{t('alertFeed.columns.proto')}</ResizableTh>}
+                {showCol('description') && <ResizableTh ckey="description">{t('alertFeed.columns.description')}</ResizableTh>}
+                {showCol('tags')        && <ResizableTh ckey="tags">{t('alertFeed.columns.tags')}</ResizableTh>}
+                {showCol('source')      && <ResizableTh ckey="source">{t('alertFeed.columns.source')}</ResizableTh>}
+                {showCol('destination') && <ResizableTh ckey="destination">{t('alertFeed.columns.destination')}</ResizableTh>}
+                {showCol('hits')        && <ResizableTh ckey="hits" extraClass="text-right">{t('alertFeed.columns.hits')}</ResizableTh>}
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -761,7 +834,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   className={`border-b border-slate-800/50 hover:brightness-125 cursor-pointer transition-all ${ROW_SEVERITY[g.severity] ?? ''}`}
                   onClick={() => setSelected(g.latest)}
                 >
-                  <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
+                  <td className="px-3 py-2 text-slate-500 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('time')}>
                     {fmtTime(g.last_ts)}
                     {g.count > 1 && (
                       <div className="text-slate-600 text-xs">
@@ -770,46 +843,46 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     )}
                   </td>
                   {showCol('severity') && (
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" style={tdStyle('severity')}>
                       <SeverityBadge severity={g.severity} />
                     </td>
                   )}
                   {egressMode !== 'off' && showCol('boundary') && (
-                    <td className="px-3 py-2"><BoundaryCell alert={g.latest} /></td>
+                    <td className="px-3 py-2" style={tdStyle('boundary')}><BoundaryCell alert={g.latest} /></td>
                   )}
                   {showTapColumn && showCol('tap') && (
-                    <td className="px-3 py-2 text-[11px] font-mono text-slate-400 whitespace-nowrap">
+                    <td className="px-3 py-2 text-[11px] font-mono text-slate-400 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('tap')}>
                       {g.latest.tap_id
                         ? (tapsById[g.latest.tap_id]?.name ?? g.latest.tap_id.slice(0, 8))
                         : <span className="text-slate-600">–</span>}
                     </td>
                   )}
                   {showCol('rule') && (
-                    <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
+                    <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('rule')}>
                       {g.rule_id ?? '–'}
                       {g.latest.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
                       {g.latest.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
                     </td>
                   )}
                   {showCol('proto') && (
-                    <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap">
+                    <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('proto')}>
                       {appProto(g.proto, g.dst_port, g.latest.src_port)}
                     </td>
                   )}
                   {showCol('description') && (
-                    <td className="px-3 py-2 text-slate-400 max-w-sm">
+                    <td className="px-3 py-2 text-slate-400 overflow-hidden" style={tdStyle('description')}>
                       <span className="line-clamp-2" title={g.description ?? undefined}>
                         {g.description ?? '–'}
                       </span>
                     </td>
                   )}
                   {showCol('tags') && (
-                    <td className="px-3 py-2 max-w-[140px]">
+                    <td className="px-3 py-2 overflow-hidden" style={tdStyle('tags')}>
                       <TagList tags={g.tags} />
                     </td>
                   )}
                   {showCol('source') && (
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 overflow-hidden" style={tdStyle('source')}>
                       <div className="flex items-center gap-1.5">
                         <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
                         {g.bidirectional && (
@@ -819,12 +892,12 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                     </td>
                   )}
                   {showCol('destination') && (
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 overflow-hidden" style={tdStyle('destination')}>
                       <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" />
                     </td>
                   )}
                   {showCol('hits') && (
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-3 py-2 text-right" style={tdStyle('hits')}>
                       <div className="flex items-center justify-end gap-1.5">
                         {g.latest.feedback && <FeedbackBadge feedback={g.latest.feedback} />}
                         {g.count > 1
@@ -857,17 +930,17 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
           <table className="w-full text-xs">
             <thead className="cyjan-table-head sticky top-0 z-10">
               <tr className="text-left">
-                <th className="px-3 py-2">{t('alertFeed.columns.time')}</th>
-                {showCol('severity')    && <th className="px-3 py-2">{t('alertFeed.columns.severity')}</th>}
-                {egressMode !== 'off' && showCol('boundary') && <th className="px-3 py-2">{t('alertFeed.columns.boundary')}</th>}
-                {showTapColumn && showCol('tap') && <th className="px-3 py-2">{t('alertFeed.columns.tap')}</th>}
-                {showCol('rule')        && <th className="px-3 py-2">{t('alertFeed.columns.rule')}</th>}
-                {showCol('proto')       && <th className="px-3 py-2">{t('alertFeed.columns.proto')}</th>}
-                {showCol('description') && <th className="px-3 py-2">{t('alertFeed.columns.description')}</th>}
-                {showCol('tags')        && <th className="px-3 py-2">{t('alertFeed.columns.tags')}</th>}
-                {showCol('source')      && <th className="px-3 py-2">{t('alertFeed.columns.source')}</th>}
-                {showCol('destination') && <th className="px-3 py-2">{t('alertFeed.columns.destination')}</th>}
-                {showCol('hits')        && <th className="px-3 py-2">{t('alertFeed.columns.score')}</th>}
+                <ResizableTh ckey="time">{t('alertFeed.columns.time')}</ResizableTh>
+                {showCol('severity')    && <ResizableTh ckey="severity">{t('alertFeed.columns.severity')}</ResizableTh>}
+                {egressMode !== 'off' && showCol('boundary') && <ResizableTh ckey="boundary">{t('alertFeed.columns.boundary')}</ResizableTh>}
+                {showTapColumn && showCol('tap') && <ResizableTh ckey="tap">{t('alertFeed.columns.tap')}</ResizableTh>}
+                {showCol('rule')        && <ResizableTh ckey="rule">{t('alertFeed.columns.rule')}</ResizableTh>}
+                {showCol('proto')       && <ResizableTh ckey="proto">{t('alertFeed.columns.proto')}</ResizableTh>}
+                {showCol('description') && <ResizableTh ckey="description">{t('alertFeed.columns.description')}</ResizableTh>}
+                {showCol('tags')        && <ResizableTh ckey="tags">{t('alertFeed.columns.tags')}</ResizableTh>}
+                {showCol('source')      && <ResizableTh ckey="source">{t('alertFeed.columns.source')}</ResizableTh>}
+                {showCol('destination') && <ResizableTh ckey="destination">{t('alertFeed.columns.destination')}</ResizableTh>}
+                {showCol('hits')        && <ResizableTh ckey="hits">{t('alertFeed.columns.score')}</ResizableTh>}
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
@@ -881,58 +954,58 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
                   className={`border-b border-slate-800/50 hover:brightness-125 cursor-pointer transition-all ${ROW_SEVERITY[a.severity] ?? ''}`}
                   onClick={() => setSelected(a)}
                 >
-                  <td className="px-3 py-2 text-slate-500 whitespace-nowrap">
+                  <td className="px-3 py-2 text-slate-500 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('time')}>
                     {fmtTime(a.ts)}
                   </td>
                   {showCol('severity') && (
-                    <td className="px-3 py-2"><SeverityBadge severity={a.severity} /></td>
+                    <td className="px-3 py-2" style={tdStyle('severity')}><SeverityBadge severity={a.severity} /></td>
                   )}
                   {egressMode !== 'off' && showCol('boundary') && (
-                    <td className="px-3 py-2"><BoundaryCell alert={a} /></td>
+                    <td className="px-3 py-2" style={tdStyle('boundary')}><BoundaryCell alert={a} /></td>
                   )}
                   {showTapColumn && showCol('tap') && (
-                    <td className="px-3 py-2 text-[11px] font-mono text-slate-400 whitespace-nowrap">
+                    <td className="px-3 py-2 text-[11px] font-mono text-slate-400 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('tap')}>
                       {a.tap_id
                         ? (tapsById[a.tap_id]?.name ?? a.tap_id.slice(0, 8))
                         : <span className="text-slate-600">–</span>}
                     </td>
                   )}
                   {showCol('rule') && (
-                    <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap">
+                    <td className="px-3 py-2 font-medium text-slate-200 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('rule')}>
                       {a.rule_id}
                       {a.is_test && <span className="ml-1 text-blue-400 text-xs">[TEST]</span>}
                       {a.source === 'external' && <span className="ml-1 px-1 py-0.5 text-[10px] rounded bg-violet-900/50 text-violet-300 border border-violet-700/40">IRMA</span>}
                     </td>
                   )}
                   {showCol('proto') && (
-                    <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap">
+                    <td className="px-3 py-2 font-mono text-[11px] text-cyan-300 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('proto')}>
                       {appProto(a.proto, a.dst_port, a.src_port)}
                     </td>
                   )}
                   {showCol('description') && (
-                    <td className="px-3 py-2 text-slate-400 max-w-sm">
+                    <td className="px-3 py-2 text-slate-400 overflow-hidden" style={tdStyle('description')}>
                       <span className="line-clamp-2" title={a.description ?? undefined}>
                         {a.description ?? '–'}
                       </span>
                     </td>
                   )}
                   {showCol('tags') && (
-                    <td className="px-3 py-2 max-w-[140px]">
+                    <td className="px-3 py-2 overflow-hidden" style={tdStyle('tags')}>
                       <TagList tags={a.tags ?? []} />
                     </td>
                   )}
                   {showCol('source') && (
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 overflow-hidden" style={tdStyle('source')}>
                       <IpCell ip={a.src_ip} enrichment={a.enrichment} dir="src" />
                     </td>
                   )}
                   {showCol('destination') && (
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 overflow-hidden" style={tdStyle('destination')}>
                       <IpCell ip={a.dst_ip} port={a.dst_port} enrichment={a.enrichment} dir="dst" />
                     </td>
                   )}
                   {showCol('hits') && (
-                    <td className="px-3 py-2 tabular-nums text-slate-400">{(a.score ?? 0).toFixed(2)}</td>
+                    <td className="px-3 py-2 tabular-nums text-slate-400 overflow-hidden text-ellipsis" style={tdStyle('hits')}>{(a.score ?? 0).toFixed(2)}</td>
                   )}
                   <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1.5">
