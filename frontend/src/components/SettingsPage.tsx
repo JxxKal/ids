@@ -34,6 +34,7 @@ import type {
 import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
+import { MlFlowDiagram } from './MlFlowDiagram';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -772,11 +773,10 @@ function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => voi
     }
   }
 
-  // Pipeline-Diagramm: ml-flow.png liegt in frontend/public/ und wird unter
-  // /ml-flow.png ausgeliefert. Vite stellt das so durch ohne Hash-Suffix.
-  // Fallback-Liste (5-Pfad-Aufzählung) bleibt darunter sichtbar — sowohl
-  // für Screenreader als auch falls das Bild aus irgendeinem Grund nicht
-  // lädt.
+  // Pipeline-Diagramm: sprachgesteuerte SVG-Komponente (MlFlowDiagram).
+  // Ersetzt das frühere ml-flow.png — Texte kommen aus i18n, Diagramm
+  // skaliert mit dem Container. Fallback-Liste (5-Pfad-Aufzählung) bleibt
+  // darunter sichtbar als Screenreader-Beschreibung der Pfad-Semantik.
   const flowItems: { idx: string; pathClass: string; text: string }[] = [
     { idx: '1', pathClass: 'text-cyan-300',    text: 'source=ml (IsolationForest) → Suppression skip · ML-Retrain via feedback-Topic' },
     { idx: '2', pathClass: 'text-emerald-300', text: 'signature heuristic + metric: → Suppression skip · rule-tuner verwaltet Threshold · Auto-FP wenn Pattern floodet' },
@@ -894,12 +894,7 @@ function MLOverviewSettings({ onNavigate }: { onNavigate: (id: SectionId) => voi
         <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
           {t('settings.mlOverview.diagram.title')}
         </h3>
-        <img
-          src="/ml-flow.png"
-          alt={t('settings.mlOverview.diagram.title')}
-          className="w-full max-w-3xl mx-auto rounded border border-slate-800/60"
-          loading="lazy"
-        />
+        <MlFlowDiagram />
         <ul className="text-[10px] text-slate-400 space-y-1 leading-relaxed pl-1">
           {flowItems.map(it => (
             <li key={it.idx} className="flex gap-2">

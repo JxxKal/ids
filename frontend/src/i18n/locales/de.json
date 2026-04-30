@@ -768,7 +768,21 @@
       },
       "diagram": {
         "title": "So arbeiten die drei zusammen",
-        "footer": "Detail-Architektur in <a>docs/ML_ENGINE.md</a> Sections 10 + 11."
+        "footer": "Detail-Architektur in <a>docs/ML_ENGINE.md</a> Sections 10 + 11.",
+        "labels": {
+          "source": "QUELLE",
+          "signature": "SIGNATUR",
+          "queue": "QUEUE",
+          "anomaly": "ANOMALY",
+          "gateway": "GATEWAY · SUPPRESSION",
+          "persistence": "PERSISTENZ",
+          "gatewayDetail": "prüft Quelle, Signatur und Metriken",
+          "suppressSkip": "suppression · skip",
+          "suppressActive": "suppression · active",
+          "legendSig": "Signatur-Pfad",
+          "legendMl": "ML-Pfad",
+          "legendFeedback": "Feedback / Retrain"
+        }
       }
     },
     "ruleOverrides": {
