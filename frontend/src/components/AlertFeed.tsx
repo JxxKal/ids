@@ -77,6 +77,10 @@ interface Props {
   onUpdate: (a: Alert) => void;
   showTest: boolean;
   mlOnly: boolean;
+  // Tap-Filter wird in App.tsx hochgehalten, damit der historic-Fetch
+  // ihn als Server-Param mitgeben kann (sonst Limit-Cutoff-Problem).
+  tapFilter: string;
+  onTapFilterChange: (v: string) => void;
 }
 
 const SEVERITIES_ORDERED = ['critical', 'high', 'medium', 'low'] as const;
@@ -400,7 +404,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
 
 // ── Komponente ─────────────────────────────────────────────────────────────────
 
-export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
+export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTapFilterChange }: Props) {
   const { t } = useTranslation();
   const [selected,          setSelected]          = useState<Alert | null>(null);
   const [severityFilters,   setSeverityFilters]   = useState<string[]>([]);
@@ -416,9 +420,9 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
   const [whitelistFor,      setWhitelistFor]      = useState<Alert | null>(null);
   const [whitelistedNotice, setWhitelistedNotice] = useState<string>('');
   // Tap-Filter: '' = alle, 'master' = nur lokal erzeugte Alerts (tap_id null),
-  // sonst Tap-UUID. Wir laden die Tap-Liste einmal beim Mount; ist sie leer,
-  // wird der Filter + die Spalte gar nicht erst gerendert.
-  const [tapFilter,         setTapFilter]         = useState('');
+  // sonst Tap-UUID. Hochgehalten in App.tsx, damit der historic-Fetch ihn
+  // server-side anwenden kann. Lokale Filter-Logik unten greift zusätzlich
+  // für Live-Mode (WebSocket broadcastet alle Alerts).
   const [taps,              setTaps]              = useState<RemoteTap[]>([]);
 
   useEffect(() => {
@@ -666,7 +670,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly }: Props) {
 
         {/* Tap-Filter (nur sichtbar wenn überhaupt ein Tap registriert ist) */}
         {showTapColumn && (
-          <select className="input w-32" value={tapFilter} onChange={e => setTapFilter(e.target.value)}
+          <select className="input w-32" value={tapFilter} onChange={e => onTapFilterChange(e.target.value)}
             title={t('alertFeed.filters.tap')}>
             <option value="">{t('alertFeed.filters.allTaps')}</option>
             <option value="master">{t('alertFeed.filters.tapMaster')}</option>

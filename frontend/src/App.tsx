@@ -88,6 +88,11 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [historicAlerts, setHistoricAlerts] = useState<Alert[]>([]);
   const [isLoading, setIsLoading]   = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Tap-Filter: '' = alle, 'master' = nur Master-lokal, sonst UUID. Hier
+  // hochgehoben (statt im AlertFeed), damit der historic-Fetch ihn als
+  // Server-side-Param mitschicken kann — sonst würden Tap-Alerts in den
+  // älteren Schichten unterhalb des Limits verloren gehen.
+  const [tapFilter, setTapFilter] = useState('');
 
   const { alerts, connected, setAlerts } = useWebSocket();
   const [sysStats,       setSysStats]       = useState<SystemStats | null>(null);
@@ -126,16 +131,17 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
 
     fetchAlerts({
       ts_from: Date.now() / 1000 - win.seconds,
-      limit: 500,
+      limit: 5000,
       is_test: showTest ? null : false,
       source: mlOnly ? 'ml' : undefined,
+      tap_id: tapFilter || undefined,
     })
       .then(r  => { if (!cancelled) setHistoricAlerts(r.alerts); })
       .catch(e => { console.error('historic fetch:', e); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
 
     return () => { cancelled = true; };
-  }, [timeWindow, refreshKey, showTest, mlOnly]);
+  }, [timeWindow, refreshKey, showTest, mlOnly, tapFilter]);
 
   const handleWindowSelect = (w: TimeWindow) => {
     if (w === timeWindow && w !== 'live') {
@@ -311,6 +317,8 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                   onUpdate={handleUpdate}
                   showTest={showTest}
                   mlOnly={mlOnly}
+                  tapFilter={tapFilter}
+                  onTapFilterChange={setTapFilter}
                 />
               </ErrorBoundary>
             </div>

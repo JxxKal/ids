@@ -95,8 +95,9 @@ async def list_alerts(
     show_whitelisted:   bool         = False,
     boundary_priority:  str | None   = None,
     sort_by:            str          = "ts",   # 'ts' | 'priority'
-    limit:              Annotated[int, Query(ge=1, le=500)] = 50,
-    offset:             Annotated[int, Query(ge=0)]         = 0,
+    tap_id:             str | None   = None,   # UUID, "master" (= NULL), oder leer
+    limit:              Annotated[int, Query(ge=1, le=10_000)] = 50,
+    offset:             Annotated[int, Query(ge=0)]            = 0,
     pool:               asyncpg.Pool = Depends(get_pool),
 ) -> AlertListResponse:
     filters: list[str] = []
@@ -135,6 +136,14 @@ async def list_alerts(
     if boundary_priority:
         filters.append(f"a.boundary_priority = ${idx}")
         params.append(boundary_priority); idx += 1
+    if tap_id:
+        # "master" = lokal am Master erzeugte Alerts (tap_id IS NULL).
+        # UUID = nur Alerts dieses spezifischen Taps.
+        if tap_id == "master":
+            filters.append("a.tap_id IS NULL")
+        else:
+            filters.append(f"a.tap_id = ${idx}::uuid")
+            params.append(tap_id); idx += 1
     if egress_only:
         # Egress-View: Alerts mit gesetzter Boundary-Priority. Whitelisted-
         # Alerts werden standardmäßig ausgeblendet, mit show_whitelisted=true

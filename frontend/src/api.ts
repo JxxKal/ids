@@ -91,6 +91,10 @@ export interface AlertFilters {
   show_whitelisted?: boolean;
   boundary_priority?: 'P0' | 'P1' | 'P2' | 'P3';
   sort_by?: 'ts' | 'priority';
+  // Tap-Filter: '' = alle, 'master' = nur Master-lokal (tap_id IS NULL),
+  // sonst UUID des Taps. Server-side angewandt; clientseitiger Filter im
+  // Live-Mode ergänzt das (WebSocket broadcastet alle Alerts).
+  tap_id?: string;
   limit?: number;
   offset?: number;
 }
@@ -113,6 +117,7 @@ export async function fetchAlerts(filters: AlertFilters = {}): Promise<{
   if (filters.show_whitelisted)   params.set('show_whitelisted', 'true');
   if (filters.boundary_priority)  params.set('boundary_priority', filters.boundary_priority);
   if (filters.sort_by)            params.set('sort_by',           filters.sort_by);
+  if (filters.tap_id)             params.set('tap_id',            filters.tap_id);
   params.set('limit',   String(filters.limit  ?? 100));
   params.set('offset',  String(filters.offset ?? 0));
   return req(`/api/alerts?${params}`);
