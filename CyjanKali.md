@@ -21,10 +21,12 @@ Pentest-Reihe vom 2026-04-30 mit **Kali Linux** (192.168.1.85) gegen einen **Lin
 
 | Rolle | IP | User | Notizen |
 |---|---|---|---|
-| Kali (Angreifer) | 192.168.1.85 | jan / ***REDACTED*** | Proxmox-VM |
-| Linuxhost (Ziel) | 192.168.1.80 | jan / ***REDACTED*** | Debian Desktop, lauscht auf 22 (SSH), 3389 (RDP) |
-| Tap (Sniffer) | 192.168.1.95 | ids / ***REDACTED*** | sniffert `ens19`, gepaart mit Master |
-| Master-IDS | 192.168.1.81 | ids / ***REDACTED*** | volle Pipeline + Frontend |
+| Kali (Angreifer) | 192.168.1.85 | jan | Proxmox-VM |
+| Linuxhost (Ziel) | 192.168.1.80 | jan | Debian Desktop, lauscht auf 22 (SSH), 3389 (RDP) |
+| Tap (Sniffer) | 192.168.1.95 | ids | sniffert `ens19`, gepaart mit Master |
+| Master-IDS | 192.168.1.81 | ids | volle Pipeline + Frontend |
+
+> Passwörter sind bewusst **nicht im Lab-Bericht** dokumentiert. Setup-Credentials werden außerhalb dieses Repos gepflegt.
 
 Pipeline-Latenz: Capture → Flow-Aggregator → signature-engine + ml-engine → alert-manager → DB. Alarme sind ~3–10 s nach dem Ereignis im Master-Postgres bzw. WebSocket-Feed.
 
