@@ -29,7 +29,7 @@
   parameters:
     entropy_iat:
       type: float
-      default: 2.5
+      default: 1.5
       min: 0.5
       max: 10.0
       label: "Mindest-IAT-Entropie"
