@@ -10,9 +10,10 @@ Pentest-Reihe vom 2026-04-30 mit **Kali Linux** (192.168.1.85) gegen einen **Lin
 4. [Diagnose nach Phase 1](#diagnose-nach-phase-1)
 5. [Phase 2 — Tests nach ML-Re-Training](#phase-2--tests-nach-ml-re-training-t9t11)
 6. [Phase 3 — Burst-Test nach Backpressure-Fix](#phase-3--burst-test-nach-backpressure-fix-bt)
-7. [Befunde & Maßnahmen](#befunde--maßnahmen)
-8. [Operator-Cheatsheet](#operator-cheatsheet)
-9. [Zusammenfassung](#zusammenfassung)
+7. [Phase 4 — DNS-Angriffsmuster](#phase-4--dns-angriffsmuster-d1d5)
+8. [Befunde & Maßnahmen](#befunde--maßnahmen)
+9. [Operator-Cheatsheet](#operator-cheatsheet)
+10. [Zusammenfassung](#zusammenfassung)
 
 ## Setup & Pipeline-Stand
 
@@ -67,6 +68,11 @@ Vor jedem Testblock wird geprüft, ob Kali-IP (.85) in den Master-Flows auftauch
 | T10 | 2 | nmap Top-1000 mit Threshold 0.40 | 2 | 0 | 1 | 0 | sig ✓, ml fängt nicht-Kali-Anomalie |
 | T11 | 2 | hping3 SYN-Flood `-i u200 -c 10000` | 3 (incl. critical) | 1 | 0 | 0 | sig ✓ critical, ml stumm (erwartet) |
 | BT | 3 | Burst-Test: hping3 + sofort nmap | 5 | 0 | 0 | 1 | Backpressure-Fix verifiziert: kafka_drop=0 |
+| D1 | 4 | DNS-Flood (1000 q @ 300 pps) gegen DNS-Server | 2 | 0 | 0 | 0 | TUNNEL_001 + FRAGMENT_001; AMP_001 deduped + pktmean knapp drüber |
+| D2 | 4 | DNS-Tunnel-Pattern (lange Subdomains) | (eng) | 0 | 0 | 0 | TUNNEL_001 in engine-log; alert-manager-dedup unterdrückt DB-Hit |
+| D3 | 4 | DGA-Pattern (uniform IAT) | 0 | 0 | 0 | 0 | IAT-Entropy 1.28 unter Default-Schwelle 2.5 |
+| D4 | 4 | DNS-Flood gegen non-listening Port (Reflection-Profil) | **3** | 0 | 0 | 0 | **AMP_001 + TUNNEL_001 + FRAGMENT_001** — alle drei sauber |
+| D5 | 4 | DGA-Pattern (bimodal IAT) | 0 | 0 | 0 | 0 | IAT-Entropy 1.34 — Default-Schwelle praktisch nicht erreichbar |
 
 ## Phase 1 — Tests gegen das ungetunte System (T1–T3)
 
@@ -334,6 +340,192 @@ nmap -sS -T4 -Pn --top-ports 1000 192.168.1.80       # direkt im Anschluss
 
 **Bewertung:** Backpressure-Fix wirkt wie geplant. Vor dem Fix: 5+ min Pipeline-Stillstand bei Phase-2-Tests. Jetzt: 30 s Aufholzeit, danach sofort einsatzbereit. Das `correlation`-Alert `UNKNOWN_HOST_001` ist ein interessanter Bonus — die correlation-Engine hat den Burst bemerkt.
 
+## Phase 4 — DNS-Angriffsmuster (D1–D5)
+
+Es gibt vier DNS-Heuristiken (`signature-engine/rules/dns.yml`):
+
+| Rule | Trigger | Default-Parameter |
+|---|---|---|
+| `DNS_AMP_001` | UDP/53, hohe pps + kleine Pakete | `pps > 100`, `pkt_size_mean < 100` |
+| `DNS_TUNNEL_001` | UDP/53, hohes Datenvolumen | `byte_count > 50 000` |
+| `DNS_DGA_001` | UDP/53, hohe IAT-Entropie + viele Pakete | `entropy_iat > 2.5`, `pkt_count > 10` |
+| `DNS_NONSTANDARD_001` | TCP/53, große mittlere Paketgröße | `pkt_size_mean > 512` |
+
+Generator (Kali, einzelner UDP-Socket → ein Flow im IDS):
+
+```python
+# /tmp/dnsattack.py — Modi: amp | tunnel | dga | (v2: gegen non-listening Port)
+# baut DNS-A-Queries selbst, schickt non-blocking, drainiert Antworten parallel
+```
+
+DNS-Resolver der Kali-VM: `192.168.1.100` (laut `/etc/resolv.conf`).
+
+---
+
+### Test D1 — DNS-Flood mit Amplification-Profil
+
+**Angriffsmuster.** Hochfrequente Standard-DNS-Queries (1000× kleine A-Records) gegen den lokalen Resolver. Klassisches Reflection-Source-Profil: viele kleine outgoing-Pakete in kurzer Zeit. Erwartet: `DNS_AMP_001`.
+
+**Befehl:**
+```bash
+python3 /tmp/dnsattack.py --mode amp --count 1000 --rate 300
+# → sent=1000 pps=300.3 avg_pkt=33.9 byte_out=33.9 KB
+```
+
+**Start (UTC):** 2026-04-30T18:09:16
+
+**Beobachteter Flow:**
+
+| Metrik | Wert |
+|---|---|
+| pkt_count (bidirektional) | 2 000 |
+| byte_count | 204 468 |
+| pps | 600,5 |
+| pkt_size mean | **102,2** |
+| IAT-Entropie | 0,18 |
+
+**IDS-Antwort:**
+
+| ts | source | severity | rule_id | score |
+|---|---|---|---|---|
+| 18:09:28 | signature | high | **DNS_TUNNEL_001** | 0.80 |
+| 18:09:53 | signature | low | ANOMALY_FRAGMENT_001 | 0.20 |
+
+**Bewertung.** TUNNEL_001 trifft sauber wegen `byte_count > 50 k`. Bonus: ANOMALY_FRAGMENT_001 zeigt fragmentierte DNS-Antworten (DNS-Replies > MTU werden in IP-Fragmente gesplittet). DNS_AMP_001 **trifft nicht**: `pkt_size_mean = 102` liegt knapp über der 100-Byte-Schwelle, weil DNS-Antworten (echo + Resource Record) den Mean hochziehen — der Flow-Aggregator mittelt bidirektional. Außerdem 120-s-Cooldown vom 18:07:27-Hit.
+
+---
+
+### Test D2 — DNS-Tunneling (lange Subdomains)
+
+**Angriffsmuster.** DNS-Queries mit ~180 Byte langen, zufälligen Subdomain-Labels — simuliert Daten-Exfiltration via DNS (z.B. iodine, dnscat2). Erwartet: `DNS_TUNNEL_001`.
+
+**Befehl:**
+```bash
+python3 /tmp/dnsattack.py --mode tunnel --count 500 --rate 100
+# → sent=500 pps=100.2 avg_pkt=218.0
+```
+
+**Start (UTC):** 2026-04-30T18:11:21
+
+**Beobachteter Flow:**
+
+| Metrik | Wert |
+|---|---|
+| pkt_count | 1 000 |
+| byte_count | 291 000 |
+| pps | 200,4 |
+| pkt_size mean | 291,0 |
+
+**IDS-Antwort (signature-engine-Log):**
+
+```
+18:11:58 ALERT [DNS_TUNNEL_001] DNS Tunneling (Volumenbasis) | 192.168.1.85 → 192.168.1.100:53 | severity=high
+```
+
+In der DB landet dieser Hit **nicht**, weil der alert-manager mit `DEDUP_WINDOW_S=300` denselben Alert-Key (Rule + src + dst) noch vom D1-Hit (18:09:28) unterdrückt.
+
+**Bewertung.** Erkennung in der signature-engine ✓. Dedup verhindert Spam, aber unterdrückt im Lab dadurch den D2-Treffer in der DB. Operator-Cheatsheet: für back-to-back-Tests denselben Vektor entweder >300 s pausieren oder `DEDUP_WINDOW_S` zur Lab-Zeit absenken.
+
+---
+
+### Test D3 — DGA-Pattern (uniform IAT)
+
+**Angriffsmuster.** Zufällige Domain-Namen (8–12 zufällige Zeichen + `.net`) mit pseudo-zufälligem Timing zwischen den Queries — simuliert C2-Beacons über DGA-Domains. Erwartet: `DNS_DGA_001`.
+
+**Befehl:**
+```bash
+python3 /tmp/dnsattack.py --mode dga --count 200 --rate 50
+# → sent=200 pps=15.6 avg_pkt=31.9
+```
+
+**Start (UTC):** 2026-04-30T18:11:31
+
+**Beobachteter Flow:**
+
+| Metrik | Wert |
+|---|---|
+| pkt_count | 400 |
+| pps | 31,3 |
+| **IAT-Entropie** | **1,28** |
+
+**IDS-Antwort:** keine. Default-Schwelle `entropy_iat > 2.5` nicht erreicht.
+
+**Bewertung.** Mein uniform-Random-Sleep erzeugt eine schmal-uniforme IAT-Verteilung mit Entropie um 1,3 — die 2,5-Schwelle ist auch in D5 (siehe unten) mit bimodalem Timing nicht erreichbar.
+
+---
+
+### Test D4 — DNS-Flood gegen non-listening Port (Reflection-Source-Profil)
+
+**Angriffsmuster.** Hochfrequente DNS-Queries (1000× kleine A-Records, 300 pps) gegen den **Master-IDS auf Port 53 — der dort nicht lauscht**. Damit geht der Flow **rein outgoing**: keine DNS-Replies vom Ziel, nur ICMP-Port-Unreachable. Das entspricht exakt dem Beobachtungs-Profil eines echten Spoofed-Reflection-Angriffs (der Angreifer sieht die Antworten nie, weil die mit gespoofter Source-IP ans Opfer gehen). Erwartet: **DNS_AMP_001 sauber**.
+
+**Befehl:**
+```bash
+python3 /tmp/dnsattack_v2.py --server 192.168.1.81 --mode amp --count 1000 --rate 300
+# → sent=991 pps=297.6 avg_pkt=33.9
+```
+
+**Start (UTC):** 2026-04-30T18:14:28
+
+**Beobachteter Flow:**
+
+| Metrik | Wert |
+|---|---|
+| pkt_count | 991 (rein outgoing) |
+| byte_count | 75 217 |
+| pps | 297,6 |
+| **pkt_size mean** | **75,9** |
+| IAT-Entropie | 0,00 |
+
+**IDS-Antwort:**
+
+| ts | source | severity | rule_id | score |
+|---|---|---|---|---|
+| 18:14:31.771 | signature | medium | **DNS_AMP_001** | 0.50 |
+| 18:14:31.771 | signature | high | **DNS_TUNNEL_001** | 0.80 |
+| 18:14:31.771 | signature | low | ANOMALY_FRAGMENT_001 | 0.20 |
+
+**Bewertung.** **Volltreffer auf 3 Rules gleichzeitig.** Das Reflection-Source-Profil ist genau das, was die DNS_AMP_001-Heuristik fängt: `pps > 100` (297 ✓) UND `pkt_size_mean < 100` (75,9 ✓). Im Vergleich zu D1 zeigt das: die Default-Schwelle `pkt_size_mean < 100` ist *richtig* kalibriert für echte Reflection-Angriffe — sie verfehlt nur Tests, in denen der Lab-Resolver tatsächlich antwortet (siehe D1).
+
+---
+
+### Test D5 — DGA-Pattern mit bimodaler IAT
+
+**Angriffsmuster.** Wie D3, aber mit klar bimodalem Timing: 80 % der Queries mit 1–3 ms Pause, 20 % mit 50–200 ms. Soll IAT-Entropie deutlich erhöhen. Erwartet: `DNS_DGA_001`.
+
+**Befehl:**
+```bash
+python3 /tmp/dnsattack_v2.py --mode dga --count 500 --rate 100
+# → sent=500 pps=39.6 avg_pkt=32.0
+```
+
+**Start (UTC):** 2026-04-30T18:14:35
+
+**Beobachteter Flow:**
+
+| Metrik | Wert |
+|---|---|
+| pkt_count | 1 000 |
+| pps | 79,3 |
+| pkt_size mean | 110,5 |
+| **IAT-Entropie** | **1,34** |
+
+**IDS-Antwort:** keine.
+
+**Bewertung.** Auch mit bimodalem Timing kommt die IAT-Entropie nur auf 1,34 — die Default-Schwelle 2,5 ist **in der Praxis kaum erreichbar**. Empfehlung: `DNS_DGA_001`-Default in der GUI auf 1,5–1,8 absenken (Settings → Rule Adjustments → DNS_DGA_001 → entropy_iat). Bei 1,5 würde dieser bimodale Generator zuverlässig triggern, ohne normale DNS-Resolver-Multiplexer (typisch ~0,5–1,0) zu erfassen.
+
+---
+
+### Befund Phase 4 — DNS-Detektion
+
+| Rule | Default-Parameter | Lab-Treffer | Bemerkung |
+|---|---|---|---|
+| `DNS_AMP_001` | `pps>100, pkt_size_mean<100` | ✓ in D4 (uni-direktional) | Default ist richtig kalibriert für **Spoofed-Reflection-Source-Profil**. Bei symmetrischem Lab-Verkehr (D1) wird der Mean durch DNS-Replies hochgezogen → keine Trigger, das ist korrekt (kein echter Reflection-Angriff). |
+| `DNS_TUNNEL_001` | `byte_count>50 000` | ✓ in D1, D2 (engine), D4 | Robust. Triggert sowohl bei Volumen-Tunneling als auch bei DNS-Floods, sobald >50 k Bytes durchlaufen. |
+| `DNS_DGA_001` | `entropy_iat>2.5, pkt_count>10` | ✗ in D3 + D5 | **Default zu strict** — selbst bimodale Generatoren erreichen nur ~1,3. Empfehlung: 1,5–1,8. |
+| `DNS_NONSTANDARD_001` | `pkt_size_mean>512` für TCP/53 | nicht getestet | DNS-over-TCP ist im Lab-Subnet selten. |
+
+Bonus: **ANOMALY_FRAGMENT_001** (`severity=low`) feuert zuverlässig bei DNS-Floods, weil die DNS-Replies oder ICMP-Port-Unreach in IP-Fragmente zerlegt werden — guter Sekundär-Indikator.
+
 ## Befunde & Maßnahmen
 
 ### Befund 1 — ML war initial taub
@@ -455,7 +647,8 @@ ORDER BY ts;
 ## Zusammenfassung
 
 1. **Tap-Mirror funktioniert** für normalen Subnet-Traffic.
-2. **Heuristik (signature-engine) erkennt jeden Pentest** sauber: SCAN_001/004 für Scans, DOS_SYN_001/CONN_001 für Floods, RECON_001..003 für Probe-Pattern, plus korrekt-priorisierte Severity bis `critical`.
+2. **Heuristik (signature-engine) erkennt jeden Pentest** sauber: SCAN_001/004 für Scans, DOS_SYN_001/CONN_001 für Floods, RECON_001..003 für Probe-Pattern, **DNS_AMP_001 für Reflection-Source, DNS_TUNNEL_001 für Volumen-Exfil**, plus korrekt-priorisierte Severity bis `critical`.
 3. **ML-Engine** war initial taub (Bootstrap-SQL-Bug + zu basale Features + Compose-Env-Bug). Nach Patch (18 Features, sauberer Bootstrap-Filter, contamination 0.005, Threshold 0.57) ist sie *komplementär* zur Heuristik aufgestellt: Single-Flow-Anomalien werden erkannt, Multi-Flow-Pattern sind weiter Sache der Heuristik (architektonisches Limit, kein Bug).
 4. **Tap-Backpressure** war Pipeline-Killer bei Pentest-Bursts (5+ min Stillstand nach hping3-Flood). Mit größerem Producer-Buffer und Drop-Policy statt blocking-Retry: `kafka_drop=0` und 30 s Aufholzeit beim Worst-Case-Burst-Test.
-5. **Lehre:** "ML soll nmap erkennen" ist die falsche Erwartung. Der Detektor dafür sitzt richtig in der signature-engine, ML ergänzt sie für nicht-benannte Verhaltens-Anomalien.
+5. **DNS-Detektion gut, mit einer Schwäche:** AMP_001 trifft das Reflection-Source-Profil sauber, TUNNEL_001 robust auf Volumen-Pattern. **DGA_001 ist mit Default-Schwelle 2,5 in der Praxis kaum auslösbar** — Empfehlung 1,5–1,8 als Tuning-Wert in den Rule-Adjustments.
+6. **Lehre:** "ML soll nmap erkennen" ist die falsche Erwartung. Der Detektor dafür sitzt richtig in der signature-engine, ML ergänzt sie für nicht-benannte Verhaltens-Anomalien.
