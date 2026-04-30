@@ -141,20 +141,41 @@ def _spawn_compose_up_runner(ids_dir: Path, profile: str) -> None:
     Verwendet ids-api:latest als Basis-Image (hat docker-compose-plugin).
     sleep 5 gibt dem aktuellen API-Container Zeit, den "done"-Status zu schreiben
     bevor compose up startet.
+
+    --force-recreate: Compose erkennt manchmal nicht, dass ein per `docker load`
+    geladenes Image neue Layer hat (Image-Tag ist identisch, Image-Digest weicht
+    aber ab). Ohne --force-recreate bleibt z.B. der frontend-Container am
+    alten Image kleben — mit dem Effekt, dass neue UI-Sections nach einem
+    Update unsichtbar bleiben. Nach dem Update wollen wir ohnehin alle
+    Container in der neuen Version sehen, also forcieren wir das.
+
+    --no-build: Defensive — die Compose-Datei hat `build:`-Direktiven, und
+    der Update-Runner mountet das ids-Verzeichnis. Ohne --no-build könnte
+    Compose im Recreate-Pfad bei einem Image-Mismatch (z.B. Bundle hat einen
+    Service noch nicht) heimlich einen Build starten. Wir wollen aber
+    fail-fast statt einen halb-fertigen In-Place-Build — die einzige
+    legitime Build-Quelle ist der vorherige docker-load-Schritt.
+
+    Logs landen in <ids_dir>/.update-runner.log (auf dem Host sichtbar, weil
+    das ids-Verzeichnis ohnehin gebind-mountet ist), damit man bei Problemen
+    nachvollziehen kann warum Compose ggf. abgebrochen ist.
     """
     compose_cmd = (
-        f"docker compose --project-directory {ids_dir} --profile {profile} up -d"
+        f"docker compose --project-directory {ids_dir} --profile {profile} "
+        f"up -d --force-recreate --no-build"
     )
+    log_path = str(ids_dir / ".update-runner.log")
     subprocess.Popen(
         [
-            "docker", "run", "--rm",
+            "docker", "run", "--rm", "--detach",
             "-v", "/var/run/docker.sock:/var/run/docker.sock",
             "-v", f"{ids_dir}:{ids_dir}",
             "-w", str(ids_dir),
             "-e", "COMPOSE_PROJECT_NAME=ids",
             "--name", "ids-update-runner",
             "ids-api:latest",
-            "sh", "-c", f"sleep 5 && {compose_cmd}",
+            "sh", "-c",
+            f"sleep 5 && {compose_cmd} >{log_path} 2>&1",
         ],
         start_new_session=True,
         close_fds=True,
