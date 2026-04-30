@@ -382,8 +382,14 @@ class Tuner:
                         "Rule %s/%s: FP/TP-Konflikt (FP_max+1=%s > TP_min=%s) — alten Wert behalten",
                         rid, pname, fp_max, tp_min,
                     )
+                    # Beide alten Werte (value + value_internal) bewahren —
+                    # ein Konflikt ist ein Datenproblem, kein Reset-Trigger.
                     new_v = old_value if isinstance(old_value, (int, float)) else None
                     new_vi = None
+                    if isinstance(existing_param, dict):
+                        old_vi = existing_param.get("value_internal")
+                        if isinstance(old_vi, (int, float)) and not isinstance(old_vi, bool):
+                            new_vi = float(old_vi)
                 else:
                     if new_v is not None:
                         new_v = self._apply_fp_tp(new_v, fp_max, tp_min, ps)
