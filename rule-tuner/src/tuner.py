@@ -367,9 +367,9 @@ class Tuner:
                     new_v = self._quantile_of(combined, quantile)
                     new_vi = None
 
-                # Safety-Margin + Schema-Clamp
-                new_v = self._postprocess(new_v, ps)
-                new_vi = self._postprocess(new_vi, ps) if new_vi is not None else None
+                # Safety-Margin + Schema-Clamp + Floor-Constraint
+                new_v = self._postprocess(new_v, ps, self._cfg.floor_factor)
+                new_vi = self._postprocess(new_vi, ps, self._cfg.floor_factor) if new_vi is not None else None
 
                 # Phase 4.5: FP/TP-Constraints anwenden — nur wenn ≥3 Markierungen
                 # für die Rule INSGESAMT existieren (mit jeweils metric_values
@@ -574,14 +574,28 @@ class Tuner:
         return s[lo] * (1.0 - frac) + s[hi] * frac
 
     @staticmethod
-    def _postprocess(value: float | None, schema: dict) -> float | None:
-        """Apply safety margin, schema clamp + cast."""
+    def _postprocess(value: float | None, schema: dict, floor_factor: float = 0.3) -> float | None:
+        """Apply safety margin, optional Floor-Constraint, schema clamp + cast.
+
+        Floor-Constraint: getunte Schwelle wird nie unter `default × floor_factor`
+        geklemmt — verhindert dass eine flach verteilte Sample-Population
+        (z.B. wenn fast nur Mini-Flows im Reservoir landen) die Schwelle auf
+        semantisch unsinnige Werte drückt. Bei floor_factor=0 wird der Floor
+        deaktiviert.
+        """
         if value is None:
             return None
         v = float(value) * SAFETY_MARGIN
         ptype = schema.get("type", "int")
         lo = schema.get("min")
         hi = schema.get("max")
+        # Sanity-Floor relativ zum YAML-Default (vor Schema-Clamp anwenden,
+        # damit ein niedriger schema-min den Floor nicht aushebelt).
+        default = schema.get("default")
+        if floor_factor > 0 and isinstance(default, (int, float)) and not isinstance(default, bool):
+            floor = float(default) * floor_factor
+            if v < floor:
+                v = floor
         if lo is not None and v < lo:
             v = float(lo)
         if hi is not None and v > hi:

@@ -16,6 +16,10 @@ class Config:
     state_poll_interval_s: float
     tuning_cycle_s:   float
     min_samples:      int
+    # Sanity-Floor: getunte Schwelle wird nie unter `default × floor_factor`
+    # geklemmt. Verhindert dass ein flach verteiltes Reservoir die Schwelle
+    # auf semantisch unsinnige Werte (z.B. SCAN port_count=8) drückt.
+    floor_factor:     float
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -41,4 +45,5 @@ class Config:
             # mit kürzeren Cycles laufen können.
             tuning_cycle_s=float(os.environ.get("TUNING_CYCLE_S", str(6 * 3600))),
             min_samples=int(os.environ.get("MIN_SAMPLES", "100")),
+            floor_factor=float(os.environ.get("TUNER_FLOOR_FACTOR", "0.3")),
         )
