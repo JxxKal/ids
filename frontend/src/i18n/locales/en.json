@@ -322,7 +322,13 @@
   },
   "help": {
     "dashboard": {
-      "sidebarNav": "Main navigation. Switches between overview, network inventory, host inventory, test scenarios, and settings.",
+      "sidebarNav": "Main navigation. Switches between overview, getting-started guide, network inventory, host inventory, test scenarios, and settings.",
+      "severityPills": "Severity filter (multi-select): click toggles a level. None selected = show all. Replaces the previous single-select dropdown.",
+      "filterSource": "Alert source: signature (heuristic rules), ml (IsolationForest anomaly), suricata (external rule sets) or external (IRMA asset enrichment).",
+      "filterFeedback": "User markings: 'no feedback' = not yet rated, FP = false positive (feeds the ML suppression learner), TP = true positive (constrains the rule-tuner).",
+      "filterTap": "For multi-tap setups: pick a single tap or only master-local alerts (tap_id IS NULL). Filter is applied server-side — works for large time windows too.",
+      "irmaFilterToggle": "Hides ASSET::* enrichment alerts from the IRMA source. Useful when IRMA emits many asset status notes that clutter the detection picture.",
+      "customRange": "Freely chosen time window: start/end as datetime-local inputs (browser local timezone). Apply reloads the alerts. Editing does nothing until you press Apply.",
       "topbarLive": "Live status of the WebSocket connection. Green = real-time alerts streaming, red = no connection to the backend.",
       "topbarKpi": "Key metrics for the selected time window: total, critical+high, alerts per hour, and visible after filtering.",
       "topbarLogout": "End the current session and return to the login screen.",

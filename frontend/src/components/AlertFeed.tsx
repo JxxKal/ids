@@ -632,52 +632,60 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
             onChange={e => setSearch(e.target.value)}
           />
         </HelpTip>
-        <div className="flex gap-1 items-center" title={t('alertFeed.filters.severity')}>
-          {SEVERITIES_ORDERED.map(s => {
-            const active = severityFilters.includes(s);
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setSeverityFilters(prev =>
-                  prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
-                )}
-                className={`cyjan-sev-badge cyjan-sev-${s} cursor-pointer transition-opacity ${
-                  active ? '' : 'opacity-30 hover:opacity-60'
-                }`}
-                aria-pressed={active}
-              >
-                {s}
-              </button>
-            );
-          })}
-        </div>
-        <select className="input w-28" value={sourceF} onChange={e => setSourceF(e.target.value)}
-          title={t('alertFeed.filters.source')}>
-          <option value="">{t('alertFeed.filters.allSources')}</option>
-          <option value="signature">{t('alertFeed.filters.sources.signature')}</option>
-          <option value="ml">{t('alertFeed.filters.sources.ml')}</option>
-          <option value="suricata">{t('alertFeed.filters.sources.suricata')}</option>
-          <option value="external">{t('alertFeed.filters.sources.external')}</option>
-        </select>
-        <select className="input w-28" value={feedbackF} onChange={e => setFeedbackF(e.target.value)}
-          title={t('alertFeed.filters.feedback')}>
-          <option value="">{t('common.all')}</option>
-          <option value="none">{t('alertFeed.filters.noFeedback')}</option>
-          <option value="fp">False Positive</option>
-          <option value="tp">True Positive</option>
-        </select>
+        <HelpTip helpKey="severityPills">
+          <div className="flex gap-1 items-center" title={t('alertFeed.filters.severity')}>
+            {SEVERITIES_ORDERED.map(s => {
+              const active = severityFilters.includes(s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setSeverityFilters(prev =>
+                    prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]
+                  )}
+                  className={`cyjan-sev-badge cyjan-sev-${s} cursor-pointer transition-opacity ${
+                    active ? '' : 'opacity-30 hover:opacity-60'
+                  }`}
+                  aria-pressed={active}
+                >
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </HelpTip>
+        <HelpTip helpKey="filterSource">
+          <select className="input w-28" value={sourceF} onChange={e => setSourceF(e.target.value)}
+            title={t('alertFeed.filters.source')}>
+            <option value="">{t('alertFeed.filters.allSources')}</option>
+            <option value="signature">{t('alertFeed.filters.sources.signature')}</option>
+            <option value="ml">{t('alertFeed.filters.sources.ml')}</option>
+            <option value="suricata">{t('alertFeed.filters.sources.suricata')}</option>
+            <option value="external">{t('alertFeed.filters.sources.external')}</option>
+          </select>
+        </HelpTip>
+        <HelpTip helpKey="filterFeedback">
+          <select className="input w-28" value={feedbackF} onChange={e => setFeedbackF(e.target.value)}
+            title={t('alertFeed.filters.feedback')}>
+            <option value="">{t('common.all')}</option>
+            <option value="none">{t('alertFeed.filters.noFeedback')}</option>
+            <option value="fp">False Positive</option>
+            <option value="tp">True Positive</option>
+          </select>
+        </HelpTip>
 
         {/* Tap-Filter (nur sichtbar wenn überhaupt ein Tap registriert ist) */}
         {showTapColumn && (
-          <select className="input w-32" value={tapFilter} onChange={e => onTapFilterChange(e.target.value)}
-            title={t('alertFeed.filters.tap')}>
-            <option value="">{t('alertFeed.filters.allTaps')}</option>
-            <option value="master">{t('alertFeed.filters.tapMaster')}</option>
-            {taps.map(tap => (
-              <option key={tap.id} value={tap.id}>{tap.name}</option>
-            ))}
-          </select>
+          <HelpTip helpKey="filterTap">
+            <select className="input w-32" value={tapFilter} onChange={e => onTapFilterChange(e.target.value)}
+              title={t('alertFeed.filters.tap')}>
+              <option value="">{t('alertFeed.filters.allTaps')}</option>
+              <option value="master">{t('alertFeed.filters.tapMaster')}</option>
+              {taps.map(tap => (
+                <option key={tap.id} value={tap.id}>{tap.name}</option>
+              ))}
+            </select>
+          </HelpTip>
         )}
 
         {/* Gruppierungs-Toggle */}
@@ -734,17 +742,19 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
         )}
 
         {/* IRMA Asset-Warnungen unterdrücken */}
-        <button
-          onClick={() => setSuppressIrmaAsset(s => !s)}
-          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
-            suppressIrmaAsset
-              ? 'bg-violet-500/15 text-violet-200 border-violet-500/50'
-              : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
-          }`}
-          title={t('alertFeed.irmaAssetToggle.title')}
-        >
-          {suppressIrmaAsset ? '∅ IRMA filter Warnings' : 'IRMA filter Warnings'}
-        </button>
+        <HelpTip helpKey="irmaFilterToggle">
+          <button
+            onClick={() => setSuppressIrmaAsset(s => !s)}
+            className={`px-2.5 py-1 rounded text-xs font-medium transition-colors border ${
+              suppressIrmaAsset
+                ? 'bg-violet-500/15 text-violet-200 border-violet-500/50'
+                : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
+            }`}
+            title={t('alertFeed.irmaAssetToggle.title')}
+          >
+            {suppressIrmaAsset ? '∅ IRMA filter Warnings' : 'IRMA filter Warnings'}
+          </button>
+        </HelpTip>
 
         {/* CSV-Export */}
         <a

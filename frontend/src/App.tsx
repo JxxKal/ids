@@ -266,6 +266,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
 
                 {/* Custom-Range-Picker — nur sichtbar bei timeWindow='custom' */}
                 {timeWindow === 'custom' && (
+                  <HelpTip helpKey="customRange">
                   <div className="flex items-center gap-2 text-xs">
                     <input
                       type="datetime-local"
@@ -294,6 +295,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                       {t('dashboard.timeWindows.apply')}
                     </button>
                   </div>
+                  </HelpTip>
                 )}
 
                 <HelpTip helpKey="alertCount">

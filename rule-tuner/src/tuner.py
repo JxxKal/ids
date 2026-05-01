@@ -292,7 +292,13 @@ class Tuner:
         cfg = self._status_cache.get("config", {})
         quantile = float(cfg.get("quantile", 0.995))
         scope_split = bool(cfg.get("scope_split_enabled", True))
-        max_change = float(cfg.get("max_change_per_cycle", 0.20))
+        # max_change asymmetrisch: Schwellen-Senkung bleibt vorsichtig (kann
+        # FP-Flood auslösen), Anhebung ist deutlich freier (korrigiert Tuning
+        # das durch Floor/FP-Bound zu niedrig hängengeblieben ist). Default
+        # down=0.20, up=1.00 — wenn keine separate Konfig, gilt der
+        # symmetrische Wert für beide Richtungen (Backwards-Compat).
+        max_change_down = float(cfg.get("max_change_per_cycle", 0.20))
+        max_change_up   = float(cfg.get("max_change_per_cycle_up", 1.00))
         blacklist = set(str(x) for x in cfg.get("blacklist", []) or [])
 
         rules = await api.list_rules()
@@ -396,13 +402,17 @@ class Tuner:
                     if new_vi is not None:
                         new_vi = self._apply_fp_tp(new_vi, fp_max, tp_min, ps)
 
-                # max_change_per_cycle (nur ab 2. Apply mit altem ml-Wert)
+                # max_change_per_cycle (nur ab 2. Apply mit altem ml-Wert).
+                # Asymmetrisch: down=cfg.max_change_per_cycle (vorsichtig),
+                # up=cfg.max_change_per_cycle_up (deutlich freier — sonst kriecht
+                # ein durch Floor zu niedrig hängengebliebener Wert nur Cycle
+                # für Cycle hoch und fängt zwischendurch FP-Floods).
                 if not first_apply and old_value is not None and isinstance(old_value, (int, float)) and new_v is not None:
-                    new_v = self._clamp_change(new_v, float(old_value), max_change)
+                    new_v = self._clamp_change(new_v, float(old_value), max_change_down, max_change_up)
                 if not first_apply and new_vi is not None and isinstance(existing_param, dict):
                     old_vi = existing_param.get("value_internal")
                     if isinstance(old_vi, (int, float)):
-                        new_vi = self._clamp_change(new_vi, float(old_vi), max_change)
+                        new_vi = self._clamp_change(new_vi, float(old_vi), max_change_down, max_change_up)
 
                 # Override-Eintrag bauen
                 ml_meta = {
@@ -611,11 +621,19 @@ class Tuner:
         return v
 
     @staticmethod
-    def _clamp_change(new_v: float, old_v: float, max_change: float) -> float:
-        """Beschränkt new_v auf [old_v*(1-mc), old_v*(1+mc)]. Wenn old_v=0,
-        bleibt new_v unverändert (sonst Divide-By-Zero-Effekt)."""
+    def _clamp_change(new_v: float, old_v: float, max_change: float, max_change_up: float | None = None) -> float:
+        """Beschränkt new_v asymmetrisch auf [old_v*(1-down), old_v*(1+up)].
+
+        max_change steht für die Senkungs-Klemme (down — Default 0.20, vorsichtig),
+        max_change_up für die Anhebungs-Klemme (Default = max_change wenn None,
+        also symmetrisch wie früher). In der Tuner-Konfig steht
+        max_change_per_cycle_up=1.0 für freiere Korrekturen nach oben.
+
+        Wenn old_v=0 oder beide Limits ≤0: keine Klemme."""
         if old_v == 0 or max_change <= 0:
             return new_v
+        if max_change_up is None:
+            max_change_up = max_change
         lo = old_v * (1.0 - max_change)
-        hi = old_v * (1.0 + max_change)
+        hi = old_v * (1.0 + max_change_up)
         return max(lo, min(hi, new_v))

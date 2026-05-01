@@ -322,7 +322,13 @@
   },
   "help": {
     "dashboard": {
-      "sidebarNav": "Hauptnavigation. Wechselt zwischen Übersicht, Netzwerk-Inventar, Host-Inventar, Test-Szenarien und Einstellungen.",
+      "sidebarNav": "Hauptnavigation. Wechselt zwischen Übersicht, Erste-Schritte-Handbuch, Netzwerk-Inventar, Host-Inventar, Test-Szenarien und Einstellungen.",
+      "severityPills": "Severity-Filter (mehrere wählbar): Klick aktiviert/deaktiviert eine Stufe. Keine ausgewählt = alle anzeigen. Ersetzt das frühere Single-Select-Dropdown.",
+      "filterSource": "Quelle des Alerts: signature (heuristische Regeln), ml (IsolationForest-Anomalie), suricata (externe Regelsätze) oder external (IRMA-Asset-Anreicherung).",
+      "filterFeedback": "User-Markierungen: 'kein Feedback' = noch nicht bewertet, FP = False Positive (geht in die ML-Suppression-Lernung), TP = True Positive (geht als Constraint in den rule-tuner).",
+      "filterTap": "In Multi-Tap-Setups: einen einzelnen Tap auswählen oder nur Master-lokale Alerts (tap_id IS NULL). Filter wird server-side angewendet — nutzbar auch in größeren Zeitfenstern.",
+      "irmaFilterToggle": "Blendet die ASSET::*-Anreicherungs-Alerts der IRMA-Quelle aus. Nützlich wenn IRMA viele Asset-Status-Hinweise produziert die das Detection-Bild zukleistern.",
+      "customRange": "Frei wählbares Zeitfenster: Start/Ende als datetime-local-Inputs (lokale Browser-Zeitzone). Apply lädt die Alerts neu. Die Eingabe ändert nichts solange du nicht Apply drückst.",
       "topbarLive": "Live-Status der WebSocket-Verbindung. Grün = Echtzeit-Alerts laufen ein, Rot = keine Verbindung zum Server.",
       "topbarKpi": "Kennzahlen für das aktuell gewählte Zeitfenster: Gesamt, kritisch+hoch, Alerts/Stunde sowie sichtbar nach Filter.",
       "topbarLogout": "Aktuelle Session beenden und zur Anmelde-Seite zurück.",
