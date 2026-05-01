@@ -311,7 +311,7 @@
         ]
       }
     },
-    "footer": "Detail-Architektur und Operator-Notizen in <a>CLAUDE.md</a>. Konkreter Lab-Bericht (Pentest gegen das eigene IDS, alle 6 Phasen): <lab>docs/cyjankali/lab.html</lab>."
+    "footer": "Vollständige Projekt-Doku in <a>README.md</a>. Konkreter Lab-Bericht (Pentest gegen das eigene IDS, alle 6 Phasen): <lab>docs/cyjankali/lab.html</lab>."
   },
   "topbar": {
     "live": "Live",

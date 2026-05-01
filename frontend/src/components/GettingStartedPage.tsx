@@ -202,7 +202,7 @@ export function GettingStartedPage({ onNavigate }: Props) {
               components={{
                 a: <a
                   className="text-cyan-300 underline hover:text-cyan-200 font-mono"
-                  href="https://github.com/JxxKal/ids/blob/main/CLAUDE.md"
+                  href="https://github.com/JxxKal/ids/blob/main/README.md"
                   target="_blank"
                   rel="noopener noreferrer"
                 />,

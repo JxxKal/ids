@@ -311,7 +311,7 @@
         ]
       }
     },
-    "footer": "Detailed architecture and operator notes in <a>CLAUDE.md</a>. Concrete lab report (pentest against the IDS itself, all 6 phases): <lab>docs/cyjankali/lab.html</lab>."
+    "footer": "Full project docs in <a>README.md</a>. Concrete lab report (pentest against the IDS itself, all 6 phases): <lab>docs/cyjankali/lab.html</lab>."
   },
   "topbar": {
     "live": "Live",
