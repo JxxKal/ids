@@ -7,6 +7,7 @@ import { disableDemoMode } from './demo/mode';
 import { resetStore as resetDemoStore } from './demo/store';
 import { AlertFeed } from './components/AlertFeed';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { GettingStartedPage } from './components/GettingStartedPage';
 import { HostsPage } from './components/HostsPage';
 import { LoginPage } from './components/LoginPage';
 import { NetworksPage } from './components/NetworksPage';
@@ -395,6 +396,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
         )}
 
+        {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5"><GettingStartedPage onNavigate={setTab} /></div>}
         {tab === 'networks' && <div className="flex-1 overflow-auto p-5"><NetworksPage /></div>}
         {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5"><HostsPage    /></div>}
         {tab === 'tests'    && <div className="flex-1 overflow-auto p-5"><TestsPage    /></div>}

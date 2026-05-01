@@ -1,10 +1,10 @@
-import { FlaskConical, LayoutDashboard, Network, Server, Settings } from 'lucide-react';
+import { Compass, FlaskConical, LayoutDashboard, Network, Server, Settings } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchVersion } from '../api';
 import { HelpTip } from './HelpTip';
 
-export type NavTab = 'dashboard' | 'networks' | 'hosts' | 'tests' | 'settings';
+export type NavTab = 'dashboard' | 'gettingStarted' | 'networks' | 'hosts' | 'tests' | 'settings';
 
 interface Props {
   active: NavTab;
@@ -13,11 +13,12 @@ interface Props {
 }
 
 const ITEMS: { id: NavTab; icon: ReactNode }[] = [
-  { id: 'dashboard', icon: <LayoutDashboard size={16} strokeWidth={1.8} /> },
-  { id: 'networks',  icon: <Network         size={16} strokeWidth={1.8} /> },
-  { id: 'hosts',     icon: <Server          size={16} strokeWidth={1.8} /> },
-  { id: 'tests',     icon: <FlaskConical    size={16} strokeWidth={1.8} /> },
-  { id: 'settings',  icon: <Settings        size={16} strokeWidth={1.8} /> },
+  { id: 'dashboard',      icon: <LayoutDashboard size={16} strokeWidth={1.8} /> },
+  { id: 'gettingStarted', icon: <Compass         size={16} strokeWidth={1.8} /> },
+  { id: 'networks',       icon: <Network         size={16} strokeWidth={1.8} /> },
+  { id: 'hosts',          icon: <Server          size={16} strokeWidth={1.8} /> },
+  { id: 'tests',          icon: <FlaskConical    size={16} strokeWidth={1.8} /> },
+  { id: 'settings',       icon: <Settings        size={16} strokeWidth={1.8} /> },
 ];
 
 export function Sidebar({ active, onNav, username }: Props) {

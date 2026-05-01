@@ -220,11 +220,98 @@
   },
   "sidebar": {
     "dashboard": "Dashboard",
+    "gettingStarted": "Getting Started",
     "networks": "Networks",
     "hosts": "Hosts",
     "tests": "Scenarios",
     "settings": "Settings",
     "footer": "{{username}}@cyjan · {{version}}"
+  },
+  "gettingStarted": {
+    "title": "Getting started with Cyjan IDS",
+    "subtitle": "What to do after a fresh install — in the right order.",
+    "intro": "The steps build on each other: without <strong>known networks</strong> the ML engine cannot tell internal from external traffic apart. Without a <strong>DNS resolver allowlist</strong> the resolver's replies look like portscans. Without a few days of runtime the ML engine has no baseline to anchor on. Plan for one to two weeks of mutual learning at the start.",
+    "pipelineTitle": "The data flow in one sentence",
+    "pipelineNote": "Packets from the mirror port → sniffer → flow aggregator → in parallel signature engine (heuristics) + ml engine (IsolationForest) → alert manager (dedup, suppression, severity normalisation) → DB + WebSocket push to the frontend.",
+    "stepLabel": "Step {{num}}",
+    "steps": {
+      "networks": {
+        "title": "Maintain known networks and hosts",
+        "open": "Open now",
+        "openNetworks": "→ Open networks",
+        "openHosts":    "→ Open hosts",
+        "description": "The <strong>known-networks table</strong> is the anchor for every downstream evaluation. It tells the system which IP ranges belong to your lab/OT/office. The internal/external split for the ML engine, the egress boundary detection and the suppression heuristics all derive from it.",
+        "bullets": [
+          "<strong>iTop sync</strong> (if available): under <em>Settings → iTop integration</em> set endpoint + API key — the sync pulls all subnets + assets as known networks and host display names.",
+          "<strong>CSV import</strong>: in the <em>Networks</em> tab upload a CIDR CSV.",
+          "<strong>Manually</strong>: add individual subnets via <em>+ New</em>. Fine for small labs.",
+          "<strong>Hosts</strong> on top — gives every IP a friendly display name so alerts show <code>web-prod-01</code> instead of <code>192.168.1.42</code>.",
+          "<em>Consequence:</em> without this list the ML engine treats everything as one network and the rule-tuner cannot learn internal-specific thresholds."
+        ]
+      },
+      "resolver": {
+        "title": "Tell the appliance about your DNS resolver",
+        "open": "→ Open settings",
+        "description": "In the mirror stream the sniffer sees the DNS resolver as the source of <em>many</em> outgoing replies — from a heuristic point of view that looks like a port scan or DNS amplification. Once you list the resolver, its medium/low alerts get filtered; high/critical (real tunnel/DGA hits) still come through.",
+        "bullets": [
+          "<em>Settings → Networks → DNS resolver allowlist</em>: enter the IP of the internal DNS server (e.g. <code>192.168.1.100</code>).",
+          "Multiple allowed — one per line.",
+          "Mandatory in OT environments with layer-2/3 DNS forwarders — otherwise you get permanent background noise."
+        ]
+      },
+      "ml": {
+        "title": "Get to know the three ML components and let them learn",
+        "open": "→ Open ML overview",
+        "description": "Cyjan IDS uses three ML components in parallel — each with a different job. They <strong>do not work right out of the box</strong>: all three need time to learn your baseline.",
+        "bullets": [
+          "<strong>(a) Anomaly engine — IsolationForest:</strong> sees every flow on its own and scores deviations from the training average. <em>Lifecycle:</em> phase \"passthrough\" until 500 flows are collected, then \"learning\" (bootstrap training), then \"active\". Default threshold 0.65 — recommended on most setups: drop it via <em>Settings → ML status</em> to <code>0.57</code> (P99 of typical idle distribution).",
+          "<strong>(b) rule-tuner:</strong> learns the concrete thresholds for every heuristic (SCAN_001, RECON_002, …) from your traffic. Collects metric values per rule and writes adapted overrides after each tuning cycle (default 6 h). <em>Recommended:</em> trigger one manual training (e.g. 2 h) during normal load — afterwards the tuner has your baseline and self-adjusts continuously.",
+          "<strong>(c) Suppression — adaptive:</strong> the alert manager learns the typical hourly rate per <code>(rule_id, ip_pair)</code> over 14 days. If the current hour is in range (Z-score &lt; 2.0) → alert is downgraded to <em>severity=low</em> with tag <code>ml-suppressed</code>. On a real spike (Z ≥ 2.0) the system breaks through suppression automatically. No initial config needed — just mark obvious FPs as \"False Positive\" in the alert detail drawer, the system does the rest."
+        ]
+      },
+      "dashboard": {
+        "title": "Understand the dashboard and its filters",
+        "open": "→ Open dashboard",
+        "description": "The dashboard filter bar combines several independent filters — they all apply together (logical AND).",
+        "bullets": [
+          "<strong>Time range</strong>: <em>Live</em> (WebSocket stream of fresh alerts) or one of the historic windows (1m / 15m / 1h / 4h / 1d / 2d / 7d) or <em>Custom</em> for a freely chosen range.",
+          "<strong>Severity pills</strong> (critical / high / medium / low): multiple selectable. None selected = show all.",
+          "<strong>Source</strong>: <code>signature</code> (heuristics), <code>ml</code> (IsolationForest), <code>suricata</code> (external rule sets), <code>external</code> (IRMA asset enrichment).",
+          "<strong>Feedback</strong>: only unmarked, only TP-marked, or only FP-marked.",
+          "<strong>Tap</strong>: in multi-tap setups pick a single tap or only master-local alerts.",
+          "<strong>Show test alerts</strong>: synthetic traffic from the <em>Tests</em> tab produces alerts with <code>is_test=true</code>. Hidden by default, toggle here.",
+          "<strong>ML only</strong>: quick filter on source=ml.",
+          "<strong>IRMA filter Warnings</strong>: hides ASSET::* enrichment alerts.",
+          "<strong>Egress on / on+wl</strong>: shows only alerts with a boundary priority. \"on+wl\" includes whitelisted connections for audit purposes.",
+          "<strong>Sort</strong>: by priority brings boundary P0..P3 to the top instead of pure timestamp ordering.",
+          "<strong>Group</strong>: collapse same rule + source IP — much quieter at the start.",
+          "<strong>CSV export</strong>: export the current filter selection up to 5 000 alerts."
+        ]
+      },
+      "boundary": {
+        "title": "Configure the OT boundary",
+        "open": "→ Open boundary",
+        "description": "The egress boundary detects connections <em>out of</em> a defined OT/internal network — and prioritises them from <strong>P0</strong> (critical, unusual) to <strong>P3</strong> (audit). Whitelisted destinations (defined CIDR + port + proto) are downgraded to P3.",
+        "bullets": [
+          "Prerequisite: known networks from step 1 are filled in — they define what \"internal\" means.",
+          "<em>Settings → Egress boundary</em>: maintain whitelist rules (source/dest/port/proto, optional description).",
+          "In the dashboard switch <em>Egress on</em> for the audit view — you see only alerts with a boundary priority, ordered by severity.",
+          "<em>Egress on+wl</em> additionally shows whitelisted hits — useful for \"who's calling where, even if allowed\" reviews."
+        ]
+      },
+      "updates": {
+        "title": "Apply updates",
+        "open": "→ Open system update",
+        "description": "Cyjan IDS has two update paths: <strong>offline update</strong> for running installations (web UI) and <strong>ISO</strong> for fresh installs.",
+        "bullets": [
+          "<strong>Releases</strong> live at <code>github.com/JxxKal/ids/releases</code>. Each major tag (e.g. v2.0.0) ships master ISO, tap ISO and update ZIP.",
+          "<strong>Apply update ZIP</strong>: <em>Settings → System update</em> → upload <code>cyjan-ids-update-vX.Y.Z.zip</code>. The backend pulls all container images and recreates all services with <code>--force-recreate</code>. Typically 1–3 min, then the pipeline runs on the new version.",
+          "<strong>Fresh install</strong>: make <code>cyjan-ids-latest.iso</code> or <code>cyjan-ids-tap-latest.iso</code> bootable, install, the setup wizard handles the rest.",
+          "<strong>Heuristic rule updates</strong> (signature-engine YAML rules) need no update package — they ship in the image and hot-reload via inotify."
+        ]
+      }
+    },
+    "footer": "Detailed architecture and operator notes in <a>CLAUDE.md</a>. Concrete lab report (pentest against the IDS itself, all 6 phases): <lab>docs/cyjankali/lab.html</lab>."
   },
   "topbar": {
     "live": "Live",
