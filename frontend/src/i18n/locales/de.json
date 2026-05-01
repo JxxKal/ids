@@ -748,7 +748,8 @@
       "filterRate": "Filter-Rate",
       "scoreThreshold": "Score-Schwellwert",
       "featureDeviationsTitle": "Warum werden Flows als anomal erkannt?",
-      "featureDeviationsSubtitle": "(Merkmal-Abweichungen in ML-Alerts vs. normaler Verkehr)",
+      "featureDeviationsSubtitle": "(Faktor: wie viel höher/niedriger das Merkmal in Alert-Flows gegenüber Normal-Flows liegt)",
+      "deviationTooltip": "Mittelwert des Merkmals in ML-Alerts gegenüber Normal-Flows. Rohe Abweichung: {{pct}} %. Bei großen Spreads zeigen wir den Faktor (z.B. 91× = 9 100 %).",
       "normalLabel": "Normal",
       "inAlerts": "In ML-Alerts",
       "noAlerts24h": "In den letzten 24 Stunden keine ML-Alerts – kein anomaler Verkehr erkannt oder ML-Filter zu lax konfiguriert."

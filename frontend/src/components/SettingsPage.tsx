@@ -1045,12 +1045,25 @@ function MLStatusDisplay() {
               const isHigh = f.deviation_pct > 0;
               const absDev = Math.abs(f.deviation_pct);
               const barW   = Math.min(100, absDev / 5);  // 500% = volle Breite
+              // Lesbare Anzeige: bei kleinen Abweichungen (< 100 %) als
+              // Prozent, sonst als Faktor (z.B. 9105 % → 91× höher). Roh-
+              // 5-stellige Prozente sind kognitiv schwer einzuordnen.
+              let devText: string;
+              if (absDev < 100) {
+                devText = `${absDev.toFixed(0)} %`;
+              } else {
+                const factor = isHigh
+                  ? 1 + absDev / 100
+                  : 1 / (1 - absDev / 100);  // -90 % → 1/0.1 = 10×
+                devText = factor >= 10 ? `${factor.toFixed(0)}×` : `${factor.toFixed(1)}×`;
+              }
               return (
-                <div key={f.name} className="text-xs">
+                <div key={f.name} className="text-xs"
+                     title={t('settings.mlStatus.deviationTooltip', { pct: f.deviation_pct })}>
                   <div className="flex items-center justify-between mb-0.5">
                     <span className="text-slate-300">{f.label}</span>
                     <span className={`font-mono ${isHigh ? 'text-orange-400' : 'text-blue-400'}`}>
-                      {isHigh ? '↑' : '↓'} {absDev.toFixed(0)} %
+                      {isHigh ? '↑' : '↓'} {devText}
                     </span>
                   </div>
                   <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">

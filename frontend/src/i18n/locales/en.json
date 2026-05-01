@@ -748,7 +748,8 @@
       "filterRate": "Filter rate",
       "scoreThreshold": "Score threshold",
       "featureDeviationsTitle": "Why are flows flagged as anomalous?",
-      "featureDeviationsSubtitle": "(feature deviations in ML alerts vs. normal traffic)",
+      "featureDeviationsSubtitle": "(factor: how much higher/lower the feature is in alerted flows vs. normal flows)",
+      "deviationTooltip": "Average of this feature in ML alerts vs. normal flows. Raw deviation: {{pct}} %. For large spreads we show the factor (e.g. 91× = 9 100 %).",
       "normalLabel": "Normal",
       "inAlerts": "In ML alerts",
       "noAlerts24h": "No ML alerts in the last 24 hours – no anomalous traffic detected, or ML filter configured too leniently."
