@@ -4,9 +4,10 @@ import {
   Globe, Network, Package, Server, ShieldCheck, Workflow,
 } from 'lucide-react';
 import type { NavTab } from './Sidebar';
+import type { SectionId } from './SettingsPage';
 
 interface Props {
-  onNavigate: (tab: NavTab) => void;
+  onNavigate: (tab: NavTab, section?: SectionId) => void;
 }
 
 /**
@@ -21,7 +22,7 @@ export function GettingStartedPage({ onNavigate }: Props) {
     id: string;
     icon: JSX.Element;
     color: string;
-    actions?: { label: string; tab: NavTab }[];
+    actions?: { label: string; tab: NavTab; section?: SectionId }[];
   }[] = [
     {
       id: 'networks',
@@ -36,13 +37,13 @@ export function GettingStartedPage({ onNavigate }: Props) {
       id: 'resolver',
       icon: <Globe size={18} />,
       color: 'cyan',
-      actions: [{ label: t('gettingStarted.steps.resolver.open'), tab: 'settings' }],
+      actions: [{ label: t('gettingStarted.steps.resolver.open'), tab: 'settings', section: 'dns-resolvers' }],
     },
     {
       id: 'ml',
       icon: <Brain size={18} />,
       color: 'amber',
-      actions: [{ label: t('gettingStarted.steps.ml.open'), tab: 'settings' }],
+      actions: [{ label: t('gettingStarted.steps.ml.open'), tab: 'settings', section: 'ml-overview' }],
     },
     {
       id: 'dashboard',
@@ -54,13 +55,13 @@ export function GettingStartedPage({ onNavigate }: Props) {
       id: 'boundary',
       icon: <ShieldCheck size={18} />,
       color: 'violet',
-      actions: [{ label: t('gettingStarted.steps.boundary.open'), tab: 'settings' }],
+      actions: [{ label: t('gettingStarted.steps.boundary.open'), tab: 'settings', section: 'egress-priorities' }],
     },
     {
       id: 'updates',
       icon: <Package size={18} />,
       color: 'slate',
-      actions: [{ label: t('gettingStarted.steps.updates.open'), tab: 'settings' }],
+      actions: [{ label: t('gettingStarted.steps.updates.open'), tab: 'settings', section: 'update' }],
     },
   ];
 
@@ -179,7 +180,7 @@ export function GettingStartedPage({ onNavigate }: Props) {
                   <button
                     key={i}
                     type="button"
-                    onClick={() => onNavigate(a.tab)}
+                    onClick={() => onNavigate(a.tab, a.section)}
                     className="px-3 py-1.5 rounded text-xs font-medium border bg-cyan-500/15 text-cyan-200 border-cyan-500/50 hover:bg-cyan-500/25 transition-colors flex items-center gap-1.5"
                   >
                     {a.label}

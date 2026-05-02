@@ -5185,7 +5185,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -5303,9 +5303,17 @@ function GeneralSettings() {
   );
 }
 
-export function SettingsPage() {
+interface SettingsPageProps {
+  // Initial sichtbare Sub-Sektion. Wird beim ersten Render in den State
+  // übernommen — spätere Wechsel innerhalb der Settings-Page laufen weiter
+  // über den lokalen setActive (wir wollen die User-Klicks im Submenü nicht
+  // bei jedem Tab-Wechsel resetten).
+  initialSection?: SectionId;
+}
+
+export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
   const { t } = useTranslation();
-  const [active, setActive] = useState<SectionId>('general');
+  const [active, setActive] = useState<SectionId>(initialSection ?? 'general');
 
   const isThorsten = active === 'thorsten';
 

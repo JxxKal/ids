@@ -11,7 +11,7 @@ import { GettingStartedPage } from './components/GettingStartedPage';
 import { HostsPage } from './components/HostsPage';
 import { LoginPage } from './components/LoginPage';
 import { NetworksPage } from './components/NetworksPage';
-import { SettingsPage } from './components/SettingsPage';
+import { SettingsPage, type SectionId } from './components/SettingsPage';
 import { SeverityBarsCard } from './components/SeverityBarsCard';
 import { HostConnectionDrawer } from './components/HostConnectionDrawer';
 import { HelpTip } from './components/HelpTip';
@@ -98,6 +98,19 @@ export default function App() {
 function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const { t } = useTranslation();
   const [tab, setTab]         = useState<NavTab>('dashboard');
+  // Wenn Settings über onNavigate von außen geöffnet wird, soll die
+  // Sub-Sektion direkt mitspringen (sonst landet jeder Klick auf "→ DNS-
+  // Resolver öffnen" auf der Default-Sektion 'general').
+  const [settingsSection, setSettingsSection] = useState<SectionId | undefined>(undefined);
+  const navigateTo = (target: NavTab, section?: SectionId) => {
+    if (target === 'settings' && section) {
+      // Force re-mount der SettingsPage über key={section}, damit die Page
+      // die neue initialSection auch übernimmt wenn man mehrfach hintereinander
+      // verschiedene Settings-Sub-Tabs anspringt.
+      setSettingsSection(section);
+    }
+    setTab(target);
+  };
   const [showTest, setShowTest] = useState(
     () => localStorage.getItem('showTest') === 'true'
   );
@@ -398,11 +411,11 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
         )}
 
-        {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5"><GettingStartedPage onNavigate={setTab} /></div>}
+        {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5"><GettingStartedPage onNavigate={navigateTo} /></div>}
         {tab === 'networks' && <div className="flex-1 overflow-auto p-5"><NetworksPage /></div>}
         {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5"><HostsPage    /></div>}
         {tab === 'tests'    && <div className="flex-1 overflow-auto p-5"><TestsPage    /></div>}
-        {tab === 'settings' && <div className="flex-1 overflow-auto p-5"><SettingsPage /></div>}
+        {tab === 'settings' && <div className="flex-1 overflow-auto p-5"><SettingsPage key={settingsSection ?? 'default'} initialSection={settingsSection} /></div>}
       </main>
 
       {showUnknown && <UnknownHostsDrawer onClose={() => setShowUnknown(false)} />}
