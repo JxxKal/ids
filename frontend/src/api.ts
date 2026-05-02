@@ -1281,3 +1281,50 @@ export async function createTapPairingToken(body: {
 export async function revokeTap(id: string): Promise<void> {
   await req(`/api/taps/${id}`, { method: 'DELETE' });
 }
+
+// ── Auto-Pairing: Pending-Liste, Approve/Reject, Audit-Log ───────────────────
+
+export interface PendingTap {
+  id:           string;
+  name:         string;
+  hardware_id:  string;
+  source_ip:    string;
+  hostname:     string | null;
+  version:      string | null;
+  fingerprint:  string;
+  announced_at: string;   // ISO
+  status:       string;
+}
+
+export interface TapAuditEntry {
+  id:           number;
+  ts:           string;   // ISO
+  event:        string;   // announce | approved | rejected | rejected_ip_not_private | rejected_ip_not_known | rejected_rate_limit | poll | rejected_csr_invalid
+  source_ip:    string | null;
+  hardware_id:  string | null;
+  name:         string | null;
+  pending_id:   string | null;
+  details:      Record<string, unknown>;
+}
+
+export async function fetchPendingTaps(): Promise<PendingTap[]> {
+  return req('/api/taps/pending');
+}
+
+export async function approvePendingTap(
+  id: string,
+  body: { name?: string; site?: string } = {},
+): Promise<{ tap_id: string; name: string; expires_at: string }> {
+  return req(`/api/taps/pending/${id}/approve`, {
+    method: 'POST',
+    body:   JSON.stringify(body),
+  });
+}
+
+export async function rejectPendingTap(id: string): Promise<void> {
+  await req(`/api/taps/pending/${id}/reject`, { method: 'POST' });
+}
+
+export async function fetchTapAuditLog(limit = 200): Promise<TapAuditEntry[]> {
+  return req(`/api/taps/audit-log?limit=${limit}`);
+}

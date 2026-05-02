@@ -577,7 +577,32 @@
     },
     "remoteTaps": {
       "title": "Remote Taps",
-      "intro": "Verteilte Capture-Knoten, die ihre Alerts über mTLS-WSS an diesen Master senden. Pro Tap einen Pairing-Token erzeugen, dem Tap-Wizard übergeben (zusammen mit der Master-API-URL), und der Tap koppelt sich automatisch. Der Token ist 60 min einmalig gültig und wird hier nur ein einziges Mal angezeigt – sofort kopieren.",
+      "intro": "Verteilte Capture-Knoten, die ihre Alerts über mTLS-WSS an diesen Master senden. Zwei Pairing-Pfade: <strong>Auto-Pair</strong> (der Tap meldet sich selbst, wenn seine Source-IP in einem deiner bekannten Netzwerke liegt — Admin bestätigt unten); oder <strong>Token-Pair</strong> (klassisch, Pro Tap einen Pairing-Token erzeugen und dem Tap-Wizard übergeben).",
+      "pending": {
+        "title": "Wartende Auto-Pair-Anfragen ({{count}})",
+        "subtitle": "approve oder reject — danach kann der Tap sein mTLS-Cert holen",
+        "colName": "Name",
+        "colSourceIp": "Source-IP",
+        "colHostname": "Hostname",
+        "colVersion": "Version",
+        "colFingerprint": "Fingerprint",
+        "colAnnouncedAt": "Gemeldet",
+        "colActions": "Aktion",
+        "approve": "✓ Hinzufügen",
+        "reject": "✗ Ablehnen"
+      },
+      "audit": {
+        "show": "Audit-Log anzeigen",
+        "hide": "Audit-Log ausblenden",
+        "refresh": "Aktualisieren",
+        "title": "Tap-Pairing Audit-Log",
+        "empty": "Keine Audit-Einträge.",
+        "colTs": "Zeitpunkt",
+        "colEvent": "Ereignis",
+        "colSourceIp": "Source-IP",
+        "colName": "Name",
+        "colDetails": "Details"
+      },
       "addBtn": "Pairing-Token erzeugen",
       "addModalTitle": "Neuen Tap koppeln",
       "addNameLabel": "Name (eindeutig)",

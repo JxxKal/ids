@@ -577,6 +577,31 @@
     },
     "remoteTaps": {
       "title": "Remote Taps",
+      "pending": {
+        "title": "Pending auto-pair requests ({{count}})",
+        "subtitle": "approve or reject — afterwards the tap can fetch its mTLS cert",
+        "colName": "Name",
+        "colSourceIp": "Source IP",
+        "colHostname": "Hostname",
+        "colVersion": "Version",
+        "colFingerprint": "Fingerprint",
+        "colAnnouncedAt": "Announced",
+        "colActions": "Action",
+        "approve": "✓ Add",
+        "reject": "✗ Reject"
+      },
+      "audit": {
+        "show": "Show audit log",
+        "hide": "Hide audit log",
+        "refresh": "Refresh",
+        "title": "Tap pairing audit log",
+        "empty": "No audit entries.",
+        "colTs": "Timestamp",
+        "colEvent": "Event",
+        "colSourceIp": "Source IP",
+        "colName": "Name",
+        "colDetails": "Details"
+      },
       "intro": "Distributed capture nodes that ship their alerts to this master over mTLS WSS. Generate a pairing token per tap, hand it to the tap wizard (together with this master's API URL), and the tap pairs itself automatically. The token is one-shot and valid for 60 minutes – it is shown here only once, copy it immediately.",
       "addBtn": "Generate pairing token",
       "addModalTitle": "Pair a new tap",

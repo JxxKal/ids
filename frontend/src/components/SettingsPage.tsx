@@ -25,6 +25,8 @@ import {
   type SuricataOverrideEntry,
   fetchBoundaryPriorityMap, saveBoundaryPriorityMap,
   fetchTaps, createTapPairingToken, revokeTap,
+  fetchPendingTaps, approvePendingTap, rejectPendingTap, fetchTapAuditLog,
+  type PendingTap, type TapAuditEntry,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
@@ -4583,13 +4585,51 @@ function RemoteTapsSettings() {
   const [revokeTarget, setRevokeTarget] = useState<RemoteTap | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
+  // Auto-Pairing: Pending-Liste + Audit-Log
+  const [pending, setPending] = useState<PendingTap[]>([]);
+  const [showAudit, setShowAudit] = useState(false);
+  const [audit, setAudit] = useState<TapAuditEntry[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);  // pending_id wenn approve/reject läuft
 
   async function reload() {
     try {
-      setTaps(await fetchTaps());
+      const [tapsList, pendingList] = await Promise.all([fetchTaps(), fetchPendingTaps()]);
+      setTaps(tapsList);
+      setPending(pendingList);
       setLoadErr('');
     } catch (exc) {
       setLoadErr(t('settings.remoteTaps.loadError', { message: String(exc) }));
+    }
+  }
+
+  async function loadAudit() {
+    try {
+      setAudit(await fetchTapAuditLog(200));
+    } catch (exc) {
+      setLoadErr(t('settings.remoteTaps.loadError', { message: String(exc) }));
+    }
+  }
+
+  async function doApprove(p: PendingTap) {
+    setBusy(p.id);
+    try {
+      await approvePendingTap(p.id, {});
+      await reload();
+    } catch (exc) {
+      alert(`Approve failed: ${exc}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function doReject(p: PendingTap) {
+    setBusy(p.id);
+    try {
+      await rejectPendingTap(p.id);
+      await reload();
+    } catch (exc) {
+      alert(`Reject failed: ${exc}`);
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -4685,6 +4725,131 @@ function RemoteTapsSettings() {
       </div>
 
       {loadErr && <div className="text-xs text-red-400">{loadErr}</div>}
+
+      {/* ── Pending Auto-Pair-Anfragen ─────────────────────────────────── */}
+      {pending.length > 0 && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-900/10 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-amber-300 uppercase tracking-wider">
+              {t('settings.remoteTaps.pending.title', { count: pending.length })}
+            </h3>
+            <span className="text-[10px] font-mono text-amber-400/70">{t('settings.remoteTaps.pending.subtitle')}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-slate-400 border-b border-amber-700/30">
+                  <th className="text-left px-2 py-1.5">{t('settings.remoteTaps.pending.colName')}</th>
+                  <th className="text-left px-2 py-1.5">{t('settings.remoteTaps.pending.colSourceIp')}</th>
+                  <th className="text-left px-2 py-1.5">{t('settings.remoteTaps.pending.colHostname')}</th>
+                  <th className="text-left px-2 py-1.5">{t('settings.remoteTaps.pending.colVersion')}</th>
+                  <th className="text-left px-2 py-1.5">{t('settings.remoteTaps.pending.colFingerprint')}</th>
+                  <th className="text-left px-2 py-1.5">{t('settings.remoteTaps.pending.colAnnouncedAt')}</th>
+                  <th className="text-right px-2 py-1.5">{t('settings.remoteTaps.pending.colActions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pending.map(p => (
+                  <tr key={p.id} className="border-b border-amber-700/20">
+                    <td className="px-2 py-1.5 font-mono text-cyan-300">{p.name}</td>
+                    <td className="px-2 py-1.5 font-mono text-slate-300">{p.source_ip}</td>
+                    <td className="px-2 py-1.5 text-slate-300">{p.hostname || '–'}</td>
+                    <td className="px-2 py-1.5 font-mono text-slate-400">{p.version || '–'}</td>
+                    <td className="px-2 py-1.5 font-mono text-slate-500" title={p.fingerprint}>
+                      {p.fingerprint.slice(0, 12)}…
+                    </td>
+                    <td className="px-2 py-1.5 font-mono text-slate-400" title={fmtAbs(p.announced_at)}>
+                      {fmtRelative(p.announced_at)}
+                    </td>
+                    <td className="px-2 py-1.5 text-right space-x-1">
+                      <button
+                        type="button"
+                        disabled={busy === p.id}
+                        onClick={() => doApprove(p)}
+                        className="px-2 py-1 rounded text-[11px] bg-green-900/30 text-green-300 border border-green-700/40 hover:bg-green-900/50 disabled:opacity-50"
+                      >
+                        {busy === p.id ? '…' : t('settings.remoteTaps.pending.approve')}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy === p.id}
+                        onClick={() => doReject(p)}
+                        className="px-2 py-1 rounded text-[11px] bg-red-900/30 text-red-300 border border-red-700/40 hover:bg-red-900/50 disabled:opacity-50"
+                      >
+                        {busy === p.id ? '…' : t('settings.remoteTaps.pending.reject')}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => { setShowAudit(s => !s); if (!showAudit) void loadAudit(); }}
+          className="px-2 py-1 rounded text-[11px] border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500"
+        >
+          {showAudit ? t('settings.remoteTaps.audit.hide') : t('settings.remoteTaps.audit.show')}
+        </button>
+        {showAudit && (
+          <button
+            type="button"
+            onClick={() => void loadAudit()}
+            className="text-[11px] text-cyan-400 hover:text-cyan-200"
+          >
+            ↻ {t('settings.remoteTaps.audit.refresh')}
+          </button>
+        )}
+      </div>
+
+      {showAudit && (
+        <div className="rounded-lg border border-slate-700/50 bg-slate-900/40 p-3">
+          <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+            {t('settings.remoteTaps.audit.title')}
+          </h3>
+          {audit.length === 0 ? (
+            <p className="text-xs text-slate-500 italic">{t('settings.remoteTaps.audit.empty')}</p>
+          ) : (
+            <div className="overflow-x-auto max-h-96">
+              <table className="w-full text-[11px]">
+                <thead className="sticky top-0 bg-slate-900/95">
+                  <tr className="text-slate-500 border-b border-slate-700/40">
+                    <th className="text-left px-2 py-1">{t('settings.remoteTaps.audit.colTs')}</th>
+                    <th className="text-left px-2 py-1">{t('settings.remoteTaps.audit.colEvent')}</th>
+                    <th className="text-left px-2 py-1">{t('settings.remoteTaps.audit.colSourceIp')}</th>
+                    <th className="text-left px-2 py-1">{t('settings.remoteTaps.audit.colName')}</th>
+                    <th className="text-left px-2 py-1">{t('settings.remoteTaps.audit.colDetails')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {audit.map(a => {
+                    const isReject = a.event.startsWith('rejected');
+                    const isApprove = a.event === 'approved';
+                    const evColor = isReject ? 'text-red-400' : isApprove ? 'text-green-400' : 'text-slate-400';
+                    return (
+                      <tr key={a.id} className="border-b border-slate-800/40">
+                        <td className="px-2 py-1 font-mono text-slate-500 whitespace-nowrap">
+                          {new Date(a.ts).toLocaleString(i18n.resolvedLanguage ?? 'de')}
+                        </td>
+                        <td className={`px-2 py-1 font-mono ${evColor}`}>{a.event}</td>
+                        <td className="px-2 py-1 font-mono text-slate-400">{a.source_ip ?? '–'}</td>
+                        <td className="px-2 py-1 text-slate-300">{a.name ?? '–'}</td>
+                        <td className="px-2 py-1 font-mono text-slate-500 truncate max-w-md">
+                          {Object.keys(a.details).length === 0 ? '' : JSON.stringify(a.details)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {taps && taps.length === 0 && (
         <div className="text-xs text-slate-500 italic">{t('settings.remoteTaps.noTaps')}</div>
