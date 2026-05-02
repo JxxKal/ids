@@ -748,6 +748,21 @@
       "saveButton": "Save SAML configuration"
     },
     "mlStatus": {
+      "trainingNow": "Model is currently retraining …",
+      "trainingNowSub": "Quantile calculation + IsolationForest fit. Typical duration 30 s to 5 min depending on sample count.",
+      "retrainTitle": "Auto re-training (training-loop)",
+      "retrainInterval": "Interval",
+      "retrainLast": "Last training",
+      "retrainNext": "Next scheduled",
+      "retrainNeverYet": "never yet",
+      "retrainDue": "due — on next cycle",
+      "retrainLastDuration": "Last duration",
+      "retrainLastError": "Last error: {{error}}",
+      "retrainNow": "↻ Retrain now",
+      "retrainNowRunning": "running …",
+      "retrainNowHint": "Triggers an immediate retrain (overrides the interval once). Model is refitted with current flow data + manually marked samples.",
+      "timeAgo": "{{duration}} ago",
+      "timeIn": "in {{duration}}",
       "title": "AI/ML engine",
       "loadError": "Could not load ML status",
       "phasePassthrough": "Data collection",
@@ -822,6 +837,15 @@
             "reactive": { "label": "Reactive", "desc": "Fast adaptation" },
             "standard": { "label": "Standard" },
             "stable":   { "label": "Stable",   "desc": "Lower CPU load" }
+          }
+        },
+        "retrainInterval": {
+          "label": "Auto re-training interval",
+          "hint": "How often the training-loop triggers a full retrain of the IsolationForest model. Default 24 h. Visible in the ML status section (Last training / Next scheduled).",
+          "presets": {
+            "hourly": { "label": "Hourly", "desc": "Aggressive adaptation — only useful in test setups" },
+            "daily":  { "label": "Daily",  "desc": "Production default" },
+            "weekly": { "label": "Weekly", "desc": "Stable environments with slow drift" }
           }
         }
       }

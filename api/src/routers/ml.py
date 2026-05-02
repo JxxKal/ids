@@ -27,7 +27,34 @@ DEFAULT_CONFIG: dict = {
     "contamination":        0.01,
     "bootstrap_min_samples": 500,
     "partial_fit_interval": 200,
+    # 24 h: Default-Intervall des training-loop. Wird zur Laufzeit aus
+    # ml_config.json gelesen, kein Container-Restart nötig.
+    "retrain_interval_s":   86400,
 }
+
+RETRAIN_STATUS_FILE = MODELS_DIR / "retrain_status.json"
+
+
+def _read_retrain_state() -> RetrainState | None:
+    """training-loop schreibt diesen File nach jedem Retrain bzw. einmal pro
+    Minute mit dem aktuellen Stand. Wenn er fehlt, läuft das training-loop
+    entweder noch nicht oder ist auf einer alten Version ohne Status-Output."""
+    if not RETRAIN_STATUS_FILE.exists():
+        return None
+    try:
+        d = json.loads(RETRAIN_STATUS_FILE.read_text())
+        return RetrainState(
+            currently_training=  bool(d.get("currently_training", False)),
+            last_trained_at=     d.get("last_trained_at"),
+            last_run_duration_s= d.get("last_run_duration_s"),
+            last_run_samples=    d.get("last_run_samples"),
+            retrain_interval_s=  d.get("retrain_interval_s"),
+            next_scheduled_at=   d.get("next_scheduled_at"),
+            last_error=          d.get("last_error"),
+            updated_at=          d.get("updated_at"),
+        )
+    except Exception:
+        return None
 
 # Menschenlesbare Feature-Labels
 FEATURE_LABELS: dict[str, dict[str, str]] = {
@@ -82,16 +109,31 @@ class MLConfig(BaseModel):
     contamination:         float   # 0.001 – 0.50
     bootstrap_min_samples: int     # 100 – 50000
     partial_fit_interval:  int     # 50 – 5000
+    retrain_interval_s:    int     # 60 – 7 * 86400 (Re-Training-Cycle des training-loop)
 
 class MLConfigPatch(BaseModel):
     alert_threshold:       float | None = None
     contamination:         float | None = None
     bootstrap_min_samples: int   | None = None
     partial_fit_interval:  int   | None = None
+    retrain_interval_s:    int   | None = None
 
 class RetrainStatus(BaseModel):
     triggered:    bool
     triggered_at: float | None
+
+class RetrainState(BaseModel):
+    """Live-State des training-loop. Wird vom training-loop selbst nach
+    /models/retrain_status.json geschrieben — fehlt das File, sind alle
+    Felder None und das UI zeigt 'unbekannt'."""
+    currently_training:   bool
+    last_trained_at:      float | None
+    last_run_duration_s:  float | None
+    last_run_samples:     int   | None
+    retrain_interval_s:   float | None
+    next_scheduled_at:    float | None
+    last_error:           str   | None
+    updated_at:           float | None
 
 class MLStatus(BaseModel):
     phase:                  str   # "passthrough" | "learning" | "active"
@@ -100,6 +142,7 @@ class MLStatus(BaseModel):
     bootstrap:              BootstrapInfo
     stats_24h:              Stats24h
     top_anomaly_features:   list[FeatureDeviation]
+    retrain_state:          RetrainState | None = None
 
 
 # ── Hilfsfunktionen ────────────────────────────────────────────────────────────
@@ -280,6 +323,7 @@ async def ml_status(pool: asyncpg.Pool = Depends(get_pool)) -> MLStatus:
         bootstrap           = bootstrap,
         stats_24h           = stats_24h,
         top_anomaly_features = feature_deviations,
+        retrain_state       = _read_retrain_state(),
     )
 
 
@@ -306,6 +350,10 @@ async def update_ml_config(body: MLConfigPatch) -> MLConfig:
         cfg["bootstrap_min_samples"] = max(100, min(50_000, body.bootstrap_min_samples))
     if body.partial_fit_interval is not None:
         cfg["partial_fit_interval"] = max(50, min(5_000, body.partial_fit_interval))
+    if body.retrain_interval_s is not None:
+        # Mind. 60 s (sonst CPU-Spam), max. 7 Tage (länger ist sinnlos —
+        # Modell wäre dauerhaft veraltet).
+        cfg["retrain_interval_s"] = max(60, min(7 * 86_400, body.retrain_interval_s))
 
     _write_ml_config(cfg)
 

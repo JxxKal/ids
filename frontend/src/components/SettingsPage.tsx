@@ -709,6 +709,22 @@ function buildParamDocs(t: TFn) {
         { label: t('settings.mlConfig.params.partialFit.presets.stable.label'),    value: 1000, desc: t('settings.mlConfig.params.partialFit.presets.stable.desc') },
       ],
     },
+    {
+      key: 'retrain_interval_s' as const,
+      label: t('settings.mlConfig.params.retrainInterval.label'),
+      min: 60, max: 7 * 86400, step: 300,
+      fmt: (v: number) => {
+        if (v < 3600)  return `${Math.round(v / 60)} min`;
+        if (v < 86400) return `${(v / 3600).toFixed(1)} h`;
+        return `${(v / 86400).toFixed(1)} d`;
+      },
+      hint: t('settings.mlConfig.params.retrainInterval.hint'),
+      presets: [
+        { label: t('settings.mlConfig.params.retrainInterval.presets.hourly.label'),  value: 3600,    desc: t('settings.mlConfig.params.retrainInterval.presets.hourly.desc') },
+        { label: t('settings.mlConfig.params.retrainInterval.presets.daily.label'),   value: 86400,   desc: t('settings.mlConfig.params.retrainInterval.presets.daily.desc') },
+        { label: t('settings.mlConfig.params.retrainInterval.presets.weekly.label'),  value: 604800,  desc: t('settings.mlConfig.params.retrainInterval.presets.weekly.desc') },
+      ],
+    },
   ];
 }
 
@@ -932,17 +948,27 @@ function MLStatusDisplay() {
   const [error,   setError]   = useState('');
 
   useEffect(() => {
-    fetchMLStatus()
-      .then(setStatus)
-      .catch(() => setError(t('settings.mlStatus.loadError')))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const load = () =>
+      fetchMLStatus()
+        .then(s => { if (!cancelled) { setStatus(s); setError(''); } })
+        .catch(() => { if (!cancelled) setError(t('settings.mlStatus.loadError')); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    void load();
+    // 30 s Polling — damit currently_training, next_scheduled-Countdown
+    // und Bootstrap-Progress live mitwandern.
+    const id = window.setInterval(() => { void load(); }, 30_000);
+    return () => { cancelled = true; window.clearInterval(id); };
   }, [t]);
 
   if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
   if (error)   return <p className="text-red-400 text-sm">{error}</p>;
   if (!status) return null;
 
-  const { phase, phase_label, model, bootstrap, stats_24h, top_anomaly_features } = status;
+  const { phase, phase_label, model, bootstrap, stats_24h, top_anomaly_features, retrain_state } = status;
+  const rs = retrain_state ?? null;
+  // Sekunden-Stand: Differenz zu jetzt für "vor X" / "in X" Anzeigen.
+  const nowSec = Date.now() / 1000;
 
   return (
     <div className="space-y-5">
@@ -996,6 +1022,17 @@ function MLStatusDisplay() {
         </div>
       )}
 
+      {/* ── Currently-Training-Banner ────────────────────────────────── */}
+      {rs?.currently_training && (
+        <div className="rounded-lg border border-amber-500/50 bg-amber-900/20 px-4 py-3 text-xs text-amber-200 flex items-center gap-3">
+          <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+          <div>
+            <p className="font-medium">{t('settings.mlStatus.trainingNow')}</p>
+            <p className="text-amber-300/70 mt-0.5">{t('settings.mlStatus.trainingNowSub')}</p>
+          </div>
+        </div>
+      )}
+
       {/* ── Modell-Details ───────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
         {[
@@ -1010,6 +1047,67 @@ function MLStatusDisplay() {
           </div>
         ))}
       </div>
+
+      {/* ── Retrain-State (training-loop) ────────────────────────────── */}
+      {rs && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-slate-400">{t('settings.mlStatus.retrainTitle')}</p>
+            <button
+              type="button"
+              disabled={rs.currently_training}
+              onClick={async () => {
+                try { await triggerMLRetrain(); }
+                catch (exc) { alert(`Retrain failed: ${exc}`); }
+              }}
+              className="px-2.5 py-1 rounded text-[11px] border bg-cyan-500/15 text-cyan-200 border-cyan-500/50 hover:bg-cyan-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
+              title={t('settings.mlStatus.retrainNowHint')}
+            >
+              {rs.currently_training ? t('settings.mlStatus.retrainNowRunning') : t('settings.mlStatus.retrainNow')}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-xs">
+            {[
+              {
+                label: t('settings.mlStatus.retrainInterval'),
+                value: rs.retrain_interval_s
+                  ? fmtDuration(rs.retrain_interval_s, t)
+                  : '—',
+              },
+              {
+                label: t('settings.mlStatus.retrainLast'),
+                value: rs.last_trained_at
+                  ? t('settings.mlStatus.timeAgo', { duration: fmtDuration(nowSec - rs.last_trained_at, t) })
+                  : t('settings.mlStatus.retrainNeverYet'),
+              },
+              {
+                label: t('settings.mlStatus.retrainNext'),
+                value: rs.next_scheduled_at
+                  ? (rs.next_scheduled_at <= nowSec
+                      ? t('settings.mlStatus.retrainDue')
+                      : t('settings.mlStatus.timeIn', { duration: fmtDuration(rs.next_scheduled_at - nowSec, t) }))
+                  : '—',
+              },
+              {
+                label: t('settings.mlStatus.retrainLastDuration'),
+                value: rs.last_run_duration_s != null
+                  ? fmtDuration(rs.last_run_duration_s, t)
+                  : '—',
+              },
+            ].map(({ label, value }) => (
+              <div key={label} className="bg-slate-800/40 rounded-lg px-3 py-2 border border-slate-700/40">
+                <div className="text-slate-500 mb-0.5">{label}</div>
+                <div className="text-slate-200 font-medium">{value}</div>
+              </div>
+            ))}
+          </div>
+          {rs.last_error && (
+            <p className="text-[11px] text-red-400 mt-2">
+              {t('settings.mlStatus.retrainLastError', { error: rs.last_error })}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── 24h-Statistik (nur im aktiven Modus) ─────────────────────── */}
       {phase === 'active' && (

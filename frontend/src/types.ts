@@ -224,6 +224,18 @@ export interface MLConfig {
   contamination:         number;
   bootstrap_min_samples: number;
   partial_fit_interval:  number;
+  retrain_interval_s:    number;
+}
+
+export interface MLRetrainState {
+  currently_training:   boolean;
+  last_trained_at:      number | null;   // unix-seconds
+  last_run_duration_s:  number | null;
+  last_run_samples:     number | null;
+  retrain_interval_s:   number | null;
+  next_scheduled_at:    number | null;
+  last_error:           string | null;
+  updated_at:           number | null;
 }
 
 export interface MLStatus {
@@ -233,6 +245,7 @@ export interface MLStatus {
   bootstrap:             MLBootstrapInfo;
   stats_24h:             MLStats24h;
   top_anomaly_features:  MLFeatureDeviation[];
+  retrain_state?:        MLRetrainState | null;
 }
 
 export interface RuleSource {

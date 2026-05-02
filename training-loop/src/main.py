@@ -173,6 +173,55 @@ def run(cfg: Config) -> None:
         cfg.min_new_samples,
     )
 
+    status_file = Path(cfg.models_dir) / "retrain_status.json"
+
+    def _read_runtime_interval() -> float:
+        """retrain_interval_s zur Laufzeit aus ml_config.json — wenn der User
+        den Wert im UI ändert, greift es ohne Container-Restart."""
+        cfg_file = Path(cfg.models_dir) / "ml_config.json"
+        if cfg_file.exists():
+            try:
+                rt = json.loads(cfg_file.read_text())
+                v = rt.get("retrain_interval_s")
+                if isinstance(v, (int, float)) and v >= 60:
+                    return float(v)
+            except Exception:
+                pass
+        return cfg.retrain_interval_s
+
+    def _write_status(*, currently_training: bool,
+                      last_trained_at: float | None,
+                      last_run_duration_s: float | None,
+                      last_run_samples: int | None,
+                      retrain_interval_s: float,
+                      next_scheduled_at: float | None,
+                      last_error: str | None = None) -> None:
+        """Schreibt den aktuellen Trainings-State in /models/retrain_status.json.
+        Wird von der API gelesen und an das Frontend ausgeliefert."""
+        try:
+            status_file.write_text(json.dumps({
+                "currently_training":   currently_training,
+                "last_trained_at":      last_trained_at,
+                "last_run_duration_s":  last_run_duration_s,
+                "last_run_samples":     last_run_samples,
+                "retrain_interval_s":   retrain_interval_s,
+                "next_scheduled_at":    next_scheduled_at,
+                "last_error":           last_error,
+                "updated_at":           time.time(),
+            }))
+        except Exception as exc:
+            log.warning("Konnte retrain_status.json nicht schreiben: %s", exc)
+
+    last_run_duration_s: float | None = None
+    last_run_samples: int | None = None
+    last_error: str | None = None
+    interval = _read_runtime_interval()
+    _write_status(
+        currently_training=False, last_trained_at=None,
+        last_run_duration_s=None, last_run_samples=None,
+        retrain_interval_s=interval, next_scheduled_at=None,
+    )
+
     try:
         while running:
             time.sleep(60)  # Prüfintervall: jede Minute
@@ -181,7 +230,21 @@ def run(cfg: Config) -> None:
                 break
 
             now = time.time()
-            if now - last_retrain_ts < cfg.retrain_interval_s:
+            interval = _read_runtime_interval()
+            next_scheduled = (last_retrain_ts + interval) if last_retrain_ts > 0 else None
+            # Status-File alle 60 s aktualisieren (auch wenn nicht trainiert wird —
+            # damit das UI den next_scheduled-Countdown live sieht).
+            _write_status(
+                currently_training=False,
+                last_trained_at=last_retrain_ts if last_retrain_ts > 0 else None,
+                last_run_duration_s=last_run_duration_s,
+                last_run_samples=last_run_samples,
+                retrain_interval_s=interval,
+                next_scheduled_at=next_scheduled,
+                last_error=last_error,
+            )
+
+            if now - last_retrain_ts < interval:
                 continue
 
             # Sofort-Retrain via Trigger-Datei (z.B. nach Konfig-Änderung im UI)
@@ -214,21 +277,55 @@ def run(cfg: Config) -> None:
                 except Exception:
                     pass
 
+            # currently_training=True während retrain() läuft.
+            _write_status(
+                currently_training=True,
+                last_trained_at=last_retrain_ts if last_retrain_ts > 0 else None,
+                last_run_duration_s=last_run_duration_s,
+                last_run_samples=last_run_samples,
+                retrain_interval_s=interval,
+                next_scheduled_at=next_scheduled,
+                last_error=last_error,
+            )
+
+            run_started = time.time()
             normal_flows    = db.load_flows_for_bootstrap(cfg.max_train_samples)
             labeled_samples = db.load_samples(cfg.max_train_samples)
 
-            success = retrain(
-                normal_flows=normal_flows,
-                labeled_samples=labeled_samples,
-                models_dir=cfg.models_dir,
-                contamination=contamination,
-            )
+            try:
+                success = retrain(
+                    normal_flows=normal_flows,
+                    labeled_samples=labeled_samples,
+                    models_dir=cfg.models_dir,
+                    contamination=contamination,
+                )
+            except Exception as exc:
+                log.exception("Retrain crashed: %s", exc)
+                success = False
+                last_error = str(exc)
 
+            run_dur = time.time() - run_started
             if success:
-                last_retrain_ts = now
-                log.info("Retrain complete")
+                last_retrain_ts = run_started
+                last_run_duration_s = run_dur
+                last_run_samples = len(normal_flows) + len(labeled_samples)
+                last_error = None
+                log.info("Retrain complete (%.1fs, %d samples)",
+                         run_dur, last_run_samples)
             else:
                 log.warning("Retrain failed – will retry next interval")
+                if last_error is None:
+                    last_error = "retrain returned False"
+
+            _write_status(
+                currently_training=False,
+                last_trained_at=last_retrain_ts if last_retrain_ts > 0 else None,
+                last_run_duration_s=last_run_duration_s,
+                last_run_samples=last_run_samples,
+                retrain_interval_s=interval,
+                next_scheduled_at=last_retrain_ts + interval if last_retrain_ts > 0 else None,
+                last_error=last_error,
+            )
 
             if cfg.test_mode:
                 log.info("Test mode: exiting after first retrain attempt")

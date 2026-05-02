@@ -757,6 +757,21 @@
       "durMin": "{{n}} Min.",
       "durHour": "{{n}} Std.",
       "durDay": "{{n}} Tage",
+      "trainingNow": "Modell wird gerade neu trainiert …",
+      "trainingNowSub": "Quantil-Berechnung + IsolationForest-Fit. Dauer typisch 30 s bis 5 min je nach Sample-Anzahl.",
+      "retrainTitle": "Auto-Re-Training (training-loop)",
+      "retrainInterval": "Intervall",
+      "retrainLast": "Letztes Training",
+      "retrainNext": "Nächstes geplant",
+      "retrainNeverYet": "noch nie",
+      "retrainDue": "fällig — beim nächsten Cycle",
+      "retrainLastDuration": "Letzte Dauer",
+      "retrainLastError": "Letzter Fehler: {{error}}",
+      "retrainNow": "↻ Jetzt manuell trainieren",
+      "retrainNowRunning": "läuft …",
+      "retrainNowHint": "Triggert sofortiges Re-Training (überschreibt das Intervall einmalig). Modell wird mit aktuellen Flow-Daten + manuell markierten Samples neu gefittet.",
+      "timeAgo": "vor {{duration}}",
+      "timeIn": "in {{duration}}",
       "bannerPassthrough": "Das Modell wartet auf ausreichend Netzwerkdaten. Noch kein ML-Filtering aktiv – alle Flows werden durchgelassen.",
       "bannerLearning": "Das Modell wurde initial trainiert und verfeinert sich kontinuierlich. ML-Filtering ist bereits aktiv, aber noch nicht vollständig kalibriert.",
       "bannerActive": "Das Modell ist vollständig trainiert. Anomaler Verkehr wird automatisch erkannt und als ML-Alert markiert.",
@@ -822,6 +837,15 @@
             "reactive": { "label": "Reaktiv",  "desc": "Schnelle Adaption" },
             "standard": { "label": "Standard" },
             "stable":   { "label": "Stabil",   "desc": "Weniger CPU-Last" }
+          }
+        },
+        "retrainInterval": {
+          "label": "Auto-Re-Training-Intervall",
+          "hint": "Wie oft der training-loop ein komplettes Re-Training des IsolationForest-Modells anstößt. Default ist 24 h. Im UI sichtbar in der ML-Status-Sektion (Letztes Training / Nächstes geplant).",
+          "presets": {
+            "hourly": { "label": "Stündlich", "desc": "Aggressive Adaption — nur in Test-Setups sinnvoll" },
+            "daily":  { "label": "Täglich",   "desc": "Standard für Produktivbetrieb" },
+            "weekly": { "label": "Wöchentlich", "desc": "Stabile Umgebungen mit langsamer Drift" }
           }
         }
       }
