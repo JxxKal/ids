@@ -221,6 +221,195 @@ async def api_pair(body: PairBody) -> JSONResponse:
     })
 
 
+# ── Auto-Pair (token-frei, Admin-bestätigt am Master) ────────────────────────
+#
+# Workflow:
+#   1) /api/auto-pair-start: generiert lokal Key+CSR, postet /api/taps/announce
+#      am Master. Persistiert State (Key + master_url + fingerprint + pending_id)
+#      in /var/lib/cyjan/auto-pair-state.json. Returnt status='pending'.
+#   2) /api/auto-pair-status: pollt Master /api/taps/announce-status. Bei
+#      'approved' wird das Cert + CA wie beim normalen Pairing in /etc/cyjan
+#      geschrieben, der State-File gelöscht und tap-uplink neu gestartet.
+#   3) Bei 'rejected' wird der State-File auch gelöscht (Operator muss neu
+#      anstoßen).
+
+_AUTO_PAIR_STATE = Path("/var/lib/cyjan/auto-pair-state.json")
+
+
+def _hardware_id() -> str:
+    """Stabile Tap-Identität. /etc/machine-id ist unter systemd ein 32-Zeichen-
+    Hex und überlebt Reboots, ändert sich aber bei OS-Reinstall — was sinnvoll
+    ist (frische OS = Admin soll bewusst neu approven)."""
+    try:
+        return Path("/etc/machine-id").read_text().strip()
+    except OSError:
+        # Fallback für Container-Lab ohne /etc/machine-id.
+        import socket, hashlib
+        return hashlib.sha256(socket.gethostname().encode()).hexdigest()[:32]
+
+
+def _csr_fingerprint(csr_pem: str) -> str:
+    """SHA256 des CSR-public-keys — identisch zur Master-Berechnung."""
+    csr_obj = x509.load_pem_x509_csr(csr_pem.encode())
+    pub = csr_obj.public_key().public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    import hashlib
+    return hashlib.sha256(pub).hexdigest()
+
+
+class AutoPairStartBody(BaseModel):
+    master_url: str = Field(min_length=1)
+    name:       str | None = Field(default=None, max_length=80)
+    verify_ssl: bool = Field(default=False)
+
+
+@app.post("/api/auto-pair-start")
+async def api_auto_pair_start(body: AutoPairStartBody) -> JSONResponse:
+    """Lokal Key+CSR erzeugen, Master /api/taps/announce rufen, State
+    persistieren. Idempotent: wenn der State-File schon existiert (Re-Run),
+    wird das vorhandene Material wiederverwendet — der Master macht selbst
+    UPSERT auf hardware_id+fingerprint."""
+    cert_dir = Path("/etc/cyjan")
+    if (cert_dir / "tap.pem").exists():
+        raise HTTPException(409, "Tap ist bereits gepairt – cert existiert. Reset zuerst.")
+
+    _AUTO_PAIR_STATE.parent.mkdir(parents=True, exist_ok=True)
+
+    # State wiederverwenden wenn vorhanden — sonst neuen Key+CSR generieren.
+    if _AUTO_PAIR_STATE.exists():
+        try:
+            state = json.loads(_AUTO_PAIR_STATE.read_text())
+        except Exception:
+            state = {}
+    else:
+        state = {}
+
+    if not state.get("key_pem") or not state.get("csr_pem"):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
+        csr = (
+            x509.CertificateSigningRequestBuilder()
+            .subject_name(x509.Name([
+                x509.NameAttribute(NameOID.COMMON_NAME, "cyjan-remote-tap"),
+            ]))
+            .sign(private_key=key, algorithm=hashes.SHA256())
+        )
+        key_pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+        csr_pem = csr.public_bytes(serialization.Encoding.PEM).decode()
+        state["key_pem"] = key_pem
+        state["csr_pem"] = csr_pem
+
+    fingerprint = _csr_fingerprint(state["csr_pem"])
+    hardware_id = _hardware_id()
+    name = body.name or os.uname().nodename or "cyjan-tap"
+
+    # Announce am Master. Wie beim Token-Pair: erst https, fallback http.
+    base = body.master_url.rstrip("/")
+    candidates = [base]
+    if base.startswith("https://"):
+        candidates.append("http://" + base[len("https://"):])
+
+    payload = {
+        "name":        name,
+        "hardware_id": hardware_id,
+        "csr_pem":     state["csr_pem"],
+        "hostname":    os.uname().nodename,
+        "version":     os.environ.get("CYJAN_VERSION", "unknown"),
+    }
+    last_exc: Exception | None = None
+    resp = None
+    for cand in candidates:
+        url = cand + "/api/taps/announce"
+        try:
+            async with httpx.AsyncClient(timeout=30.0, verify=body.verify_ssl) as client:
+                resp = await client.post(url, json=payload)
+            base = cand  # erfolgreiche URL für Polling cachen
+            break
+        except httpx.HTTPError as exc:
+            last_exc = exc
+            log.warning("Master-Announce gegen %s fehlgeschlagen: %s", cand, exc)
+            continue
+    if resp is None:
+        raise HTTPException(502, f"Master nicht erreichbar: {last_exc}")
+    if resp.status_code not in (200, 201):
+        raise HTTPException(resp.status_code, f"Master abgewiesen: {resp.text[:200]}")
+    data = resp.json()
+
+    # State persistieren
+    state["master_url"]  = base
+    state["hardware_id"] = hardware_id
+    state["fingerprint"] = fingerprint
+    state["pending_id"]  = data.get("pending_id")
+    state["name"]        = name
+    state["verify_ssl"]  = body.verify_ssl
+    _AUTO_PAIR_STATE.write_text(json.dumps(state))
+    os.chmod(_AUTO_PAIR_STATE, 0o600)
+
+    return JSONResponse({
+        "status":     data.get("status", "pending"),
+        "pending_id": data.get("pending_id"),
+        "message":    data.get("message"),
+        "next_step":  "GET /api/auto-pair-status alle 5–30 s pollen bis status=approved.",
+    })
+
+
+@app.get("/api/auto-pair-status")
+async def api_auto_pair_status() -> JSONResponse:
+    """Pollt Master und installiert das Cert wenn approved."""
+    if not _AUTO_PAIR_STATE.exists():
+        return JSONResponse({"status": "no-pending", "message": "Kein laufendes Auto-Pair."})
+    try:
+        state = json.loads(_AUTO_PAIR_STATE.read_text())
+    except Exception as exc:
+        raise HTTPException(500, f"State-File defekt: {exc}")
+
+    base = state["master_url"]
+    hwid = state["hardware_id"]
+    fp   = state["fingerprint"]
+    url  = f"{base}/api/taps/announce-status/{hwid}/{fp}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, verify=state.get("verify_ssl", False)) as client:
+            resp = await client.get(url)
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, f"Master nicht erreichbar: {exc}")
+    if resp.status_code != 200:
+        raise HTTPException(resp.status_code, f"Master-Status: {resp.text[:200]}")
+    data = resp.json()
+    status = data.get("status", "unknown")
+
+    if status == "approved":
+        cert_dir = Path("/etc/cyjan")
+        cert_dir.mkdir(parents=True, exist_ok=True)
+        (cert_dir / "tap.key").write_text(state["key_pem"])
+        os.chmod(cert_dir / "tap.key", 0o600)
+        (cert_dir / "tap.pem").write_text(data["cert_pem"])
+        os.chmod(cert_dir / "tap.pem", 0o644)
+        (cert_dir / "master-ca.pem").write_text(data["master_ca_pem"])
+        os.chmod(cert_dir / "master-ca.pem", 0o644)
+        # State-File aufräumen — fertig gepairt.
+        _AUTO_PAIR_STATE.unlink(missing_ok=True)
+        log.warning("Tap auto-pair APPROVED: tap_id=%s", data.get("tap_id"))
+        return JSONResponse({
+            "status":          "approved",
+            "tap_id":          data.get("tap_id"),
+            "cert_expires_at": data.get("expires_at"),
+            "next_step":       "tap-uplink-Container neu starten",
+        })
+
+    if status == "rejected":
+        _AUTO_PAIR_STATE.unlink(missing_ok=True)
+        log.warning("Tap auto-pair REJECTED")
+        return JSONResponse({"status": "rejected", "message": data.get("message")})
+
+    return JSONResponse({"status": status, "message": data.get("message")})
+
+
 @app.post("/api/test-alert")
 async def api_test_alert() -> JSONResponse:
     """Erzeugt einen synthetischen Alert und schiebt ihn in das lokale

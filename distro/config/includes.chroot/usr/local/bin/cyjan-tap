@@ -122,6 +122,74 @@ cmd_pair() {
   echo "[+] fertig"
 }
 
+cmd_auto_pair() {
+  require_curl
+  local master="${1:-}" tap_name="${2:-}"
+  if [[ -z "$master" ]]; then
+    cat <<USAGE
+Usage: cyjan-tap auto-pair <master-url> [tap-name]
+  Beispiel: cyjan-tap auto-pair http://192.168.1.81 site-a-rack-3
+
+Token-freies Pairing — der Tap meldet sich beim Master, der Master-Admin
+bestätigt die Anmeldung im Web-UI (Settings → Remote Taps → "Wartende
+Anfragen"). Voraussetzung: Source-IP des Taps liegt in einem der bekannten
+Netzwerke des Masters.
+USAGE
+    exit 2
+  fi
+  local body
+  if [[ -n "$tap_name" ]]; then
+    body=$(printf '{"master_url":%s,"name":%s}' \
+      "$(json_escape "$master")" "$(json_escape "$tap_name")")
+  else
+    body=$(printf '{"master_url":%s}' "$(json_escape "$master")")
+  fi
+  echo "[*] Auto-Pair-Anfrage an $master ..."
+  api_post /api/auto-pair-start "$body" | maybe_jq
+
+  echo
+  echo "[*] Warte auf Admin-Approval — alle 5 s pollen, Ctrl+C bricht ab."
+  local i=0
+  while (( i < 360 )); do  # 360 × 5 s = 30 min Timeout
+    sleep 5
+    local s status
+    s=$(api_get /api/auto-pair-status 2>/dev/null) || { echo "  tap-api nicht erreichbar"; continue; }
+    if have_jq; then
+      status=$(jq -r '.status // "unknown"' <<<"$s")
+    else
+      status=$(echo "$s" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status","unknown"))')
+    fi
+    case "$status" in
+      approved)
+        echo
+        echo "[+] APPROVED — Cert installiert."
+        echo "$s" | maybe_jq
+        echo
+        echo "[*] tap-uplink neu starten, damit das neue Cert geladen wird ..."
+        compose restart tap-uplink
+        echo "[+] fertig"
+        return 0
+        ;;
+      rejected)
+        echo
+        echo "[-] REJECTED vom Admin. Auto-Pair abgebrochen." >&2
+        echo "$s" | maybe_jq
+        return 1
+        ;;
+      pending)
+        printf "."
+        ;;
+      *)
+        echo "  status=$status"
+        ;;
+    esac
+    i=$(( i + 1 ))
+  done
+  echo
+  echo "[!] Timeout nach 30 min ohne Approval. Kein Cert installiert." >&2
+  return 1
+}
+
 cmd_test() {
   require_curl
   api_post /api/test-alert '{}' | maybe_jq
@@ -153,7 +221,8 @@ cyjan-tap – Remote-Tap-CLI
 
   cyjan-tap status                       Status anzeigen
   cyjan-tap connection follow            Live-Tail des Master-Connection-Status
-  cyjan-tap pair <master-url> <token>    erstmaliges Pairing mit Master
+  cyjan-tap pair <master-url> <token>    klassisches Pairing mit Master + Token
+  cyjan-tap auto-pair <master-url> [name]  token-freies Pairing — Admin bestätigt im Master-UI
   cyjan-tap test                         synthetischen Test-Alert an Master schicken
   cyjan-tap reconnect                    tap-uplink-Reconnect erzwingen
   cyjan-tap logs follow [service]        Container-Logs (Default alle)
@@ -169,6 +238,7 @@ case "${1:-status}" in
   status)     shift; cmd_status "$@" ;;
   connection) shift; cmd_connection "$@" ;;
   pair)       shift; cmd_pair "$@" ;;
+  auto-pair)  shift; cmd_auto_pair "$@" ;;
   test)       shift; cmd_test "$@" ;;
   reconnect)  shift; cmd_reconnect ;;
   logs)       shift; cmd_logs "$@" ;;
