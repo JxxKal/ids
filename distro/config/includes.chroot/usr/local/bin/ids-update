@@ -22,12 +22,19 @@ git pull --ff-only origin main | tee -a "$LOG"
 
 NEW_COMMIT=$(git rev-parse HEAD)
 
+# Wenn nichts gepullt wurde, überspringen wir Build + Compose-up — aber den
+# distro-Sync-Block weiter unten lassen wir trotzdem laufen. Grund: nach
+# einem manuellen `git reset --hard origin/main` (oder einer früheren
+# Update-Variante die den Sync übersprungen hat) sind /usr/local/bin/cyjan-tap
+# und Co. ggf. veraltet, obwohl der git-Stand schon aktuell ist. _sync_file
+# ist idempotent (cmp gleicher Inhalt → kein Schreiben), das kostet nichts.
+SKIP_BUILD=0
 if [ "$OLD_COMMIT" = "$NEW_COMMIT" ]; then
-  echo "[update] Keine Änderungen – Stack unverändert."
-  exit 0
+  echo "[update] Keine neuen Commits — überspringe Build, sync nur System-Dateien."
+  SKIP_BUILD=1
+else
+  echo "[update] Neue Commits: $(git log --oneline "${OLD_COMMIT}..${NEW_COMMIT}")"
 fi
-
-echo "[update] Neue Commits: $(git log --oneline "${OLD_COMMIT}..${NEW_COMMIT}")"
 
 # Selbst-Update: dieses Skript liegt in /usr/local/bin/, der Pull aktualisiert
 # nur die Quelle in $IDS_DIR/distro/.... Vor allen weiteren Schritten kopieren
@@ -70,11 +77,13 @@ esac
 
 echo "[update] Mode=$MODE  Compose=${COMPOSE_ARGS[*]:-default}  Profile=${PROFILE_FLAGS[*]:-none}" | tee -a "$LOG"
 
-echo "[update] Baue geänderte Images..."
-docker compose "${COMPOSE_ARGS[@]}" "${PROFILE_FLAGS[@]}" build | tee -a "$LOG"
+if [ "$SKIP_BUILD" = "0" ]; then
+  echo "[update] Baue geänderte Images..."
+  docker compose "${COMPOSE_ARGS[@]}" "${PROFILE_FLAGS[@]}" build | tee -a "$LOG"
 
-echo "[update] Starte geänderte Dienste neu..."
-docker compose "${COMPOSE_ARGS[@]}" "${PROFILE_FLAGS[@]}" up -d | tee -a "$LOG"
+  echo "[update] Starte geänderte Dienste neu..."
+  docker compose "${COMPOSE_ARGS[@]}" "${PROFILE_FLAGS[@]}" up -d | tee -a "$LOG"
+fi
 
 # Nachzügler-Sync: System-Dateien, die im ISO-Hook landen, kommen via reinem
 # git-pull nicht an. Wir spiegeln idempotent die Stellen, deren Drift
