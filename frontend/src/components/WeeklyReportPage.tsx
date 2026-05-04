@@ -7,12 +7,13 @@ import {
   weeklyReportCsvUrl,
   getToken,
   type WeeklyReport,
+  type WeeklyReportBoundary,
   type WeeklyReportDay,
   type WeeklyReportHistoryEntry,
 } from '../api';
 import { countryFlag } from '../lib/country';
 
-// ── ISO-Wochen-Helfer ───────────────────────────────────────────────────
+// ── ISO-Wochen-Helfer ─────────────────────────────────────────────────
 
 function isoWeek(d: Date): { year: number; week: number } {
   // ISO-Woche-Berechnung nach https://en.wikipedia.org/wiki/ISO_week_date
@@ -49,7 +50,7 @@ function shiftWeek(year: number, week: number, delta: number): { year: number; w
   return isoWeek(d);
 }
 
-// ── Severity-Konstanten ────────────────────────────────────────────────
+// ── Severity-Konstanten ─────────────────────────────────────────────────
 
 const SEV_COLOR: Record<string, string> = {
   critical: '#ef4444',
@@ -398,7 +399,7 @@ export function WeeklyReportPage() {
             </div>
           )}
 
-          {/* ── Block 1: Executive Summary ───────────────────────── */}
+          {/* ── Block 1: Executive Summary ────────────────────── */}
           <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
             <h2 className="text-sm font-semibold text-cyan-200 print:text-black mb-3 uppercase tracking-wider">
               {t('weeklyReport.summary.title')}
@@ -539,7 +540,15 @@ export function WeeklyReportPage() {
             </div>
           </section>
 
-          {/* ── Block 3: Operations ───────────────────────────── */}
+          {/* ── Block 3: OT-Boundary Breaches ──────────────────── */}
+          <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
+            <h2 className="text-sm font-semibold text-cyan-200 print:text-black mb-3 uppercase tracking-wider">
+              {t('weeklyReport.boundary.title')}
+            </h2>
+            <BoundaryBlock boundary={report.boundary} />
+          </section>
+
+          {/* ── Block 4: Operations ──────────────────────────── */}
           <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
             <h2 className="text-sm font-semibold text-cyan-200 print:text-black mb-3 uppercase tracking-wider">
               {t('weeklyReport.ops.title')}
@@ -615,7 +624,7 @@ export function WeeklyReportPage() {
             </div>
           </section>
 
-          {/* ── Block 4: Audit ──────────────────────────────── */}
+          {/* ── Block 5: Audit ───────────────────────────────── */}
           <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
             <h2 className="text-sm font-semibold text-cyan-200 print:text-black mb-3 uppercase tracking-wider">
               {t('weeklyReport.audit.title')}
@@ -666,6 +675,149 @@ function Row({ label, value }: { label: string; value: number | string }) {
     <div className="flex justify-between border-b border-slate-800/50 print:border-gray-200 py-0.5">
       <span className="text-slate-400 print:text-gray-700">{label}</span>
       <span className="text-slate-200 print:text-black tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+// Priority-Color-Map: P0 ist die heißeste Klasse (vollständig unbekannt),
+// P3 die mildeste (Inventory-Lücke). Farben analog zur Severity-Skala.
+const PRIO_COLOR: Record<string, string> = {
+  P0: '#ef4444',   // rot
+  P1: '#f97316',   // orange
+  P2: '#eab308',   // gelb
+  P3: '#22c55e',   // grün
+};
+
+function PrioBadge({ p }: { p: string | null | undefined }) {
+  if (!p) return <span className="text-slate-600">–</span>;
+  return (
+    <span
+      className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold"
+      style={{
+        backgroundColor: `${PRIO_COLOR[p] || '#64748b'}22`,
+        color:           PRIO_COLOR[p] || '#94a3b8',
+      }}
+    >
+      {p}
+    </span>
+  );
+}
+
+function BoundaryBlock({ boundary }: { boundary: WeeklyReportBoundary | undefined }) {
+  const { t } = useTranslation();
+  // Älterer Archiv-Snapshot ohne boundary-Section → kompletter Fallback.
+  if (!boundary) {
+    return <p className="text-xs text-slate-600 italic">{t('weeklyReport.boundary.none')}</p>;
+  }
+  if (boundary.total === 0 && boundary.whitelisted === 0) {
+    return <p className="text-xs text-slate-500 italic">{t('weeklyReport.boundary.none')}</p>;
+  }
+  const prios = ['P0', 'P1', 'P2', 'P3'] as const;
+
+  return (
+    <div className="space-y-4">
+      {/* Headline-Zeile: Total + Priority-Counts + Whitelist-Hinweis */}
+      <div className="flex flex-wrap items-baseline gap-4">
+        <div>
+          <span className="text-xs text-slate-500 print:text-gray-700">
+            {t('weeklyReport.boundary.totalLabel')}:{' '}
+          </span>
+          <span className="text-slate-200 print:text-black font-mono text-xl">
+            {boundary.total}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs font-mono">
+          {prios.map(p => (
+            <span key={p} className="text-slate-400 print:text-gray-700">
+              <PrioBadge p={p} />{' '}
+              <span className="text-slate-200 print:text-black tabular-nums">
+                {boundary.by_priority[p]}
+              </span>
+            </span>
+          ))}
+        </div>
+        {boundary.whitelisted > 0 && (
+          <div className="text-[11px] text-slate-500 print:text-gray-600 font-mono ml-auto">
+            {t('weeklyReport.boundary.whitelistedLabel')}:{' '}
+            <span className="text-slate-300 print:text-gray-800 tabular-nums">{boundary.whitelisted}</span>
+          </div>
+        )}
+      </div>
+      <p className="text-[10px] text-slate-600 print:text-gray-500 italic">
+        {t('weeklyReport.boundary.priorityHint')}
+      </p>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Top-Talker */}
+        <div>
+          <p className="text-xs text-slate-500 print:text-gray-700 mb-1.5">
+            {t('weeklyReport.boundary.topTalkersTitle')}
+          </p>
+          <table className="w-full text-xs font-mono">
+            <thead>
+              <tr className="text-slate-500 print:text-gray-600">
+                <th className="text-left pb-1">Source</th>
+                <th className="text-left pb-1">Prio</th>
+                <th className="text-right pb-1">Anzahl</th>
+              </tr>
+            </thead>
+            <tbody>
+              {boundary.top_talkers.length === 0 && (
+                <tr><td colSpan={3} className="text-slate-600 italic py-2">{t('common.empty')}</td></tr>
+              )}
+              {boundary.top_talkers.map(tl => (
+                <tr key={tl.src_ip} className="border-t border-slate-800/50 print:border-gray-200">
+                  <td className="py-1 text-slate-200 print:text-black">
+                    {tl.display_name || tl.hostname || tl.src_ip}
+                    {(tl.display_name || tl.hostname) && (
+                      <span className="text-slate-600 print:text-gray-500 ml-2 text-[10px]">{tl.src_ip}</span>
+                    )}
+                  </td>
+                  <td className="py-1"><PrioBadge p={tl.top_priority} /></td>
+                  <td className="py-1 text-right text-slate-200 print:text-black">{tl.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Top-Pairs */}
+        <div>
+          <p className="text-xs text-slate-500 print:text-gray-700 mb-1.5">
+            {t('weeklyReport.boundary.topPairsTitle')}
+          </p>
+          <table className="w-full text-xs font-mono">
+            <thead>
+              <tr className="text-slate-500 print:text-gray-600">
+                <th className="text-left pb-1">Source → Ziel</th>
+                <th className="text-left pb-1">Land/ASN</th>
+                <th className="text-left pb-1">Prio</th>
+                <th className="text-right pb-1">Anzahl</th>
+              </tr>
+            </thead>
+            <tbody>
+              {boundary.top_pairs.length === 0 && (
+                <tr><td colSpan={4} className="text-slate-600 italic py-2">{t('common.empty')}</td></tr>
+              )}
+              {boundary.top_pairs.map(p => (
+                <tr key={`${p.src_ip}-${p.dst_ip}`} className="border-t border-slate-800/50 print:border-gray-200">
+                  <td className="py-1 text-slate-200 print:text-black">
+                    {p.src_ip} <span className="text-slate-500">→</span> {p.dst_ip}
+                  </td>
+                  <td className="py-1 text-slate-300 print:text-gray-800">
+                    {countryFlag(p.dst_country_code)} {p.dst_country || p.dst_country_code || '–'}
+                    {p.dst_asn && (
+                      <span className="text-slate-500 ml-1 text-[10px]">/ {p.dst_asn}</span>
+                    )}
+                  </td>
+                  <td className="py-1"><PrioBadge p={p.top_priority} /></td>
+                  <td className="py-1 text-right text-slate-200 print:text-black">{p.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
