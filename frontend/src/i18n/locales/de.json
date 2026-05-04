@@ -565,7 +565,7 @@
       "system-health": "Systemauslastung",
       "interfaces": "Interfaces",
       "dns-resolvers": "DNS-Resolver",
-      "egress-priorities": "Egress-Prioritäten",
+      "egress-priorities": "OT-Boundary",
       "remote-taps": "Remote Taps",
       "ssl": "SSL-Zertifikat",
       "syslog": "Syslog / SIEM",

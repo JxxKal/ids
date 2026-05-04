@@ -892,6 +892,27 @@ export async function saveBoundaryPriorityMap(value: BoundaryPriorityMap): Promi
   await req('/api/config/boundary_priority_map', { method: 'PATCH', body: JSON.stringify({ value }) });
 }
 
+// V2 (Phase B+C): zone-basierte 3×3-Matrix. Schlüssel "<src_zone>/<dst_zone>"
+// mit zone ∈ {ot, it, internet}. Diagonale (gleiche Zone) ist null per
+// Default — kein Alert für In-Zone-Traffic.
+export type BoundaryPriorityMapV2 = Record<string, string | null>;
+
+export async function fetchBoundaryPriorityMapV2(): Promise<BoundaryPriorityMapV2 | null> {
+  if (isDemoMode()) return null;
+  try {
+    const r = await req<{ key: string; value: BoundaryPriorityMapV2 }>('/api/config/boundary_priority_map_v2');
+    return r.value && typeof r.value === 'object' ? r.value : null;
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) return null;
+    throw e;
+  }
+}
+
+export async function saveBoundaryPriorityMapV2(value: BoundaryPriorityMapV2): Promise<void> {
+  if (isDemoMode()) return;
+  await req('/api/config/boundary_priority_map_v2', { method: 'PATCH', body: JSON.stringify({ value }) });
+}
+
 // ── iTop CMDB ─────────────────────────────────────────────────────────────────
 
 const ITOP_DEFAULT: import('./types').ItopConfig = {
@@ -1471,6 +1492,10 @@ export interface WeeklyReportBoundary {
   whitelisted: number;
   top_talkers: WeeklyReportBoundaryTalker[];
   top_pairs:   WeeklyReportBoundaryPair[];
+  // V2 (Phase C): Zone-Aufschlüsselung. Schlüssel "<src_zone>/<dst_zone>".
+  // Pre-V2-Bestandsalerts (vor Migration 017) liegen im 'unzoned'-Counter.
+  by_zone?:    Record<string, number>;
+  unzoned?:    number;
 }
 
 export interface WeeklyReport {
@@ -1627,6 +1652,14 @@ function demoWeeklyReport(_week?: string): WeeklyReport {
         { src_ip: '10.10.5.12',   dst_ip: '88.198.12.7',     dst_country: 'Germany',       dst_country_code: 'DE', dst_asn: 'Hetzner',     count: 4, top_priority: 'P0' },
         { src_ip: '192.168.1.85', dst_ip: '8.8.8.8',         dst_country: 'United States', dst_country_code: 'US', dst_asn: 'GOOGLE',      count: 2, top_priority: 'P2' },
       ],
+      by_zone: {
+        'ot/it':       3,
+        'ot/internet': 2,
+        'it/ot':       6,
+        'it/internet': 8,
+        'internet/ot': 5,
+      },
+      unzoned: 0,
     },
     audit: {
       active_users: [

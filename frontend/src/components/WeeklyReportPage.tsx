@@ -747,6 +747,8 @@ function BoundaryBlock({ boundary }: { boundary: WeeklyReportBoundary | undefine
         {t('weeklyReport.boundary.priorityHint')}
       </p>
 
+      <ZoneBreakdown boundary={boundary} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Top-Talker */}
         <div>
@@ -818,6 +820,100 @@ function BoundaryBlock({ boundary }: { boundary: WeeklyReportBoundary | undefine
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Zone-Aufschlüsselung (Phase C) ──────────────────────────────────────────
+//
+// 3×3-Heatmap der aktiven Breaches gruppiert nach (src_zone, dst_zone).
+// Zeigt nur, wenn V2-Daten vorhanden sind (Migration 017+). Pre-V2-Bestand
+// wird als 'unzoned' summiert und unten als Hinweis angezeigt.
+
+const ZONES_ORDER = ['ot', 'it', 'internet'] as const;
+
+function zoneLabel(z: string): string {
+  return z === 'ot' ? 'OT' : z === 'it' ? 'IT' : 'Internet';
+}
+
+// Heatmap-Färbung: linear nach max-count im Grid, weil Absolutwerte je
+// nach Woche stark schwanken. Cyan-Skala für niedrigste-höchste.
+function cellTone(count: number, max: number): string {
+  if (count === 0)            return 'text-slate-700';
+  if (max === 0)              return 'text-slate-700';
+  const ratio = count / max;
+  if (ratio >= 0.66)          return 'bg-cyan-700/40 text-cyan-100 font-semibold';
+  if (ratio >= 0.33)          return 'bg-cyan-800/30 text-cyan-200';
+  if (ratio >= 0.10)          return 'bg-cyan-900/30 text-cyan-300';
+  return 'bg-slate-800/30 text-slate-400';
+}
+
+function ZoneBreakdown({ boundary }: { boundary: WeeklyReportBoundary }) {
+  const { t } = useTranslation();
+  const byZone = boundary.by_zone || {};
+  const unzoned = boundary.unzoned ?? 0;
+  const counts: Record<string, number> = {};
+  let max = 0;
+  for (const src of ZONES_ORDER) for (const dst of ZONES_ORDER) {
+    const k = `${src}/${dst}`;
+    const c = byZone[k] ?? 0;
+    counts[k] = c;
+    if (c > max) max = c;
+  }
+  const totalZoned = Object.values(counts).reduce((a, b) => a + b, 0);
+  // Wenn weder zoned noch unzoned-Daten da sind: Block komplett verbergen.
+  if (totalZoned === 0 && unzoned === 0) return null;
+
+  return (
+    <div>
+      <p className="text-xs text-slate-500 print:text-gray-700 mb-1.5">
+        {t('weeklyReport.boundary.zoneBreakdownTitle', { defaultValue: 'Aufschlüsselung nach Zone' })}
+      </p>
+      <div className="rounded border border-slate-800/50 print:border-gray-300 overflow-hidden inline-block">
+        <table className="text-xs font-mono">
+          <thead>
+            <tr className="text-slate-500 print:text-gray-600">
+              <th className="px-2 py-1 text-right text-[10px] uppercase">
+                {t('weeklyReport.boundary.zoneHeader', { defaultValue: 'Source ↓ / Dest →' })}
+              </th>
+              {ZONES_ORDER.map(z => (
+                <th key={z} className="px-3 py-1 text-center text-[10px] uppercase tracking-wider">{zoneLabel(z)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ZONES_ORDER.map(src => (
+              <tr key={src} className="border-t border-slate-800/50 print:border-gray-200">
+                <td className="px-2 py-1 text-right text-[10px] uppercase tracking-wider text-slate-400 print:text-gray-700">
+                  {zoneLabel(src)}
+                </td>
+                {ZONES_ORDER.map(dst => {
+                  const k = `${src}/${dst}`;
+                  const c = counts[k];
+                  const isDiag = src === dst;
+                  return (
+                    <td
+                      key={k}
+                      title={`${zoneLabel(src)} → ${zoneLabel(dst)}: ${c}`}
+                      className={`px-3 py-1 text-center tabular-nums ${cellTone(c, max)} ${isDiag ? 'opacity-60' : ''}`}
+                    >
+                      {c > 0 ? c : '–'}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {unzoned > 0 && (
+        <p className="text-[10px] text-slate-500 print:text-gray-600 italic mt-1.5">
+          {t('weeklyReport.boundary.unzonedHint', {
+            defaultValue: '{{count}} Alerts ohne Zone-Tag (Pre-V2-Bestand vor Migration 017) — werden hier nicht aufgeschlüsselt.',
+            count: unzoned,
+          })}
+        </p>
+      )}
     </div>
   );
 }

@@ -490,6 +490,35 @@ async def _boundary_top_talkers(
     ]
 
 
+async def _boundary_zone_breakdown(conn: asyncpg.Connection, t0: datetime, t1: datetime) -> dict:
+    """Aktive Breaches gruppiert nach (src_zone, dst_zone). Nur Alerts mit
+    befüllten Zonen-Spalten (Migration 017+) — ältere Bestandsalerts haben
+    NULL und landen im 'unzoned'-Bucket. Damit sieht der User auf einen
+    Blick die V2-Coverage."""
+    rows = await conn.fetch(
+        f"""
+        SELECT a.boundary_src_zone AS src,
+               a.boundary_dst_zone AS dst,
+               COUNT(*) AS c
+          FROM alerts a
+         WHERE a.ts >= $1 AND a.ts < $2 AND NOT a.is_test
+           AND a.boundary_priority IS NOT NULL
+           AND {_BOUNDARY_NOT_WHITELISTED}
+         GROUP BY a.boundary_src_zone, a.boundary_dst_zone
+        """,
+        t0, t1,
+    )
+    by_pair: dict[str, int] = {}
+    unzoned = 0
+    for r in rows:
+        src, dst = r["src"], r["dst"]
+        if src and dst:
+            by_pair[f"{src}/{dst}"] = int(r["c"])
+        else:
+            unzoned += int(r["c"])
+    return {"by_pair": by_pair, "unzoned": unzoned}
+
+
 async def _boundary_top_pairs(
     conn: asyncpg.Connection, t0: datetime, t1: datetime, limit: int = 10,
 ) -> list[dict]:
@@ -633,6 +662,7 @@ async def _build_weekly_payload(year: int, wk: int) -> dict:
         boundary_sum          = await _boundary_summary(conn, t0, t1)
         boundary_talkers      = await _boundary_top_talkers(conn, t0, t1)
         boundary_pairs        = await _boundary_top_pairs(conn, t0, t1)
+        boundary_zones        = await _boundary_zone_breakdown(conn, t0, t1)
 
     # _rank-Hilfsspalte aus top_sources entfernen (war nur internes Sort)
     top_sources = [{k: v for k, v in r.items() if not k.startswith("_")} for r in top_sources_raw]
@@ -670,6 +700,8 @@ async def _build_weekly_payload(year: int, wk: int) -> dict:
             "whitelisted": boundary_sum["whitelisted"],
             "top_talkers": boundary_talkers,
             "top_pairs":   boundary_pairs,
+            "by_zone":     boundary_zones["by_pair"],
+            "unzoned":     boundary_zones["unzoned"],
         },
         "audit": audit,
     }
@@ -875,6 +907,17 @@ def _to_csv_zip(payload: dict, year: int, week: int) -> StreamingResponse:
         zf.writestr("boundary_top_pairs.csv", _csv_response(
             b.get("top_pairs") or [],
             ["src_ip", "dst_ip", "dst_country", "dst_country_code", "dst_asn", "count", "top_priority"],
+        ))
+        # Zone-Aufschlüsselung als Long-Form CSV (eine Zeile pro Zell-Treffer).
+        bz_rows = [
+            {"src_zone": k.split("/", 1)[0], "dst_zone": k.split("/", 1)[1], "count": v}
+            for k, v in (b.get("by_zone") or {}).items()
+        ]
+        if b.get("unzoned"):
+            bz_rows.append({"src_zone": "—", "dst_zone": "—", "count": b["unzoned"]})
+        zf.writestr("boundary_by_zone.csv", _csv_response(
+            bz_rows,
+            ["src_zone", "dst_zone", "count"],
         ))
         zf.writestr("audit_active_users.csv", _csv_response(
             payload["audit"]["active_users"],

@@ -72,6 +72,9 @@ const DE = {
       topTalkersTitle: 'Top-Talker → unbekannte Netze',
       topPairsTitle: 'Top-Verbindungen Source → Ziel (unbekannt)',
       priorityHint: 'P0 = vollständig unbekannt · P1 = bekannt → unbekannt (C2/Exfil) · P2 = Rogue/Routing · P3 = Inventory-Lücke',
+      zoneBreakdownTitle: 'Aufschlüsselung nach Zone (Source × Destination)',
+      zoneHeader: 'Source ↓ / Dest →',
+      unzonedHint: '{{count}} Alerts ohne Zone-Tag (Pre-V2-Bestand vor Migration 017) — werden hier nicht aufgeschlüsselt.',
     },
     audit: {
       title: 'Audit',
@@ -172,6 +175,9 @@ const EN = {
       topTalkersTitle: 'Top talkers → unknown networks',
       topPairsTitle: 'Top connections source → unknown destination',
       priorityHint: 'P0 = fully unknown · P1 = known → unknown (C2/exfil) · P2 = rogue/routing · P3 = inventory gap',
+      zoneBreakdownTitle: 'Breakdown by zone (source × destination)',
+      zoneHeader: 'Source ↓ / Dest →',
+      unzonedHint: '{{count}} alerts without zone tag (pre-V2 records, before migration 017) — not broken down here.',
     },
     audit: {
       title: 'Audit',

@@ -24,6 +24,7 @@ import {
   fetchSuricataOverrides, saveSuricataOverrides,
   type SuricataOverrideEntry,
   fetchBoundaryPriorityMap, saveBoundaryPriorityMap,
+  fetchBoundaryPriorityMapV2, saveBoundaryPriorityMapV2,
   fetchTaps, createTapPairingToken, revokeTap,
   fetchPendingTaps, approvePendingTap, rejectPendingTap, fetchTapAuditLog,
   type PendingTap, type TapAuditEntry,
@@ -5312,47 +5313,55 @@ function ShowTokenModal({
   );
 }
 
-// ── EgressPrioritySettings ───────────────────────────────────────────────────
+// ── OT-Boundary Settings ─────────────────────────────────────────────────────
+//
+// Phase C: V2-Zone-Matrix (3×3) statt der alten 7-Tupel-Map. Klassifiziert
+// pro Alert die (src_zone, dst_zone)-Kombination auf eine Priority P0–P3.
+// Zonen: 'ot' (known_networks.kind=ot), 'it' (kind=it), 'internet' (alles
+// außerhalb von known_networks). Diagonale (gleiche Zone) ist None per
+// Default — kein Alert für In-Zone-Traffic.
 
-// 7 echte Klassifikations-Tupel für die Egress-View (✓✓✓ ist nicht-egress).
-const BOUNDARY_TUPLES: { key: string; net: boolean; src: boolean; dst: boolean }[] = [
-  { key: '000', net: false, src: false, dst: false },
-  { key: '010', net: false, src: true,  dst: false },
-  { key: '001', net: false, src: false, dst: true  },
-  { key: '100', net: true,  src: false, dst: false },
-  { key: '011', net: false, src: true,  dst: true  },
-  { key: '101', net: true,  src: false, dst: true  },
-  { key: '110', net: true,  src: true,  dst: false },
-];
+type Zone = 'ot' | 'it' | 'internet';
 
-const DEFAULT_PRIORITY_MAP: Record<string, string | null> = {
-  '000': 'P0',
-  '010': 'P1',
-  '001': 'P1',
-  '100': 'P2',
-  '011': 'P2',
-  '101': 'P3',
-  '110': 'P3',
+const ZONES: Zone[] = ['ot', 'it', 'internet'];
+
+const DEFAULT_PRIORITY_MAP_V2: Record<string, string | null> = {
+  'ot/ot':             null,
+  'ot/it':             'P2',
+  'ot/internet':       'P0',
+  'it/ot':             'P1',
+  'it/it':             null,
+  'it/internet':       'P2',
+  'internet/ot':       'P0',
+  'internet/it':       'P2',
+  'internet/internet': null,
+};
+
+const PRIO_CELL: Record<string, string> = {
+  P0: 'bg-red-900/30 text-red-200 border-red-700/40',
+  P1: 'bg-orange-900/30 text-orange-200 border-orange-700/40',
+  P2: 'bg-amber-900/30 text-amber-200 border-amber-700/40',
+  P3: 'bg-emerald-900/30 text-emerald-200 border-emerald-700/40',
 };
 
 function EgressPrioritySettings() {
   const { t } = useTranslation();
-  const [map, setMap]               = useState<Record<string, string | null>>(DEFAULT_PRIORITY_MAP);
-  const [originalMap, setOriginal]  = useState<Record<string, string | null>>(DEFAULT_PRIORITY_MAP);
-  const [loading, setLoading]       = useState(true);
-  const [saving, setSaving]         = useState(false);
-  const [error, setError]           = useState('');
-  const [info, setInfo]             = useState('');
+  const [map, setMap]              = useState<Record<string, string | null>>(DEFAULT_PRIORITY_MAP_V2);
+  const [originalMap, setOriginal] = useState<Record<string, string | null>>(DEFAULT_PRIORITY_MAP_V2);
+  const [loading, setLoading]      = useState(true);
+  const [saving, setSaving]        = useState(false);
+  const [error, setError]          = useState('');
+  const [info, setInfo]            = useState('');
 
   useEffect(() => {
     let alive = true;
-    fetchBoundaryPriorityMap()
+    fetchBoundaryPriorityMapV2()
       .then(value => {
         if (!alive) return;
         if (value) {
-          const merged = { ...DEFAULT_PRIORITY_MAP };
-          for (const tup of BOUNDARY_TUPLES) {
-            if (tup.key in value) merged[tup.key] = value[tup.key];
+          const merged = { ...DEFAULT_PRIORITY_MAP_V2 };
+          for (const k of Object.keys(merged)) {
+            if (k in value) merged[k] = value[k];
           }
           setMap(merged);
           setOriginal(merged);
@@ -5366,15 +5375,13 @@ function EgressPrioritySettings() {
   const dirty = useMemo(() => JSON.stringify(map) !== JSON.stringify(originalMap), [map, originalMap]);
 
   const handleSave = async () => {
-    setSaving(true);
-    setError('');
-    setInfo('');
+    setSaving(true); setError(''); setInfo('');
     try {
-      await saveBoundaryPriorityMap(map);
+      await saveBoundaryPriorityMapV2(map);
       setOriginal(map);
-      setInfo(t('settings.egressPriorities.saved'));
+      setInfo(t('settings.otBoundary.saved', { defaultValue: 'Mapping gespeichert.' }));
     } catch (e) {
-      setError(t('settings.egressPriorities.saveError', { message: e instanceof Error ? e.message : String(e) }));
+      setError(t('settings.otBoundary.saveError', { defaultValue: 'Speichern fehlgeschlagen: {{message}}', message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSaving(false);
     }
@@ -5382,10 +5389,19 @@ function EgressPrioritySettings() {
 
   if (loading) return <p className="text-slate-500 text-sm">{t('common.loading')}</p>;
 
+  const zoneLabel = (z: Zone) => z === 'ot' ? 'OT' : z === 'it' ? 'IT' : 'Internet';
+
   return (
     <div className="space-y-4">
-      <h2 className="text-sm font-semibold text-slate-200">{t('settings.egressPriorities.title')}</h2>
-      <p className="text-xs text-slate-500 leading-relaxed">{t('settings.egressPriorities.intro')}</p>
+      <h2 className="text-sm font-semibold text-slate-200">
+        {t('settings.otBoundary.title', { defaultValue: 'OT-Boundary' })}
+      </h2>
+      <p className="text-xs text-slate-500 leading-relaxed">
+        {t('settings.otBoundary.intro', { defaultValue: 'Mapping aus dem (Source-Zone × Destination-Zone)-Tupel auf eine Priority P0–P3 für den AlertFeed-Egress-Filter. Zonen kommen aus known_networks.kind: ot=OT-Scope, it=Corporate-IT, internet=alles außerhalb. Diagonale ist standardmäßig leer (keine Alerts für In-Zone-Traffic). Persistiert in system_config-Key boundary_priority_map_v2 und wird vom enrichment-service binnen 60s ohne Restart übernommen.' })}
+      </p>
+      <div className="rounded-lg border border-cyan-700/30 bg-cyan-950/15 px-3 py-2 text-[11px] text-cyan-200">
+        💡 {t('settings.otBoundary.hintItImport', { defaultValue: 'IT-Netze pflegst du über den Networks-Tab — dort kann die kind-Spalte pro Eintrag (oder beim CSV-Import) auf "it" gesetzt werden. Erst danach klassifiziert der enrichment-service Traffic als IT statt als unbekannt.' })}
+      </div>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
@@ -5393,51 +5409,66 @@ function EgressPrioritySettings() {
         <table className="w-full text-xs">
           <thead className="bg-slate-900/60 border-b border-slate-700/50">
             <tr className="text-left text-slate-500">
-              <th className="px-3 py-2">{t('settings.egressPriorities.colNet')}</th>
-              <th className="px-3 py-2">{t('settings.egressPriorities.colSrc')}</th>
-              <th className="px-3 py-2">{t('settings.egressPriorities.colDst')}</th>
-              <th className="px-3 py-2 w-32">{t('settings.egressPriorities.colPriority')}</th>
-              <th className="px-3 py-2">{t('settings.egressPriorities.colMeaning')}</th>
+              <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider">
+                {t('settings.otBoundary.srcHeader', { defaultValue: 'Source ↓ / Dest →' })}
+              </th>
+              {ZONES.map(z => (
+                <th key={z} className="px-3 py-2 text-center text-[10px] uppercase tracking-wider">{zoneLabel(z)}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {BOUNDARY_TUPLES.map(tup => {
-              const cur = map[tup.key];
-              const def = DEFAULT_PRIORITY_MAP[tup.key];
-              const changed = cur !== def;
-              return (
-                <tr key={tup.key} className="border-b border-slate-800/40">
-                  <td className="px-3 py-2 font-mono">{tup.net ? <span className="text-green-400">✓</span> : <span className="text-red-400">✗</span>}</td>
-                  <td className="px-3 py-2 font-mono">{tup.src ? <span className="text-green-400">✓</span> : <span className="text-red-400">✗</span>}</td>
-                  <td className="px-3 py-2 font-mono">{tup.dst ? <span className="text-green-400">✓</span> : <span className="text-red-400">✗</span>}</td>
-                  <td className="px-3 py-2">
-                    <select
-                      className={`input text-xs w-24 ${changed ? 'border-amber-600 text-amber-200' : ''}`}
-                      value={cur ?? ''}
-                      onChange={e => setMap(p => ({ ...p, [tup.key]: e.target.value || null }))}
-                    >
-                      <option value="">—</option>
-                      <option value="P0">P0</option>
-                      <option value="P1">P1</option>
-                      <option value="P2">P2</option>
-                      <option value="P3">P3</option>
-                    </select>
-                  </td>
-                  <td className="px-3 py-2 text-slate-400">{t(`settings.egressPriorities.tuples.${tup.key}`)}</td>
-                </tr>
-              );
-            })}
+            {ZONES.map(srcZone => (
+              <tr key={srcZone} className="border-b border-slate-800/40">
+                <td className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-slate-400">
+                  {zoneLabel(srcZone)}
+                </td>
+                {ZONES.map(dstZone => {
+                  const k = `${srcZone}/${dstZone}`;
+                  const cur = map[k];
+                  const def = DEFAULT_PRIORITY_MAP_V2[k];
+                  const changed = cur !== def;
+                  // Diagonale optisch zurückgenommen — semantisch null, aber editierbar.
+                  const isDiagonal = srcZone === dstZone;
+                  return (
+                    <td key={k} className="px-3 py-2 text-center">
+                      <select
+                        className={`text-xs px-2 py-1 rounded border font-mono w-20 ${
+                          cur && PRIO_CELL[cur]
+                            ? PRIO_CELL[cur]
+                            : 'bg-slate-800/40 border-slate-700/50 text-slate-500'
+                        } ${changed ? 'ring-1 ring-amber-600/50' : ''} ${isDiagonal ? 'opacity-60' : ''}`}
+                        value={cur ?? ''}
+                        onChange={e => setMap(p => ({ ...p, [k]: e.target.value || null }))}
+                      >
+                        <option value="">—</option>
+                        <option value="P0">P0</option>
+                        <option value="P1">P1</option>
+                        <option value="P2">P2</option>
+                        <option value="P3">P3</option>
+                      </select>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
 
+      <p className="text-[10px] text-slate-600 italic">
+        {t('settings.otBoundary.priorityLegend', { defaultValue: 'P0 = höchste Kritikalität · P3 = niedrigste · — = kein Alert' })}
+      </p>
+
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[10px] text-slate-600">{t('settings.egressPriorities.applyHint')}</span>
+        <span className="text-[10px] text-slate-600">
+          {t('settings.otBoundary.applyHint', { defaultValue: 'Änderungen wirken nur auf neue Alerts ab Speicher-Zeitpunkt; bestehende Datensätze werden nicht zurückklassifiziert.' })}
+        </span>
         <div className="flex items-center gap-2">
           {info && <span className="text-[11px] text-green-400">{info}</span>}
-          <button onClick={() => { setMap(DEFAULT_PRIORITY_MAP); setInfo(''); }}
+          <button onClick={() => { setMap(DEFAULT_PRIORITY_MAP_V2); setInfo(''); }}
             className="btn-ghost text-xs">
-            {t('settings.egressPriorities.reset')}
+            {t('settings.otBoundary.reset', { defaultValue: 'Default wiederherstellen' })}
           </button>
           <button onClick={handleSave} disabled={!dirty || saving}
             className="btn-primary text-xs disabled:opacity-50">
