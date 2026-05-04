@@ -18,7 +18,6 @@ Endpunkte:
   GET  /api/tests/runs                  – Test-Run-Protokoll
   GET  /api/tests/runs/{id}             – Einzelner Test-Run
   GET  /api/reports/weekly              – Wochenbericht (JSON oder CSV-ZIP)
-  GET  /api/reports/history             – Liste archivierter Wochen (MinIO)
 
 WebSocket:
   WS   /ws/alerts                       – Echtzeit-Alert-Stream

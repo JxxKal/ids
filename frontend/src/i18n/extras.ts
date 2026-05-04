@@ -38,6 +38,10 @@ const DE = {
     printLabel: 'Drucken',
     downloadJson: 'Vollständigen Bericht als JSON herunterladen',
     downloadCsv: 'Bericht als CSV-Bundle (ZIP) für Excel/Power-BI',
+    historyLabel: 'Archiv',
+    historyTitle: 'Archivierte Wochen anzeigen',
+    historyEmpty: 'Noch keine archivierten Wochen vorhanden.',
+    archivedHint: 'Archiv-Snapshot — eingefroren am ',
     summary: {
       title: 'Zusammenfassung',
       totalLabel: 'Alerts gesamt',
@@ -104,6 +108,10 @@ const EN = {
     printLabel: 'Print',
     downloadJson: 'Download full report as JSON',
     downloadCsv: 'Download report as CSV bundle (ZIP) for Excel/Power-BI',
+    historyLabel: 'Archive',
+    historyTitle: 'Show archived weeks',
+    historyEmpty: 'No archived weeks yet.',
+    archivedHint: 'Archived snapshot — frozen at ',
     summary: {
       title: 'Summary',
       totalLabel: 'Alerts total',
