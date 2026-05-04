@@ -76,7 +76,7 @@ export async function fetchMe(): Promise<User> {
   return req('/api/auth/me');
 }
 
-// ── Alerts ─────────────────────────────────────────────────────────────────
+// ── Alerts ─────────────────────────────────────────────────────────────────────
 
 export interface AlertFilters {
   severity?: string;
@@ -1262,7 +1262,7 @@ export async function fetchMaintenanceAudit(limit = 100): Promise<MaintenanceAud
   return req(`/api/maintenance/audit?limit=${limit}`);
 }
 
-// ── Remote Taps ───────────────────────────────────────────────────────────────
+// ── Remote Taps ───────────────────────────────────────────────────────────
 
 export async function fetchTaps(): Promise<RemoteTap[]> {
   if (isDemoMode()) return [];
@@ -1390,6 +1390,34 @@ export interface WeeklyReportTap {
   alerts_week: number;
 }
 
+// OT-/IT-Boundary-Breaches: Top-Talker Richtung unbekannter Netze (also
+// boundary_net_known != true), exkl. whitelist-suppressed Alerts.
+export interface WeeklyReportBoundaryTalker {
+  src_ip:       string;
+  display_name: string | null;
+  hostname:     string | null;
+  count:        number;
+  top_priority: 'P0' | 'P1' | 'P2' | 'P3' | null;
+}
+
+export interface WeeklyReportBoundaryPair {
+  src_ip:           string;
+  dst_ip:           string;
+  dst_country:      string | null;
+  dst_country_code: string | null;
+  dst_asn:          string | null;
+  count:            number;
+  top_priority:     'P0' | 'P1' | 'P2' | 'P3' | null;
+}
+
+export interface WeeklyReportBoundary {
+  total:       number;
+  by_priority: { P0: number; P1: number; P2: number; P3: number };
+  whitelisted: number;
+  top_talkers: WeeklyReportBoundaryTalker[];
+  top_pairs:   WeeklyReportBoundaryPair[];
+}
+
 export interface WeeklyReport {
   // archived=true: Snapshot kommt aus MinIO (frozen). archived=false/undefined:
   // live aus DB-Aggregat. Frontend zeigt einen Indikator "Archiv" wenn true.
@@ -1406,6 +1434,9 @@ export interface WeeklyReport {
     ml:                 { fp_marked: number; tp_marked: number; tuner_cycles: number };
     suricata_top_sids:  Array<{ sid: string; count: number }>;
   };
+  // Optional, weil ältere Archiv-Snapshots aus pre-V2-Zeit das Feld noch
+  // nicht haben — UI rendert dann nur fallback "keine Daten".
+  boundary?: WeeklyReportBoundary;
   audit: {
     active_users:    Array<{ username: string; last_login: string }>;
     whitelist_adds:  number;
@@ -1525,6 +1556,21 @@ function demoWeeklyReport(_week?: string): WeeklyReport {
       suricata_top_sids: [
         { sid: 'SURICATA:1:2006380:17', count: 8 },
         { sid: 'SURICATA:1:2022082:6',  count: 3 },
+      ],
+    },
+    boundary: {
+      total: 24,
+      by_priority: { P0: 2, P1: 6, P2: 11, P3: 5 },
+      whitelisted: 4,
+      top_talkers: [
+        { src_ip: '192.168.1.66', display_name: 'workstation-04', hostname: null, count: 9, top_priority: 'P1' },
+        { src_ip: '10.10.5.12',   display_name: null, hostname: 'plc-room-a',     count: 7, top_priority: 'P0' },
+        { src_ip: '192.168.1.85', display_name: 'kali-lab', hostname: null, count: 4, top_priority: 'P2' },
+      ],
+      top_pairs: [
+        { src_ip: '192.168.1.66', dst_ip: '185.199.108.153', dst_country: 'United States', dst_country_code: 'US', dst_asn: 'GitHub Inc.', count: 5, top_priority: 'P1' },
+        { src_ip: '10.10.5.12',   dst_ip: '88.198.12.7',     dst_country: 'Germany',       dst_country_code: 'DE', dst_asn: 'Hetzner',     count: 4, top_priority: 'P0' },
+        { src_ip: '192.168.1.85', dst_ip: '8.8.8.8',         dst_country: 'United States', dst_country_code: 'US', dst_asn: 'GOOGLE',      count: 2, top_priority: 'P2' },
       ],
     },
     audit: {
