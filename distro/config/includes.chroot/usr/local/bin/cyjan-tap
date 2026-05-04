@@ -7,6 +7,7 @@
 #
 # Beispiele:
 #   cyjan-tap status
+#   cyjan-tap load follow
 #   cyjan-tap connection follow
 #   cyjan-tap pair https://master.example.com:8001 abcDEF...
 #   cyjan-tap test
@@ -81,9 +82,97 @@ print("Letzter Fehler:   ", F(d.get("last_error")))
   fi
 }
 
+# Last-Snapshot (CPU/RAM/Disk/Mirror-Traffic/Sniffer-Drops). Bewusst in einem
+# Stil gerendert, der gut neben print_state funktioniert — man sieht die
+# Verbindungs-Sicht und die Lokal-Health-Sicht im selben Block.
+print_load() {
+  local s
+  s=$(api_get /api/load) || { echo "tap-api nicht erreichbar"; return 1; }
+  # Python-Renderer für beide Pfade — die Bash/jq-Variante wäre für die
+  # human-readable Bps/pps-Formatierung sehr unhandlich. Python ist ohnehin
+  # auf jeder Tap-Maschine vorhanden.
+  echo "$s" | python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+def fmt_bps(b):
+    if b is None: return "–"
+    for u in ("B/s","KB/s","MB/s","GB/s"):
+        if b < 1024: return f"{b:6.1f} {u}"
+        b /= 1024
+    return f"{b:6.1f} TB/s"
+def fmt_int(n):
+    return "–" if n is None else f"{int(n):,}".replace(",", " ")
+def fmt_pct(p):
+    return "–" if p is None else f"{p:.1f} %"
+
+print()
+print("─── Last (Tap-lokal) ──────────────────────────")
+print(f"Mirror-Iface:      {d.get(\"iface\") or \"–\"}")
+cpu = d.get("cpu_pct")
+print(f"CPU-Last:          {fmt_pct(cpu)}")
+m = d.get("mem") or {}
+mem_used = m.get("used_mb"); mem_total = m.get("total_mb")
+mem_pct  = m.get("pct")
+print(f"RAM:               {mem_used or 0} / {mem_total or 0} MB ({fmt_pct(mem_pct)})")
+dk = d.get("disk") or {}
+print(f"Disk (Outage-Vol): {dk.get(\"used_gb\",0):.1f} / {dk.get(\"total_gb\",0):.1f} GB ({fmt_pct(dk.get(\"pct\"))})")
+
+n = d.get("net") or None
+if n:
+    print()
+    print("Mirror-Traffic:")
+    print(f"  RX: {fmt_bps(n.get(\"rx_bps\"))}  /  {fmt_int(n.get(\"rx_pps\"))} pps")
+    print(f"  TX: {fmt_bps(n.get(\"tx_bps\"))}  /  {fmt_int(n.get(\"tx_pps\"))} pps")
+    rx_d = n.get("rx_dropped")
+    if rx_d is not None and rx_d > 0:
+        print(f"  rx_dropped (Kernel): {fmt_int(rx_d)}  ← Mirror-NIC verwirft Pakete")
+else:
+    print()
+    print("Mirror-Traffic:    (Iface nicht lesbar — sysfs-Mount oder MIRROR_IFACE prüfen)")
+
+sn = d.get("sniffer") or {}
+print()
+print("Sniffer:")
+pps = sn.get("pps"); drop = sn.get("drop_pct")
+if pps is not None:
+    drop_marker = "  ← Backpressure" if (drop or 0) > 0.5 else ""
+    print(f"  Aktuell:   {fmt_int(pps)} pps   drop {drop:.2f} %{drop_marker}")
+print(f"  Captured:  {fmt_int(sn.get(\"total_captured\",0))}")
+print(f"  Dropped:   {fmt_int(sn.get(\"total_dropped\",0))}")
+print(f"  Kafka-Err: {fmt_int(sn.get(\"kafka_errors\",0))}")
+note = sn.get("note")
+if note:
+    print(f"  Hinweis:   {note}")
+'
+}
+
 cmd_status() {
   require_curl
   print_state
+  print_load || true
+}
+
+cmd_load() {
+  require_curl
+  case "${1:-}" in
+    "")
+      print_load
+      ;;
+    follow)
+      while true; do
+        clear
+        echo "─── cyjan-tap load follow (Ctrl+C zum Beenden) ────────────────"
+        date '+%Y-%m-%d %H:%M:%S'
+        # connection-Status und Last in einem Frame — wer das hier offen
+        # lässt, will beides gleichzeitig im Auge.
+        print_state || echo "tap-api nicht erreichbar"
+        print_load || true
+        sleep 2
+      done
+      ;;
+    *)
+      echo "Usage: cyjan-tap load [follow]"; exit 2 ;;
+  esac
 }
 
 cmd_connection() {
@@ -219,7 +308,8 @@ usage() {
   cat <<USAGE
 cyjan-tap – Remote-Tap-CLI
 
-  cyjan-tap status                       Status anzeigen
+  cyjan-tap status                       Verbindungs- + Last-Status anzeigen
+  cyjan-tap load [follow]                nur Last-Block (CPU/RAM/Disk/Traffic/Drops)
   cyjan-tap connection follow            Live-Tail des Master-Connection-Status
   cyjan-tap pair <master-url> <token>    klassisches Pairing mit Master + Token
   cyjan-tap auto-pair <master-url> [name]  token-freies Pairing — Admin bestätigt im Master-UI
@@ -236,6 +326,7 @@ USAGE
 
 case "${1:-status}" in
   status)     shift; cmd_status "$@" ;;
+  load)       shift; cmd_load "$@" ;;
   connection) shift; cmd_connection "$@" ;;
   pair)       shift; cmd_pair "$@" ;;
   auto-pair)  shift; cmd_auto_pair "$@" ;;
