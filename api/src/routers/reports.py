@@ -389,6 +389,150 @@ async def _ml_activity(conn: asyncpg.Connection, t0: datetime, t1: datetime) -> 
     }
 
 
+# ── Egress-Boundary-Breaches (OT/IT-Boundary) ───────────────────────────────────
+#
+# Eine Boundary-Breach ist ein Alert mit `boundary_priority IS NOT NULL`,
+# also einer der Klassen P0–P3 aus Migration 010 (siehe SQL-Kommentar dort).
+# `boundary_whitelisted` wird zur Query-Zeit gegen die `egress_whitelist`
+# berechnet — wir wenden hier dieselbe NOT-EXISTS-Korrelation wie im
+# Alert-Feed-Endpoint (alerts.py) an, damit der Wochenbericht den gleichen
+# „aktiven Stand" zeigt wie die Live-Ansicht.
+
+_BOUNDARY_NOT_WHITELISTED = """\
+NOT EXISTS (
+    SELECT 1 FROM egress_whitelist w
+    WHERE w.active = true
+      AND (w.expires_at IS NULL OR w.expires_at > now())
+      AND w.src_ip = a.src_ip
+      AND (
+        (w.dst_ip  IS NULL AND w.dst_net IS NULL) OR
+        (w.dst_ip  IS NOT NULL AND w.dst_ip  = a.dst_ip) OR
+        (w.dst_net IS NOT NULL AND a.dst_ip <<= w.dst_net)
+      )
+      AND (w.dst_port IS NULL OR w.dst_port = a.dst_port)
+      AND (w.proto    IS NULL OR w.proto    = a.proto)
+)"""
+
+
+async def _boundary_summary(conn: asyncpg.Connection, t0: datetime, t1: datetime) -> dict:
+    """Zähle Breaches pro Priority + wie viele die Whitelist suppressed.
+    Zwei Queries — eine für aktive Breaches gruppiert, eine für den
+    Whitelist-Total. Beide sharen den Index `alerts_boundary_priority_ts_idx`."""
+    by_prio = await conn.fetch(
+        f"""
+        SELECT boundary_priority AS p, COUNT(*) AS c
+          FROM alerts a
+         WHERE a.ts >= $1 AND a.ts < $2 AND NOT a.is_test
+           AND a.boundary_priority IS NOT NULL
+           AND {_BOUNDARY_NOT_WHITELISTED}
+         GROUP BY boundary_priority
+        """,
+        t0, t1,
+    )
+    wl_row = await conn.fetchrow(
+        f"""
+        SELECT COUNT(*) AS c
+          FROM alerts a
+         WHERE a.ts >= $1 AND a.ts < $2 AND NOT a.is_test
+           AND a.boundary_priority IS NOT NULL
+           AND NOT ({_BOUNDARY_NOT_WHITELISTED})
+        """,
+        t0, t1,
+    )
+    counts = {"P0": 0, "P1": 0, "P2": 0, "P3": 0}
+    for r in by_prio:
+        if r["p"] in counts:
+            counts[r["p"]] = int(r["c"])
+    return {
+        "total":       sum(counts.values()),
+        "by_priority": counts,
+        "whitelisted": int(wl_row["c"] or 0),
+    }
+
+
+async def _boundary_top_talkers(
+    conn: asyncpg.Connection, t0: datetime, t1: datetime, limit: int = 10,
+) -> list[dict]:
+    """Top-N Source-IPs die Richtung unbekannter Netze (boundary_net_known
+    ≠ true) gefeuert haben — also die heißesten internen Sender Richtung
+    Außen. Hostname/Display-Name-Lookup aus host_info. MIN(priority) ist
+    bewusst lex-sort: 'P0' < 'P1' < 'P2' < 'P3', also liefert MIN die
+    schärfste Klassifikation des Talkers."""
+    rows = await conn.fetch(
+        f"""
+        SELECT a.src_ip,
+               COUNT(*) AS c,
+               MIN(a.boundary_priority) AS top_priority,
+               h.display_name,
+               h.hostname
+          FROM alerts a
+          LEFT JOIN host_info h ON h.ip = a.src_ip
+         WHERE a.ts >= $1 AND a.ts < $2 AND NOT a.is_test
+           AND a.boundary_priority IS NOT NULL
+           AND a.boundary_net_known IS DISTINCT FROM TRUE
+           AND a.src_ip IS NOT NULL
+           AND {_BOUNDARY_NOT_WHITELISTED}
+         GROUP BY a.src_ip, h.display_name, h.hostname
+         ORDER BY c DESC
+         LIMIT $3
+        """,
+        t0, t1, limit,
+    )
+    return [
+        {
+            "src_ip":       str(r["src_ip"]),
+            "display_name": r["display_name"],
+            "hostname":     r["hostname"],
+            "count":        int(r["c"]),
+            "top_priority": r["top_priority"],
+        }
+        for r in rows
+    ]
+
+
+async def _boundary_top_pairs(
+    conn: asyncpg.Connection, t0: datetime, t1: datetime, limit: int = 10,
+) -> list[dict]:
+    """Top-N (src, dst)-Pärchen Richtung unbekannter Netze. Jeder Pair-
+    Eintrag bekommt zusätzlich Country/ASN des Ziels aus dem Enrichment-
+    JSONB — typisch Internet-Ziele, gelegentlich Multicast/RFC1918 ohne
+    Geo-Daten (dann sind die Felder NULL)."""
+    rows = await conn.fetch(
+        f"""
+        SELECT a.src_ip,
+               a.dst_ip,
+               COUNT(*) AS c,
+               MIN(a.boundary_priority) AS top_priority,
+               MAX(a.enrichment->'dst_geo'->>'country')      AS dst_country,
+               MAX(a.enrichment->'dst_geo'->>'country_code') AS dst_country_code,
+               MAX(a.enrichment->'dst_asn'->>'org')          AS dst_asn
+          FROM alerts a
+         WHERE a.ts >= $1 AND a.ts < $2 AND NOT a.is_test
+           AND a.boundary_priority IS NOT NULL
+           AND a.boundary_net_known IS DISTINCT FROM TRUE
+           AND a.src_ip IS NOT NULL
+           AND a.dst_ip IS NOT NULL
+           AND {_BOUNDARY_NOT_WHITELISTED}
+         GROUP BY a.src_ip, a.dst_ip
+         ORDER BY c DESC
+         LIMIT $3
+        """,
+        t0, t1, limit,
+    )
+    return [
+        {
+            "src_ip":           str(r["src_ip"]),
+            "dst_ip":           str(r["dst_ip"]),
+            "count":            int(r["c"]),
+            "top_priority":     r["top_priority"],
+            "dst_country":      r["dst_country"],
+            "dst_country_code": r["dst_country_code"],
+            "dst_asn":          r["dst_asn"],
+        }
+        for r in rows
+    ]
+
+
 async def _suricata_top(conn: asyncpg.Connection, t0: datetime, t1: datetime, limit: int = 5) -> list[dict]:
     rows = await conn.fetch(
         """
@@ -486,6 +630,9 @@ async def _build_weekly_payload(year: int, wk: int) -> dict:
         ml                    = await _ml_activity(conn, t0, t1)
         suricata              = await _suricata_top(conn, t0, t1)
         audit                 = await _audit_summary(conn, t0, t1)
+        boundary_sum          = await _boundary_summary(conn, t0, t1)
+        boundary_talkers      = await _boundary_top_talkers(conn, t0, t1)
+        boundary_pairs        = await _boundary_top_pairs(conn, t0, t1)
 
     # _rank-Hilfsspalte aus top_sources entfernen (war nur internes Sort)
     top_sources = [{k: v for k, v in r.items() if not k.startswith("_")} for r in top_sources_raw]
@@ -516,6 +663,13 @@ async def _build_weekly_payload(year: int, wk: int) -> dict:
             "taps":                 taps,
             "ml":                   ml,
             "suricata_top_sids":    suricata,
+        },
+        "boundary": {
+            "total":       boundary_sum["total"],
+            "by_priority": boundary_sum["by_priority"],
+            "whitelisted": boundary_sum["whitelisted"],
+            "top_talkers": boundary_talkers,
+            "top_pairs":   boundary_pairs,
         },
         "audit": audit,
     }
@@ -699,6 +853,28 @@ def _to_csv_zip(payload: dict, year: int, week: int) -> StreamingResponse:
         zf.writestr("ml.csv", _csv_response(
             [payload["ops"]["ml"]],
             ["fp_marked", "tp_marked", "tuner_cycles"],
+        ))
+        # Boundary-Bereich: Summary als Key/Value, Top-Talker + Top-Pairs als Tabellen.
+        b = payload.get("boundary") or {}
+        bp = b.get("by_priority") or {}
+        zf.writestr("boundary_summary.csv", _csv_response(
+            [
+                {"key": "total",       "value": b.get("total", 0)},
+                {"key": "whitelisted", "value": b.get("whitelisted", 0)},
+                {"key": "P0",          "value": bp.get("P0", 0)},
+                {"key": "P1",          "value": bp.get("P1", 0)},
+                {"key": "P2",          "value": bp.get("P2", 0)},
+                {"key": "P3",          "value": bp.get("P3", 0)},
+            ],
+            ["key", "value"],
+        ))
+        zf.writestr("boundary_top_talkers.csv", _csv_response(
+            b.get("top_talkers") or [],
+            ["src_ip", "display_name", "hostname", "count", "top_priority"],
+        ))
+        zf.writestr("boundary_top_pairs.csv", _csv_response(
+            b.get("top_pairs") or [],
+            ["src_ip", "dst_ip", "dst_country", "dst_country_code", "dst_asn", "count", "top_priority"],
         ))
         zf.writestr("audit_active_users.csv", _csv_response(
             payload["audit"]["active_users"],

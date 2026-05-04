@@ -64,6 +64,15 @@ const DE = {
       tunerCycles: 'Rule-Tuner-Cycles',
       suricataTitle: 'Top-5 Suricata-SIDs',
     },
+    boundary: {
+      title: 'OT-Boundary Breaches',
+      totalLabel: 'Aktive Breaches',
+      whitelistedLabel: 'Whitelisted (suppressed)',
+      none: 'Keine Egress-Boundary-Breaches in dieser Woche.',
+      topTalkersTitle: 'Top-Talker → unbekannte Netze',
+      topPairsTitle: 'Top-Verbindungen Source → Ziel (unbekannt)',
+      priorityHint: 'P0 = vollständig unbekannt · P1 = bekannt → unbekannt (C2/Exfil) · P2 = Rogue/Routing · P3 = Inventory-Lücke',
+    },
     audit: {
       title: 'Audit',
       activeUsersTitle: 'Aktive User (in der Woche eingeloggt)',
@@ -133,6 +142,15 @@ const EN = {
       tpMarked: 'TP markings',
       tunerCycles: 'Rule-tuner cycles',
       suricataTitle: 'Top-5 Suricata SIDs',
+    },
+    boundary: {
+      title: 'OT-Boundary breaches',
+      totalLabel: 'Active breaches',
+      whitelistedLabel: 'Whitelisted (suppressed)',
+      none: 'No egress-boundary breaches this week.',
+      topTalkersTitle: 'Top talkers → unknown networks',
+      topPairsTitle: 'Top connections source → unknown destination',
+      priorityHint: 'P0 = fully unknown · P1 = known → unknown (C2/exfil) · P2 = rogue/routing · P3 = inventory gap',
     },
     audit: {
       title: 'Audit',
