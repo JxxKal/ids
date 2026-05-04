@@ -23,7 +23,6 @@ import {
   type MlTuningStatus,
   fetchSuricataOverrides, saveSuricataOverrides,
   type SuricataOverrideEntry,
-  fetchBoundaryPriorityMap, saveBoundaryPriorityMap,
   fetchBoundaryPriorityMapV2, saveBoundaryPriorityMapV2,
   fetchTaps, createTapPairingToken, revokeTap,
   fetchPendingTaps, approvePendingTap, rejectPendingTap, fetchTapAuditLog,
