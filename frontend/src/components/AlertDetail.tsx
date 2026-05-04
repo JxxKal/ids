@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Network } from 'lucide-react';
 import { clearFeedback, setFeedback } from '../api';
+import { countryFlag, geoTooltip } from '../lib/country';
 import type { Alert } from '../types';
 import { AlertFlowPopup } from './AlertFlowPopup';
 import { showHostConnections } from './HostConnectionDrawer';
@@ -15,12 +16,17 @@ interface Props {
   onUpdate: (a: Alert) => void;
 }
 
-function Row({ label, value }: { label: string; value?: string | number | null }) {
+function Row({ label, value, title }: { label: string; value?: string | number | null; title?: string }) {
   if (value == null) return null;
   return (
     <div className="flex gap-3 py-1.5 border-b border-slate-800/50">
       <span className="w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
-      <span className="text-slate-200 text-xs break-all font-mono">{String(value)}</span>
+      <span
+        className="text-slate-200 text-xs break-all font-mono"
+        title={title || undefined}
+      >
+        {String(value)}
+      </span>
     </div>
   );
 }
@@ -202,8 +208,30 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
               <Row label="Dst Ping"      value={enr.dst_ping_ms != null ? `${enr.dst_ping_ms} ms` : undefined} />
               <Row label="Src ASN"       value={enr.src_asn ? `AS${enr.src_asn.number} ${enr.src_asn.org}` : undefined} />
               <Row label="Dst ASN"       value={enr.dst_asn ? `AS${enr.dst_asn.number} ${enr.dst_asn.org}` : undefined} />
-              <Row label="Src Geo"       value={enr.src_geo ? [enr.src_geo.city, enr.src_geo.country].filter(Boolean).join(', ') : undefined} />
-              <Row label="Dst Geo"       value={enr.dst_geo ? [enr.dst_geo.city, enr.dst_geo.country].filter(Boolean).join(', ') : undefined} />
+              <Row
+                label="Src Geo"
+                value={
+                  enr.src_geo
+                    ? [
+                        countryFlag(enr.src_geo.country_code),
+                        [enr.src_geo.city, enr.src_geo.country].filter(Boolean).join(', '),
+                      ].filter(Boolean).join(' ')
+                    : undefined
+                }
+                title={geoTooltip(enr.src_geo)}
+              />
+              <Row
+                label="Dst Geo"
+                value={
+                  enr.dst_geo
+                    ? [
+                        countryFlag(enr.dst_geo.country_code),
+                        [enr.dst_geo.city, enr.dst_geo.country].filter(Boolean).join(', '),
+                      ].filter(Boolean).join(' ')
+                    : undefined
+                }
+                title={geoTooltip(enr.dst_geo)}
+              />
             </>
           )}
 
