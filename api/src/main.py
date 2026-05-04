@@ -18,6 +18,7 @@ Endpunkte:
   GET  /api/tests/runs                  – Test-Run-Protokoll
   GET  /api/tests/runs/{id}             – Einzelner Test-Run
   GET  /api/reports/weekly              – Wochenbericht (JSON oder CSV-ZIP)
+  GET  /api/reports/history             – Liste archivierter Wochen (MinIO)
 
 WebSocket:
   WS   /ws/alerts                       – Echtzeit-Alert-Stream
@@ -147,6 +148,7 @@ kafka_producer = Producer({
 set_feedback_producer(kafka_producer)
 make_pcap_endpoint(minio_client, cfg.pcap_bucket)
 make_run_endpoint(kafka_producer)
+reports_router.configure_archive(minio_client, cfg.reports_bucket)
 
 _auth = [Depends(get_current_user)]
 
@@ -191,6 +193,16 @@ async def startup() -> None:
     # Root beim ersten Start; danach idempotent.
     master_ca.init(cfg.master_ca_dir)
 
+    # Reports-Bucket für die archivierten Wochen-Snapshots. Pcap-Bucket wird
+    # vom pcap-store-Service angelegt; reports legt sich der API-Container
+    # selber, weil keine andere Komponente schreibt.
+    try:
+        if not minio_client.bucket_exists(cfg.reports_bucket):
+            minio_client.make_bucket(cfg.reports_bucket)
+            log.info("MinIO bucket created: %s", cfg.reports_bucket)
+    except Exception as exc:
+        log.warning("Reports-Bucket-Init fehlgeschlagen: %s", exc)
+
     # _known_networks.json initial ins sig-rules-Volume schreiben, damit die
     # signature-engine den CIDR-Cache für den internal/external-Param-Split
     # bekommt — ohne dass zuerst ein Network-CRUD getriggert werden muss.
@@ -210,6 +222,11 @@ async def startup() -> None:
 
     # Syslog-Forwarder
     asyncio.create_task(syslog_forwarder_loop(get_pool))
+
+    # Reports-Archive-Cron — alle 60 min prüfen, ob die abgeschlossene Woche
+    # bereits archiviert ist; sonst Snapshot in MinIO ablegen.
+    asyncio.create_task(reports_router.archive_loop())
+
     log.info("API startup complete")
 
 
