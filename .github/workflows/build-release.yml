@@ -33,11 +33,11 @@ on:
         options: [master, tap, both]
 
 jobs:
-  # ─────────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
   # Alle Custom-Images (ids-*) bauen + externe Runtime-Images (timescaledb,
   # kafka, redis, minio, kafka-ui) ziehen, gemeinsam in einen tarball
   # exportieren. Output-Artefakt: docker-images/images.tar.gz
-  # ─────────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
   build-images:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -163,14 +163,14 @@ jobs:
           path: images-tap.tar.zst
           retention-days: 7
 
-  # ─────────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
   # ISO bauen mit eingebettetem Image-Bundle.
   #
   # Läuft nur wenn:
   #   • das gepushte Tag auf .0.0 endet (Major-Release), ODER
   #   • workflow_dispatch mit build_iso=true manuell getriggert wurde.
   # Sonst stoppt der Workflow nach build-images bei build-update-package.
-  # ─────────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
   build-iso:
     needs: build-images
     if: |
@@ -333,7 +333,7 @@ jobs:
             ### Erstanmeldung
             - Web-Interface: `http://<management-ip>/`
             - API / Swagger: `http://<management-ip>:8001/api/docs`
-            - Default-Login: **`admin` / `***REDACTED***`** → sofort ändern.
+            - Default-Login: **`admin` / `admin-change-me`** → sofort ändern.
 
             ### Update nach Installation
             Zwei Pfade, je nach Internetzugang:
@@ -354,14 +354,14 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
 
-  # ─────────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
   # Tap-ISO: gleiche Live-Build-Basis wie Master, aber kleineres Image-Bundle
   # (nur Tap-Services + Kafka) und /etc/cyjan/mode=tap als Marker, damit der
   # Wizard beim ersten Boot direkt Tap als Default vorschlägt.
   #
   # Hostname: cyjan-tap (statt cyjan-ids beim Master) – macht im DHCP-Lease
   # und auf der Konsole sofort sichtbar dass es ein Tap ist.
-  # ─────────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
   build-iso-tap:
     needs: build-images
     if: |
@@ -517,10 +517,10 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
 
-  # ─────────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
   # Update-Paket: gleiches Bundle + compose.yml + infra/, ohne ISO drumrum.
   # Wird über Settings → System-Update eingespielt.
-  # ─────────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────────
   build-update-package:
     needs: build-images
     runs-on: ubuntu-24.04
@@ -554,6 +554,38 @@ jobs:
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.
           mv images-master.tar.zst "$PKG/images.tar.zst"
+
+          # GeoIP-/ASN-Lite-DBs von DB-IP mit reinpacken, damit Offline-Hosts
+          # nach jedem Update frische Geo-Daten haben (DB-IP veröffentlicht am
+          # 1. eines jeden Monats unter download.db-ip.com/free).
+          # Der enrichment-service erwartet die Dateien als
+          # GeoLite2-{City,ASN}.mmdb in /opt/ids/geoip/. Die System-Update-API
+          # extrahiert das ZIP nach /opt/ids und restartet alle Services →
+          # enrichment-service lädt die neuen Dateien automatisch.
+          # Failsoft: wenn DB-IP nicht erreichbar ist (CI-Netz-Hiccup, Lite-
+          # Endpoint-Wechsel), bauen wir das Update trotzdem — der Settings-
+          # Upload-Pfad bleibt als Fallback.
+          mkdir -p "$PKG/geoip"
+          GEOIP_OK=0
+          for MO in $(date -u +%Y-%m) $(date -u -d '1 month ago' +%Y-%m) $(date -u -d '2 months ago' +%Y-%m); do
+            URL_CITY="https://download.db-ip.com/free/dbip-city-lite-${MO}.mmdb.gz"
+            URL_ASN="https://download.db-ip.com/free/dbip-asn-lite-${MO}.mmdb.gz"
+            if curl -sfI "$URL_CITY" >/dev/null && curl -sfI "$URL_ASN" >/dev/null; then
+              echo "GeoIP-Stand: DB-IP Lite $MO"
+              curl -sf -o /tmp/city.mmdb.gz "$URL_CITY"
+              curl -sf -o /tmp/asn.mmdb.gz  "$URL_ASN"
+              gunzip -c /tmp/city.mmdb.gz > "$PKG/geoip/GeoLite2-City.mmdb"
+              gunzip -c /tmp/asn.mmdb.gz  > "$PKG/geoip/GeoLite2-ASN.mmdb"
+              rm -f /tmp/city.mmdb.gz /tmp/asn.mmdb.gz
+              GEOIP_OK=1
+              break
+            fi
+          done
+          if [ "$GEOIP_OK" = "0" ]; then
+            echo "WARNUNG: DB-IP Lite nicht erreichbar – Update-ZIP ohne GeoIP-DBs."
+            echo "Hosts können sie über Settings → GeoIP-Datenbanken nachträglich hochladen."
+            rmdir "$PKG/geoip"
+          fi
 
           cat > "$PKG/UPDATE.md" << 'EOF'
           # Cyjan IDS Update-Paket
