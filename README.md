@@ -65,7 +65,8 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | `signature-engine` | Python | ✅ | Regelbasierte Erkennung mit Sliding-Window-Kontext und Hot-Reload |
 | `ml-engine` | Python | ✅ | Anomalie-Erkennung mit Isolation Forest, Bootstrap aus DB, inkrementeller Scaler-Update, konfigurierbarer Threshold → **[ausführliche Doku](docs/ML_ENGINE.md)** |
 | `alert-manager` | Python | ✅ | Deduplication (Sliding Window), Score-Normierung, DB-Write + Weiterleitung |
-| `enrichment-service` | Python | ✅ | Reverse-DNS, ICMP-Ping, GeoIP/ASN (MaxMind), Known-Network-Lookup, Redis-Cache, Host-Trust-Prüfung |
+| `enrichment-service` | Python | ✅ | Reverse-DNS, ICMP-Ping, GeoIP/ASN (DB-IP Lite oder MaxMind), Known-Network-Lookup, Host-Trust, **OT-Boundary V2 Zone-Klassifikation** (ot/it/internet) |
+| `rule-tuner` | Python | ✅ | *(nur Master)* Reservoir-Sampling über `rule-metrics`-Topic, Quantil-basiertes Schwellwert-Tuning für Heuristik-Rules, schreibt Overrides nach 6h-Cycle (siehe [ML-Tuning](#ml-tuning--automatische-schwellwert-anpassung)) |
 | `pcap-store` | Python | ✅ | Sliding-Window-Paketpuffer, PCAP-Writer, MinIO-Upload, DB-Update, WS-Push nach Upload |
 | `api` | Python FastAPI | ✅ | REST + WebSocket, JWT-Auth (8h / 365d API), Swagger UI mit Bearer-Auth, alle Datenpfade |
 | `frontend` | React + Vite + TS | ✅ | Echtzeit Alert-Feed, Verbindungsgraph, PCAP-Download, Feedback, ML-Konfiguration, Sidebar-Navigation |
@@ -235,6 +236,14 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 | `006_suricata_source.sql` | `suricata` als gültige Alert-Quelle |
 | `007_external_source.sql` | `external` als gültige Alert-Quelle (IRMA-Bridge) |
 | `008_itop_cmdb.sql` | `cmdb` als gültige Trust-Quelle (iTop-Integration) |
+| `010_egress_boundary.sql` | Egress-Boundary-Klassifikation V1 + Whitelist-Tabelle |
+| `011_remote_taps.sql` | mTLS-Pairing, Cert-Speicher, Heartbeat |
+| `012_rule_tuner_baselines.sql` | `rule_baselines` für ML-Tuner + Tuning-Status-Config |
+| `013_alert_metric_values.sql` | `alerts.metric_values` für FP/TP-Constraints im Tuner |
+| `014_dos_blacklist_default.sql` | Default-Blacklist DOS-Rules im ML-Tuner |
+| `015_tap_auto_pair.sql` | Tap-Auto-Pairing (Pending-Liste, Audit-Log) |
+| `016_known_networks_kind.sql` | `known_networks.kind` (`ot`\|`it`) für OT-Boundary V2 |
+| `017_alerts_boundary_zones.sql` | `alerts.boundary_{src,dst}_zone` + V2-Priority-Matrix in `system_config` |
 
 ---
 
@@ -305,9 +314,10 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 
 ### Netzwerke
 
-- Bekannte Netzwerke (CIDR + Name + Beschreibung + Farbe) anlegen und löschen
-- **CSV-Import** – Bulk-Import aus Datei
-- **iTop-Import** – Netzwerke aus CMDB synchronisieren (grün markiert)
+- Bekannte Netzwerke (CIDR + Name + Beschreibung + Farbe + **Zone**) anlegen und löschen
+- **Zone-Tag** (`kind`): `ot` (Default, OT-Scope) oder `it` (Corporate-IT, nicht im OT-Scope) — steuert die [OT-Boundary V2 Klassifikation](#ot-boundary-klassifikation-v2)
+- **CSV-Import** – Bulk-Import aus Datei (5. Spalte `kind` optional, Default `ot`; Re-Imports erhalten manuell auf `it` getaggte Einträge)
+- **iTop-Import** – Netzwerke aus CMDB synchronisieren (grün markiert, `kind=ot` explizit gesetzt; manuell auf `it` umgetaggte iTop-Netze bleiben `it` auch beim Re-Sync)
 - **Beispiel-CSV** – Download-Button (authentifizierter Fetch)
 
 ### Hosts
@@ -322,6 +332,22 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 
 - 5 Test-Szenarien direkt aus dem Dashboard auslösen
 - Ergebnis-Protokoll: Latenz, Alert-ID, Treffer-Status
+
+### Wochenbericht
+
+Aggregierter Detection-/Operations-Bericht für eine ISO-Woche mit Vergleich zur Vorwoche. ISO-Wochen-Selector, Print/PDF, JSON-Download, CSV-Bundle (ZIP) für Excel/Power-BI.
+
+**Inhalt:**
+
+- **Executive Summary** – Severity-Donut, Headline (z.B. *„4 kritische Alerts diese Woche; Spitzenreiter: SCAN_001 mit 67 Treffern."*), Trend-Pfeil ggü. Vorwoche
+- **Detection** – gestapeltes Tagesdiagramm (Severity), Top-10 Regeln, Top-10 Source-IPs, Top-10 externe Ziele mit Länderflagge + ASN
+- **OT-Boundary** – aktive Breaches per Priority + 3×3 **Zone-Aufschlüsselung** (Source × Destination), Top-Talker Richtung unbekannter Netze, Top-Pairs mit Geo/ASN; whitelist-suppressed Alerts werden separat ausgewiesen
+- **Betrieb** – Remote-Tap-Heartbeat + Wochen-Volumen, ML/Tuner-Aktivität (FP/TP-Marks, Tuner-Cycles), Top-5 Suricata-SIDs
+- **Audit** – aktive User der Woche, Whitelist-Adds
+
+**Archivierung (MinIO):**
+
+Beim ersten Tick nach Mo 00:00 UTC wird die abgeschlossene Woche als JSON-Snapshot in den `ids-reports`-Bucket geschrieben (`weekly/YYYY-Wnn.json`). Vergangene Wochen werden aus dem Archiv-Snapshot gelesen — robust gegen retention-Pruning der `alerts`-Hypertable, FP-Markierungen wirken auf den live-Pfad ab dem nächsten Build-Tick rückwirkend nicht mehr (frozen view). UI-Toolbar zeigt eine **History-Liste** der letzten 12 archivierten Wochen mit Headline + Total zum Schnellsprung. Endpunkte: `GET /api/reports/weekly?week=YYYY-Wnn` (JSON oder `?fmt=csv` für ZIP), `GET /api/reports/history?limit=12`.
 
 ### Settings (Sidebar-Navigation)
 
@@ -459,15 +485,101 @@ Synchronisation mit iTop IP-Management (TeemIP-Extension):
 
 Offline-Update via ZIP-Upload direkt aus dem Dashboard:
 
-1. Release-ZIP von GitHub herunterladen (enthält `images.tar.gz`)
+1. Release-ZIP von GitHub herunterladen (enthält `images.tar.zst` + aktuelle DB-IP-Lite-GeoIP-Files)
 2. In Settings → System-Update hochladen
 3. Fortschrittsbalken (0–100%) und Live-Log verfolgen
 4. Nach ~20 Sekunden Seite neu laden
 
 **Ablauf:**
-- ZIP wird entpackt (`.env` und `.git` bleiben erhalten)
+- ZIP wird entpackt (`.env` und `.git` bleiben erhalten); GeoIP-`.mmdb`-Files landen in `/opt/ids/geoip/`
 - `docker load` lädt vorgebaute Images
-- Unabhängiger Runner-Container startet `docker compose up -d` (überlebt api-Neustart)
+- Unabhängiger Runner-Container startet `docker compose up -d --force-recreate` (überlebt api-Neustart, enrichment-service zieht die frischen GeoIP-DBs automatisch)
+
+#### GeoIP-Datenbanken
+
+Der `enrichment-service` braucht zwei `.mmdb`-Files unter `/opt/ids/geoip/` (`GeoLite2-City.mmdb` + `GeoLite2-ASN.mmdb`) für Land- und ASN-Lookup. Frei und ohne Account: [DB-IP Lite](https://db-ip.com/db/lite.php) (monatliches Update); MaxMind GeoLite2 funktioniert ebenfalls.
+
+- **Auto-Bundle**: Update-ZIPs aus dem GitHub-Build-Workflow enthalten automatisch die aktuellen DB-IP-Lite-DBs (Fallback auf -1/-2 Monate, wenn der aktuelle Monat noch nicht released ist; failsoft falls download.db-ip.com nicht erreichbar). Beim System-Update werden sie ins `geoip/`-Volume entpackt und der enrichment-service neu gestartet.
+- **Settings-Upload**: für Air-Gap-Hosts oder Custom-DBs zeigt die GUI Status pro File (Größe, Alter, MaxMind-Magic-Validierung) und akzeptiert Upload (raw `.mmdb` oder `.gz`). Atomic-Write (`.tmp` + rename), automatischer Restart des `enrichment-service` über einen unabhängigen Runner-Container.
+
+#### OT-Boundary
+
+3×3-Matrix für die V2-Klassifikation: pro `(Source-Zone × Destination-Zone)` eine Priority `P0`–`P3` oder `—` (kein Alert). Zonen kommen aus `known_networks.kind`: `ot` (OT-Scope), `it` (Corporate-IT, nicht im OT-Scope), `internet` (alles außerhalb). Default-Map:
+
+|  | → OT | → IT | → Internet |
+|---|---|---|---|
+| **OT** | – | P2 | **P0** |
+| **IT** | P1 | – | P2 |
+| **Internet** | P0 | P2 | – |
+
+Persistiert in `system_config['boundary_priority_map_v2']`, wird vom `enrichment-service` binnen 60s ohne Restart aufgepickt. Hint zur Networks-Page (IT-Netz-Pflege) inline.
+
+---
+
+## OT-Boundary Klassifikation (V2)
+
+Pro Alert tagged der `enrichment-service` zwei zusätzliche Spalten und eine Priority:
+
+```
+src_ip ── known_networks.kind ──┬─► boundary_src_zone   ('ot' | 'it' | 'internet')
+                                 │
+dst_ip ── known_networks.kind ──┴─► boundary_dst_zone
+
+(boundary_src_zone, boundary_dst_zone)
+        │
+        ▼  Lookup in system_config['boundary_priority_map_v2']
+        │  (Fallback: In-Code-Default in enrichment-service/src/boundary.py)
+        ▼
+   boundary_priority   P0 | P1 | P2 | P3 | NULL
+```
+
+Der spezifischste CIDR-Match gewinnt: ein `/16` mit `kind=it` mit einem darin liegenden `/24` mit `kind=ot` klassifiziert IPs im `/24` korrekt als `ot`. IPs außerhalb aller `known_networks` zählen als `internet`.
+
+**Whitelisting**: legitimer Egress-Verkehr (z.B. Office365-Telemetrie eines bekannten Hosts) wird per `egress_whitelist`-Tabelle ausgenommen — die Korrelation läuft zur Query-Zeit, kein Batch-Update auf der `alerts`-Hypertable. UI-Pfad: Alert-Detail → „Whitelist".
+
+**Backwards-Compat**: Bestandsalerts vor Migration 017 haben `boundary_src_zone`/`boundary_dst_zone = NULL`; ihre alte `boundary_priority` aus der V1-Klassifikation bleibt unverändert. Im Wochenbericht werden sie unter „unzoned" aufgeschlüsselt. V1-Felder `boundary_net_known/_src_known/_dst_known` werden weiter befüllt für den Alert-Detail-View.
+
+---
+
+## ML-Tuning – automatische Schwellwert-Anpassung
+
+Heuristik-Regeln deklarieren ihre Schwellwerte als `parameters:`-Block (siehe [Regel-Anpassungen](#regel-anpassungen-heuristik-schwellwerte-tunen)). Ein dedizierter `rule-tuner`-Service lernt per Reservoir-Sampling das Normalverhalten des Netzes und passt diese Schwellwerte automatisch an, ohne Heuristiken während der Lernphase abzuschalten.
+
+```
+signature-engine                          rule-tuner (Master-only)
+   │                                          │
+   │  pro Flow → metric_value berechnet        │  Reservoir-Sampling (Algorithm R)
+   │                                          │  pro (rule_id, param_name, scope) → 10k Samples
+   ▼                                          ▼
+Kafka rule-metrics  ──────────────────────►  Reservoirs (in-memory)
+                                              │
+                                              │  alle 60s: P50/P99/P995/P999 → rule_baselines (TimescaleDB)
+                                              │
+                                              │  alle 6h im 'tuning'-State:
+                                              ▼
+                                       PUT /api/sig-rules/overrides
+                                              │
+                                              ▼
+                                    _overrides.json (signature-rules-Volume)
+                                              │
+                                              ▼  inotify ──► signature-engine reload
+                                              │  Reverse-Channel ──► Tap-Hosts
+```
+
+**State-Maschine** (Settings → Regel-Anpassungen → ML-Tuning-Card): `idle` → `training` (10 d Default, einstellbar) → `tuning` (Continuous-Loop, 6h-Cadence, max ±20 % pro Cycle) → `paused` (manueller Pause-Button, Reservoirs füllen sich weiter aber kein Override-Write).
+
+**Quantil-basiert + FP/TP-Constraint**:
+- Schwellwert = `Quantil(samples) × Sicherheitsmarge`, geclamped auf `min`/`max` aus dem YAML-Schema
+- FP-Markierungen aus dem Alert-Feedback ziehen die Untergrenze nach oben (`threshold ≥ max(metric_at_fp) + 1`); TP-Markierungen ziehen sie nach unten (`threshold ≤ min(metric_at_tp)`); Konflikt → alten Wert behalten + Warnung loggen
+- Mindestens 3 Markierungen pro Rule sonst FP/TP-Pfad inaktiv (zu wenig Signal)
+
+**Provenance**: jeder Param-Override im `_overrides.json` trägt `source: 'manual' | 'ml'`. Manuelle Bearbeitung in der GUI lockt den Param (`manual`); der Tuner fasst ihn dann nicht mehr an, bis der User in der UI explizit „ML wieder übernehmen" klickt.
+
+**Eligibility-Filter**: pro `parameters:`-Block kann eine `eligibility:`-Condition deklariert sein (gleiche Sandbox-Sprache wie `condition:`). Nur passende Flows landen im Reservoir. Verhindert dass z.B. UDP-/ICMP-Flows ein TCP-SYN-Scan-Reservoir kontaminieren — das war 2026-04 die Ursache für falsch getunte SCAN_001-Schwellwerte und ist seit Phase 6 abgestellt.
+
+**DOS-Default-Blacklist**: `DOS_SYN_001`, `DOS_CONN_001`, `DOS_UDP_001`, `DOS_ICMP_001` sind out-of-the-box auf der Tuner-Blacklist (`ml_tuning_config.blacklist`). Quantil-basiertes Tuning funktioniert für diese Rules nicht zuverlässig, weil normaler Top-Tail (Streaming, VoIP, mDNS-Bursts) sich mit echtem Flood-Beginn überlappt. Konservative YAML-Defaults bleiben aktiv, User kann Rules bewusst aus der Blacklist nehmen.
+
+**Endpunkte**: `GET /api/sig-rules/ml/status`, `POST /api/sig-rules/ml/start-training`, `POST /api/sig-rules/ml/pause`, `POST /api/sig-rules/ml/resume`, `GET /api/sig-rules/ml/baselines?rule_id=…`. Alle admin-only.
 
 ---
 
