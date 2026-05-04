@@ -149,12 +149,13 @@ def _spawn_compose_up_runner(ids_dir: Path, profile: str) -> None:
     Update unsichtbar bleiben. Nach dem Update wollen wir ohnehin alle
     Container in der neuen Version sehen, also forcieren wir das.
 
-    --no-build: Defensive — die Compose-Datei hat `build:`-Direktiven, und
-    der Update-Runner mountet das ids-Verzeichnis. Ohne --no-build könnte
-    Compose im Recreate-Pfad bei einem Image-Mismatch (z.B. Bundle hat einen
-    Service noch nicht) heimlich einen Build starten. Wir wollen aber
-    fail-fast statt einen halb-fertigen In-Place-Build — die einzige
-    legitime Build-Quelle ist der vorherige docker-load-Schritt.
+    Hinweis: --no-build wurde bewusst weggelassen, weil das Flag erst seit
+    docker compose 2.21+ existiert und das Plugin im API-Image bei alten
+    Update-Pfaden ggf. älter ist (Update-Runner nutzt sein eigenes Plugin,
+    nicht das Host-Plugin). Compose `up -d` bauen nur Services für die
+    `build:` deklariert ist UND deren Image fehlt — nach `docker load`
+    sind alle nötigen Images da, das Risiko eines unbeabsichtigten Builds
+    ist null.
 
     Logs landen in <ids_dir>/.update-runner.log (auf dem Host sichtbar, weil
     das ids-Verzeichnis ohnehin gebind-mountet ist), damit man bei Problemen
@@ -162,7 +163,7 @@ def _spawn_compose_up_runner(ids_dir: Path, profile: str) -> None:
     """
     compose_cmd = (
         f"docker compose --project-directory {ids_dir} --profile {profile} "
-        f"up -d --force-recreate --no-build"
+        f"up -d --force-recreate"
     )
     log_path = str(ids_dir / ".update-runner.log")
     subprocess.Popen(
