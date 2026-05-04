@@ -107,7 +107,10 @@ def fmt_pct(p):
 
 print()
 print("─── Last (Tap-lokal) ──────────────────────────")
-print(f"Mirror-Iface:      {d.get(\"iface\") or \"–\"}")
+# Variablen vor f-strings extrahieren — Python 3.11 (Tap-Default) erlaubt
+# keine Backslash-Escapes innerhalb einer f-string-Expression.
+iface = d.get("iface") or "–"
+print(f"Mirror-Iface:      {iface}")
 cpu = d.get("cpu_pct")
 print(f"CPU-Last:          {fmt_pct(cpu)}")
 m = d.get("mem") or {}
@@ -115,14 +118,18 @@ mem_used = m.get("used_mb"); mem_total = m.get("total_mb")
 mem_pct  = m.get("pct")
 print(f"RAM:               {mem_used or 0} / {mem_total or 0} MB ({fmt_pct(mem_pct)})")
 dk = d.get("disk") or {}
-print(f"Disk (Outage-Vol): {dk.get(\"used_gb\",0):.1f} / {dk.get(\"total_gb\",0):.1f} GB ({fmt_pct(dk.get(\"pct\"))})")
+disk_used = dk.get("used_gb", 0); disk_total = dk.get("total_gb", 0)
+disk_pct  = dk.get("pct")
+print(f"Disk (Outage-Vol): {disk_used:.1f} / {disk_total:.1f} GB ({fmt_pct(disk_pct)})")
 
 n = d.get("net") or None
 if n:
     print()
     print("Mirror-Traffic:")
-    print(f"  RX: {fmt_bps(n.get(\"rx_bps\"))}  /  {fmt_int(n.get(\"rx_pps\"))} pps")
-    print(f"  TX: {fmt_bps(n.get(\"tx_bps\"))}  /  {fmt_int(n.get(\"tx_pps\"))} pps")
+    rx_bps = n.get("rx_bps"); tx_bps = n.get("tx_bps")
+    rx_pps = n.get("rx_pps"); tx_pps = n.get("tx_pps")
+    print(f"  RX: {fmt_bps(rx_bps)}  /  {fmt_int(rx_pps)} pps")
+    print(f"  TX: {fmt_bps(tx_bps)}  /  {fmt_int(tx_pps)} pps")
     rx_d = n.get("rx_dropped")
     if rx_d is not None and rx_d > 0:
         print(f"  rx_dropped (Kernel): {fmt_int(rx_d)}  ← Mirror-NIC verwirft Pakete")
@@ -137,9 +144,10 @@ pps = sn.get("pps"); drop = sn.get("drop_pct")
 if pps is not None:
     drop_marker = "  ← Backpressure" if (drop or 0) > 0.5 else ""
     print(f"  Aktuell:   {fmt_int(pps)} pps   drop {drop:.2f} %{drop_marker}")
-print(f"  Captured:  {fmt_int(sn.get(\"total_captured\",0))}")
-print(f"  Dropped:   {fmt_int(sn.get(\"total_dropped\",0))}")
-print(f"  Kafka-Err: {fmt_int(sn.get(\"kafka_errors\",0))}")
+cap_t = sn.get("total_captured", 0); drop_t = sn.get("total_dropped", 0); kerr = sn.get("kafka_errors", 0)
+print(f"  Captured:  {fmt_int(cap_t)}")
+print(f"  Dropped:   {fmt_int(drop_t)}")
+print(f"  Kafka-Err: {fmt_int(kerr)}")
 note = sn.get("note")
 if note:
     print(f"  Hinweis:   {note}")
