@@ -17,6 +17,7 @@ import { HostConnectionDrawer } from './components/HostConnectionDrawer';
 import { HelpTip } from './components/HelpTip';
 import { Sidebar, type NavTab } from './components/Sidebar';
 import { TestsPage } from './components/TestsPage';
+import { WeeklyReportPage } from './components/WeeklyReportPage';
 import { ThreatGauge } from './components/ThreatGauge';
 import { TopBar } from './components/TopBar';
 import { TopProtocolsCard } from './components/TopProtocolsCard';
@@ -431,6 +432,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
         {tab === 'networks' && <div className="flex-1 overflow-auto p-5"><NetworksPage /></div>}
         {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5"><HostsPage    /></div>}
         {tab === 'tests'    && <div className="flex-1 overflow-auto p-5"><TestsPage    /></div>}
+        {tab === 'reports'  && <div className="flex-1 overflow-auto p-5"><WeeklyReportPage /></div>}
         {tab === 'settings' && <div className="flex-1 overflow-auto p-5"><SettingsPage key={settingsSection ?? 'default'} initialSection={settingsSection} /></div>}
       </main>
 
