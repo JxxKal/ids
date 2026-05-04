@@ -167,7 +167,7 @@ async def _top_rules(conn: asyncpg.Connection, t0: datetime, t1: datetime, limit
 
 async def _top_sources(conn: asyncpg.Connection, t0: datetime, t1: datetime, limit: int = 10) -> list[dict]:
     """Top-N Source-IPs nach Alert-Anzahl. Hostname/Display-Name-Lookup
-    aus hosts-Tabelle (LEFT JOIN, IP-Match)."""
+    aus host_info-Tabelle (LEFT JOIN, IP-Match)."""
     rows = await conn.fetch(
         """
         SELECT a.src_ip,
@@ -176,7 +176,7 @@ async def _top_sources(conn: asyncpg.Connection, t0: datetime, t1: datetime, lim
                h.display_name,
                h.hostname
           FROM alerts a
-          LEFT JOIN hosts h ON h.ip = a.src_ip
+          LEFT JOIN host_info h ON h.ip = a.src_ip
          WHERE a.ts >= $1 AND a.ts < $2 AND NOT a.is_test AND a.src_ip IS NOT NULL
          GROUP BY a.src_ip, h.display_name, h.hostname
          ORDER BY c DESC
