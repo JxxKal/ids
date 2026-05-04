@@ -49,6 +49,7 @@ from routers import ml as ml_router
 from routers import rules as rules_router
 from routers import sig_rules as sig_rules_router
 from routers import egress_whitelist as egress_whitelist_router
+from routers import geoip as geoip_router
 from routers import reports as reports_router
 from routers import taps as taps_router
 from routers import ssl as ssl_router
@@ -122,7 +123,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Globale Objekte ────────────────────────────────────────────────────────────
+# ── Globale Objekte ─────────────────────────────────────────────────────────────
 
 ws_manager  = ConnectionManager()
 alert_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
@@ -140,7 +141,7 @@ kafka_producer = Producer({
     "acks": "1",
 })
 
-# ── Routers einbinden ─────────────────────────────────────────────────────────
+# ── Routers einbinden ────────────────────────────────────────────────────────────
 # WICHTIG: make_*_endpoint vor include_router aufrufen – FastAPI kopiert die
 # Routes beim include_router-Aufruf; später hinzugefügte Routen werden ignoriert.
 
@@ -164,6 +165,7 @@ app.include_router(ml_router.router,       dependencies=_auth)
 app.include_router(rules_router.router,    dependencies=_auth)
 app.include_router(sig_rules_router.router, dependencies=_auth)
 app.include_router(egress_whitelist_router.router, dependencies=_auth)
+app.include_router(geoip_router.router,    dependencies=_auth)
 app.include_router(reports_router.router,  dependencies=_auth)
 # taps_router: GET/POST(token)/DELETE sind admin-only; POST /api/taps/pair ist
 # bewusst öffentlich (Token-authentisiert), darum hier ohne global JWT-Gate
