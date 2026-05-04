@@ -1333,6 +1333,55 @@ export async function fetchTapAuditLog(limit = 200): Promise<TapAuditEntry[]> {
   return req(`/api/taps/audit-log?limit=${limit}`);
 }
 
+// ── GeoIP-Datenbanken ────────────────────────────────────────────────────────
+
+export interface GeoIpFileMeta {
+  present: boolean;
+  size:    number;
+  mtime:   string | null;
+  valid:   boolean;
+}
+
+export interface GeoIpStatus {
+  geoip_dir: string;
+  city:      GeoIpFileMeta;
+  asn:       GeoIpFileMeta;
+}
+
+export async function fetchGeoIpStatus(): Promise<GeoIpStatus> {
+  if (isDemoMode()) {
+    return {
+      geoip_dir: '/opt/ids/geoip',
+      city: { present: true, size: 131_000_000, mtime: new Date(Date.now() - 3 * 86400e3).toISOString(), valid: true },
+      asn:  { present: true, size:   9_500_000, mtime: new Date(Date.now() - 3 * 86400e3).toISOString(), valid: true },
+    };
+  }
+  return req<GeoIpStatus>('/api/system/geoip/status');
+}
+
+export async function uploadGeoIp(city: File | null, asn: File | null): Promise<{ status: string; written: string[]; message: string }> {
+  if (isDemoMode()) return { status: 'ok', written: [], message: 'demo' };
+  const fd = new FormData();
+  if (city) fd.append('city', city, city.name);
+  if (asn)  fd.append('asn',  asn,  asn.name);
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/system/geoip/upload`, {
+    method:  'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body:    fd,
+  });
+  if (res.status === 401) {
+    clearToken();
+    window.dispatchEvent(new Event('ids:unauthorized'));
+    throw new Error('401 Unauthorized');
+  }
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`${res.status}: ${txt}`);
+  }
+  return res.json();
+}
+
 // ── Weekly Report ───────────────────────────────────────────────────────────
 
 export interface WeeklyReportTrend {
