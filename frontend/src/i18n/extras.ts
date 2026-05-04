@@ -86,6 +86,27 @@ const DE = {
       topbarTaps: 'Heartbeat aller gepairten Remote-Sniffer (Taps). Grün = letzter Kontakt < 90 s, Gelb = 90 s–5 min (Verbindung wackelt), Rot = > 5 min (offline). Hover zeigt das genaue Alter.',
     },
   },
+  settings: {
+    items: {
+      geoip: 'GeoIP-Datenbanken',
+    },
+    geoip: {
+      title: 'GeoIP-Datenbanken',
+      intro: 'Der enrichment-service nutzt zwei <code>.mmdb</code>-Dateien (City + ASN) für Land/ASN-Lookup. Frei und ohne Account: <a>DB-IP Lite</a> (monatliches Update). Auch MaxMind GeoLite2 funktioniert. System-Updates über das Update-ZIP enthalten automatisch eine aktuelle Version — der manuelle Upload hier ist für Offline-Maschinen oder Custom-Datenbanken.',
+      statusTitle: 'Aktueller Stand',
+      uploadTitle: 'Hochladen',
+      uploadHint: 'Beide Dateien sind optional — du kannst auch nur eine ersetzen. Akzeptiert .mmdb roh oder .gz. Nach erfolgreichem Upload wird der enrichment-service automatisch neu geladen.',
+      statusOk: 'geladen',
+      statusInvalid: 'Datei vorhanden, aber kein gültiger MaxMind-Marker',
+      statusMissing: 'fehlt — kein GeoIP-Lookup möglich',
+      mtimeAge: 'aktualisiert vor {{age}}',
+      path: 'Pfad: {{path}}',
+      optional: '(optional)',
+      uploadBtn: 'Hochladen + Reload',
+      uploading: 'Lade hoch …',
+      restartHint: 'enrichment-service wird neu gestartet — kann ein paar Sekunden dauern.',
+    },
+  },
 };
 
 const EN = {
@@ -163,6 +184,27 @@ const EN = {
   help: {
     dashboard: {
       topbarTaps: 'Heartbeat of all paired remote sniffers (taps). Green = last contact < 90 s, amber = 90 s–5 min (link unstable), red = > 5 min (offline). Hover for the exact age.',
+    },
+  },
+  settings: {
+    items: {
+      geoip: 'GeoIP databases',
+    },
+    geoip: {
+      title: 'GeoIP databases',
+      intro: 'The enrichment-service uses two <code>.mmdb</code> files (City + ASN) for country/ASN lookups. Free without account: <a>DB-IP Lite</a> (monthly update). MaxMind GeoLite2 also works. System-Update ZIPs ship a fresh copy automatically — this manual upload is for air-gapped hosts or custom databases.',
+      statusTitle: 'Current status',
+      uploadTitle: 'Upload',
+      uploadHint: 'Both files are optional — you can replace just one. Accepts raw .mmdb or .gz. After a successful upload the enrichment-service is reloaded automatically.',
+      statusOk: 'loaded',
+      statusInvalid: 'file present, but no valid MaxMind marker',
+      statusMissing: 'missing — no GeoIP lookup',
+      mtimeAge: 'updated {{age}} ago',
+      path: 'Path: {{path}}',
+      optional: '(optional)',
+      uploadBtn: 'Upload + reload',
+      uploading: 'Uploading …',
+      restartHint: 'enrichment-service is being restarted — may take a few seconds.',
     },
   },
 };
