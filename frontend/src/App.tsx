@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { clearToken, fetchAlerts, fetchMe, fetchSystemStats, fetchUnknownHosts, getToken, setToken } from './api';
+import { clearToken, fetchAlerts, fetchMe, fetchSystemStats, fetchTaps, fetchUnknownHosts, getToken, setToken } from './api';
 import type { SystemStats } from './api';
 import { UnknownHostsDrawer } from './components/UnknownHostsDrawer';
 import { disableDemoMode } from './demo/mode';
@@ -21,7 +21,7 @@ import { ThreatGauge } from './components/ThreatGauge';
 import { TopBar } from './components/TopBar';
 import { TopProtocolsCard } from './components/TopProtocolsCard';
 import { useWebSocket } from './hooks/useWebSocket';
-import type { Alert, User } from './types';
+import type { Alert, RemoteTap, User } from './types';
 
 type TimeWindow = 'live' | '1m' | '15m' | '1h' | '4h' | '1d' | '2d' | '7d' | 'custom';
 
@@ -141,6 +141,10 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [sysStats,       setSysStats]       = useState<SystemStats | null>(null);
   const [unknownCount,   setUnknownCount]   = useState<number | null>(null);
   const [showUnknown,    setShowUnknown]    = useState(false);
+  // Tap-Heartbeat: alle 30 s abgefragt. Topbar nutzt last_seen pro Tap, um
+  // online/stale/offline zu rendern. Ohne registrierte Taps bleibt das Array
+  // leer und die Topbar zeigt keine Extra-Badges.
+  const [taps,           setTaps]           = useState<RemoteTap[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -157,6 +161,17 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
     const load = () => fetchUnknownHosts(30).then(d => { if (alive) setUnknownCount(d.length); }).catch(() => {});
     load();
     const t = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    const load = () => fetchTaps()
+      .then(d => { if (alive) setTaps(d); })
+      .catch(() => { if (alive) setTaps([]); });
+    load();
+    const t = setInterval(load, 30_000);
     return () => { alive = false; clearInterval(t); };
   }, [user]);
 
@@ -230,6 +245,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
           title={t(`tabs.${tab}`)}
           live={connected && timeWindow === 'live'}
           kpis={tab === 'dashboard' ? kpis : []}
+          taps={taps}
           username={user.username}
           onLogout={onLogout}
         />
