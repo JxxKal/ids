@@ -78,27 +78,60 @@ export function fetchUsers(): User[] {
   return [DEMO_USER];
 }
 
+// Form muss exakt zum types.ts MLStatus-Schema passen — sonst crashen die
+// Settings-Subpages (MLOverviewSettings, MLStatusDisplay) beim Destructuring
+// (model.n_samples, stats_24h.ml_alerts, etc.).
 export function fetchMLStatus() {
+  const nowSec = Math.floor(Date.now() / 1000);
   return {
-    trained:         true,
-    model_version:   42,
-    last_train_ts:   new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
-    next_train_ts:   new Date(Date.now() + 18 * 3600 * 1000).toISOString(),
-    samples_total:   18432,
-    samples_fp:      1247,
-    samples_tp:      386,
-    bootstrap: { done: true, current_flows: 18432, required: 500, progress_pct: 100 },
-    features: [],
+    phase:        'active',
+    phase_label:  'Aktiv (Demo)',
+    model: {
+      trained:       true,
+      n_samples:     18_432,
+      trained_at:    nowSec - 6 * 3600,
+      contamination: 0.05,
+      n_attack:      386,
+    },
+    bootstrap: {
+      required:              500,
+      current_flows:         18_432,
+      progress_pct:          100,
+      estimated_remaining_s: null,
+    },
+    stats_24h: {
+      flows_total:     1_240_000,
+      ml_alerts:       42,
+      filter_rate_pct: 99.7,
+      alert_threshold: 0.45,
+    },
+    top_anomaly_features: [
+      { name: 'pps',          label: 'Pakete/Sekunde',     unit: 'pps',  avg_in_alerts: 8400, avg_normal: 320,  deviation_pct: 26.3 },
+      { name: 'flow_rate_30', label: 'Flows / 30 s',       unit: '',     avg_in_alerts: 142,  avg_normal: 18,   deviation_pct:  7.9 },
+      { name: 'iat_entropy',  label: 'IAT-Entropie',       unit: 'bits', avg_in_alerts: 4.1,  avg_normal: 1.2,  deviation_pct:  3.4 },
+    ],
+    retrain_state: {
+      currently_training:   false,
+      last_trained_at:      nowSec - 6 * 3600,
+      last_run_duration_s:  42.3,
+      last_run_samples:     18_432,
+      retrain_interval_s:   86_400,
+      next_scheduled_at:    nowSec + 18 * 3600,
+      last_error:           null,
+      updated_at:           nowSec - 6 * 3600,
+    },
   };
 }
 
+// Form muss exakt zum types.ts MLConfig-Schema passen — sonst crasht
+// MLFilterConfig beim Render.
 export function fetchMLConfig() {
   return {
-    retrain_interval_s: 86400,
-    dedup_window_s: 300,
-    bootstrap_min: 500,
-    score_threshold: 0.45,
-    feature_filters: {},
+    alert_threshold:       0.45,
+    contamination:         0.05,
+    bootstrap_min_samples: 500,
+    partial_fit_interval:  300,
+    retrain_interval_s:    86_400,
   };
 }
 
