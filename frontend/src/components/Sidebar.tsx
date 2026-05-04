@@ -1,10 +1,10 @@
-import { Compass, FlaskConical, LayoutDashboard, Network, Server, Settings } from 'lucide-react';
+import { Compass, FileText, FlaskConical, LayoutDashboard, Network, Server, Settings } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchVersion } from '../api';
 import { HelpTip } from './HelpTip';
 
-export type NavTab = 'dashboard' | 'gettingStarted' | 'networks' | 'hosts' | 'tests' | 'settings';
+export type NavTab = 'dashboard' | 'gettingStarted' | 'networks' | 'hosts' | 'tests' | 'reports' | 'settings';
 
 interface Props {
   active: NavTab;
@@ -18,6 +18,7 @@ const ITEMS: { id: NavTab; icon: ReactNode }[] = [
   { id: 'networks',       icon: <Network         size={16} strokeWidth={1.8} /> },
   { id: 'hosts',          icon: <Server          size={16} strokeWidth={1.8} /> },
   { id: 'tests',          icon: <FlaskConical    size={16} strokeWidth={1.8} /> },
+  { id: 'reports',        icon: <FileText        size={16} strokeWidth={1.8} /> },
   { id: 'settings',       icon: <Settings        size={16} strokeWidth={1.8} /> },
 ];
 
