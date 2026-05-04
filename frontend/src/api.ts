@@ -1332,3 +1332,160 @@ export async function fetchTapAuditLog(limit = 200): Promise<TapAuditEntry[]> {
   if (isDemoMode()) return [];
   return req(`/api/taps/audit-log?limit=${limit}`);
 }
+
+// ── Weekly Report ────────────────────────────────────────────────────────────
+
+export interface WeeklyReportTrend {
+  prev:       number;
+  delta_pct:  number | null;
+  direction:  'up' | 'down' | 'flat';
+}
+
+export interface WeeklyReportSummary {
+  alerts_total:       number;
+  alerts_total_trend: WeeklyReportTrend;
+  by_severity:        { critical: number; high: number; medium: number; low: number };
+  by_severity_prev:   { critical: number; high: number; medium: number; low: number };
+  headline:           string;
+}
+
+export interface WeeklyReportDay {
+  date:     string;  // YYYY-MM-DD
+  critical: number;
+  high:     number;
+  medium:   number;
+  low:      number;
+}
+
+export interface WeeklyReportTopRule {
+  rule_id:     string;
+  source:      string;
+  severity:    string;
+  description: string | null;
+  count:       number;
+}
+
+export interface WeeklyReportTopSource {
+  src_ip:       string;
+  display_name: string | null;
+  hostname:     string | null;
+  max_severity: string | null;
+  count:        number;
+}
+
+export interface WeeklyReportTopDest {
+  dst_ip:       string;
+  country:      string | null;
+  country_code: string | null;
+  asn:          string | null;
+  count:        number;
+}
+
+export interface WeeklyReportTap {
+  id:          string;
+  name:        string;
+  site:        string | null;
+  status:      string;
+  last_seen:   string | null;
+  alerts_week: number;
+}
+
+export interface WeeklyReport {
+  week:    { year: number; week: number; from: string; to: string; generated: string };
+  summary: WeeklyReportSummary;
+  detection: {
+    daily:              WeeklyReportDay[];
+    top_rules:          WeeklyReportTopRule[];
+    top_sources:        WeeklyReportTopSource[];
+    top_external_dests: WeeklyReportTopDest[];
+  };
+  ops: {
+    taps:               WeeklyReportTap[];
+    ml:                 { fp_marked: number; tp_marked: number; tuner_cycles: number };
+    suricata_top_sids:  Array<{ sid: string; count: number }>;
+  };
+  audit: {
+    active_users:    Array<{ username: string; last_login: string }>;
+    whitelist_adds:  number;
+  };
+}
+
+export async function fetchWeeklyReport(week?: string): Promise<WeeklyReport> {
+  if (isDemoMode()) return demoWeeklyReport(week);
+  const qs = week ? `?week=${encodeURIComponent(week)}` : '';
+  return req<WeeklyReport>(`/api/reports/weekly${qs}`);
+}
+
+export function weeklyReportCsvUrl(week?: string): string {
+  const q = new URLSearchParams({ fmt: 'csv' });
+  if (week) q.set('week', week);
+  return `${BASE}/api/reports/weekly?${q}`;
+}
+
+// Demo-Stub mit plausiblen Werten (damit der Demo-User die Page nicht leer
+// sieht). Schema folgt dem echten Endpoint.
+function demoWeeklyReport(_week?: string): WeeklyReport {
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const days: WeeklyReportDay[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push({
+      date: d.toISOString().slice(0, 10),
+      critical: Math.floor(Math.random() * 3),
+      high:     Math.floor(Math.random() * 8),
+      medium:   Math.floor(Math.random() * 18),
+      low:      Math.floor(Math.random() * 30),
+    });
+  }
+  return {
+    week: { year: 2026, week: 18,
+      from: monday.toISOString(), to: new Date(monday.getTime() + 7*86400e3).toISOString(),
+      generated: new Date().toISOString() },
+    summary: {
+      alerts_total:       248,
+      alerts_total_trend: { prev: 312, delta_pct: -20.5, direction: 'down' },
+      by_severity:      { critical: 4,  high: 28, medium: 96, low: 120 },
+      by_severity_prev: { critical: 9,  high: 41, medium: 113, low: 149 },
+      headline: '4 kritische Alerts diese Woche; Spitzenreiter: SCAN_001 mit 67 Treffern.',
+    },
+    detection: {
+      daily: days,
+      top_rules: [
+        { rule_id: 'SCAN_001', source: 'signature', severity: 'medium',
+          description: 'TCP-SYN-Port-Scan Heuristik', count: 67 },
+        { rule_id: 'RECON_002', source: 'signature', severity: 'medium',
+          description: 'Systematischer Port-Sweep', count: 38 },
+        { rule_id: 'DOS_UDP_001', source: 'signature', severity: 'critical',
+          description: 'UDP Flood gegen einzelnen Host', count: 4 },
+      ],
+      top_sources: [
+        { src_ip: '192.168.1.85', display_name: 'kali-lab', hostname: null, max_severity: 'critical', count: 73 },
+        { src_ip: '192.168.1.66', display_name: null, hostname: 'workstation-04', max_severity: 'medium', count: 42 },
+      ],
+      top_external_dests: [
+        { dst_ip: '8.8.8.8', country: 'United States', country_code: 'US', asn: 'GOOGLE', count: 19 },
+        { dst_ip: '94.198.93.10', country: 'Germany', country_code: 'DE', asn: 'Hetzner', count: 11 },
+      ],
+    },
+    ops: {
+      taps: [
+        { id: 'demo-tap', name: 'cyjankali', site: 'lab', status: 'active',
+          last_seen: new Date(Date.now() - 8000).toISOString(), alerts_week: 73 },
+      ],
+      ml: { fp_marked: 12, tp_marked: 1, tuner_cycles: 28 },
+      suricata_top_sids: [
+        { sid: 'SURICATA:1:2006380:17', count: 8 },
+        { sid: 'SURICATA:1:2022082:6',  count: 3 },
+      ],
+    },
+    audit: {
+      active_users: [
+        { username: 'admin', last_login: new Date(Date.now() - 6 * 3600e3).toISOString() },
+      ],
+      whitelist_adds: 2,
+    },
+  };
+}
