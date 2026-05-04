@@ -17,6 +17,7 @@ Endpunkte:
   POST /api/tests/run                   – Test-Szenario auslösen
   GET  /api/tests/runs                  – Test-Run-Protokoll
   GET  /api/tests/runs/{id}             – Einzelner Test-Run
+  GET  /api/reports/weekly              – Wochenbericht (JSON oder CSV-ZIP)
 
 WebSocket:
   WS   /ws/alerts                       – Echtzeit-Alert-Stream
@@ -48,6 +49,7 @@ from routers import ml as ml_router
 from routers import rules as rules_router
 from routers import sig_rules as sig_rules_router
 from routers import egress_whitelist as egress_whitelist_router
+from routers import reports as reports_router
 from routers import taps as taps_router
 from routers import ssl as ssl_router
 from routers import system as system_router
@@ -161,6 +163,7 @@ app.include_router(ml_router.router,       dependencies=_auth)
 app.include_router(rules_router.router,    dependencies=_auth)
 app.include_router(sig_rules_router.router, dependencies=_auth)
 app.include_router(egress_whitelist_router.router, dependencies=_auth)
+app.include_router(reports_router.router,  dependencies=_auth)
 # taps_router: GET/POST(token)/DELETE sind admin-only; POST /api/taps/pair ist
 # bewusst öffentlich (Token-authentisiert), darum hier ohne global JWT-Gate
 # aufgehängt – die einzelnen Endpunkte nutzen Depends(require_admin) selbst.
