@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Alert, Enrichment, RemoteTap } from '../types';
 import { alertsExportUrl, createEgressWhitelist, fetchTaps } from '../api';
+import { countryFlag, geoTooltip } from '../lib/country';
 import { AlertDetail } from './AlertDetail';
 import { HelpTip } from './HelpTip';
 import { SeverityBadge } from './SeverityBadge';
@@ -47,15 +48,32 @@ function IpCell({
   const displayName = dir === 'src' ? enrichment?.src_display_name: enrichment?.dst_display_name;
   const trusted     = dir === 'src' ? enrichment?.src_trusted      : enrichment?.dst_trusted;
   const trustSrc    = dir === 'src' ? enrichment?.src_trust_source : enrichment?.dst_trust_source;
+  const geo         = dir === 'src' ? enrichment?.src_geo           : enrichment?.dst_geo;
 
   const primary  = displayName ?? hostname ?? ip ?? '–';
   const showIp   = !!ip && primary !== ip;
   const portStr  = port ? `:${port}` : '';
   const srcLabel = trustSrc ? t(`trust.sources.${trustSrc}`, { defaultValue: trustSrc }) : null;
 
+  // Flagge nur bei Public-IPs sichtbar — der Enrichment-Service liefert
+  // für private/Multicast-IPs keinen country_code, deshalb reicht der
+  // Truthy-Check. Tooltip: Land + (wenn vorhanden) Stadt.
+  const flag = countryFlag(geo?.country_code);
+  const geoTitle = geoTooltip(geo);
+
   return (
     <div className="leading-tight">
-      <span className="text-slate-300">{primary}{!showIp ? portStr : ''}</span>
+      <span className="text-slate-300">
+        {flag && (
+          <span
+            className="mr-1 align-baseline cursor-help"
+            title={geoTitle || geo?.country_code || ''}
+          >
+            {flag}
+          </span>
+        )}
+        {primary}{!showIp ? portStr : ''}
+      </span>
       {showIp && (
         <div className="text-slate-600 text-[10px]">{ip}{portStr}</div>
       )}
