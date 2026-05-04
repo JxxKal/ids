@@ -117,6 +117,9 @@ export interface KnownNetwork {
   name: string;
   description?: string;
   color?: string;
+  // 'ot' | 'it' — Zone-Tag für die OT-Boundary-Klassifikation.
+  // Default 'ot' für Bestandseinträge (Migration 016).
+  kind?: 'ot' | 'it';
 }
 
 export interface TestRun {

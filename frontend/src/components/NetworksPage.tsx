@@ -4,12 +4,18 @@ import { createNetwork, deleteNetwork, downloadNetworksExampleCsv, fetchNetworks
 import type { KnownNetwork } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 
-type EditState = { name: string; description: string; color: string } | null;
+type Kind = 'ot' | 'it';
+type EditState = { name: string; description: string; color: string; kind: Kind } | null;
+
+const KIND_BADGE: Record<Kind, { label: string; cls: string }> = {
+  ot: { label: 'OT', cls: 'bg-cyan-900/40 text-cyan-300 border-cyan-700/40' },
+  it: { label: 'IT', cls: 'bg-violet-900/40 text-violet-300 border-violet-700/40' },
+};
 
 export function NetworksPage() {
   const { t } = useTranslation();
   const [networks, setNetworks]         = useState<KnownNetwork[]>([]);
-  const [form, setForm]                 = useState({ cidr: '', name: '', description: '', color: '#4CAF50' });
+  const [form, setForm]                 = useState<{ cidr: string; name: string; description: string; color: string; kind: Kind }>({ cidr: '', name: '', description: '', color: '#4CAF50', kind: 'ot' });
   const [error, setError]               = useState('');
   const [loading, setLoading]           = useState(false);
   const [importResult, setImportResult] = useState('');
@@ -32,7 +38,7 @@ export function NetworksPage() {
     setLoading(true);
     try {
       await createNetwork(form);
-      setForm({ cidr: '', name: '', description: '', color: '#4CAF50' });
+      setForm({ cidr: '', name: '', description: '', color: '#4CAF50', kind: 'ot' });
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.errorGeneric'));
@@ -43,7 +49,7 @@ export function NetworksPage() {
 
   const startEdit = (n: KnownNetwork) => {
     setEditId(n.id);
-    setEditState({ name: n.name, description: n.description ?? '', color: n.color ?? '#4CAF50' });
+    setEditState({ name: n.name, description: n.description ?? '', color: n.color ?? '#4CAF50', kind: (n.kind === 'it' ? 'it' : 'ot') });
     setEditError('');
   };
 
@@ -57,6 +63,7 @@ export function NetworksPage() {
         name:        editState.name || undefined,
         description: editState.description || undefined,
         color:       editState.color || undefined,
+        kind:        editState.kind,
       });
       setEditId(null);
       setEditState(null);
@@ -158,6 +165,17 @@ export function NetworksPage() {
               onChange={e => setForm(f => ({ ...f, color: e.target.value }))}
             />
           </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-slate-500">{t('networks.zone', { defaultValue: 'Zone' })}</span>
+            <select
+              className="input w-24"
+              value={form.kind}
+              onChange={e => setForm(f => ({ ...f, kind: (e.target.value as Kind) }))}
+            >
+              <option value="ot">OT</option>
+              <option value="it">IT</option>
+            </select>
+          </label>
           <button type="submit" disabled={loading} className="btn-primary self-end">
             {loading ? '…' : t('common.add')}
           </button>
@@ -174,13 +192,14 @@ export function NetworksPage() {
               <th>{t('networks.columns.name')}</th>
               <th>{t('networks.columns.description')}</th>
               <th>{t('networks.columns.color')}</th>
+              <th>{t('networks.columns.zone', { defaultValue: 'Zone' })}</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {networks.length === 0 && (
               <tr>
-                <td colSpan={5} className="text-center text-slate-600 py-8">{t('networks.noNetworks')}</td>
+                <td colSpan={6} className="text-center text-slate-600 py-8">{t('networks.noNetworks')}</td>
               </tr>
             )}
             {networks.map(n => (
@@ -231,6 +250,26 @@ export function NetworksPage() {
                       </span>
                     )
                   )}
+                </td>
+                <td className="px-4 py-2">
+                  {editId === n.id && editState ? (
+                    <select
+                      className="input w-20"
+                      value={editState.kind}
+                      onChange={e => setEditState(s => s ? { ...s, kind: (e.target.value as Kind) } : s)}
+                    >
+                      <option value="ot">OT</option>
+                      <option value="it">IT</option>
+                    </select>
+                  ) : (() => {
+                    const k: Kind = (n.kind === 'it' ? 'it' : 'ot');
+                    const b = KIND_BADGE[k];
+                    return (
+                      <span className={`inline-block px-2 py-0.5 rounded border text-[10px] font-mono uppercase ${b.cls}`}>
+                        {b.label}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="px-4 py-2 text-right">
                   {editId === n.id ? (

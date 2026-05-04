@@ -183,11 +183,17 @@ export async function createNetwork(data: {
   name: string;
   description?: string;
   color?: string;
+  kind?: 'ot' | 'it';
 }): Promise<KnownNetwork> {
   return req('/api/networks', { method: 'POST', body: JSON.stringify(data) });
 }
 
-export async function updateNetwork(id: string, data: { name?: string; description?: string; color?: string }): Promise<KnownNetwork> {
+export async function updateNetwork(id: string, data: {
+  name?: string;
+  description?: string;
+  color?: string;
+  kind?: 'ot' | 'it';
+}): Promise<KnownNetwork> {
   return req(`/api/networks/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 }
 

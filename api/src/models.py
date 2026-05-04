@@ -114,6 +114,9 @@ class NetworkResponse(BaseModel):
     name:        str
     description: str | None = None
     color:       str | None = None
+    # 'ot' | 'it' — OT-/IT-Zonen-Tag für die OT-Boundary-Klassifikation.
+    # Default 'ot' für Bestandseinträge (Migration 016).
+    kind:        str = "ot"
 
 
 class NetworkCreate(BaseModel):
@@ -121,12 +124,14 @@ class NetworkCreate(BaseModel):
     name:        str
     description: str | None = None
     color:       str | None = None
+    kind:        str = "ot"
 
 
 class NetworkUpdate(BaseModel):
     name:        str | None = None
     description: str | None = None
     color:       str | None = None
+    kind:        str | None = None
 
 
 # ── Connection Graph ──────────────────────────────────────────────────────────

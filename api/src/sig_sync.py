@@ -37,14 +37,19 @@ async def sync_known_networks_file(pool: asyncpg.Pool) -> int:
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT cidr FROM known_networks ORDER BY cidr"
+                "SELECT cidr, kind FROM known_networks ORDER BY cidr"
             )
     except Exception as exc:
         log.warning("sync_known_networks: DB-Read fehlgeschlagen: %s", exc)
         return -1
 
+    # Schema-V2: Liste von {cidr, kind}-Records. Schema-V1 (nur cidrs als
+    # flache Liste) bleibt zusätzlich befüllt für Backwards-Compat — die
+    # signature-engine kennt aktuell nur das flache Format und braucht den
+    # kind-Tag (noch) nicht.
     cidrs = [str(r["cidr"]) for r in rows]
-    payload = {"version": "1", "networks": cidrs}
+    networks_v2 = [{"cidr": str(r["cidr"]), "kind": r["kind"]} for r in rows]
+    payload = {"version": "2", "networks": cidrs, "networks_v2": networks_v2}
     body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
 
     try:
