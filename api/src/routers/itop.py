@@ -168,10 +168,16 @@ async def _sync(pool: asyncpg.Pool) -> None:
                         continue
                     cidr = f"{ip}/{prefix}"
                     try:
+                        # iTop ist das OT-CMDB → neue Einträge kriegen explizit
+                        # kind='ot'. Der DB-Default täte dasselbe, aber explizit
+                        # macht das Intent sichtbar. Wichtig: bei ON CONFLICT
+                        # NICHT auf 'ot' zurücksetzen — wenn der User ein
+                        # iTop-Netz händisch auf 'it' umtaggt, soll das Tag
+                        # erhalten bleiben.
                         await conn.execute(
                             """
-                            INSERT INTO known_networks (cidr, name, description, color)
-                            VALUES ($1::cidr, $2, $3, '#22c55e')
+                            INSERT INTO known_networks (cidr, name, description, color, kind)
+                            VALUES ($1::cidr, $2, $3, '#22c55e', 'ot')
                             ON CONFLICT (cidr) DO UPDATE SET
                               name        = EXCLUDED.name,
                               description = COALESCE(EXCLUDED.description, known_networks.description),
