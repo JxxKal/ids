@@ -516,6 +516,7 @@ export interface RuleFileSaveResponse {
 }
 
 export async function fetchRuleFiles(): Promise<RuleFileMeta[]> {
+  if (isDemoMode()) return [];
   return req('/api/rules/files');
 }
 
@@ -1264,6 +1265,7 @@ export async function fetchMaintenanceAudit(limit = 100): Promise<MaintenanceAud
 // ── Remote Taps ──────────────────────────────────────────────────────────────
 
 export async function fetchTaps(): Promise<RemoteTap[]> {
+  if (isDemoMode()) return [];
   return req('/api/taps');
 }
 
@@ -1308,6 +1310,7 @@ export interface TapAuditEntry {
 }
 
 export async function fetchPendingTaps(): Promise<PendingTap[]> {
+  if (isDemoMode()) return [];
   return req('/api/taps/pending');
 }
 
@@ -1326,5 +1329,6 @@ export async function rejectPendingTap(id: string): Promise<void> {
 }
 
 export async function fetchTapAuditLog(limit = 200): Promise<TapAuditEntry[]> {
+  if (isDemoMode()) return [];
   return req(`/api/taps/audit-log?limit=${limit}`);
 }
