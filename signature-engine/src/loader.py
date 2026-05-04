@@ -297,6 +297,10 @@ class RuleLoader:
         # nur ein Containment-Match braucht.
         self._known_networks_mtime: float = 0.0
         self._known_networks: list[ipaddress._BaseNetwork] = []
+        # Aus _known_networks abgeleitete Subnet-Broadcast-Adressen, plus
+        # 255.255.255.255 (limited broadcast). Cache wird beim Reload neu
+        # befüllt. Erlaubt is_broadcast(ip) in O(1) statt pro CIDR rechnen.
+        self._known_broadcasts: set[str] = set()
 
     def load(self) -> None:
         """Erstes vollständiges Laden aller Regeln."""
@@ -314,7 +318,7 @@ class RuleLoader:
         log.info("Rules reloaded: %d rules active", len(self.rules))
         return True
 
-    # ── Interne Hilfsmethoden ─────────────────────────────────────────────────
+    # ── Interne Hilfsmethoden ───────────────────────────────────────────────────────
 
     def _yaml_files(self) -> list[Path]:
         """Gibt alle .yml-Dateien im rules_dir zurück, plus die eingebaute test.yml.
@@ -526,7 +530,37 @@ class RuleLoader:
                 out.append(ipaddress.ip_network(cidr, strict=False))
             except ValueError as exc:
                 log.warning("known_networks: ungültiges CIDR '%s' übersprungen: %s", cidr, exc)
+
+        # Broadcasts pro Netz vorberechnen. /32- und /128-Hosts haben keine
+        # eigene Broadcast-Adresse; .broadcast_address fällt dort auf den Host
+        # selbst zurück, das filtern wir aus. 255.255.255.255 (limited
+        # broadcast) immer mit drin.
+        bcasts: set[str] = {"255.255.255.255"}
+        for net in out:
+            if net.prefixlen >= net.max_prefixlen:
+                continue
+            bcasts.add(str(net.broadcast_address))
+        self._known_broadcasts = bcasts
         return out
+
+    def is_multicast(self, ip: str) -> bool:
+        """True wenn `ip` eine Multicast-Adresse ist (IPv4 224.0.0.0/4 oder
+        IPv6 ff00::/8). Ungültige IPs → False."""
+        if not ip:
+            return False
+        try:
+            return ipaddress.ip_address(ip).is_multicast
+        except ValueError:
+            return False
+
+    def is_broadcast(self, ip: str) -> bool:
+        """True wenn `ip` eine Broadcast-Adresse ist: 255.255.255.255 oder
+        die berechnete Subnet-Broadcast-IP eines known_network (z.B.
+        192.168.1.255 wenn 192.168.1.0/24 als known_network konfiguriert ist).
+        Ohne known_networks bleibt nur 255.255.255.255 als Treffer."""
+        if not ip:
+            return False
+        return ip in self._known_broadcasts
 
     def is_internal(self, ip: str) -> bool:
         """True wenn `ip` in einem der konfigurierten known_networks liegt.

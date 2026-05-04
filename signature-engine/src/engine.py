@@ -80,6 +80,31 @@ METRIC_FUNCS: dict[str, Callable[["RuleContext", dict, "_FlowParams"], Any]] = {
 }
 
 
+class _NetHelper:
+    """Schmaler Namespace, der den eval-Sandboxen `net.is_multicast(ip)`,
+    `net.is_broadcast(ip)` und `net.is_internal(ip)` exponiert.
+
+    Wir reichen NICHT den ganzen Loader durch — der hat auch interne
+    Methoden, die Rule-Autoren in einer Condition nichts angehen. Diese
+    Wrapper-Klasse ist die explizite Schnittstelle, gegen die Rule-YAMLs
+    schreiben dürfen.
+    """
+
+    __slots__ = ("_loader",)
+
+    def __init__(self, loader: "RuleLoader") -> None:
+        self._loader = loader
+
+    def is_multicast(self, ip: str) -> bool:
+        return self._loader.is_multicast(ip)
+
+    def is_broadcast(self, ip: str) -> bool:
+        return self._loader.is_broadcast(ip)
+
+    def is_internal(self, ip: str) -> bool:
+        return self._loader.is_internal(ip)
+
+
 class _FlowParams:
     """Pro-Flow Param-Resolver. Lazy-Lookup gegen rule.parameters mit Auswahl
     von `value_internal` vs. `value` anhand `is_internal`.
@@ -113,6 +138,7 @@ class SignatureEngine:
     def __init__(self, rules_dir: str) -> None:
         self._loader  = RuleLoader(rules_dir)
         self._ctx     = RuleContext()
+        self._net     = _NetHelper(self._loader)
         # {(rule_id, src_ip): last_fired_ts}
         self._cooldowns: dict[tuple[str, str], float] = {}
 
@@ -149,6 +175,7 @@ class SignatureEngine:
                 "flow": flat,
                 "ctx": self._ctx,
                 "params": fparams,
+                "net": self._net,
             }
             try:
                 match = eval(rule.condition_code, _EVAL_GLOBALS, local_vars)  # noqa: S307
@@ -159,7 +186,7 @@ class SignatureEngine:
             if not match:
                 continue
 
-            # ── Cooldown-Prüfung ──────────────────────────────────────────────
+            # ── Cooldown-Prüfung ───────────────────────────────────────────────────
             key = (rule.id, src_ip)
             if now - self._cooldowns.get(key, 0.0) < rule.cooldown_s:
                 continue   # zu kurz nach dem letzten Alert dieser Regel+IP
@@ -212,7 +239,12 @@ class SignatureEngine:
                     elig = eval(  # noqa: S307
                         rule.eligibility_code,
                         _EVAL_GLOBALS,
-                        {"flow": flat, "ctx": self._ctx, "params": fparams_eli},
+                        {
+                            "flow": flat,
+                            "ctx": self._ctx,
+                            "params": fparams_eli,
+                            "net": self._net,
+                        },
                     )
                 except Exception as exc:
                     log.debug("Rule %s eligibility eval error: %s — sample skipped",
@@ -249,7 +281,7 @@ class SignatureEngine:
         return out
 
 
-# ── Alert-Erstellung mit dynamischer Beschreibung ─────────────────────────────
+# ── Alert-Erstellung mit dynamischer Beschreibung ─────────────────────────────────
 
 def _make_alert(rule: Rule, flow: dict, ctx: RuleContext, fparams: "_FlowParams") -> dict:
     src_ip = flow.get("src_ip") or ""
