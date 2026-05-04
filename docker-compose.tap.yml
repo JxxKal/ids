@@ -201,5 +201,11 @@ services:
     volumes:
       - tap-cert:/etc/cyjan                 # pair-Endpoint schreibt hier rein
       - tap-runtime:/run/cyjan:ro
+      # /api/load liefert CPU/RAM/Disk/Mirror-Iface/Sniffer-Stats für die
+      # CLI (`cyjan-tap load`). /proc + /sys vom Host für die Ressourcen-
+      # Werte, docker.sock für `docker logs cyjan-tap-sniffer`.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${TAP_UI_BIND:-127.0.0.1}:${TAP_UI_PORT:-8001}:8000"
