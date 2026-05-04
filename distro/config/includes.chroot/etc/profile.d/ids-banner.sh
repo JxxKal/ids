@@ -122,6 +122,7 @@ if [ "$MODE" = "tap" ]; then
   printf "  ║  Dienste:       %-3s / %-3s laufen           ║\n" "$RUNNING" "$TOTAL"
   echo "  ╠══════════════════════════════════════════════╣"
   echo "  ║  cyjan-tap status      – Tap-Status anzeigen ║"
+  echo "  ║  cyjan-tap load follow – Live: pps + drops   ║"
   echo "  ║  cyjan-tap pair        – mit Master koppeln  ║"
   echo "  ║  cyjan-tap reconnect   – Reconnect erzwingen ║"
   echo "  ║  cyjan-tap logs follow – Live-Logs streamen  ║"
