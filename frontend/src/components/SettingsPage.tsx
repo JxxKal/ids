@@ -27,6 +27,8 @@ import {
   fetchTaps, createTapPairingToken, revokeTap,
   fetchPendingTaps, approvePendingTap, rejectPendingTap, fetchTapAuditLog,
   type PendingTap, type TapAuditEntry,
+  fetchGeoIpStatus, uploadGeoIp,
+  type GeoIpStatus, type GeoIpFileMeta,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
@@ -3878,6 +3880,147 @@ function SystemUpdate() {
   );
 }
 
+// ── GeoIP-Datenbanken ─────────────────────────────────────────────────────────
+//
+// Status + Upload für die `.mmdb`-Files, die vom enrichment-service für
+// GeoIP-/ASN-Lookups gebraucht werden. Liegen unter /opt/ids/geoip/ auf
+// dem Host (read-write vom api-Container, read-only vom enrichment-service).
+
+function fmtFileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024)        return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function fmtAge(iso: string | null): string {
+  if (!iso) return '–';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000)        return 'gerade eben';
+  if (ms < 3_600_000)     return `${Math.floor(ms / 60_000)} min`;
+  if (ms < 86_400_000)    return `${Math.floor(ms / 3_600_000)} h`;
+  return `${Math.floor(ms / 86_400_000)} d`;
+}
+
+function GeoIpSettings() {
+  const { t } = useTranslation();
+  const [status,    setStatus]    = useState<GeoIpStatus | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
+  const [busy,      setBusy]      = useState(false);
+  const [cityFile,  setCityFile]  = useState<File | null>(null);
+  const [asnFile,   setAsnFile]   = useState<File | null>(null);
+
+  const refresh = async () => {
+    try {
+      setStatus(await fetchGeoIpStatus());
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const handleUpload = async () => {
+    if (!cityFile && !asnFile) return;
+    setBusy(true); setError(null);
+    try {
+      await uploadGeoIp(cityFile, asnFile);
+      setCityFile(null); setAsnFile(null);
+      // Restart braucht ~3-5s. Nach kurzer Pause Status neu holen.
+      setTimeout(() => { refresh(); setBusy(false); }, 4000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  const StatusRow = ({ label, meta }: { label: string; meta: GeoIpFileMeta | undefined }) => {
+    if (!meta) return null;
+    if (!meta.present) {
+      return (
+        <div className="flex items-center gap-3 py-1.5 border-b border-slate-800/40">
+          <span className="text-xs font-mono text-slate-500 w-32">{label}</span>
+          <span className="text-xs text-amber-300">{t('settings.geoip.statusMissing')}</span>
+        </div>
+      );
+    }
+    return (
+      <div className="flex items-center gap-3 py-1.5 border-b border-slate-800/40">
+        <span className="text-xs font-mono text-slate-500 w-32">{label}</span>
+        <span className={`text-xs ${meta.valid ? 'text-green-300' : 'text-amber-300'}`}>
+          {meta.valid ? t('settings.geoip.statusOk') : t('settings.geoip.statusInvalid')}
+        </span>
+        <span className="text-xs text-slate-400 font-mono">{fmtFileSize(meta.size)}</span>
+        <span className="text-xs text-slate-500" title={meta.mtime ?? ''}>
+          {t('settings.geoip.mtimeAge', { age: fmtAge(meta.mtime) })}
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      <h2 className="text-lg font-semibold">{t('settings.geoip.title')}</h2>
+      <p className="text-sm text-slate-400">
+        <Trans i18nKey="settings.geoip.intro" components={{ code: <code className="text-cyan-300" />, a: <a className="text-cyan-300 underline" href="https://db-ip.com/db/lite.php" target="_blank" rel="noreferrer" /> }} />
+      </p>
+
+      <div className="bg-slate-900/40 border border-slate-700 rounded p-3">
+        <h3 className="text-sm font-mono text-cyan-300 mb-2">{t('settings.geoip.statusTitle')}</h3>
+        {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
+        {!status ? (
+          <p className="text-xs text-slate-500 italic">{t('common.loading')}</p>
+        ) : (
+          <>
+            <p className="text-[11px] text-slate-500 font-mono mb-2">
+              {t('settings.geoip.path', { path: status.geoip_dir })}
+            </p>
+            <StatusRow label="GeoLite2-City.mmdb" meta={status.city} />
+            <StatusRow label="GeoLite2-ASN.mmdb"  meta={status.asn} />
+          </>
+        )}
+      </div>
+
+      <div className="bg-slate-900/40 border border-slate-700 rounded p-3">
+        <h3 className="text-sm font-mono text-cyan-300 mb-2">{t('settings.geoip.uploadTitle')}</h3>
+        <p className="text-xs text-slate-400 mb-3">{t('settings.geoip.uploadHint')}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-300">GeoLite2-City.mmdb {t('settings.geoip.optional')}</span>
+            <input
+              type="file"
+              accept=".mmdb,.gz"
+              onChange={e => setCityFile(e.target.files?.[0] ?? null)}
+              className="text-xs file:mr-2 file:rounded file:border file:border-slate-600 file:bg-slate-800 file:px-2 file:py-1 file:text-slate-200 file:hover:bg-slate-700"
+            />
+            {cityFile && <span className="text-[10px] text-slate-500 font-mono">{cityFile.name} · {fmtFileSize(cityFile.size)}</span>}
+          </label>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-slate-300">GeoLite2-ASN.mmdb {t('settings.geoip.optional')}</span>
+            <input
+              type="file"
+              accept=".mmdb,.gz"
+              onChange={e => setAsnFile(e.target.files?.[0] ?? null)}
+              className="text-xs file:mr-2 file:rounded file:border file:border-slate-600 file:bg-slate-800 file:px-2 file:py-1 file:text-slate-200 file:hover:bg-slate-700"
+            />
+            {asnFile && <span className="text-[10px] text-slate-500 font-mono">{asnFile.name} · {fmtFileSize(asnFile.size)}</span>}
+          </label>
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            onClick={handleUpload}
+            disabled={busy || (!cityFile && !asnFile)}
+            className="px-3 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-mono"
+          >
+            {busy ? t('settings.geoip.uploading') : t('settings.geoip.uploadBtn')}
+          </button>
+          {busy && <span className="text-xs text-slate-400">{t('settings.geoip.restartHint')}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── SystemHealth ──────────────────────────────────────────────────────────────
 
 function fmtBytes(bps: number | null): string {
@@ -5448,7 +5591,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -5501,6 +5644,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'ssl',            icon: <Lock      {...ICON_PROPS} /> },
       { id: 'syslog',         icon: <FileText  {...ICON_PROPS} /> },
       { id: 'update',         icon: <Upload    {...ICON_PROPS} /> },
+      { id: 'geoip',          icon: <Globe     {...ICON_PROPS} /> },
       { id: 'db-maintenance', icon: <HardDrive {...ICON_PROPS} /> },
     ],
   },
@@ -5632,6 +5776,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
             {active === 'irma'          && <IrmaSettings />}
             {active === 'itop'          && <ItopSettings />}
             {active === 'update'        && <SystemUpdate />}
+            {active === 'geoip'         && <GeoIpSettings />}
           </div>
         </div>
         )}
