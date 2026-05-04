@@ -27,7 +27,7 @@ export function LoginPage({ onLogin }: Props) {
     setError('');
     setLoading(true);
     try {
-      if (username === 'demo' && password === 'demo') enableDemoMode();
+      if (username === 'demo' && password === 'DemoCyjan2026!') enableDemoMode();
       else disableDemoMode();
       const res = await login(username, password);
       setToken(res.access_token);
@@ -143,13 +143,13 @@ export function LoginPage({ onLogin }: Props) {
         {/* Demo-Hint */}
         <button
           type="button"
-          onClick={() => { setUsername('demo'); setPassword('demo'); setError(''); }}
+          onClick={() => { setUsername('demo'); setPassword('DemoCyjan2026!'); setError(''); }}
           className="mt-5 w-full cyjan-demo-hint group"
           title={t('login.demoTitle')}
         >
           <span className="cyjan-demo-pill">DEMO</span>
           <span className="cyjan-demo-text">
-            {t('login.demoHint')} <code>demo</code> / <code>demo</code>
+            {t('login.demoHint')} <code>demo</code> / <code>DemoCyjan2026!</code>
             <span className="cyjan-demo-sub">{t('login.demoSub')}</span>
           </span>
         </button>
