@@ -11,6 +11,7 @@ class Config:
     minio_access_key: str
     minio_secret_key: str
     pcap_bucket: str
+    reports_bucket: str         # MinIO-Bucket für archivierte Wochenberichte (JSON-Snapshots)
     secret_key: str
     test_mode: bool
     master_ca_dir: str          # Verzeichnis für Master-CA (Cert + Key) für mTLS-Auth der Remote-Taps
@@ -28,6 +29,7 @@ class Config:
             minio_access_key=os.environ.get("MINIO_ACCESS_KEY", "ids-access"),
             minio_secret_key=os.environ.get("MINIO_SECRET_KEY", "ids-secret-change-me"),
             pcap_bucket=os.environ.get("PCAP_BUCKET", "ids-pcaps"),
+            reports_bucket=os.environ.get("REPORTS_BUCKET", "ids-reports"),
             secret_key=os.environ.get("SECRET_KEY", "change-me-in-production"),
             test_mode=os.environ.get("TEST_MODE", "false").lower() == "true",
             master_ca_dir=os.environ.get("MASTER_CA_DIR", "/var/lib/cyjan/master-ca"),
