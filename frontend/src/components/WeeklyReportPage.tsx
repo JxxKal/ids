@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, FileJson, Printer, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Archive, Download, FileJson, Printer, ChevronLeft, ChevronRight, History } from 'lucide-react';
 import {
   fetchWeeklyReport,
+  fetchWeeklyReportHistory,
   weeklyReportCsvUrl,
   getToken,
   type WeeklyReport,
   type WeeklyReportDay,
+  type WeeklyReportHistoryEntry,
 } from '../api';
 import { countryFlag } from '../lib/country';
 
-// ── ISO-Wochen-Helfer ────────────────────────────────────────────────────────
+// ── ISO-Wochen-Helfer ───────────────────────────────────────────────────
 
 function isoWeek(d: Date): { year: number; week: number } {
   // ISO-Woche-Berechnung nach https://en.wikipedia.org/wiki/ISO_week_date
@@ -47,7 +49,7 @@ function shiftWeek(year: number, week: number, delta: number): { year: number; w
   return isoWeek(d);
 }
 
-// ── Severity-Konstanten ──────────────────────────────────────────────────────
+// ── Severity-Konstanten ────────────────────────────────────────────────
 
 const SEV_COLOR: Record<string, string> = {
   critical: '#ef4444',
@@ -57,7 +59,7 @@ const SEV_COLOR: Record<string, string> = {
 };
 const SEV_ORDER = ['critical', 'high', 'medium', 'low'] as const;
 
-// ── Kleine SVG-Charts ────────────────────────────────────────────────────────
+// ── Kleine SVG-Charts ──────────────────────────────────────────────────
 
 function SeverityDonut({ counts, size = 120 }: {
   counts: { critical: number; high: number; medium: number; low: number };
@@ -172,7 +174,7 @@ function StackedDailyBars({ days }: { days: WeeklyReportDay[] }) {
   );
 }
 
-// ── Trend-Pfeil ──────────────────────────────────────────────────────────────
+// ── Trend-Pfeil ───────────────────────────────────────────────────────────
 
 function TrendBadge({ trend }: { trend: { delta_pct: number | null; direction: string; prev: number } }) {
   if (trend.delta_pct === null) {
@@ -189,7 +191,7 @@ function TrendBadge({ trend }: { trend: { delta_pct: number | null; direction: s
   );
 }
 
-// ── Severity-Badge mini ──────────────────────────────────────────────────────
+// ── Severity-Badge mini ──────────────────────────────────────────────────
 
 function SevPill({ sev }: { sev: string | null | undefined }) {
   const s = (sev || 'low').toLowerCase();
@@ -201,7 +203,7 @@ function SevPill({ sev }: { sev: string | null | undefined }) {
   );
 }
 
-// ── Hauptkomponente ─────────────────────────────────────────────────────────
+// ── Hauptkomponente ────────────────────────────────────────────────────
 
 export function WeeklyReportPage() {
   const { t } = useTranslation();
@@ -210,6 +212,8 @@ export function WeeklyReportPage() {
   const [weekY, setWeekY] = useState(initial.year);
   const [weekN, setWeekN] = useState(initial.week);
   const [report, setReport] = useState<WeeklyReport | null>(null);
+  const [history, setHistory] = useState<WeeklyReportHistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -226,9 +230,23 @@ export function WeeklyReportPage() {
     return () => { alive = false; };
   }, [weekStr]);
 
+  // History parallel laden — der Cron-Archive-Loop persistiert in MinIO,
+  // daher braucht das Mount-Once + Refresh wenn die History-Liste geöffnet
+  // wird (re-fetch deckt zwischenzeitlich neu archivierte Wochen ab).
+  useEffect(() => {
+    let alive = true;
+    fetchWeeklyReportHistory(12)
+      .then(r => { if (alive) setHistory(r.items); })
+      .catch(() => { /* History ist optional — leer lassen wenn MinIO down */ });
+    return () => { alive = false; };
+  }, [showHistory]);
+
   const goPrev = () => { const w = shiftWeek(weekY, weekN, -1); setWeekY(w.year); setWeekN(w.week); };
   const goNext = () => { const w = shiftWeek(weekY, weekN, +1); setWeekY(w.year); setWeekN(w.week); };
   const goCurrent = () => { const w = isoWeek(new Date()); setWeekY(w.year); setWeekN(w.week); };
+  const jumpTo = (year: number, week: number) => {
+    setWeekY(year); setWeekN(week); setShowHistory(false);
+  };
 
   const handlePrint = () => window.print();
 
@@ -288,6 +306,54 @@ export function WeeklyReportPage() {
             className="ml-1 px-2 py-1 rounded border border-cyan-700 text-cyan-300 hover:bg-cyan-500/15 text-xs font-mono">
             {t('weeklyReport.currentLabel')}
           </button>
+          <div className="relative ml-1">
+            <button
+              onClick={() => setShowHistory(v => !v)}
+              title={t('weeklyReport.historyTitle')}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded border text-xs font-mono transition-colors ${
+                showHistory
+                  ? 'border-cyan-500/50 bg-cyan-500/15 text-cyan-200'
+                  : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+              }`}
+            >
+              <History size={13} />
+              {t('weeklyReport.historyLabel')}
+              {history.length > 0 && (
+                <span className="ml-1 text-[10px] text-slate-500">({history.length})</span>
+              )}
+            </button>
+            {showHistory && (
+              <div className="absolute right-0 top-full mt-1 z-30 bg-slate-900 border border-slate-700 rounded shadow-lg w-80 max-h-96 overflow-y-auto">
+                {history.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic p-3">{t('weeklyReport.historyEmpty')}</p>
+                ) : (
+                  <ul className="divide-y divide-slate-800/60">
+                    {history.map(h => {
+                      const active = h.year === weekY && h.week === weekN;
+                      return (
+                        <li key={h.week_str}>
+                          <button
+                            onClick={() => jumpTo(h.year, h.week)}
+                            className={`w-full text-left px-3 py-2 hover:bg-slate-800/60 transition-colors ${
+                              active ? 'bg-slate-800/40' : ''
+                            }`}
+                          >
+                            <div className="flex items-baseline justify-between gap-2">
+                              <span className="text-xs font-mono text-cyan-300">{h.week_str}</span>
+                              <span className="text-[10px] font-mono text-slate-500 tabular-nums">
+                                {h.alerts_total} alerts
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{h.headline}</p>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={handlePrint} title={t('weeklyReport.print')}
@@ -315,11 +381,24 @@ export function WeeklyReportPage() {
             <h1 className="text-2xl font-bold mb-1">Cyjan IDS — {t('weeklyReport.title')} {weekStr}</h1>
             <p className="text-sm text-gray-700">
               {fromDate.toLocaleDateString()} – {toDate.toLocaleDateString()}  ·  Erstellt: {new Date(report.week.generated).toLocaleString()}
+              {report.week.archived && <span className="ml-2 italic">[archiviert]</span>}
             </p>
             <hr className="my-3" />
           </div>
 
-          {/* ── Block 1: Executive Summary ───────────────────────────── */}
+          {/* Archiv-Indikator (Bildschirm) — schmaler Hinweis dass dieser
+              Snapshot aus MinIO kommt und nicht nachträglich neu aggregiert
+              wird. Hilfreich um zu erkennen ob FP-Markierungen rückwirkend
+              greifen würden oder nicht. */}
+          {report.week.archived && (
+            <div className="print:hidden flex items-center gap-2 text-[11px] text-cyan-300 font-mono px-3 py-1.5 rounded border border-cyan-700/40 bg-cyan-950/20 w-fit">
+              <Archive size={12} />
+              {t('weeklyReport.archivedHint', { defaultValue: 'Archiv-Snapshot — frozen am ' })}
+              {new Date(report.week.generated).toLocaleString()}
+            </div>
+          )}
+
+          {/* ── Block 1: Executive Summary ───────────────────────── */}
           <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
             <h2 className="text-sm font-semibold text-cyan-200 print:text-black mb-3 uppercase tracking-wider">
               {t('weeklyReport.summary.title')}
@@ -357,7 +436,7 @@ export function WeeklyReportPage() {
             </div>
           </section>
 
-          {/* ── Block 2: Detection ──────────────────────────────────── */}
+          {/* ── Block 2: Detection ───────────────────────────── */}
           <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
             <h2 className="text-sm font-semibold text-cyan-200 print:text-black mb-3 uppercase tracking-wider">
               {t('weeklyReport.detection.title')}
@@ -460,7 +539,7 @@ export function WeeklyReportPage() {
             </div>
           </section>
 
-          {/* ── Block 3: Operations ──────────────────────────────────── */}
+          {/* ── Block 3: Operations ───────────────────────────── */}
           <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
             <h2 className="text-sm font-semibold text-cyan-200 print:text-black mb-3 uppercase tracking-wider">
               {t('weeklyReport.ops.title')}
@@ -536,7 +615,7 @@ export function WeeklyReportPage() {
             </div>
           </section>
 
-          {/* ── Block 4: Audit ───────────────────────────────────────── */}
+          {/* ── Block 4: Audit ──────────────────────────────── */}
           <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
             <h2 className="text-sm font-semibold text-cyan-200 print:text-black mb-3 uppercase tracking-wider">
               {t('weeklyReport.audit.title')}
