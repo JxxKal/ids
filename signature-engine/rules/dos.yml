@@ -84,7 +84,7 @@
 
 - id: DOS_ICMP_001
   name: "ICMP Flood"
-  description: "Hohe ICMP-Rate von einer Quelle"
+  description: "Hohe ICMP-Rate von einer Quelle gegen einen einzelnen Host"
   severity: high
   cooldown_s: 30
   tags: [dos, flood]
@@ -96,8 +96,15 @@
       max: 10000000
       label: "Mindest-Paketrate (Pakete/Sekunde)"
       metric: pps
+  # Multicast (z.B. IPv6 ND, mDNS-IPv6) und Subnet-/Limited-Broadcasts
+  # ausnehmen — Smart-Home-Geräte und IPv6-Stacks senden dort regelmäßig
+  # ICMP-Bursts, das ist kein Flood gegen einen Host.
   eligibility: |
     flow.get('proto') == 'ICMP'
+    and not net.is_multicast(flow.get('dst_ip', ''))
+    and not net.is_broadcast(flow.get('dst_ip', ''))
   condition: |
     flow.get('proto') == 'ICMP'
+    and not net.is_multicast(flow.get('dst_ip', ''))
+    and not net.is_broadcast(flow.get('dst_ip', ''))
     and flow.get('pps', 0) > params.pps
