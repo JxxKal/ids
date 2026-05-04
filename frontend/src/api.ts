@@ -47,7 +47,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Auth ───────────────────────────────────────────────────────────────────
 
 export interface LoginResponse {
   access_token: string;
@@ -76,7 +76,7 @@ export async function fetchMe(): Promise<User> {
   return req('/api/auth/me');
 }
 
-// ── Alerts ────────────────────────────────────────────────────────────────────
+// ── Alerts ─────────────────────────────────────────────────────────────────
 
 export interface AlertFilters {
   severity?: string;
@@ -164,14 +164,14 @@ export function alertsExportUrl(params: {
   return `${BASE}/api/alerts/export.csv?${p}`;
 }
 
-// ── Threat Level ──────────────────────────────────────────────────────────────
+// ── Threat Level ───────────────────────────────────────────────────────────
 
 export async function fetchThreatLevel(): Promise<ThreatLevel> {
   if (isDemoMode()) return demo.fetchThreatLevel();
   return req('/api/stats/threat-level');
 }
 
-// ── Networks ──────────────────────────────────────────────────────────────────
+// ── Networks ───────────────────────────────────────────────────────────────
 
 export async function fetchNetworks(): Promise<KnownNetwork[]> {
   if (isDemoMode()) return demo.fetchNetworks();
@@ -195,7 +195,7 @@ export async function deleteNetwork(id: string): Promise<void> {
   await req(`/api/networks/${id}`, { method: 'DELETE' });
 }
 
-// ── Hosts ─────────────────────────────────────────────────────────────────────
+// ── Hosts ──────────────────────────────────────────────────────────────────
 
 export interface UnknownHost {
   ip: string;
@@ -287,7 +287,7 @@ export async function downloadNetworksExampleCsv(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// ── Tests ──────────────────────────────────────────────────────────────────
 
 export async function runTest(scenarioId: string): Promise<TestRun> {
   return req('/api/tests/run', {
@@ -309,7 +309,7 @@ export async function deleteAllTestRuns(): Promise<void> {
   return req('/api/tests/runs', { method: 'DELETE' });
 }
 
-// ── Users ─────────────────────────────────────────────────────────────────────
+// ── Users ──────────────────────────────────────────────────────────────────
 
 export async function fetchUsers(): Promise<User[]> {
   if (isDemoMode()) return demo.fetchUsers();
@@ -402,7 +402,7 @@ export async function fetchConnectionGraph(
   return req(`/api/flows/graph?${p}`);
 }
 
-// ── Rules Engine ─────────────────────────────────────────────────────────────
+// ── Rules Engine ───────────────────────────────────────────────────────────
 
 export async function fetchRuleSources(): Promise<RuleSource[]> {
   if (isDemoMode()) return demo.fetchRuleSources();
@@ -618,7 +618,7 @@ export async function saveSamlConfig(value: SamlConfig): Promise<void> {
   await req('/api/config/saml', { method: 'PATCH', body: JSON.stringify({ value }) });
 }
 
-// ── DNS-Resolver-Allowlist ────────────────────────────────────────────────────
+// ── DNS-Resolver-Allowlist ─────────────────────────────────────────────────────
 
 export interface DnsResolversConfig { resolvers: string[] }
 
@@ -689,7 +689,7 @@ export interface SigRulesOverridesResponse {
   overrides: Record<string, SigRuleOverride>;
 }
 
-// ── ML-Tuning (Phase 3+4) ───────────────────────────────────────────────────
+// ── ML-Tuning (Phase 3+4) ────────────────────────────────────────────────────
 
 export interface MlTuningStateBlock {
   state:           'idle' | 'training' | 'tuning' | 'paused';
@@ -792,7 +792,7 @@ export async function saveSigRulesOverrides(
   });
 }
 
-// ── Suricata SID-Overrides ───────────────────────────────────────────────────
+// ── Suricata SID-Overrides ────────────────────────────────────────────────────
 
 export interface SuricataOverrideEntry {
   enabled?:  boolean | null;
@@ -818,7 +818,7 @@ export async function saveSuricataOverrides(
   });
 }
 
-// ── Egress-Whitelist ──────────────────────────────────────────────────────────
+// ── Egress-Whitelist ───────────────────────────────────────────────────────────
 
 export interface EgressWhitelistEntry {
   id:             string;
@@ -866,7 +866,7 @@ export async function deactivateEgressWhitelist(id: string): Promise<EgressWhite
   });
 }
 
-// ── Boundary-Priority-Map (system_config) ─────────────────────────────────────
+// ── Boundary-Priority-Map (system_config) ────────────────────────────────────
 
 export type BoundaryPriorityMap = Record<string, string | null>;
 
@@ -920,7 +920,7 @@ export async function getItopSyncStatus(): Promise<import('./types').ItopSyncSta
   return req('/api/itop/sync/status');
 }
 
-// ── SSL / TLS ─────────────────────────────────────────────────────────────────
+// ── SSL / TLS ────────────────────────────────────────────────────────────────
 
 export interface SslStatus {
   mode: 'none' | 'upload' | 'self-signed' | 'acme';
@@ -993,7 +993,7 @@ export async function setSslHostname(hostname: string): Promise<{ hostname: stri
   return req('/api/ssl/hostname', { method: 'POST', body: JSON.stringify({ hostname }) });
 }
 
-// ── Syslog ────────────────────────────────────────────────────────────────────
+// ── Syslog ───────────────────────────────────────────────────────────────────
 
 export interface SyslogConfig {
   enabled:      boolean;
@@ -1158,7 +1158,7 @@ export async function fetchLearnedPatterns(): Promise<LearnedPatternsResponse> {
   return req('/api/ml/learned-patterns');
 }
 
-// ── Datenbank-Wartung ─────────────────────────────────────────────────────────
+// ── Datenbank-Wartung ───────────────────────────────────────────────────────────
 
 export interface DbTableStat {
   name:       string;
@@ -1262,7 +1262,7 @@ export async function fetchMaintenanceAudit(limit = 100): Promise<MaintenanceAud
   return req(`/api/maintenance/audit?limit=${limit}`);
 }
 
-// ── Remote Taps ──────────────────────────────────────────────────────────────
+// ── Remote Taps ───────────────────────────────────────────────────────────────
 
 export async function fetchTaps(): Promise<RemoteTap[]> {
   if (isDemoMode()) return [];
@@ -1284,7 +1284,7 @@ export async function revokeTap(id: string): Promise<void> {
   await req(`/api/taps/${id}`, { method: 'DELETE' });
 }
 
-// ── Auto-Pairing: Pending-Liste, Approve/Reject, Audit-Log ───────────────────
+// ── Auto-Pairing: Pending-Liste, Approve/Reject, Audit-Log ───────────────────────
 
 export interface PendingTap {
   id:           string;
@@ -1333,7 +1333,7 @@ export async function fetchTapAuditLog(limit = 200): Promise<TapAuditEntry[]> {
   return req(`/api/taps/audit-log?limit=${limit}`);
 }
 
-// ── Weekly Report ────────────────────────────────────────────────────────────
+// ── Weekly Report ───────────────────────────────────────────────────────────
 
 export interface WeeklyReportTrend {
   prev:       number;
@@ -1391,7 +1391,9 @@ export interface WeeklyReportTap {
 }
 
 export interface WeeklyReport {
-  week:    { year: number; week: number; from: string; to: string; generated: string };
+  // archived=true: Snapshot kommt aus MinIO (frozen). archived=false/undefined:
+  // live aus DB-Aggregat. Frontend zeigt einen Indikator "Archiv" wenn true.
+  week:    { year: number; week: number; from: string; to: string; generated: string; archived?: boolean };
   summary: WeeklyReportSummary;
   detection: {
     daily:              WeeklyReportDay[];
@@ -1410,16 +1412,60 @@ export interface WeeklyReport {
   };
 }
 
+export interface WeeklyReportHistoryEntry {
+  week_str:     string;       // "2026-W18"
+  year:         number;
+  week:         number;
+  from:         string | null;
+  to:           string | null;
+  generated:    string | null;
+  alerts_total: number;
+  headline:     string;
+}
+
+export interface WeeklyReportHistoryResponse {
+  items: WeeklyReportHistoryEntry[];
+  count: number;
+}
+
 export async function fetchWeeklyReport(week?: string): Promise<WeeklyReport> {
   if (isDemoMode()) return demoWeeklyReport(week);
   const qs = week ? `?week=${encodeURIComponent(week)}` : '';
   return req<WeeklyReport>(`/api/reports/weekly${qs}`);
 }
 
+export async function fetchWeeklyReportHistory(limit = 12): Promise<WeeklyReportHistoryResponse> {
+  if (isDemoMode()) return demoWeeklyHistory(limit);
+  return req<WeeklyReportHistoryResponse>(`/api/reports/history?limit=${limit}`);
+}
+
 export function weeklyReportCsvUrl(week?: string): string {
   const q = new URLSearchParams({ fmt: 'csv' });
   if (week) q.set('week', week);
   return `${BASE}/api/reports/weekly?${q}`;
+}
+
+function demoWeeklyHistory(limit: number): WeeklyReportHistoryResponse {
+  // Demo-Stub: gibt ein paar plausible Wochen-Einträge zurück, damit die
+  // History-Liste in der Demo nicht leer aussieht.
+  const items: WeeklyReportHistoryEntry[] = [];
+  const today = new Date();
+  for (let i = 1; i <= Math.min(limit, 6); i++) {
+    const monday = new Date(today);
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) - 7 * i);
+    const year = monday.getFullYear();
+    const wk   = 18 - i;
+    items.push({
+      week_str:     `${year}-W${String(wk).padStart(2, '0')}`,
+      year, week: wk,
+      from:         monday.toISOString(),
+      to:           new Date(monday.getTime() + 7 * 86400e3).toISOString(),
+      generated:    new Date(monday.getTime() + 8 * 86400e3).toISOString(),
+      alerts_total: Math.floor(150 + Math.random() * 200),
+      headline:     `${Math.floor(2 + Math.random() * 8)} kritische Alerts in KW ${wk}.`,
+    });
+  }
+  return { items, count: items.length };
 }
 
 // Demo-Stub mit plausiblen Werten (damit der Demo-User die Page nicht leer
