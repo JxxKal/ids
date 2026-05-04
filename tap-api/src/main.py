@@ -19,6 +19,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+import shutil
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -113,12 +116,185 @@ async def page_config(request: Request) -> HTMLResponse:
     )
 
 
+# ── System-Last (Mirror-Traffic + Sniffer-Drops + Host-Ressourcen) ───────────
+#
+# Direkt aus api/src/routers/system.py portiert. tap-api wird nur read-only
+# aufgerufen (kein Auth, lokal-only), die Implementation ist identisch zur
+# Master-API damit beide das gleiche Bild liefern.
+
+_HOST_PROC = Path("/host/proc")
+_HOST_SYS_NET = Path("/host/sys/class/net")
+
+_cpu_prev: list[int] = []
+_cpu_prev_t: float = 0.0
+_net_prev: dict[str, tuple[int, int, int, int, float]] = {}
+
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+
+
+def _cpu_pct() -> float | None:
+    """Linux-CPU-Auslastung über /proc/stat-Delta. Erster Aufruf gibt None
+    zurück (keine Baseline) — der nächste Tick (~1 s später) liefert dann den
+    realen Wert."""
+    global _cpu_prev, _cpu_prev_t
+    try:
+        line = (_HOST_PROC / "stat").read_text().splitlines()[0]
+        vals = list(map(int, line.split()[1:8]))
+        now = time.monotonic()
+        result: float | None = None
+        if _cpu_prev and now - _cpu_prev_t > 0.1:
+            delta = [v2 - v1 for v1, v2 in zip(_cpu_prev, vals)]
+            total = sum(delta)
+            idle = delta[3] + delta[4]
+            result = round((total - idle) / total * 100, 1) if total > 0 else 0.0
+        _cpu_prev = vals
+        _cpu_prev_t = now
+        return result
+    except Exception:
+        return None
+
+
+def _mem() -> dict:
+    try:
+        info: dict[str, int] = {}
+        for line in (_HOST_PROC / "meminfo").read_text().splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                info[parts[0].rstrip(":")] = int(parts[1])
+        total = info.get("MemTotal", 0)
+        avail = info.get("MemAvailable", 0)
+        used = total - avail
+        return {
+            "total_mb": total // 1024,
+            "used_mb":  used // 1024,
+            "pct":      round(used / total * 100, 1) if total else None,
+        }
+    except Exception:
+        return {"total_mb": 0, "used_mb": 0, "pct": None}
+
+
+def _disk() -> dict:
+    """Disk-Auslastung des Volumes auf dem `/var/lib/cyjan/uplink-queue.db`
+    sitzt — das ist genau der Grund warum Disk hier interessant ist
+    (Outage-Buffer kann bei langer Master-Trennung anwachsen). Fallback
+    `/`, weil das Tap-OS ein Single-Partition-Layout fährt."""
+    try:
+        # /var/lib/cyjan ist im tap-uplink-Container, nicht hier — wir nehmen
+        # was der Container selbst sieht. Auf dem Tap-OS ist alles auf /, das
+        # passt.
+        st = os.statvfs("/")
+        total = st.f_frsize * st.f_blocks
+        free  = st.f_frsize * st.f_bfree
+        used  = total - free
+        return {
+            "total_gb": round(total / 1e9, 1),
+            "used_gb":  round(used  / 1e9, 1),
+            "pct":      round(used / total * 100, 1) if total else None,
+        }
+    except Exception:
+        return {"total_gb": 0.0, "used_gb": 0.0, "pct": None}
+
+
+def _net_rates(iface: str) -> dict | None:
+    """Mirror-Interface-Raten aus /sys/class/net/<iface>/statistics. Erster
+    Aufruf liefert nur den absoluten rx_dropped-Counter, ab dem zweiten Tick
+    auch Bps/pps."""
+    global _net_prev
+    if not iface:
+        return None
+    stats_dir = _HOST_SYS_NET / iface / "statistics"
+    if not stats_dir.is_dir():
+        return None
+    try:
+        def rd(f: str) -> int:
+            return int((stats_dir / f).read_text())
+        rx_b = rd("rx_bytes"); tx_b = rd("tx_bytes")
+        rx_p = rd("rx_packets"); tx_p = rd("tx_packets")
+        rx_d = rd("rx_dropped")
+        now = time.monotonic()
+        prev = _net_prev.get(iface)
+        _net_prev[iface] = (rx_b, tx_b, rx_p, tx_p, now)
+        if prev is None:
+            return {"rx_bps": None, "tx_bps": None, "rx_pps": None, "tx_pps": None, "rx_dropped": rx_d}
+        p_rx_b, p_tx_b, p_rx_p, p_tx_p, p_t = prev
+        dt = now - p_t
+        if dt < 0.1:
+            return {"rx_bps": None, "tx_bps": None, "rx_pps": None, "tx_pps": None, "rx_dropped": rx_d}
+        return {
+            "rx_bps":     round((rx_b - p_rx_b) / dt),
+            "tx_bps":     round((tx_b - p_tx_b) / dt),
+            "rx_pps":     round((rx_p - p_rx_p) / dt),
+            "tx_pps":     round((tx_p - p_tx_p) / dt),
+            "rx_dropped": rx_d,
+        }
+    except Exception:
+        return None
+
+
+def _sniffer_stats() -> dict:
+    """Letzte 'sniffer stats'-Zeile aus den Container-Logs parsen. Auf dem
+    Tap heißt der Container `cyjan-tap-sniffer` (vs. `ids-sniffer` am
+    Master). Wenn docker-CLI fehlt (Image ohne Mount), kommt None für die
+    Live-Werte zurück — die Total-Counter aus der State-Datei der tap-uplink
+    bleiben davon unberührt."""
+    if not shutil.which("docker"):
+        return {"pps": None, "drop_pct": None, "total_captured": 0,
+                "total_dropped": 0, "kafka_errors": 0,
+                "note": "docker-CLI im tap-api-Container nicht verfügbar"}
+    try:
+        r = subprocess.run(
+            ["docker", "logs", "--tail", "30", "cyjan-tap-sniffer"],
+            capture_output=True, text=True, timeout=3,
+        )
+        text = _ANSI_RE.sub("", r.stdout + r.stderr)
+        for line in reversed(text.splitlines()):
+            if "sniffer stats" not in line:
+                continue
+            def _f(pattern: str, default: float = 0.0) -> float:
+                m = re.search(pattern, line)
+                return float(m.group(1)) if m else default
+            def _i(pattern: str) -> int:
+                m = re.search(pattern, line)
+                return int(m.group(1)) if m else 0
+            return {
+                "pps":            _f(r'pps="([^"]+)"'),
+                "drop_pct":       _f(r'drop_pct="([^%"]+)%?"'),
+                "total_captured": _i(r'total_cap=(\d+)'),
+                "total_dropped":  _i(r'total_drop=(\d+)'),
+                "kafka_errors":   _i(r'kafka_errors=(\d+)'),
+            }
+    except Exception as exc:
+        return {"pps": None, "drop_pct": None, "total_captured": 0,
+                "total_dropped": 0, "kafka_errors": 0, "note": str(exc)}
+    return {"pps": None, "drop_pct": None, "total_captured": 0,
+            "total_dropped": 0, "kafka_errors": 0,
+            "note": "noch keine 'sniffer stats'-Zeile in den letzten 30 Logs"}
+
+
 # ── Maschinen-Endpunkte (für CLI) ─────────────────────────────────────────────
 
 
 @app.get("/api/state")
 async def api_state() -> JSONResponse:
     return JSONResponse(_read_state())
+
+
+@app.get("/api/load")
+async def api_load() -> JSONResponse:
+    """Last-Snapshot: Mirror-Traffic-Raten, Sniffer-Drops, Host-Ressourcen.
+
+    `/api/state` bleibt der Master-Connection-Status; `/api/load` ist die
+    Tap-lokale Health-Sicht. Aufgerufen von der CLI-Subkommando
+    `cyjan-tap load` und (folgt) der HTML-Status-Page.
+    """
+    return JSONResponse({
+        "iface":   MIRROR_IFACE,
+        "cpu_pct": _cpu_pct(),
+        "mem":     _mem(),
+        "disk":    _disk(),
+        "net":     _net_rates(MIRROR_IFACE),
+        "sniffer": _sniffer_stats(),
+    })
 
 
 @app.get("/api/config")
