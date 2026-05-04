@@ -70,11 +70,19 @@ class EnrichmentDB:
         src_known:       bool | None,
         dst_known:       bool | None,
         priority:        str | None,
+        src_zone:        str | None = None,
+        dst_zone:        str | None = None,
     ) -> None:
         """Schreibt die Egress-Boundary-Felder auf den Alert-Record.
 
         priority darf P0/P1/P2/P3 oder NULL sein. NULL = nicht in Egress-View
-        (z.B. ✓✓✓-Konstellation oder fehlende Klassifikation).
+        (Diagonale ot/ot bzw. it/it, oder ✓✓✓-Konstellation aus V1).
+
+        src_zone/dst_zone (V2, Phase B) sind 'ot'|'it'|'internet'|None. Auf
+        bestehenden Spalten boundary_src_zone/_dst_zone — Migration 017
+        legt sie an, aber wir setzen sie nur wenn übergeben (Backwards-Compat
+        falls dieser Code vor der Migration läuft, dann sind src/dst_zone
+        einfach NULL).
         """
         self._execute(
             """
@@ -82,14 +90,17 @@ class EnrichmentDB:
             SET boundary_net_known = %s,
                 boundary_src_known = %s,
                 boundary_dst_known = %s,
-                boundary_priority  = %s
+                boundary_priority  = %s,
+                boundary_src_zone  = %s,
+                boundary_dst_zone  = %s
             WHERE alert_id = %s
             """,
-            (net_known, src_known, dst_known, priority, alert_id),
+            (net_known, src_known, dst_known, priority, src_zone, dst_zone, alert_id),
         )
 
     def is_known_network(self, ip: str | None) -> bool:
-        """True wenn die IP in einem konfigurierten known_networks-CIDR liegt."""
+        """True wenn die IP in einem konfigurierten known_networks-CIDR liegt.
+        Wird für Backwards-Compat-Felder boundary_net_known weiterhin genutzt."""
         if not ip:
             return False
         try:
@@ -106,8 +117,44 @@ class EnrichmentDB:
             self._conn = None
             return False
 
+    def get_zone(self, ip: str | None) -> str:
+        """V2-Zone-Lookup (Migration 017): 'ot' | 'it' | 'internet'.
+
+        Mehrfache Match-Treffer (überlappende CIDRs) werden über masklen
+        sortiert — der spezifischste CIDR gewinnt. Das ist relevant wenn
+        z.B. ein /16 als 'it' getaggt ist und ein /24 darin als 'ot':
+        IPs im /24 werden korrekt als 'ot' klassifiziert.
+
+        Bei nicht-IP / leerem Input oder DB-Fehler → 'internet' (failsafe:
+        unbekanntes Ziel sieht aus wie Internet, keine versehentlichen
+        OT-Klassifikationen).
+        """
+        if not ip:
+            return "internet"
+        try:
+            self._connect()
+            with self._conn.cursor() as cur:  # type: ignore[union-attr]
+                cur.execute(
+                    """
+                    SELECT kind
+                      FROM known_networks
+                     WHERE %s::inet <<= cidr
+                     ORDER BY masklen(cidr) DESC
+                     LIMIT 1
+                    """,
+                    (ip,),
+                )
+                row = cur.fetchone()
+            if row and row[0] in ("ot", "it"):
+                return row[0]
+            return "internet"
+        except Exception as exc:
+            log.debug("get_zone(%s): %s", ip, exc)
+            self._conn = None
+            return "internet"
+
     def get_boundary_priority_map(self) -> dict | None:
-        """Liest die system_config-Konfiguration für boundary_priority_map.
+        """Liest die system_config-Konfiguration für boundary_priority_map (V1).
 
         Gibt None zurück wenn der Key nicht existiert oder nicht parsebar ist
         – Caller fällt dann auf den In-Code-Default zurück.
@@ -125,6 +172,26 @@ class EnrichmentDB:
             return None
         except Exception as exc:
             log.debug("get_boundary_priority_map: %s", exc)
+            self._conn = None
+            return None
+
+    def get_boundary_priority_map_v2(self) -> dict | None:
+        """Liest die V2-Map (Migration 017) aus system_config. Format:
+        {"ot/internet": "P0", ...}. None wenn Key fehlt → Caller fällt auf
+        DEFAULT_PRIORITY_MAP_V2 zurück."""
+        try:
+            self._connect()
+            with self._conn.cursor() as cur:  # type: ignore[union-attr]
+                cur.execute(
+                    "SELECT value FROM system_config WHERE key = %s",
+                    ("boundary_priority_map_v2",),
+                )
+                row = cur.fetchone()
+            if row and isinstance(row[0], dict):
+                return row[0]
+            return None
+        except Exception as exc:
+            log.debug("get_boundary_priority_map_v2: %s", exc)
             self._conn = None
             return None
 

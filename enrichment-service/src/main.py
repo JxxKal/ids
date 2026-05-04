@@ -28,8 +28,8 @@ import time
 import orjson
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
 
-from boundary import classify as classify_boundary
-from boundary import parse_priority_map
+from boundary import classify_v2 as classify_boundary_v2
+from boundary import parse_priority_map_v2
 from cache import EnrichmentCache
 from config import Config
 from db import EnrichmentDB
@@ -230,21 +230,35 @@ def run(cfg: Config) -> None:
             db.update_alert_enrichment(alert_id, enrichment)
 
             # ── Egress-Boundary-Klassifikation ────────────────────────
-            # net_known = dst in known_networks
-            # src_known = host_info.trusted für src
-            # dst_known = host_info.trusted für dst
-            # Priority aus system_config-Map (Cache 60s).
-            net_known = db.is_known_network(dst_ip) if dst_ip else False
+            # V2 (Phase B): src_zone × dst_zone-Matrix mit 3 Zonen
+            #   ot       — known_networks.kind='ot' (OT-Scope)
+            #   it       — known_networks.kind='it' (Corporate IT, nicht im OT-Scope)
+            #   internet — alles außerhalb von known_networks
+            # Priority aus system_config-Key 'boundary_priority_map_v2', sonst
+            # DEFAULT_PRIORITY_MAP_V2.
+            #
+            # V1-Felder (net_known/src_known/dst_known) werden weiter befüllt
+            # für Alert-Detail-View-Backwards-Compat. boundary_priority kommt
+            # aus V2-Klassifikator — V1-Map wird für neue Alerts nicht mehr
+            # konsultiert.
+            src_zone  = db.get_zone(src_ip)
+            dst_zone  = db.get_zone(dst_ip)
+            net_known = dst_zone in ("ot", "it")  # = "dst ist in known_networks"
             src_known = bool(_f(src_info, "trusted"))
             dst_known = bool(_f(dst_info, "trusted"))
-            pmap_raw  = db.get_boundary_priority_map()
-            pmap      = parse_priority_map(pmap_raw) if pmap_raw else None
-            priority  = classify_boundary(net_known, src_known, dst_known, pmap)
-            db.update_alert_boundary(alert_id, net_known, src_known, dst_known, priority)
+            pmap_v2_raw = db.get_boundary_priority_map_v2()
+            pmap_v2     = parse_priority_map_v2(pmap_v2_raw) if pmap_v2_raw else None
+            priority    = classify_boundary_v2(src_zone, dst_zone, pmap_v2)
+            db.update_alert_boundary(
+                alert_id, net_known, src_known, dst_known, priority,
+                src_zone=src_zone, dst_zone=dst_zone,
+            )
             enrichment["boundary"] = {
                 "net_known": net_known,
                 "src_known": src_known,
                 "dst_known": dst_known,
+                "src_zone":  src_zone,
+                "dst_zone":  dst_zone,
                 "priority":  priority,
             }
 
