@@ -1,20 +1,30 @@
 """
 Wochenbericht — aggregierte Detection-/Operations-Sicht für eine ISO-Woche.
 
-Phase 1 (on-demand, kein Archiv):
+Phase 1 (on-demand):
   GET /api/reports/weekly                 — aktuelle Woche, JSON
   GET /api/reports/weekly?week=2026-W18   — bestimmte Woche
   GET /api/reports/weekly?fmt=csv         — ZIP-Bundle mit CSVs
 
+Phase 2 (Archivierung):
+  - Hintergrund-Cron archiviert beim ersten Zugriff nach Wochenende den
+    JSON-Snapshot ins MinIO-Bucket `ids-reports` (Key: weekly/YYYY-Wnn.json).
+  - GET /api/reports/weekly?week=… liefert für vergangene Wochen den
+    archivierten Snapshot wenn vorhanden, sonst frischen DB-Aggregat. Das
+    schützt vor Drift, wenn die alerts-Hypertable retention-pruned wird.
+  - GET /api/reports/history?limit=12 listet die letzten archivierten
+    Wochen mit Headline und Total.
+
 Read-only (kein admin nötig). Pure SQL-Aggregate über die Hypertable
-`alerts` und ein paar Hilfstabellen — keine neuen DB-Strukturen, kein
-Cron, kein Archiv. Phase 2 (Archivierung in MinIO + History-Liste +
-Mail-Versand) kommt später.
+`alerts` und ein paar Hilfstabellen — keine neuen DB-Strukturen.
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import json
+import logging
 import re
 import zipfile
 from datetime import date, datetime, timedelta, timezone
@@ -22,10 +32,101 @@ from datetime import date, datetime, timedelta, timezone
 import asyncpg
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from minio import Minio
+from minio.error import S3Error
 
 from database import get_pool
 
+log = logging.getLogger("api.reports")
+
 router = APIRouter(prefix="/api/reports", tags=["reports"])
+
+# ── MinIO-Hooks (optional gesetzt von main.py beim Startup) ──────────────────
+#
+# Modulscoped, weil der Endpoint sie über zwei Pfade braucht:
+#  - weekly_report() liest archivierten Snapshot wenn vorhanden
+#  - _archive_loop() schreibt regelmäßig
+# main.py setzt das Paar via configure_archive() vor dem include_router-Call.
+
+_minio_client: Minio | None = None
+_archive_bucket: str | None = None
+
+
+def configure_archive(client: Minio, bucket: str) -> None:
+    """Wird vom api/main.py beim Startup aufgerufen, sobald MinIO-Client +
+    bucket-name verfügbar sind. Idempotent: kann mehrfach aufgerufen werden."""
+    global _minio_client, _archive_bucket
+    _minio_client = client
+    _archive_bucket = bucket
+
+
+def _archive_key(year: int, week: int) -> str:
+    return f"weekly/{year}-W{week:02d}.json"
+
+
+def _read_archive(year: int, week: int) -> dict | None:
+    """Liest einen archivierten Wochenbericht aus MinIO. None wenn nicht
+    vorhanden (auch bei MinIO-Fehlern — der Live-Aggregat-Pfad ist immer
+    ein gültiger Fallback, daher kein Hochreichen)."""
+    if not _minio_client or not _archive_bucket:
+        return None
+    try:
+        key = _archive_key(year, week)
+        resp = _minio_client.get_object(_archive_bucket, key)
+        try:
+            return json.loads(resp.read().decode("utf-8"))
+        finally:
+            resp.close()
+            resp.release_conn()
+    except S3Error as exc:
+        if exc.code in ("NoSuchKey", "NoSuchBucket"):
+            return None
+        log.warning("MinIO read %s/%s fehlgeschlagen: %s", _archive_bucket, _archive_key(year, week), exc)
+        return None
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("Archive read fehlgeschlagen für %s-W%s: %s", year, week, exc)
+        return None
+
+
+def _write_archive(year: int, week: int, payload: dict) -> bool:
+    """Schreibt einen Snapshot ins Archiv. Gibt True wenn erfolgreich,
+    False wenn MinIO nicht erreichbar oder Bucket fehlt — der Cron-Loop
+    versucht's beim nächsten Tick erneut."""
+    if not _minio_client or not _archive_bucket:
+        return False
+    try:
+        body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        _minio_client.put_object(
+            _archive_bucket,
+            _archive_key(year, week),
+            data=io.BytesIO(body),
+            length=len(body),
+            content_type="application/json",
+        )
+        return True
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("Archive write fehlgeschlagen für %s-W%s: %s", year, week, exc)
+        return False
+
+
+def _list_archive_keys(limit: int = 24) -> list[tuple[int, int]]:
+    """Liefert die letzten archivierten Wochen als (year, week)-Tupel,
+    absteigend sortiert. Nutzt MinIO-list-Listing — keine DB."""
+    if not _minio_client or not _archive_bucket:
+        return []
+    try:
+        objs = _minio_client.list_objects(_archive_bucket, prefix="weekly/", recursive=True)
+        out: list[tuple[int, int]] = []
+        for o in objs:
+            # Key-Form: weekly/YYYY-Wnn.json
+            m = re.match(r"^weekly/(\d{4})-W(\d{1,2})\.json$", o.object_name or "")
+            if m:
+                out.append((int(m.group(1)), int(m.group(2))))
+        out.sort(reverse=True)
+        return out[:limit]
+    except Exception as exc:                                # noqa: BLE001
+        log.warning("MinIO list weekly/ fehlgeschlagen: %s", exc)
+        return []
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -369,18 +470,10 @@ def _trend(cur: int, prev: int) -> dict:
 # ── JSON-Endpunkt ────────────────────────────────────────────────────────────
 
 
-@router.get("/weekly", summary="Wochenbericht (JSON oder CSV-ZIP)")
-async def weekly_report(
-    week: str | None = Query(default=None, description="ISO-Woche YYYY-Wnn (Default: aktuell)"),
-    fmt:  str        = Query(default="json", regex="^(json|csv)$"),
-):
-    """Aggregierter Detection-/Operations-Bericht für eine ISO-Woche.
-
-    Wenn `fmt=csv`, kommt ein ZIP zurück mit einer CSV pro Tabelle —
-    direkt in Excel/PowerBI lesbar.
-    """
-    year, wk = _parse_week(week)
-    t0, t1   = _week_bounds(year, wk)
+async def _build_weekly_payload(year: int, wk: int) -> dict:
+    """Baut den vollständigen Wochenbericht-Payload aus DB-Aggregaten.
+    Wird von weekly_report() (live-Pfad) und vom Archiv-Cron benutzt."""
+    t0, t1 = _week_bounds(year, wk)
 
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -397,13 +490,14 @@ async def weekly_report(
     # _rank-Hilfsspalte aus top_sources entfernen (war nur internes Sort)
     top_sources = [{k: v for k, v in r.items() if not k.startswith("_")} for r in top_sources_raw]
 
-    payload = {
+    return {
         "week": {
             "year":      year,
             "week":      wk,
             "from":      t0.isoformat(),
             "to":        t1.isoformat(),
             "generated": datetime.now(timezone.utc).isoformat(),
+            "archived":  False,         # vom Archiv-Reader auf True gesetzt
         },
         "summary": {
             "alerts_total":       detection_total["total"],
@@ -426,9 +520,123 @@ async def weekly_report(
         "audit": audit,
     }
 
+
+def _is_past_week(year: int, wk: int) -> bool:
+    """True wenn die Woche jünger als heute UND komplett abgeschlossen ist
+    (also der Montag der Woche liegt vor dem Montag der aktuellen Woche)."""
+    cur = date.today().isocalendar()
+    if year < cur.year:
+        return True
+    if year > cur.year:
+        return False
+    return wk < cur.week
+
+
+@router.get("/weekly", summary="Wochenbericht (JSON oder CSV-ZIP)")
+async def weekly_report(
+    week: str | None = Query(default=None, description="ISO-Woche YYYY-Wnn (Default: aktuell)"),
+    fmt:  str        = Query(default="json", regex="^(json|csv)$"),
+):
+    """Aggregierter Detection-/Operations-Bericht für eine ISO-Woche.
+
+    Vergangene Wochen werden — wenn ein Archiv-Snapshot in MinIO vorhanden
+    ist — daraus zurückgeliefert (immutable, robust gegen retention-Pruning).
+    Aktuelle Woche und nicht-archivierte Wochen werden live aus der DB
+    aggregiert.
+
+    Wenn `fmt=csv`, kommt ein ZIP zurück mit einer CSV pro Tabelle —
+    direkt in Excel/PowerBI lesbar.
+    """
+    year, wk = _parse_week(week)
+
+    payload: dict | None = None
+    if _is_past_week(year, wk):
+        archived = await asyncio.to_thread(_read_archive, year, wk)
+        if archived is not None:
+            archived.setdefault("week", {})["archived"] = True
+            payload = archived
+
+    if payload is None:
+        payload = await _build_weekly_payload(year, wk)
+
     if fmt == "csv":
         return _to_csv_zip(payload, year, wk)
     return payload
+
+
+@router.get("/history", summary="Liste der archivierten Wochen")
+async def history(
+    limit: int = Query(default=12, ge=1, le=104, description="Max. Anzahl Einträge (Default: 12)"),
+) -> dict:
+    """Lightweight-Index der archivierten Wochen — sortiert absteigend
+    (jüngste zuerst). Pro Eintrag wird der Snapshot kurz gelesen und nur
+    die Kennzahlen für die History-Liste rausgereicht; Frontend kann dann
+    pro Klick den vollen Bericht über `/weekly?week=YYYY-Wnn` nachladen.
+
+    Wenn MinIO nicht erreichbar ist, kommt eine leere Liste zurück (keine
+    503 — der UI-Pfad fällt dann sauber auf nur die aktuelle Woche zurück).
+    """
+    keys = _list_archive_keys(limit)
+    out: list[dict] = []
+    for year, wk in keys:
+        snap = await asyncio.to_thread(_read_archive, year, wk)
+        if snap is None:
+            continue
+        out.append({
+            "week_str":      f"{year}-W{wk:02d}",
+            "year":          year,
+            "week":          wk,
+            "from":          snap.get("week", {}).get("from"),
+            "to":            snap.get("week", {}).get("to"),
+            "generated":     snap.get("week", {}).get("generated"),
+            "alerts_total":  snap.get("summary", {}).get("alerts_total", 0),
+            "headline":      snap.get("summary", {}).get("headline", ""),
+        })
+    return {"items": out, "count": len(out)}
+
+
+# ── Archive-Cron ─────────────────────────────────────────────────────────────
+
+
+async def archive_loop() -> None:
+    """Hintergrund-Task: prüft stündlich, ob die letzte abgeschlossene Woche
+    archiviert ist. Wenn nicht → Snapshot bauen + ins MinIO schreiben.
+
+    Idempotent — re-archiviert nicht. Beim ersten Tick nach Mo 00:00 UTC
+    landet die abgelaufene Woche im Archiv. Existierende Archive bleiben
+    unangetastet, weil Datapoints sich rückwirkend ändern könnten (FP-Marks,
+    feedback) und der Snapshot bewusst frozen ist.
+
+    Aufgehängt im api/main.py-Startup. Stoppt sauber bei CancelledError.
+    """
+    log.info("Reports-Archive-Loop gestartet")
+    # Beim Container-Start einmal sofort prüfen (kein Hour-Wait nach
+    # Reboot wenn das Archiv für die letzte Woche fehlt).
+    while True:
+        try:
+            cur = date.today().isocalendar()
+            # Letzte abgeschlossene Woche bestimmen (heute - 7 Tage Trick).
+            ref = date.today() - timedelta(days=7)
+            ref_iso = ref.isocalendar()
+            year, wk = ref_iso.year, ref_iso.week
+            # Skip, wenn diese Woche zufällig die aktuelle ist (sollte nicht
+            # passieren, schützt aber gegen Edge-Cases an Jahreswechseln).
+            if (year, wk) != (cur.year, cur.week):
+                if await asyncio.to_thread(_read_archive, year, wk) is None:
+                    log.info("Archive für %s-W%s fehlt — generiere Snapshot", year, wk)
+                    payload = await _build_weekly_payload(year, wk)
+                    if await asyncio.to_thread(_write_archive, year, wk, payload):
+                        log.info("Archive geschrieben: %s-W%s (alerts=%d)",
+                                 year, wk, payload["summary"]["alerts_total"])
+        except Exception as exc:                            # noqa: BLE001
+            log.warning("Archive-Loop tick failed: %s", exc)
+        # 1 h warten — feiner muss es nicht; die Lücke ist max. 60 min nach
+        # Mo 00:00 UTC bevor der Snapshot landet.
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            log.info("Reports-Archive-Loop gestoppt")
+            return
 
 
 # ── CSV-Bundle ──────────────────────────────────────────────────────────────
