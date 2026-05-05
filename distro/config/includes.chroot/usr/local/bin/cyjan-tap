@@ -125,21 +125,25 @@ print(f"Disk (Outage-Vol): {disk_used:.1f} / {disk_total:.1f} GB ({fmt_pct(disk_
 n = d.get("net") or None
 if n:
     print()
-    print("Mirror-Traffic:")
+    print("Mirror-Traffic (Kernel-NIC-Ebene):")
     rx_bps = n.get("rx_bps"); tx_bps = n.get("tx_bps")
     rx_pps = n.get("rx_pps"); tx_pps = n.get("tx_pps")
     print(f"  RX: {fmt_bps(rx_bps)}  /  {fmt_int(rx_pps)} pps")
     print(f"  TX: {fmt_bps(tx_bps)}  /  {fmt_int(tx_pps)} pps")
     rx_d = n.get("rx_dropped")
     if rx_d is not None and rx_d > 0:
-        print(f"  rx_dropped (Kernel): {fmt_int(rx_d)}  ← Mirror-NIC verwirft Pakete")
+        print(f"  Drops (Kernel-Ring-Buffer): {fmt_int(rx_d)}")
+        print( "    ↑ Mirror-NIC nimmt vom Switch keine Pakete mehr an.")
+        print( "      Ursache: Hardware-/Treiber-Limit (Ring-Buffer voll).")
+        print( "      Fix:     ethtool -G <iface> rx 4096, mehr RX-Queues,")
+        print( "               IRQ-Affinity auf dedizierte CPUs setzen.")
 else:
     print()
     print("Mirror-Traffic:    (Iface nicht lesbar — sysfs-Mount oder MIRROR_IFACE prüfen)")
 
 sn = d.get("sniffer") or {}
 print()
-print("Sniffer:")
+print("Sniffer (User-Space, AF_PACKET → Kafka):")
 pps = sn.get("pps"); drop = sn.get("drop_pct")
 if pps is not None:
     drop_marker = "  ← Backpressure" if (drop or 0) > 0.5 else ""
@@ -147,10 +151,30 @@ if pps is not None:
 cap_t = sn.get("total_captured", 0); drop_t = sn.get("total_dropped", 0); kerr = sn.get("kafka_errors", 0)
 print(f"  Captured:  {fmt_int(cap_t)}")
 print(f"  Dropped:   {fmt_int(drop_t)}")
+if drop_t > 0:
+    print( "    ↑ Kernel hat Pakete an den Sniffer-Prozess übergeben,")
+    print( "      aber der konnte sie nicht verarbeiten.")
+    print( "      Ursache: Sniffer-CPU am Limit oder Kafka-Producer-Queue voll")
+    print( "               (nachgelagerte flow-aggregator/Kafka zu langsam).")
+    print( "      Fix:     mehr CPU für Sniffer, Kafka-Producer-Buffer hoch,")
+    print( "               flow-aggregator-Throughput verifizieren.")
 print(f"  Kafka-Err: {fmt_int(kerr)}")
 note = sn.get("note")
 if note:
     print(f"  Hinweis:   {note}")
+
+# Footer-Hinweis nur wenn irgendwo Drops sichtbar sind — sonst halten wir
+# den Status sauber. Bei sichtbaren Drops nochmal explizit den Unterschied
+# der zwei Stellen zusammenfassen, weil der User vermutlich gerade
+# debuggt.
+_kernel_drops = (n or {}).get("rx_dropped") or 0
+_sniffer_drops = sn.get("total_dropped") or 0
+if _kernel_drops or _sniffer_drops:
+    print()
+    print("ℹ Drops gibt es auf zwei Ebenen — Diagnose-Hilfe:")
+    print("  • Kernel-Ring-Buffer = NIC kommt nicht hinterher (Hardware-Limit)")
+    print("  • Sniffer-User-Space = CPU/Kafka-Backpressure (Software-Limit)")
+    print("  Beide unabhängig → unterschiedliche Fixes (siehe oben).")
 '
 }
 
