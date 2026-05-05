@@ -142,21 +142,41 @@ fi
 # Tap    = Capture-Knoten ohne DB/Frontend, schickt Alerts via mTLS an einen
 #          bereits eingerichteten Master.
 #
-# Wenn /etc/cyjan/mode existiert (light-mode reuse), übernehmen wir dessen
-# Wert als Default – sonst wählt der User explizit.
+# Reihenfolge der Default-Quellen:
+#   1. /etc/cyjan/iso-kind (build-zeitlicher Marker aus dem dedizierten
+#      Tap-ISO-Build — wenn hier 'tap' steht, IST das Ding schon ein
+#      Tap-Image, da macht eine Rollenwahl null Sinn → Menü skippen).
+#   2. /etc/cyjan/mode (light-mode reuse aus früherem ids-setup-Lauf).
+#   3. Default 'master' für die generischen Master-ISO-Frischinstalls.
+#
+# Escape-Hatch wenn jemand eine Tap-ISO-Maschine zu Master umbauen will:
+# /etc/cyjan/iso-kind vor `ids-setup` löschen, dann fragt der Wizard
+# wieder.
 ROLE_DEFAULT="master"
+ROLE_FORCED=""
+if [ -r "$CYJAN_STATE/iso-kind" ]; then
+  ISO_KIND="$(tr -d '[:space:]' < "$CYJAN_STATE/iso-kind" 2>/dev/null)"
+  case "$ISO_KIND" in
+    tap|master) ROLE_FORCED="$ISO_KIND" ;;
+  esac
+fi
 if [ -r "$CYJAN_STATE/mode" ]; then
   ROLE_DEFAULT="$(tr -d '[:space:]' < "$CYJAN_STATE/mode" 2>/dev/null || echo master)"
   case "$ROLE_DEFAULT" in master|tap) ;; *) ROLE_DEFAULT="master" ;; esac
 fi
 
-ROLE=$(whiptail --title "$TITLE" --menu \
-  "Welche Rolle hat dieses System im Cyjan-Verbund?\n\nMaster = vollständige IDS-Appliance (Detection + DB + Frontend).\nTap    = entfernter Capture-Knoten, schickt nur Alerts an einen Master." $H $W 2 \
-  "master" "Cyjan IDS Master (Default für Standalone-Installationen)" \
-  "tap"    "Cyjan IDS Remote-Tap (mTLS-gekoppelt an einen Master)" \
-  --default-item "$ROLE_DEFAULT" \
-  3>&1 1>&2 2>&3) || ROLE="$ROLE_DEFAULT"
-log "Rolle: $ROLE"
+if [ -n "$ROLE_FORCED" ]; then
+  ROLE="$ROLE_FORCED"
+  log "Rolle: $ROLE (forciert via $CYJAN_STATE/iso-kind=$ISO_KIND, Menü übersprungen)"
+else
+  ROLE=$(whiptail --title "$TITLE" --menu \
+    "Welche Rolle hat dieses System im Cyjan-Verbund?\n\nMaster = vollständige IDS-Appliance (Detection + DB + Frontend).\nTap    = entfernter Capture-Knoten, schickt nur Alerts an einen Master." $H $W 2 \
+    "master" "Cyjan IDS Master (Default für Standalone-Installationen)" \
+    "tap"    "Cyjan IDS Remote-Tap (mTLS-gekoppelt an einen Master)" \
+    --default-item "$ROLE_DEFAULT" \
+    3>&1 1>&2 2>&3) || ROLE="$ROLE_DEFAULT"
+  log "Rolle: $ROLE"
+fi
 
 whiptail --title "$TITLE" --msgbox \
 "Willkommen beim Cyjan IDS Setup.
