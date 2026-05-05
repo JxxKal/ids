@@ -858,17 +858,48 @@ elif [ -n "$OFFLINE_BUNDLE" ]; then
     *.gz)  DECOMPRESS="gunzip -c" ;;
   esac
   load_rc=0
-  {
-    echo 5;  echo "# Lade Offline-Image-Bundle aus dem ISO ($(du -h "$OFFLINE_BUNDLE" | cut -f1))..."
-    if $DECOMPRESS "$OFFLINE_BUNDLE" | docker load >>"$LOG" 2>&1; then
-      echo 100; echo "# Images geladen – kein Build nötig."
-    else
-      rc=$?
-      echo 100; echo "# WARNUNG: docker load fehlgeschlagen, fahre mit Online-Build fort."
-      exit "$rc"
-    fi
-  } | gauge "Offline-Images laden..." 0 || load_rc=$?
-  [ "$load_rc" -eq 0 ] && load_rc=${PIPESTATUS[0]}
+
+  BUNDLE_SIZE=$(stat -c %s "$OFFLINE_BUNDLE" 2>/dev/null || echo 0)
+  BUNDLE_HUMAN=$(du -h "$OFFLINE_BUNDLE" | cut -f1)
+
+  # Progress-Pipe: pv -n streamt eine Zeile mit "<prozent>" pro Sekunde an
+  # stderr, während die Bundle-Daten unverändert über stdout in den
+  # Decompressor + docker load gehen. Wir pipen pv-stderr in einen FIFO,
+  # füttern damit den whiptail-gauge — vorher stand der Dialog die ganze
+  # Zeit bei 5 % weil die Pipeline nur 5 % am Anfang und 100 % am Ende
+  # emittiert hat.
+  if command -v pv >/dev/null 2>&1 && [ "$BUNDLE_SIZE" -gt 0 ]; then
+    PROGRESS_FIFO=$(mktemp -u)
+    mkfifo "$PROGRESS_FIFO"
+    (
+      # Hintergrund-Worker: pv → decompress → docker load. Schickt pv-
+      # Prozente in den FIFO, am Ende ein "100" als Sentinel.
+      pv -n -i 1 -s "$BUNDLE_SIZE" "$OFFLINE_BUNDLE" 2>"$PROGRESS_FIFO" \
+        | $DECOMPRESS \
+        | docker load >>"$LOG" 2>&1
+      worker_rc=$?
+      echo 100 >"$PROGRESS_FIFO"
+      exit $worker_rc
+    ) &
+    WORKER_PID=$!
+    gauge "Offline-Images laden ($BUNDLE_HUMAN, ~1–2 min)..." 0 <"$PROGRESS_FIFO"
+    wait "$WORKER_PID"; load_rc=$?
+    rm -f "$PROGRESS_FIFO"
+  else
+    # Fallback ohne pv: alte 5%/100%-Variante. Greift nur auf alten
+    # Bestandssystemen, frisches ISO hat pv im Package-Set.
+    {
+      echo 5;  echo "# Lade Offline-Image-Bundle ($BUNDLE_HUMAN)..."
+      if $DECOMPRESS "$OFFLINE_BUNDLE" | docker load >>"$LOG" 2>&1; then
+        echo 100; echo "# Images geladen – kein Build nötig."
+      else
+        rc=$?
+        echo 100; echo "# WARNUNG: docker load fehlgeschlagen, fahre mit Online-Build fort."
+        exit "$rc"
+      fi
+    } | gauge "Offline-Images laden..." 0 || load_rc=$?
+    [ "$load_rc" -eq 0 ] && load_rc=${PIPESTATUS[0]}
+  fi
   clear
   if [ "$load_rc" -eq 0 ]; then
     LOADED_OFFLINE=1
