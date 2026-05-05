@@ -200,14 +200,28 @@ cmd_connection() {
   esac
 }
 
+# Akzeptiert "192.168.1.230" (oder "master.lan") und baut daraus die
+# Master-API-URL. Voll-URLs wie "http://x:8001" werden 1:1 durchgereicht.
+# So muss der User in der CLI dieselbe einfache Eingabe machen wie im
+# Wizard (Host/IP only).
+_normalize_master_url() {
+  local in="$1"
+  case "$in" in
+    http://*|https://*) printf '%s' "$in" ;;
+    *) printf 'http://%s:8001' "$in" ;;
+  esac
+}
+
 cmd_pair() {
   require_curl
-  local master="${1:-}" token="${2:-}"
-  if [[ -z "$master" || -z "$token" ]]; then
-    echo "Usage: cyjan-tap pair <master-url> <token>"
-    echo "  Beispiel: cyjan-tap pair http://192.168.1.230:8001 v_abc123..."
+  local raw="${1:-}" token="${2:-}"
+  if [[ -z "$raw" || -z "$token" ]]; then
+    echo "Usage: cyjan-tap pair <master-host-or-url> <token>"
+    echo "  Beispiel: cyjan-tap pair 192.168.1.230 v_abc123..."
+    echo "  Auch erlaubt: cyjan-tap pair http://192.168.1.230:8001 v_abc..."
     exit 2
   fi
+  local master; master=$(_normalize_master_url "$raw")
   local body
   body=$(printf '{"master_url":%s,"token":%s}' \
     "$(json_escape "$master")" \
@@ -221,11 +235,12 @@ cmd_pair() {
 
 cmd_auto_pair() {
   require_curl
-  local master="${1:-}" tap_name="${2:-}"
-  if [[ -z "$master" ]]; then
+  local raw="${1:-}" tap_name="${2:-}"
+  if [[ -z "$raw" ]]; then
     cat <<USAGE
-Usage: cyjan-tap auto-pair <master-url> [tap-name]
-  Beispiel: cyjan-tap auto-pair http://192.168.1.81 site-a-rack-3
+Usage: cyjan-tap auto-pair <master-host-or-url> [tap-name]
+  Beispiel: cyjan-tap auto-pair 192.168.1.81 site-a-rack-3
+  Auch erlaubt: cyjan-tap auto-pair http://192.168.1.81 site-a
 
 Token-freies Pairing — der Tap meldet sich beim Master, der Master-Admin
 bestätigt die Anmeldung im Web-UI (Settings → Remote Taps → "Wartende
@@ -234,6 +249,7 @@ Netzwerke des Masters.
 USAGE
     exit 2
   fi
+  local master; master=$(_normalize_master_url "$raw")
   local body
   if [[ -n "$tap_name" ]]; then
     body=$(printf '{"master_url":%s,"name":%s}' \
@@ -355,8 +371,8 @@ cyjan-tap – Remote-Tap-CLI
   cyjan-tap status                       Verbindungs- + Last-Status anzeigen
   cyjan-tap load [follow]                nur Last-Block (CPU/RAM/Disk/Traffic/Drops)
   cyjan-tap connection follow            Live-Tail des Master-Connection-Status
-  cyjan-tap pair <master-url> <token>    klassisches Pairing mit Master + Token
-  cyjan-tap auto-pair <master-url> [name]  token-freies Pairing — Admin bestätigt im Master-UI
+  cyjan-tap pair <master-host> <token>    klassisches Pairing mit Master + Token
+  cyjan-tap auto-pair <master-host> [name]  token-freies Pairing — Admin bestätigt im Master-UI
   cyjan-tap test                         synthetischen Test-Alert an Master schicken
   cyjan-tap reconnect                    tap-uplink-Reconnect erzwingen
   cyjan-tap logs follow [service]        Container-Logs (Default alle)

@@ -507,76 +507,55 @@ fi   # ROLE = master
 # 60 min einmalig gültig. Die eigentliche Cert-Erzeugung passiert nach dem
 # Stack-Start gegen die lokale tap-api – wir merken uns hier nur die Eingaben.
 
+MASTER_HOST=""
 MASTER_API_URL=""
-PAIR_TOKEN=""
+MASTER_WSS_URL=""
+PAIR_RESULT="skipped"   # skipped | auto-pending | failed
+PAIR_DETAIL=""
 if [ "$ROLE" = "tap" ]; then
   # Light-Modus + bereits gepaarter Tap: Pairing-Step optional, sonst läuft
-  # der Wizard in einen 409 vom /api/pair (Tap bereits gepaart, Token wäre
-  # ohnehin verbraucht). User kann explizit "neu pairen" bestätigen, sonst
-  # bleibt das bestehende Cert unangetastet.
+  # der Wizard in einen 409 vom /api/auto-pair-start (Tap bereits gepaart).
+  # User kann explizit "neu pairen" bestätigen, sonst bleibt das bestehende
+  # Cert unangetastet.
   SKIP_PAIRING=0
   if [ "$SETUP_MODE" = "light" ] && [ -r "$ENV_FILE" ]; then
     EXISTING_MASTER=$(grep -m1 -E '^MASTER_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)
     if [ -n "$EXISTING_MASTER" ]; then
-      if yesno "Light-Modus: dieser Tap ist bereits konfiguriert (MASTER_URL=$EXISTING_MASTER).\n\nBestehendes Pairing behalten?\n\n• Ja → Master-URL/Token-Schritte überspringen, vorhandenes Cert weiterverwenden.\n• Nein → neu pairen (alter Master-Eintrag wird ersetzt; vorher am Master einen neuen Token generieren)."; then
+      if yesno "Light-Modus: dieser Tap ist bereits konfiguriert (MASTER_URL=$EXISTING_MASTER).\n\nBestehendes Pairing behalten?\n\n• Ja → Master-Host-Schritt überspringen, vorhandenes Cert weiterverwenden.\n• Nein → neu pairen (Auto-Pair-Anfrage; Master-Admin muss approven)."; then
         SKIP_PAIRING=1
-        # Default-Werte für die .env-Schreib-Stelle aus den existierenden
-        # Env-Werten ziehen, damit nichts überschrieben wird.
         MASTER_WSS_URL="$EXISTING_MASTER"
         log "Tap-Light-Mode: bestehendes Pairing wird beibehalten."
       fi
     fi
   fi
 
-if [ "$SKIP_PAIRING" = "0" ]; then
-  MASTER_API_URL=$(input "Master-API-URL" \
-    "Basis-URL der Master-IDS-API\n(Default-Setup ohne TLS: http://<master-ip>:8001).\nWenn Master hinter Reverse-Proxy mit TLS: https://master.lan):" \
-    "${MASTER_API_URL:-http://192.168.1.230:8001}") || MASTER_API_URL=""
-  if [ -z "$MASTER_API_URL" ]; then
-    msg "Ohne Master-URL kann kein Pairing erfolgen – Setup abgebrochen."
-    exit 1
-  fi
+  if [ "$SKIP_PAIRING" = "0" ]; then
+    # Single-Field-Eingabe: nur Host/IP. Schemata + Ports werden intern
+    # festgenagelt. Der Default-Stack ist plain-HTTP auf 8001 und mTLS auf 8443
+    # — wer einen Reverse-Proxy mit TLS davor hat, editiert .env nach Setup.
+    MASTER_HOST=$(input "Master-Host" \
+"IP oder Hostname des Master-IDS.
 
-  # Master-WSS-URL für den Uplink ableiten: gleiche Hostkomponente, Port 8443.
-  # Master-Uplink ist IMMER mTLS — der Compose-Service hat keinen plain-WS-
-  # Modus. Daher hart wss:// als Default, unabhängig vom Schema der API-URL.
-  # (Vorher hat der Wizard http:// → ws:// gemappt, was den Tap gegen einen
-  # mTLS-Endpoint mit ws:// verbinden ließ → ValueError in der websockets-
-  # Lib.)
-  case "$MASTER_API_URL" in
-    https://*) _hostpart="${MASTER_API_URL#https://}" ;;
-    http://*)  _hostpart="${MASTER_API_URL#http://}"  ;;
-    *)         _hostpart="$MASTER_API_URL" ;;
-  esac
-  _hostonly="${_hostpart%%/*}"; _hostonly="${_hostonly%%:*}"
-  MASTER_WSS_URL=$(input "Master-WSS-URL" \
-    "WSS-URL für den Tap-Uplink (mTLS-Endpoint des Masters auf Port 8443):" \
-    "wss://${_hostonly}:8443/uplink") || MASTER_WSS_URL=""
-  if [ -z "$MASTER_WSS_URL" ]; then
-    msg "Ohne Master-WSS-URL kann der Uplink nicht aufgebaut werden – Abbruch."
-    exit 1
-  fi
-  # Schutznetz falls User händisch ws:// getippt hat: master-uplink kennt
-  # keinen plain-WS-Modus, automatisch korrigieren + den User informieren.
-  case "$MASTER_WSS_URL" in
-    ws://*)
-      MASTER_WSS_URL="wss://${MASTER_WSS_URL#ws://}"
-      msg "Hinweis: master-uplink ist mTLS-only — habe ws:// auf wss:// korrigiert.\nNeue URL: $MASTER_WSS_URL"
-      ;;
-  esac
+Folgende Ports müssen vom Tap aus erreichbar sein
+(ggf. Firewall-Freischaltung):
 
-  # Token-Eingabe bewusst per inputbox (sichtbar) – nicht passwordbox. Der
-  # Token ist im Master-Frontend ohnehin als Klartext sichtbar (genau einmal),
-  # und beim Tippen verhindern Sterne nur dass der User Tippfehler erkennt.
-  PAIR_TOKEN=$(input "Pairing-Token" \
-    "Einmaliger Pairing-Token vom Master\n(Settings → Remote Taps → 'Pairing-Token erzeugen'):" \
-    "") || PAIR_TOKEN=""
-  if [ -z "$PAIR_TOKEN" ]; then
-    msg "Ohne Pairing-Token kann das Tap nicht authentifiziert werden – Abbruch."
-    exit 1
+  • 8001/tcp — Master-API (Auto-Pair-Anfrage, Cert-Bezug)
+  • 8443/tcp —  Live-Alert-Stream + Reverse-Channel)
+
+Beispiele: 192.168.1.230  oder  master.lan" \
+      "${MASTER_HOST:-192.168.1.230}") || MASTER_HOST=""
+    if [ -z "$MASTER_HOST" ]; then
+      msg "Master-Host nicht angegeben — Setup läuft ohne Pairing weiter.\nManuell nachholen mit:\n  sudo cyjan-tap auto-pair <host>"
+      SKIP_PAIRING=1
+    else
+      # Hart fixierte Schemata + Ports: master-uplink ist immer mTLS auf 8443,
+      # master-api defaultmäßig http auf 8001. Custom-Setups (TLS-Reverse-Proxy
+      # vor der API) muss der User nach Setup in .env korrigieren.
+      MASTER_API_URL="http://${MASTER_HOST}:8001"
+      MASTER_WSS_URL="wss://${MASTER_HOST}:8443/uplink"
+      log "Tap-Modus: Master-Host=$MASTER_HOST → API=$MASTER_API_URL, WSS=$MASTER_WSS_URL"
+    fi
   fi
-  log "Tap-Modus: Master-API=$MASTER_API_URL, WSS=$MASTER_WSS_URL, Token (verkürzt)=${PAIR_TOKEN:0:6}…"
-fi   # SKIP_PAIRING == 0
 fi   # ROLE == tap
 
 # ── Schritt 5b: Systembenutzer-Passwörter (ids, root) ─────────────────────────
@@ -927,35 +906,50 @@ if ! docker compose "${COMPOSE_BASE_ARGS[@]}" "${PROFILE_FLAGS[@]}" up -d >>"$LO
 fi
 clear   # nach dem letzten gauge ebenfalls Terminal aufräumen
 
-# ── Schritt 11c: Pairing (nur Tap-Modus, nur wenn nicht übersprungen) ────────
+# ── Schritt 11c: Auto-Pairing (nur Tap-Modus, nur wenn nicht übersprungen) ───
 # Stack ist hochgefahren, tap-uplink ist im Idle weil noch kein Cert da ist,
 # tap-api lauscht auf 127.0.0.1:8001. Wir warten kurz bis der HTTP-Endpoint
-# antwortet und schicken dann die Pair-Anfrage an den Master. Bei Erfolg
-# restarten wir tap-uplink, damit das frisch geschriebene Cert verwendet wird.
+# antwortet (Gauge statt schwarzem Bildschirm) und schicken dann die
+# Auto-Pair-Anfrage. Bei Fehlschlag wird der Wizard NICHT abgebrochen —
+# Setup läuft sauber zu Ende, User pairt später manuell via cyjan-tap CLI.
 if [ "$ROLE" = "tap" ] && [ "${SKIP_PAIRING:-0}" = "0" ]; then
-  log "Warte auf tap-api unter http://127.0.0.1:${API_PORT:-8001}/api/state ..."
-  for i in $(seq 1 30); do
-    if curl -fsS --max-time 2 "http://127.0.0.1:${API_PORT:-8001}/api/state" >/dev/null 2>&1; then
-      log "tap-api ready nach ${i}s."
-      break
-    fi
-    sleep 1
-  done
+  # Gauge: 30 s Warte-Schleife auf tap-api. Vorher gab's hier einen
+  # schwarzen Bildschirm mit blinkendem Cursor — irritierend.
+  (
+    for i in $(seq 1 30); do
+      pct=$(( i * 100 / 30 ))
+      echo "$pct"
+      if curl -fsS --max-time 2 "http://127.0.0.1:${API_PORT:-8001}/api/state" >/dev/null 2>&1; then
+        echo "100"; break
+      fi
+      sleep 1
+    done
+  ) | whiptail --title "$TITLE" --gauge "Warte auf tap-api …" 7 70 0
+  log "tap-api ready, starte Auto-Pair gegen $MASTER_API_URL ..."
 
-  PAIR_BODY=$(printf '{"master_url":"%s","token":"%s","verify_ssl":false}' \
-    "${MASTER_API_URL//\"/}" "${PAIR_TOKEN//\"/}")
-  PAIR_HTTP=$(curl -fsS -o /tmp/pair-response.json -w '%{http_code}' \
+  # Auto-Pair statt Token-Pair: tap-api macht Key+CSR, postet
+  # /api/taps/announce am Master. Master legt Pending-Eintrag an, Admin
+  # approved im Master-UI. Tap pollt den Status — das übernimmt der
+  # tap-uplink im Hintergrund nach dem Restart.
+  TAP_NAME="${HOSTNAME:-cyjan-tap}"
+  PAIR_BODY=$(printf '{"master_url":"%s","name":"%s","verify_ssl":false}' \
+    "${MASTER_API_URL//\"/}" "${TAP_NAME//\"/}")
+  PAIR_HTTP=$(curl -sS -o /tmp/pair-response.json -w '%{http_code}' \
     -H 'Content-Type: application/json' -X POST \
-    -d "$PAIR_BODY" "http://127.0.0.1:${API_PORT:-8001}/api/pair" 2>>"$LOG" || echo "000")
-  if [ "$PAIR_HTTP" = "200" ]; then
-    log "Pairing erfolgreich (HTTP $PAIR_HTTP)."
-    docker compose "${COMPOSE_BASE_ARGS[@]}" restart tap-uplink >>"$LOG" 2>&1 || true
-    msg "✓ Pairing mit Master erfolgreich.\n\nDer tap-uplink-Container wurde neu gestartet und sollte sich gleich beim Master melden.\nStatus prüfen: cyjan-tap status"
-  else
-    PAIR_ERR=$(head -c 200 /tmp/pair-response.json 2>/dev/null || echo "")
-    log "Pairing fehlgeschlagen: HTTP $PAIR_HTTP – $PAIR_ERR"
-    msg "Pairing-Versuch fehlgeschlagen (HTTP $PAIR_HTTP).\n\nMaster-Response (Auszug):\n${PAIR_ERR:-(leer)}\n\nNach Korrektur erneut: cyjan-tap pair $MASTER_API_URL <token>"
-  fi
+    -d "$PAIR_BODY" "http://127.0.0.1:${API_PORT:-8001}/api/auto-pair-start" 2>>"$LOG" || echo "000")
+  PAIR_BODY_RESP=$(head -c 300 /tmp/pair-response.json 2>/dev/null || echo "")
+  case "$PAIR_HTTP" in
+    200|201)
+      PAIR_RESULT="auto-pending"
+      log "Auto-Pair-Anfrage erfolgreich gesendet (HTTP $PAIR_HTTP) — wartet auf Master-Approval."
+      docker compose "${COMPOSE_BASE_ARGS[@]}" restart tap-uplink >>"$LOG" 2>&1 || true
+      ;;
+    *)
+      PAIR_RESULT="failed"
+      PAIR_DETAIL="HTTP $PAIR_HTTP — ${PAIR_BODY_RESP:-(keine Antwort)}"
+      log "Auto-Pair fehlgeschlagen: $PAIR_DETAIL"
+      ;;
+  esac
 fi
 
 # ── Schritt 12: First-Boot-Flag + Mode/Profile persistieren ──────────────────
@@ -993,19 +987,39 @@ Zum Update (ids-update):
 
 Das System ist jetzt einsatzbereit." $H $W
 else
+# Pairing-Status-Block für die finale Anzeige zusammensetzen.
+case "$PAIR_RESULT" in
+  auto-pending)
+    PAIRING_STATUS_LINES="  Pairing:        Auto-Pair-Anfrage gesendet
+                  → Master-Admin muss im UI approven
+                  → Settings → Remote Taps → 'Pending Taps'
+                  → tap-uplink verbindet sich automatisch nach Approval"
+    ;;
+  failed)
+    PAIRING_STATUS_LINES="  Pairing:        ⚠ Auto-Pair fehlgeschlagen
+                  Detail: ${PAIR_DETAIL}
+                  → Master erreichbar? Firewall 8001/tcp?
+                  → Manuell wiederholen (siehe CLI unten)"
+    ;;
+  *)
+    PAIRING_STATUS_LINES="  Pairing:        unverändert (bestehendes Cert beibehalten)"
+    ;;
+esac
+
 whiptail --title "$TITLE" --msgbox \
 "✓ Cyjan IDS Remote-Tap wurde eingerichtet!
 
-  Tap-Status:    http://127.0.0.1:8001/   (lokal)
-  Master-API:    ${MASTER_API_URL}
-  Master-WSS:    ${MASTER_WSS_URL}
-  Mirror-NIC:    ${MIRROR_IFACE:-?}
+  Tap-Status:     http://127.0.0.1:8001/   (lokal)
+  Master-Host:    ${MASTER_HOST:-(unverändert)}
+  Mirror-NIC:     ${MIRROR_IFACE:-?}
+${PAIRING_STATUS_LINES}
 
 CLI:
-  cyjan-tap status                Aktuellen Verbindungs-Status sehen
-  cyjan-tap connection follow     Live-Tail der Master-Verbindung
-  cyjan-tap test                  Test-Alert an Master schicken
-  cyjan-tap pair <url> <token>    Pairing erneut ausführen
+  cyjan-tap status                  Aktuellen Verbindungs-Status sehen
+  cyjan-tap connection follow       Live-Tail der Master-Verbindung
+  cyjan-tap test                    Test-Alert an Master schicken
+  cyjan-tap auto-pair <host>        Auto-Pair-Anfrage erneut senden
+  cyjan-tap pair <host> <token>     Klassisches Token-Pairing (Fallback)
 
 Konfigurationsdatei: $ENV_FILE
 Logs: docker compose -f $IDS_DIR/docker-compose.tap.yml logs -f" $H $W
