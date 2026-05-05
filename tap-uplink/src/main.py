@@ -57,6 +57,22 @@ METRICS_TOPIC = os.environ.get("METRICS_TOPIC", "rule-metrics")
 GROUP_ID      = os.environ.get("KAFKA_GROUP_ID", "tap-uplink")
 
 MASTER_URL    = os.environ.get("MASTER_URL", "wss://master.example.com:8443/uplink")
+# Plain ws:// gegen den master-uplink (mTLS-only Endpoint) führt zu einem
+# ValueError der websockets-Lib ("connect() received a ssl argument for a
+# ws:// URI"). Statt User mit kryptischem Stack zu nerven: automatisch zu
+# wss:// upgraden + im Log warnen. Echtes plain-WS-Setup ist im Cyjan-
+# Master-Stack nicht vorgesehen — der Endpoint hat per Compose immer TLS.
+if MASTER_URL.startswith("ws://"):
+    _orig = MASTER_URL
+    MASTER_URL = "wss://" + MASTER_URL[len("ws://"):]
+    # `log` ist hier noch nicht initialisiert (wird unten konfiguriert).
+    # Statt Import-Order zu verbiegen, nutzen wir print() — landet im
+    # Container-Stdout und damit im docker-compose-Log.
+    print(
+        f"[WARN] tap-uplink: MASTER_URL={_orig} → upgrade auf {MASTER_URL} "
+        f"(master-uplink ist mTLS-only auf 8443, plain ws:// funktioniert nicht).",
+        flush=True,
+    )
 TAP_CERT      = os.environ.get("TAP_CERT", "/etc/cyjan/tap.pem")
 TAP_KEY       = os.environ.get("TAP_KEY",  "/etc/cyjan/tap.key")
 MASTER_CA     = os.environ.get("MASTER_CA", "/etc/cyjan/master-ca.pem")

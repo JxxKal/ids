@@ -308,7 +308,43 @@ cmd_config() {
   require_curl
   case "${1:-get}" in
     get) api_get /api/config | maybe_jq ;;
-    *)   echo "Usage: cyjan-tap config get" ; exit 2 ;;
+    set)
+      shift
+      local key="${1:-}" val="${2:-}"
+      if [ -z "$key" ] || [ -z "$val" ]; then
+        echo "Usage: cyjan-tap config set <key> <value>"
+        echo "Aktuell unterstützte Keys: master_url"
+        exit 2
+      fi
+      case "$key" in
+        master_url|MASTER_URL)
+          # Kein REST-Endpoint dafür auf der tap-api — Single-User-Maschine,
+          # wir editieren direkt /opt/ids/.env und restarten den Container.
+          # ws:// → wss:// automatisch upgraden, master-uplink ist mTLS-only.
+          case "$val" in
+            ws://*) val="wss://${val#ws://}"
+                    echo "Info: ws:// → wss:// upgraded (master-uplink ist mTLS-only)" ;;
+            wss://*) ;;
+            *) echo "FEHLER: master_url muss mit wss:// beginnen, war '$val'"; exit 2 ;;
+          esac
+          local env_file="${CYJAN_DIR:-/opt/ids}/.env"
+          if [ ! -w "$env_file" ] && [ "$EUID" -ne 0 ]; then
+            echo "FEHLER: $env_file nicht schreibbar — als root oder via sudo aufrufen."; exit 2
+          fi
+          if grep -qE '^MASTER_URL=' "$env_file"; then
+            sed -i "s|^MASTER_URL=.*|MASTER_URL=$val|" "$env_file"
+          else
+            echo "MASTER_URL=$val" >> "$env_file"
+          fi
+          echo "MASTER_URL in $env_file gesetzt: $val"
+          echo "Restart tap-uplink, damit der neue Wert wirksam wird:"
+          echo "  sudo docker compose -f ${CYJAN_DIR:-/opt/ids}/docker-compose.tap.yml restart tap-uplink"
+          ;;
+        *)
+          echo "FEHLER: Unbekannter Key '$key'. Aktuell: master_url"; exit 2 ;;
+      esac
+      ;;
+    *) echo "Usage: cyjan-tap config get | cyjan-tap config set <key> <value>" ; exit 2 ;;
   esac
 }
 
@@ -325,6 +361,7 @@ cyjan-tap – Remote-Tap-CLI
   cyjan-tap reconnect                    tap-uplink-Reconnect erzwingen
   cyjan-tap logs follow [service]        Container-Logs (Default alle)
   cyjan-tap config get                   aktuelle Konfiguration
+  cyjan-tap config set master_url <url>  Master-WSS-URL ändern (wss:// erzwungen)
 
 ENV:
   TAP_API_URL    Default http://127.0.0.1:8001

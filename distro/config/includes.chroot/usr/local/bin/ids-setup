@@ -538,23 +538,32 @@ if [ "$SKIP_PAIRING" = "0" ]; then
   fi
 
   # Master-WSS-URL für den Uplink ableiten: gleiche Hostkomponente, Port 8443.
-  # Wir respektieren das Schema (https→wss, http→ws) auch wenn ws im Prod-
-  # Setup eigentlich nicht vorkommen sollte – Master-Uplink ist immer mTLS,
-  # also de facto wss://. Wer ein anderes Setup hat (z.B. WSS hinter Reverse-
-  # Proxy) korrigiert das Feld manuell.
+  # Master-Uplink ist IMMER mTLS — der Compose-Service hat keinen plain-WS-
+  # Modus. Daher hart wss:// als Default, unabhängig vom Schema der API-URL.
+  # (Vorher hat der Wizard http:// → ws:// gemappt, was den Tap gegen einen
+  # mTLS-Endpoint mit ws:// verbinden ließ → ValueError in der websockets-
+  # Lib.)
   case "$MASTER_API_URL" in
-    https://*) _proto="wss" ; _hostpart="${MASTER_API_URL#https://}" ;;
-    http://*)  _proto="ws"  ; _hostpart="${MASTER_API_URL#http://}"  ;;
-    *)         _proto="wss" ; _hostpart="$MASTER_API_URL" ;;
+    https://*) _hostpart="${MASTER_API_URL#https://}" ;;
+    http://*)  _hostpart="${MASTER_API_URL#http://}"  ;;
+    *)         _hostpart="$MASTER_API_URL" ;;
   esac
   _hostonly="${_hostpart%%/*}"; _hostonly="${_hostonly%%:*}"
   MASTER_WSS_URL=$(input "Master-WSS-URL" \
     "WSS-URL für den Tap-Uplink (mTLS-Endpoint des Masters auf Port 8443):" \
-    "${_proto}://${_hostonly}:8443/uplink") || MASTER_WSS_URL=""
+    "wss://${_hostonly}:8443/uplink") || MASTER_WSS_URL=""
   if [ -z "$MASTER_WSS_URL" ]; then
     msg "Ohne Master-WSS-URL kann der Uplink nicht aufgebaut werden – Abbruch."
     exit 1
   fi
+  # Schutznetz falls User händisch ws:// getippt hat: master-uplink kennt
+  # keinen plain-WS-Modus, automatisch korrigieren + den User informieren.
+  case "$MASTER_WSS_URL" in
+    ws://*)
+      MASTER_WSS_URL="wss://${MASTER_WSS_URL#ws://}"
+      msg "Hinweis: master-uplink ist mTLS-only — habe ws:// auf wss:// korrigiert.\nNeue URL: $MASTER_WSS_URL"
+      ;;
+  esac
 
   # Token-Eingabe bewusst per inputbox (sichtbar) – nicht passwordbox. Der
   # Token ist im Master-Frontend ohnehin als Klartext sichtbar (genau einmal),
