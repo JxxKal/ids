@@ -568,12 +568,42 @@ Beispiele: 192.168.1.230  oder  master.lan" \
       msg "Master-Host nicht angegeben — Setup läuft ohne Pairing weiter.\nManuell nachholen mit:\n  sudo cyjan-tap auto-pair <host>"
       SKIP_PAIRING=1
     else
+      # Tap-Name: Default ist der lokale $HOSTNAME, was bei Frischinstall
+      # auf jeder Tap-Maschine "cyjan-ids" ist (Live-ISO-Default). Wenn der
+      # User nicht ändert, würde im Master-UI jedes weitere Tap als
+      # "cyjan-ids" auflaufen und sich gegenseitig überschreiben (UPSERT
+      # auf hardware_id+fingerprint deduppt zwar, aber der User hat keine
+      # menschenlesbare Trennung). Daher Pflicht-Eingabe mit sinnvollem
+      # Default aus dem Hostname (falls der vom User geändert wurde) bzw.
+      # Fallback "tap-<kurzer-mac-suffix>" wenn nur cyjan-ids steht.
+      _DEFAULT_TAP_NAME="${HOSTNAME:-cyjan-tap}"
+      if [ "$_DEFAULT_TAP_NAME" = "cyjan-ids" ] || [ "$_DEFAULT_TAP_NAME" = "cyjan-tap" ] || [ "$_DEFAULT_TAP_NAME" = "localhost" ]; then
+        # Suffix aus den letzten 4 hex-Zeichen der ersten MAC-Adresse holen
+        # — eindeutig pro Maschine, kurz genug, lesbar.
+        _MAC_SUFFIX=$(ip link 2>/dev/null | awk '/link\/ether/ {gsub(":",""); print substr($2, length($2)-3); exit}')
+        if [ -n "$_MAC_SUFFIX" ]; then
+          _DEFAULT_TAP_NAME="tap-${_MAC_SUFFIX}"
+        else
+          _DEFAULT_TAP_NAME="tap-$(hexdump -n2 -e '/2 "%04x"' /dev/urandom 2>/dev/null || echo unknown)"
+        fi
+      fi
+      TAP_NAME=$(input "Tap-Name" \
+"Name dieses Taps wie er im Master-UI erscheint.
+Pro Standort/Rack typischerweise sprechend wählen, damit du Taps
+auseinanderhalten kannst.
+
+Beispiele: site-a-rack-3  oder  fra-firewall-mirror  oder  ${_DEFAULT_TAP_NAME}" \
+        "$_DEFAULT_TAP_NAME") || TAP_NAME=""
+      if [ -z "$TAP_NAME" ]; then
+        TAP_NAME="$_DEFAULT_TAP_NAME"
+        log "Tap-Name leer eingegeben → Fallback auf $TAP_NAME"
+      fi
       # Hart fixierte Schemata + Ports: master-uplink ist immer mTLS auf 8443,
       # master-api defaultmäßig http auf 8001. Custom-Setups (TLS-Reverse-Proxy
       # vor der API) muss der User nach Setup in .env korrigieren.
       MASTER_API_URL="http://${MASTER_HOST}:8001"
       MASTER_WSS_URL="wss://${MASTER_HOST}:8443/uplink"
-      log "Tap-Modus: Master-Host=$MASTER_HOST → API=$MASTER_API_URL, WSS=$MASTER_WSS_URL"
+      log "Tap-Modus: name=$TAP_NAME, Master-Host=$MASTER_HOST → API=$MASTER_API_URL, WSS=$MASTER_WSS_URL"
     fi
   fi
 fi   # ROLE == tap
@@ -686,6 +716,7 @@ else
   Rolle:            Remote-Tap
   Management-IP:    ${MGMT_IP}
   Mirror-Interface: ${MIRROR_IFACE:-nicht konfiguriert}
+  Tap-Name:         ${TAP_NAME:-(unverändert aus bestehender Konfig)}
   Master-Host:      ${MASTER_HOST:-(unverändert aus bestehender Konfig)}
   Master-WSS-URL:   ${MASTER_WSS_URL}
   Pairing:          $([ "${SKIP_PAIRING:-0}" = "1" ] && echo "(unverändert – bestehendes Cert wird weiter benutzt)" || echo "(Auto-Pair — Master-Admin approved im UI)")
@@ -985,9 +1016,14 @@ if [ "$ROLE" = "tap" ] && [ "${SKIP_PAIRING:-0}" = "0" ]; then
 
   # Auto-Pair statt Token-Pair: tap-api macht Key+CSR, postet
   # /api/taps/announce am Master. Master legt Pending-Eintrag an, Admin
-  # approved im Master-UI. Tap pollt den Status — das übernimmt der
-  # tap-uplink im Hintergrund nach dem Restart.
-  TAP_NAME="${HOSTNAME:-cyjan-tap}"
+  # approved im Master-UI. Background-Poller in tap-api übernimmt das
+  # Status-Polling und installiert das Cert wenn approved — tap-uplink
+  # picked es via 5-s-retry-tick auf.
+  #
+  # TAP_NAME wurde im Step-5-Block aus User-Input gesetzt; Fallback auf
+  # Hostname falls SKIP_PAIRING-Pfad das Feld nicht erreicht hat (sollte
+  # eigentlich nicht passieren, aber defensiv).
+  TAP_NAME="${TAP_NAME:-${HOSTNAME:-cyjan-tap}}"
   PAIR_BODY=$(printf '{"master_url":"%s","name":"%s","verify_ssl":false}' \
     "${MASTER_API_URL//\"/}" "${TAP_NAME//\"/}")
   PAIR_HTTP=$(curl -sS -o /tmp/pair-response.json -w '%{http_code}' \
@@ -1066,6 +1102,7 @@ whiptail --title "$TITLE" --msgbox \
 "✓ Cyjan IDS Remote-Tap wurde eingerichtet!
 
   Tap-Status:     http://127.0.0.1:8001/   (lokal)
+  Tap-Name:       ${TAP_NAME:-(unverändert)}
   Master-Host:    ${MASTER_HOST:-(unverändert)}
   Mirror-NIC:     ${MIRROR_IFACE:-?}
 ${PAIRING_STATUS_LINES}

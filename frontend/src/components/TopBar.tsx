@@ -71,6 +71,11 @@ export function TopBar({ title, live, kpis = [], taps = [], username, onLogout }
   const { t } = useTranslation();
   const { helpMode, toggle: toggleHelp } = useHelpMode();
   const nowMs = Date.now();
+  // Revokte Taps gehören aus dem Topbar raus — der Header zeigt den
+  // operativen Live-Stand, revoked = end-of-life. Audit-Spur bleibt in
+  // Settings → Remote Taps voll erhalten (dort sind auch revoked-Einträge
+  // weiter sichtbar mit Datum/Begründung).
+  const activeTaps = taps.filter(tap => tap.status !== 'revoked');
   return (
     <div className="cyjan-topbar">
       <div className="cyjan-topbar-left">
@@ -81,10 +86,10 @@ export function TopBar({ title, live, kpis = [], taps = [], username, onLogout }
             {live ? t('topbar.live') : t('topbar.offline')}
           </span>
         </HelpTip>
-        {taps.length > 0 && (
+        {activeTaps.length > 0 && (
           <HelpTip helpKey="topbarTaps">
             <div className="flex items-center gap-1.5 ml-2">
-              {taps.map(tap => {
+              {activeTaps.map(tap => {
                 const state = tapState(tap, nowMs);
                 const age   = fmtAge(tap.last_seen, nowMs);
                 const tip   = state === 'never'

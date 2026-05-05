@@ -16,6 +16,7 @@ größeres Problem als das Fehlen von Login-Boxen.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -534,11 +535,19 @@ async def api_auto_pair_start(body: AutoPairStartBody) -> JSONResponse:
     })
 
 
-@app.get("/api/auto-pair-status")
-async def api_auto_pair_status() -> JSONResponse:
-    """Pollt Master und installiert das Cert wenn approved."""
+async def _check_auto_pair_status() -> dict:
+    """Single-Shot: pollt Master einmal und installiert Cert bei approval.
+
+    Wird sowohl vom GET-Endpoint /api/auto-pair-status als auch vom
+    Background-Poller (Lifecycle-Hook unten) aufgerufen — Logic ist
+    identisch, Result wird einmalig zentral berechnet.
+
+    Return-Form (raised exceptions kommen aus dem httpx-Layer):
+      {"status": "no-pending"|"pending"|"approved"|"rejected"|"unknown",
+       "message": "...", "tap_id": "...", ...}
+    """
     if not _AUTO_PAIR_STATE.exists():
-        return JSONResponse({"status": "no-pending", "message": "Kein laufendes Auto-Pair."})
+        return {"status": "no-pending", "message": "Kein laufendes Auto-Pair."}
     try:
         state = json.loads(_AUTO_PAIR_STATE.read_text())
     except Exception as exc:
@@ -571,19 +580,67 @@ async def api_auto_pair_status() -> JSONResponse:
         # State-File aufräumen — fertig gepairt.
         _AUTO_PAIR_STATE.unlink(missing_ok=True)
         log.warning("Tap auto-pair APPROVED: tap_id=%s", data.get("tap_id"))
-        return JSONResponse({
+        return {
             "status":          "approved",
             "tap_id":          data.get("tap_id"),
             "cert_expires_at": data.get("expires_at"),
-            "next_step":       "tap-uplink-Container neu starten",
-        })
+            "next_step":       "tap-uplink picked up cert beim nächsten retry-tick (5s)",
+        }
 
     if status == "rejected":
         _AUTO_PAIR_STATE.unlink(missing_ok=True)
         log.warning("Tap auto-pair REJECTED")
-        return JSONResponse({"status": "rejected", "message": data.get("message")})
+        return {"status": "rejected", "message": data.get("message")}
 
-    return JSONResponse({"status": status, "message": data.get("message")})
+    return {"status": status, "message": data.get("message")}
+
+
+@app.get("/api/auto-pair-status")
+async def api_auto_pair_status() -> JSONResponse:
+    """Pollt Master und installiert das Cert wenn approved.
+
+    Identisch zum Background-Poller — manuelle CLI-Trigger bleibt aber
+    zusätzlich verfügbar (cyjan-tap auto-pair pollt diesen Endpoint)."""
+    return JSONResponse(await _check_auto_pair_status())
+
+
+async def _auto_pair_poller_loop() -> None:
+    """Background-Task: pollt periodisch /api/auto-pair-status, solange ein
+    State-File existiert UND noch kein Cert auf Disk ist.
+
+    Vorher hat der ids-setup-Wizard nur /api/auto-pair-start aufgerufen
+    (= Announce am Master) — die Folge-Phase 'pollen bis approved' fehlte
+    komplett, weshalb tap-uplink endlos im 'starting'-State hing.
+
+    Stoppt sich selbst nicht — läuft solange tap-api läuft, wacht regelmäßig
+    auf, no-ops bei nichts zu tun. Default-Cadence 30s; bei reachability-
+    Errors wird einfach beim nächsten Tick erneut probiert."""
+    cert_path = Path("/etc/cyjan/tap.pem")
+    interval = float(os.environ.get("AUTO_PAIR_POLL_INTERVAL_S", "30"))
+    log.info("Auto-Pair-Poller gestartet (interval=%.0fs)", interval)
+    while True:
+        try:
+            if _AUTO_PAIR_STATE.exists() and not cert_path.exists():
+                result = await _check_auto_pair_status()
+                status = result.get("status")
+                if status == "approved":
+                    log.info("Auto-Pair-Poller: Cert installiert, tap-uplink picked it up")
+                elif status == "rejected":
+                    log.warning("Auto-Pair-Poller: Master hat REJECTED — State gelöscht")
+                # bei 'pending' oder 'unknown' einfach beim nächsten Tick erneut
+        except HTTPException as exc:
+            # 502 (Master nicht erreichbar) ist Normalbetrieb für Air-Gap-
+            # Phasen — nur debug loggen, kein WARNING-Spam.
+            log.debug("Auto-Pair-Poll-Fehler: %s", exc.detail)
+        except Exception as exc:                                 # noqa: BLE001
+            log.warning("Auto-Pair-Poll-Tick fehlgeschlagen: %s", exc)
+        await asyncio.sleep(interval)
+
+
+@app.on_event("startup")
+async def _startup_hooks() -> None:
+    """Hängt Background-Tasks auf — läuft genau einmal beim ASGI-Boot."""
+    asyncio.create_task(_auto_pair_poller_loop())
 
 
 @app.post("/api/test-alert")
