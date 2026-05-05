@@ -3613,6 +3613,8 @@ function SystemUpdate() {
   const [file,        setFile]        = useState<File | null>(null);
   const [pullImages,  setPullImages]  = useState(false);
   const [uploading,   setUploading]   = useState(false);
+  const [uploadPct,   setUploadPct]   = useState(0);
+  const [uploadOk,    setUploadOk]    = useState(false);
   const [error,       setError]       = useState<string | null>(null);
   const [status,      setStatus]      = useState<SystemUpdateStatus>({
     phase: 'idle', log: [], progress: 0, started_at: null, finished_at: null,
@@ -3659,10 +3661,16 @@ function SystemUpdate() {
     if (!file) return;
     setError(null);
     setUploading(true);
+    setUploadPct(0);
+    setUploadOk(false);
     setRestarting(false);
     try {
-      await startSystemUpdate(file, pullImages, force);
+      await startSystemUpdate(file, pullImages, force, pct => setUploadPct(pct));
+      // Server hat 200 zurückgegeben + Validierung war erfolgreich →
+      // grüner Flash für ~2.5s, danach übernimmt der phase-Polling-Loop.
+      setUploadOk(true);
       setStatus(s => ({ ...s, phase: 'extracting', log: [], progress: 0, started_at: new Date().toISOString() }));
+      setTimeout(() => setUploadOk(false), 2500);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -3741,6 +3749,33 @@ function SystemUpdate() {
           {uploading ? t('settings.update.uploading') : t('settings.update.startUpdate')}
         </button>
       </div>
+
+      {/* Upload-Progress-Bar — sichtbar während die ZIP über die Wire geht.
+          Bei großen Updates (1+ GB) entscheidet das ob der User zwei Minuten
+          rätselt ob das Frontend hängt. */}
+      {uploading && (
+        <div className="mt-3 space-y-1">
+          <div className="flex items-center justify-between text-xs text-slate-400">
+            <span>{t('settings.update.uploadProgress', { defaultValue: 'Upload läuft' })}</span>
+            <span className="font-mono tabular-nums">{uploadPct}%</span>
+          </div>
+          <div className="h-2 bg-slate-800 rounded overflow-hidden">
+            <div
+              className="h-full bg-cyan-600 transition-[width] duration-150 ease-linear"
+              style={{ width: `${uploadPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Upload-OK-Toast — kurzer grüner Flash zwischen "Upload fertig" und
+          "Server beginnt mit Extraction". */}
+      {uploadOk && (
+        <div className="mt-3 flex items-center gap-2 px-3 py-1.5 rounded border border-green-700/50 bg-green-950/30 text-green-300 text-xs w-fit">
+          <span>✓</span>
+          <span>{t('settings.update.uploadOk', { defaultValue: 'Upload abgeschlossen — Server validiert + entpackt jetzt …' })}</span>
+        </div>
+      )}
 
       <label className="mt-3 flex items-center gap-2 cursor-pointer w-fit">
         <input

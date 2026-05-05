@@ -1064,26 +1064,49 @@ export async function startSystemUpdate(
   file: File,
   pullImages: boolean,
   force: boolean = false,
+  onProgress?: (pct: number) => void,
 ): Promise<SystemUpdateStartResponse> {
+  // XHR statt fetch() weil fetch() keine Upload-Progress-Events anbietet.
+  // Wir wollen aber die Progress-Bar im UI füllen können während der
+  // multipart-Body über die Wire geht — bei einem 1+ GB Update-ZIP über ein
+  // entferntes Netz dauert das gerne mal 30+ Sekunden.
   const token = getToken();
   const fd = new FormData();
   fd.append('file', file);
   fd.append('pull_images', String(pullImages));
   if (force) fd.append('force', 'true');
-  const res = await fetch(`${BASE}/api/system/update`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: fd,
+  return new Promise<SystemUpdateStartResponse>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${BASE}/api/system/update`);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    if (onProgress) {
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+    }
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        clearToken();
+        window.dispatchEvent(new Event('ids:unauthorized'));
+        reject(new Error('401 Unauthorized'));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch (e) {
+          reject(new Error(`Antwort nicht parsebar: ${e instanceof Error ? e.message : String(e)}`));
+        }
+      } else {
+        // Body als Error-Message durchreichen — UI macht Force-Retry-Heuristik
+        // anhand 400 + 'Downgrade'/'kein Update notwendig' im Text.
+        reject(new Error(`${xhr.status}: ${xhr.responseText || xhr.statusText}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Netzwerkfehler beim Upload'));
+    xhr.onabort = () => reject(new Error('Upload abgebrochen'));
+    xhr.send(fd);
   });
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    // 400 mit 'Downgrade abgelehnt' / 'kein Update notwendig' → der Caller
-    // kann das parsen und einen Force-Retry-Button anbieten. Wir reichen den
-    // Body als Error-Message durch, damit der UI-Layer die Heuristik machen
-    // kann ohne einen separaten Status-Code-Pfad.
-    throw new Error(`${res.status}: ${t}`);
-  }
-  return res.json();
 }
 
 export async function fetchSystemUpdateStatus(): Promise<SystemUpdateStatus> {

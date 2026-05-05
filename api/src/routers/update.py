@@ -312,6 +312,68 @@ def _peek_zip_version(zip_bytes: bytes) -> str | None:
     return None
 
 
+def _validate_bundle(zip_bytes: bytes) -> None:
+    """Prüft die ZIP-Struktur, bevor das Update überhaupt scheduled wird.
+
+    Häufiger User-Fehler: aus dem GitHub-Actions-„Artifacts"-Tab statt aus den
+    Release-Assets heruntergeladen — das produziert einen Wrapper-ZIP mit
+    den eigentlichen Update-ZIPs *innen drin* (verschachtelt). Der bisherige
+    Code hat das nicht erkannt und ist still in den Build-aus-Quellcode-Pfad
+    gerutscht.
+
+    Erwartete Struktur:
+      cyjan-ids-update-<tag>/
+        images.tar.{zst,gz}    (oder images.tar)
+        docker-compose.yml
+        VERSION
+        infra/...
+
+    Bei Fehler → HTTPException(400) mit klarer User-Message.
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(400, f"Datei ist kein gültiges ZIP: {exc}")
+    members = zf.namelist()
+    if not members:
+        raise HTTPException(400, "ZIP ist leer")
+
+    # Wrapped-ZIP-Detection: wenn der Top-Level Inhalt selbst eine .zip-Datei
+    # ist, hat der User wahrscheinlich aus „GitHub Actions Artifacts" geladen
+    # (das verpackt Release-Assets in einem zusätzlichen Wrapper).
+    nested_zips = [m for m in members if m.endswith(".zip") and "/" not in m.rstrip("/")]
+    if nested_zips:
+        raise HTTPException(
+            400,
+            "Diese ZIP enthält weitere ZIP-Dateien — vermutlich wurde sie aus "
+            "dem GitHub-Actions-Artifacts-Tab heruntergeladen. Bitte stattdessen "
+            "den Release-Asset von github.com/JxxKal/ids/releases verwenden "
+            f"(z.B. cyjan-ids-update-latest.zip). Gefunden: {', '.join(nested_zips[:3])}",
+        )
+
+    # Erwartete Top-Level-Marker prüfen.
+    prefix = members[0].split("/")[0] + "/"
+    has_compose = any(m == f"{prefix}docker-compose.yml" for m in members)
+    has_bundle = any(
+        m == f"{prefix}{img}" for m in members for img in _IMAGE_FILES
+    )
+    if not has_compose:
+        raise HTTPException(
+            400,
+            "ZIP enthält keine docker-compose.yml auf Top-Level — kein gültiges "
+            "Cyjan-Update-Bundle. Bitte das offizielle "
+            "cyjan-ids-update-<tag>.zip aus den GitHub-Releases verwenden.",
+        )
+    if not has_bundle:
+        raise HTTPException(
+            400,
+            "ZIP enthält kein Image-Bundle (images.tar.zst/.gz/.tar). Ohne "
+            "vorgebaute Images würde der Update-Pfad in den Build-aus-Quellcode-"
+            "Modus fallen, was auf Air-Gap-Hosts ohne Internet sicher fehlschlägt. "
+            "Bitte das offizielle Release-ZIP verwenden.",
+        )
+
+
 def _parse_semver(s: str) -> tuple[int, int, int] | None:
     """v1.5.1 → (1, 5, 1). Alles was nicht passt → None.
     Ignoriert nachgehängte Suffixe wie '-iso', '-rc1' (alphabetischer
@@ -345,6 +407,10 @@ async def start_update(
     if not (file.filename or "").endswith(".zip"):
         raise HTTPException(400, "Nur ZIP-Dateien erlaubt")
     zip_bytes = await file.read()
+
+    # Vor allem anderen: Struktur prüfen. Wirft 400 mit spezifischer Message
+    # wenn z.B. wrapped GitHub-Actions-Artifacts geladen wurden.
+    _validate_bundle(zip_bytes)
 
     incoming = _peek_zip_version(zip_bytes)
     current = _read_version()
