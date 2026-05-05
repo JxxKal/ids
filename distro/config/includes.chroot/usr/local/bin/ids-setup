@@ -686,15 +686,20 @@ else
   Rolle:            Remote-Tap
   Management-IP:    ${MGMT_IP}
   Mirror-Interface: ${MIRROR_IFACE:-nicht konfiguriert}
-  Master-API-URL:   ${MASTER_API_URL:-(unverändert aus bestehender Konfig)}
+  Master-Host:      ${MASTER_HOST:-(unverändert aus bestehender Konfig)}
   Master-WSS-URL:   ${MASTER_WSS_URL}
-  Pairing:          $([ "${SKIP_PAIRING:-0}" = "1" ] && echo "(unverändert – Cert wird nicht neu erzeugt)" || echo "(Token gesetzt, ${#PAIR_TOKEN} Zeichen)")
+  Pairing:          $([ "${SKIP_PAIRING:-0}" = "1" ] && echo "(unverändert – bestehendes Cert wird weiter benutzt)" || echo "(Auto-Pair — Master-Admin approved im UI)")
   HTTP-Proxy:       ${PROXY_HTTP:-keiner}
 
-Nach dem Stack-Start versucht der Wizard das Pairing automatisch
-(es sei denn, du hast oben 'bestehendes Pairing behalten' gewählt).
-Schlägt es fehl, kann es manuell mit 'cyjan-tap pair <url> <token>'
-nachgeholt werden.
+Nach dem Stack-Start sendet der Wizard automatisch eine Auto-Pair-Anfrage
+an den Master (es sei denn, du hast oben 'bestehendes Pairing behalten'
+gewählt). Sobald der Master-Admin im UI approved, fließen Alarme ohne
+weitere Eingabe.
+
+Schlägt das Auto-Pair fehl (Master nicht erreichbar / Firewall), läuft
+das Setup trotzdem zu Ende. Manuell nachholen mit:
+  sudo cyjan-tap auto-pair <host>
+  sudo cyjan-tap pair <host> <token>      (Fallback mit Token)
 
 Weiter mit OK – der Stack wird gestartet."
 fi
