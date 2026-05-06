@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from database import get_pool
+from deps import require_admin
 from models import NetworkCreate, NetworkResponse, NetworkUpdate
 from sig_sync import sync_known_networks_file
 
@@ -130,6 +131,7 @@ async def import_networks_csv(
 
     imported = 0
     skipped  = 0
+    skipped_ot_priority = 0   # eigene Klasse: existing ot vs. incoming it → ot bleibt
     errors:  list[str] = []
 
     # Header-Spaltenpositionen ermitteln (case-insensitive)
@@ -174,6 +176,21 @@ async def import_networks_csv(
             if color and not (color.startswith("#") and len(color) in (4, 7)):
                 color = None
 
+            # OT-Vorrang-Regel: existing kind=ot darf nicht durch ein
+            # incoming kind=it überschrieben werden. Andere Richtung
+            # (it → ot) ist explizit gewünscht (OT-Promotion).
+            try:
+                existing_kind = await conn.fetchval(
+                    "SELECT kind FROM known_networks WHERE cidr = $1::cidr",
+                    cidr,
+                )
+            except Exception as exc:
+                errors.append(f"Zeile {lineno} ({cidr}): {exc}")
+                continue
+            if existing_kind == "ot" and kind == "it":
+                skipped_ot_priority += 1
+                continue
+
             try:
                 # ON CONFLICT (cidr): kind wird nur überschrieben, wenn die CSV-Zelle
                 # explizit gesetzt war. Bei leerer kind-Spalte erbt der Eintrag den
@@ -198,7 +215,49 @@ async def import_networks_csv(
 
     if imported:
         await sync_known_networks_file(pool)
-    return {"imported": imported, "skipped": skipped, "errors": errors[:20]}
+    return {
+        "imported":            imported,
+        "skipped":             skipped,
+        "skipped_ot_priority": skipped_ot_priority,
+        "errors":              errors[:20],
+    }
+
+
+@router.delete("", status_code=200)
+async def bulk_delete_networks(
+    kind: str | None = None,
+    pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
+) -> dict:
+    """Massenlöschen aller bekannten Netzwerke (admin-only).
+
+    Optional auf eine Zone einschränken via ?kind=ot oder ?kind=it.
+    Ohne Filter werden ALLE Netze gelöscht — typischer Recovery-Pfad nach
+    einem fehlgeschlagenen Import. Klein zu halten, weil ein Frontend-
+    Confirm-Dialog davor sitzt; Backend macht keine zusätzliche
+    Sicherheitsabfrage."""
+    if kind is not None:
+        kind = _normalize_kind(kind)
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM known_networks WHERE kind = $1",
+                kind,
+            )
+    else:
+        async with pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM known_networks")
+
+    # asyncpg liefert "DELETE <n>" als Status-String; n extrahieren.
+    deleted = 0
+    if isinstance(result, str) and result.startswith("DELETE "):
+        try:
+            deleted = int(result.split()[1])
+        except (ValueError, IndexError):
+            deleted = 0
+
+    if deleted:
+        await sync_known_networks_file(pool)
+    return {"deleted": deleted, "kind_filter": kind}
 
 
 @router.patch("/{network_id}", response_model=NetworkResponse)

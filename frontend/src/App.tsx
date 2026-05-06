@@ -429,7 +429,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
         )}
 
         {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5"><GettingStartedPage onNavigate={navigateTo} /></div>}
-        {tab === 'networks' && <div className="flex-1 overflow-auto p-5"><NetworksPage /></div>}
+        {tab === 'networks' && <div className="flex-1 overflow-auto p-5"><NetworksPage user={user} /></div>}
         {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5"><HostsPage    /></div>}
         {tab === 'tests'    && <div className="flex-1 overflow-auto p-5"><TestsPage    /></div>}
         {tab === 'reports'  && <div className="flex-1 overflow-auto p-5"><WeeklyReportPage /></div>}

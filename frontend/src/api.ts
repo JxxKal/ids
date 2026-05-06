@@ -201,6 +201,13 @@ export async function deleteNetwork(id: string): Promise<void> {
   await req(`/api/networks/${id}`, { method: 'DELETE' });
 }
 
+// Massenlöschen — admin-only. Ohne kind-Filter werden ALLE Netze gelöscht
+// (Recovery-Pfad nach fehlerhaftem Import). Frontend muss vorher confirmen.
+export async function bulkDeleteNetworks(kind?: 'ot' | 'it'): Promise<{ deleted: number; kind_filter: 'ot' | 'it' | null }> {
+  const qs = kind ? `?kind=${kind}` : '';
+  return req(`/api/networks${qs}`, { method: 'DELETE' });
+}
+
 // ── Hosts ──────────────────────────────────────────────────────────────────
 
 export interface UnknownHost {
@@ -268,7 +275,7 @@ export async function downloadHostsExampleCsv(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-export async function importNetworksCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {
+export async function importNetworksCsv(file: File): Promise<{ imported: number; skipped: number; skipped_ot_priority?: number; errors: string[] }> {
   const fd = new FormData();
   fd.append('file', file);
   const token = getToken();
