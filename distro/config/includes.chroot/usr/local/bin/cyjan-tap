@@ -436,16 +436,50 @@ cmd_update() {
     exit 2
   fi
 
+  # Update braucht zwingend root: tap.key (mode 600) ist nicht für den
+  # ids-User lesbar, plus docker load + cp /opt/ids/* + compose up -d
+  # gehen alle nur als root. Statt jeden Schritt einzeln zu sudo'en
+  # einmal sauber mit sudo re-exec — und beim --yes durch.
+  if [ "$EUID" -ne 0 ]; then
+    if ! command -v sudo >/dev/null 2>&1; then
+      echo "FEHLER: Update braucht root, sudo fehlt aber." >&2
+      exit 1
+    fi
+    exec sudo "$0" update "$@"
+  fi
+
   require_curl
   command -v zstd >/dev/null || { echo "zstd fehlt"; exit 1; }
   command -v sha256sum >/dev/null || { echo "sha256sum fehlt"; exit 1; }
 
-  local cert="/etc/cyjan/tap.pem"
-  local key="/etc/cyjan/tap.key"
-  local ca="/etc/cyjan/master-ca.pem"
-  for f in "$cert" "$key" "$ca"; do
-    [ -r "$f" ] || { echo "FEHLER: $f fehlt oder nicht lesbar — Tap nicht gepairt?"; exit 2; }
+  # Certs liegen im Docker-Volume tap-cert (Mount-Punkt /etc/cyjan IM
+  # Container, am Host nicht direkt sichtbar). Wir kopieren sie via
+  # docker cp in einen temp-Ordner mit mode 700, der beim Exit weg ist.
+  # Quelle ist der laufende cyjan-tap-uplink-Container — wenn der nicht
+  # läuft, ist 'gepairt' eh nicht sinnvoll und der Update bricht ab.
+  if ! docker ps --format '{{.Names}}' | grep -qx cyjan-tap-uplink; then
+    echo "FEHLER: Container cyjan-tap-uplink läuft nicht — Tap-Stack down oder nicht gepairt?" >&2
+    echo "  Status:    cyjan-tap status" >&2
+    echo "  Stack-up:  docker compose -f $COMPOSE_FILE up -d" >&2
+    exit 2
+  fi
+
+  local cert_tmp_dir
+  cert_tmp_dir=$(mktemp -d)
+  chmod 700 "$cert_tmp_dir"
+  # Cleanup auch im Fehlerfall — der Trap überschreibt den unten
+  # definierten für die Bundle-Tmp-Dateien, deshalb hier alles inkludiert.
+  trap 'rm -rf "$cert_tmp_dir" "${manifest_tmp:-}" "${BUNDLE_TMP:-}" "${COMPOSE_TMP:-}"' EXIT
+  for f in tap.pem tap.key master-ca.pem; do
+    if ! docker cp "cyjan-tap-uplink:/etc/cyjan/$f" "$cert_tmp_dir/$f" 2>/dev/null; then
+      echo "FEHLER: konnte $f nicht aus cyjan-tap-uplink:/etc/cyjan kopieren — Tap nicht gepairt?" >&2
+      echo "  Pairing:   cyjan-tap pair … oder cyjan-tap auto-pair …" >&2
+      exit 2
+    fi
   done
+  local cert="$cert_tmp_dir/tap.pem"
+  local key="$cert_tmp_dir/tap.key"
+  local ca="$cert_tmp_dir/master-ca.pem"
 
   # Master-URL aus /opt/ids/.env oder /etc/cyjan/profile lesen, dann den
   # /uplink-Pfad gegen /tap-update/ tauschen. wss:// → https:// für curl.
@@ -523,34 +557,24 @@ cmd_update() {
   # ── 3. docker load ────────────────────────────────────────────────────
   local tar_tmp
   tar_tmp=$(mktemp --suffix=.tar)
+  # Ab hier laufen wir garantiert als root (siehe re-exec oben), die
+  # ganzen `if EUID -ne 0; then sudo …` sind weggefallen.
   echo "Entpacke Bundle …"
   zstd -d "$BUNDLE_TMP" -o "$tar_tmp" --force --quiet
   echo "Lade Images via docker load …"
-  if [ "$EUID" -ne 0 ]; then
-    sudo docker load -i "$tar_tmp"
-  else
-    docker load -i "$tar_tmp"
-  fi
+  docker load -i "$tar_tmp"
   rm -f "$tar_tmp"
 
   # ── 4. Compose-File aktualisieren ─────────────────────────────────────
   COMPOSE_TMP=$(mktemp)
   echo "Lade docker-compose.tap.yml …"
   "${curl_mtls[@]}" --output "$COMPOSE_TMP" "$master_base/tap-update/compose"
-  if [ "$EUID" -ne 0 ]; then
-    sudo cp "$COMPOSE_TMP" "$COMPOSE_FILE"
-  else
-    cp "$COMPOSE_TMP" "$COMPOSE_FILE"
-  fi
+  cp "$COMPOSE_TMP" "$COMPOSE_FILE"
   echo "  → $COMPOSE_FILE aktualisiert"
 
   # VERSION-Marker setzen, damit nachfolgende Update-Checks korrekt
   # vergleichen können.
-  if [ "$EUID" -ne 0 ]; then
-    echo "$remote_version" | sudo tee "$COMPOSE_DIR/VERSION" > /dev/null
-  else
-    echo "$remote_version" > "$COMPOSE_DIR/VERSION"
-  fi
+  echo "$remote_version" > "$COMPOSE_DIR/VERSION"
 
   # ── 5. Host-Side-Skripte aus tap-update/scripts/ holen ────────────────
   # Skripte/systemd-Units werden im Update-ZIP unter scripts/ ausgeliefert
@@ -559,7 +583,7 @@ cmd_update() {
   # kann (greift auf /etc/docker, /etc/systemd, /usr/local/bin zu — Pfade
   # die der Update-Container nicht selbst bedienen kann).
   SCRIPTS_DIR="$COMPOSE_DIR/scripts"
-  if [ "$EUID" -ne 0 ]; then sudo mkdir -p "$SCRIPTS_DIR"; else mkdir -p "$SCRIPTS_DIR"; fi
+  mkdir -p "$SCRIPTS_DIR"
 
   # Whitelist matcht master-uplink _TAP_UPDATE_FILES. 404 bei einer Datei
   # ist kein Fehler — das ZIP von einem älteren Master kann scripts/ noch
@@ -570,11 +594,7 @@ cmd_update() {
            cyjan-tap; do
     SCRIPT_TMP=$(mktemp)
     if "${curl_mtls[@]}" --output "$SCRIPT_TMP" "$master_base/tap-update/scripts/$f" 2>/dev/null; then
-      if [ "$EUID" -ne 0 ]; then
-        sudo cp "$SCRIPT_TMP" "$SCRIPTS_DIR/$f"
-      else
-        cp "$SCRIPT_TMP" "$SCRIPTS_DIR/$f"
-      fi
+      cp "$SCRIPT_TMP" "$SCRIPTS_DIR/$f"
       echo "  → scripts/$f"
     fi
     rm -f "$SCRIPT_TMP"
@@ -583,29 +603,21 @@ cmd_update() {
   # ── 6. Stack hochfahren ───────────────────────────────────────────────
   if [ "$skip_compose" -eq 1 ]; then
     echo "--no-compose gesetzt — Stack-Restart übersprungen."
-    echo "Manuell: sudo docker compose -f $COMPOSE_FILE up -d --force-recreate"
+    echo "Manuell: docker compose -f $COMPOSE_FILE up -d --force-recreate"
     return 0
   fi
   echo "Starte Stack neu (--force-recreate, Outage-Buffer fängt ~30 s Downtime ab) …"
-  if [ "$EUID" -ne 0 ]; then
-    sudo docker compose -f "$COMPOSE_FILE" up -d --force-recreate
-  else
-    docker compose -f "$COMPOSE_FILE" up -d --force-recreate
-  fi
+  docker compose -f "$COMPOSE_FILE" up -d --force-recreate
 
   # ── 7. Host-Wartung: post-update.sh ausführen falls vorhanden ─────────
   # daemon.json + Maintenance-Timer + Mirror-Tune sind dadurch idempotent
   # nachgezogen. Skript checkt selbst ob ethtool fehlt und gibt Hinweis.
   POST_UPDATE="$SCRIPTS_DIR/post-update.sh"
   if [ -f "$POST_UPDATE" ]; then
-    if [ "$EUID" -ne 0 ]; then sudo chmod +x "$POST_UPDATE"; else chmod +x "$POST_UPDATE"; fi
+    chmod +x "$POST_UPDATE"
     echo
     echo "Führe Host-Wartung aus (post-update.sh) …"
-    if [ "$EUID" -ne 0 ]; then
-      sudo bash "$POST_UPDATE" || echo "post-update.sh exit $? — siehe Output oben."
-    else
-      bash "$POST_UPDATE" || echo "post-update.sh exit $? — siehe Output oben."
-    fi
+    bash "$POST_UPDATE" || echo "post-update.sh exit $? — siehe Output oben."
   else
     echo
     echo "Hinweis: scripts/post-update.sh nicht im Master-Bundle — überspringe Host-Wartung."
