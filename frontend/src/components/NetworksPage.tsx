@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createNetwork, deleteNetwork, downloadNetworksExampleCsv, fetchNetworks, importNetworksCsv, updateNetwork } from '../api';
 import type { KnownNetwork } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 
 type Kind = 'ot' | 'it';
+type ZoneFilter = 'all' | 'ot' | 'it';
 type EditState = { name: string; description: string; color: string; kind: Kind } | null;
 
 const KIND_BADGE: Record<Kind, { label: string; cls: string }> = {
@@ -23,7 +24,26 @@ export function NetworksPage() {
   const [editState, setEditState]       = useState<EditState>(null);
   const [editError, setEditError]       = useState('');
   const [confirmId, setConfirmId]       = useState<string | null>(null);
+  // Such-/Filter-State (client-side, weil fetchNetworks ohnehin alle Einträge
+  // lädt — Bereiche mit hunderten Netzen brauchen kein Server-Side-Pagination).
+  const [searchQuery, setSearchQuery]   = useState('');
+  const [zoneFilter, setZoneFilter]     = useState<ZoneFilter>('all');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const filteredNetworks = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return networks.filter(n => {
+      if (zoneFilter !== 'all' && (n.kind ?? 'ot') !== zoneFilter) return false;
+      if (!q) return true;
+      // Case-insensitive Substring-Match über CIDR + Name + Beschreibung.
+      // CIDR ist Text — Eingabe '192.168.1' matcht 192.168.1.0/24, 192.168.10.0/24
+      // (Substring), 192.168.1.0/24 etc. Für IP-/Subnet-präzise Suche müsste
+      // man CIDR-Mathematik machen — V2-Backlog.
+      return (n.cidr.toLowerCase().includes(q)
+           || n.name.toLowerCase().includes(q)
+           || (n.description ?? '').toLowerCase().includes(q));
+    });
+  }, [networks, searchQuery, zoneFilter]);
 
   const load = () =>
     fetchNetworks()
@@ -183,6 +203,54 @@ export function NetworksPage() {
         </form>
       </div>
 
+      {/* Search + Filter — sichtbar erst ab >5 Einträgen, sonst rauscht es nur. */}
+      {networks.length > 5 && (
+        <div className="card p-3 flex flex-wrap items-center gap-3">
+          <input
+            type="search"
+            className="input flex-1 min-w-[200px]"
+            placeholder={t('networks.searchPlaceholder', { defaultValue: 'Suche CIDR, Name oder Beschreibung …' })}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          <div className="flex items-center gap-1 text-xs">
+            <span className="text-slate-500">{t('networks.zone', { defaultValue: 'Zone' })}:</span>
+            {(['all', 'ot', 'it'] as const).map(z => (
+              <button
+                key={z}
+                type="button"
+                onClick={() => setZoneFilter(z)}
+                className={`px-2 py-1 rounded border font-mono uppercase text-[10px] transition-colors ${
+                  zoneFilter === z
+                    ? (z === 'ot' ? KIND_BADGE.ot.cls
+                      : z === 'it' ? KIND_BADGE.it.cls
+                      : 'bg-slate-700/40 text-slate-200 border-slate-500/40')
+                    : 'bg-slate-900/40 text-slate-500 border-slate-700/50 hover:text-slate-300'
+                }`}
+              >
+                {z === 'all' ? t('common.all', { defaultValue: 'Alle' }) : z}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10px] text-slate-500 font-mono whitespace-nowrap">
+            {t('networks.filterCount', {
+              defaultValue: '{{shown}} von {{total}}',
+              shown: filteredNetworks.length,
+              total: networks.length,
+            })}
+          </span>
+          {(searchQuery || zoneFilter !== 'all') && (
+            <button
+              type="button"
+              onClick={() => { setSearchQuery(''); setZoneFilter('all'); }}
+              className="btn-ghost text-[10px] text-slate-500 hover:text-slate-300"
+            >
+              ↺ {t('common.reset', { defaultValue: 'Zurücksetzen' })}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Table */}
       <div className="card overflow-hidden">
         <table className="w-full text-xs">
@@ -197,12 +265,19 @@ export function NetworksPage() {
             </tr>
           </thead>
           <tbody>
+            {filteredNetworks.length === 0 && networks.length > 0 && (
+              <tr>
+                <td colSpan={6} className="text-center text-slate-600 py-8">
+                  {t('networks.noMatch', { defaultValue: 'Keine Treffer für diese Filter.' })}
+                </td>
+              </tr>
+            )}
             {networks.length === 0 && (
               <tr>
                 <td colSpan={6} className="text-center text-slate-600 py-8">{t('networks.noNetworks')}</td>
               </tr>
             )}
-            {networks.map(n => (
+            {filteredNetworks.map(n => (
               <tr key={n.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                 <td className="px-4 py-2 font-mono text-slate-200">{n.cidr}</td>
                 <td className="px-4 py-2">
