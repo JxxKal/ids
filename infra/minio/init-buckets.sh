@@ -20,22 +20,35 @@ echo "[minio-init] Konfiguriere MinIO Client..."
 
 # WICHTIG: KEIN `mc alias set` mit Secret als CLI-Argument. Wenn der
 # MINIO_SECRET_KEY mit `--` beginnt (random-generierter Wert), interpretiert
-# mc das als Flag → Init bricht ab und Lifecycle wird nie gesetzt. Der
-# Bug saß ursprünglich in produktiven Stacks ohne dass es jemand merkte.
+# mc das als Flag → Init bricht ab und Lifecycle wird nie gesetzt.
 #
-# Stattdessen: MC_HOST_<alias>-Env-Var verwenden. Dort wird das Secret in
-# der URL-Userinfo-Section eingebettet, wo `--` keine Sonderbedeutung
-# hat. URL-kritische Zeichen (`%`, `:`, `/`, `?`, `@`, `#`) müssen aber
-# encoded werden — mit POSIX-sed, weil python3 im mc-Image nicht da ist.
+# Stattdessen: MC_HOST_<alias>-Env-Var. Das Secret landet in der URL-
+# Userinfo-Section, wo `--` keine Sonderbedeutung hat.
+#
+# URL-Encoding: das mc-Image (minio/mc:latest) ist ein minimaler busybox-
+# scratch-Build, hat weder sed noch awk noch python. Wir prüfen darum nur
+# auf URL-kritische Zeichen und brechen mit klarer Meldung ab statt halbgar
+# weiterzumachen. Typische Random-Generators (openssl rand -base64,
+# url-safe-base64) liefern alphanumerisch + `_-+/=` — alles davon ist
+# in der Userinfo-Section legal AUSSER `:` und `@` und `/`. Wenn doch
+# eines davon im Secret steckt, muss der User in .env quoten oder neu
+# generieren.
 EP="${MINIO_ENDPOINT:-minio:9000}"
-url_encode() {
-  printf '%s' "$1" \
-    | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's|/|%2F|g' \
-          -e 's/?/%3F/g' -e 's/@/%40/g' -e 's/#/%23/g'
-}
-ACCESS_ENC=$(url_encode "$MINIO_ACCESS_KEY")
-SECRET_ENC=$(url_encode "$MINIO_SECRET_KEY")
-export MC_HOST_local="http://${ACCESS_ENC}:${SECRET_ENC}@${EP}"
+case "$MINIO_SECRET_KEY" in
+  *:*|*@*|*/*|*\?*|*\#*|*%*)
+    echo "[minio-init] FEHLER: MINIO_SECRET_KEY enthält URL-kritisches Zeichen."
+    echo "[minio-init]    Erlaubt: alphanumerisch + _-+=. Secret in .env neu erzeugen, z.B.:"
+    echo "[minio-init]    openssl rand -hex 32   bzw.   openssl rand -base64 32 | tr -d /+="
+    exit 1
+    ;;
+esac
+case "$MINIO_ACCESS_KEY" in
+  *:*|*@*|*/*|*\?*|*\#*|*%*)
+    echo "[minio-init] FEHLER: MINIO_ACCESS_KEY enthält URL-kritisches Zeichen."
+    exit 1
+    ;;
+esac
+export MC_HOST_local="http://${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}@${EP}"
 
 # Smoke-Test: erste Anfrage gegen den Server. Wenn Auth/Endpoint kaputt
 # ist, scheitert mc hier und das Skript bricht via `set -e` ab — besser
