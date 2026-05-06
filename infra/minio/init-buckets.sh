@@ -17,10 +17,36 @@ PCAP_DAYS="${PCAP_RETENTION_DAYS:-7}"
 EXPORTS_DAYS="${EXPORTS_RETENTION_DAYS:-7}"
 
 echo "[minio-init] Konfiguriere MinIO Client..."
-mc alias set local http://"${MINIO_ENDPOINT:-minio:9000}" \
-  "$MINIO_ACCESS_KEY" \
-  "$MINIO_SECRET_KEY" \
-  --api S3v4
+
+# WICHTIG: KEIN `mc alias set` mit Secret als CLI-Argument. Wenn der
+# MINIO_SECRET_KEY mit `--` beginnt (random-generierter Wert), interpretiert
+# mc das als Flag → Init bricht ab und Lifecycle wird nie gesetzt. Der
+# Bug saß ursprünglich in produktiven Stacks ohne dass es jemand merkte.
+#
+# Stattdessen: MC_HOST_<alias>-Env-Var verwenden. Dort wird das Secret in
+# der URL-Userinfo-Section eingebettet, wo `--` keine Sonderbedeutung
+# hat. URL-kritische Zeichen (`%`, `:`, `/`, `?`, `@`, `#`) müssen aber
+# encoded werden — mit POSIX-sed, weil python3 im mc-Image nicht da ist.
+EP="${MINIO_ENDPOINT:-minio:9000}"
+url_encode() {
+  printf '%s' "$1" \
+    | sed -e 's/%/%25/g' -e 's/:/%3A/g' -e 's|/|%2F|g' \
+          -e 's/?/%3F/g' -e 's/@/%40/g' -e 's/#/%23/g'
+}
+ACCESS_ENC=$(url_encode "$MINIO_ACCESS_KEY")
+SECRET_ENC=$(url_encode "$MINIO_SECRET_KEY")
+export MC_HOST_local="http://${ACCESS_ENC}:${SECRET_ENC}@${EP}"
+
+# Smoke-Test: erste Anfrage gegen den Server. Wenn Auth/Endpoint kaputt
+# ist, scheitert mc hier und das Skript bricht via `set -e` ab — besser
+# als später einen halbgaren Bucket zu hinterlassen.
+if ! mc admin info local >/dev/null 2>&1; then
+  echo "[minio-init] FEHLER: mc kann sich nicht zu MinIO verbinden."
+  echo "[minio-init]    Endpoint: $EP"
+  echo "[minio-init]    Access-Key: ${MINIO_ACCESS_KEY:-<unset>}"
+  echo "[minio-init]    Secret gesetzt: $([ -n "$MINIO_SECRET_KEY" ] && echo ja || echo NEIN)"
+  exit 1
+fi
 
 ensure_bucket() {
   bucket="$1"
