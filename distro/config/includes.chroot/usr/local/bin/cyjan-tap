@@ -499,8 +499,16 @@ cmd_update() {
   master_base=$(echo "$master_url" | sed -E 's|^wss://|https://|; s|^ws://|https://|; s|/[^/]*$||')
   echo "Master:        $master_base"
 
-  local curl_mtls=(curl --silent --show-error --fail
-                   --cert "$cert" --key "$key" --cacert "$ca"
+  # --insecure ist hier mit Bedacht: das Master-Server-Cert ist gleich-
+  # zeitig die Master-CA und hat keinen IP-SAN — curl würde sonst am
+  # Hostname-Mismatch scheitern. Die echte Authentifizierung läuft über
+  # das mTLS-Client-Cert (--cert/--key), das nur der gepairte Tap besitzt
+  # und das der Server gegen die CA validiert. Das ist genau das Modell
+  # das tap-uplink fährt (check_hostname=False, verify_mode=CERT_REQUIRED).
+  # V2-Backlog: dediziertes Server-Cert mit IP-SAN am master-uplink, dann
+  # kann --insecure weg und --cacert wieder die echte CA-Pin sein.
+  local curl_mtls=(curl --silent --show-error --fail --insecure
+                   --cert "$cert" --key "$key"
                    --connect-timeout 10 --max-time 1200)
 
   # ── 1. Manifest pullen ────────────────────────────────────────────────
