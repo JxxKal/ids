@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { Alert, Enrichment, RemoteTap } from '../types';
 import { alertsExportUrl, createEgressWhitelist, fetchTaps } from '../api';
 import { countryFlag, geoTooltip } from '../lib/country';
+import { effectiveSeverity } from '../lib/severity';
 import { AlertDetail } from './AlertDetail';
 import { HelpTip } from './HelpTip';
 import { SeverityBadge } from './SeverityBadge';
@@ -385,12 +386,17 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
   for (const a of alerts) {
     const k = `${a.rule_id ?? '–'}::${sessionKey(a.src_ip, a.dst_ip)}`;
     const g = map.get(k);
+    // Group-Severity zeigt die EFFECTIVE Severity (P0→critical, FP→low),
+    // nicht die DB-Original. Sonst würde eine Group mit lauter P0-Boundary-
+    // medium-Alerts als 'medium' angezeigt, obwohl jeder einzelne in der
+    // Detail-Ansicht als 'critical' geflaggt wird.
+    const aEff = effectiveSeverity(a);
     if (g) {
       g.count++;
-      // Gruppen-Severity = höchste Severity aller enthaltenen Alerts.
+      // Gruppen-Severity = höchste effective Severity aller enthaltenen Alerts.
       // Sonst würde eine Gruppe mit 1 critical + 4 low als 'low' angezeigt
       // (weil neuester low) und der Filter 'critical' würde sie nicht finden.
-      g.severity = maxSeverity(g.severity, a.severity);
+      g.severity = maxSeverity(g.severity, aEff);
       // Richtungswechsel erkennen: wenn diese Quelle vorher das Ziel war
       if (a.src_ip && a.src_ip === g.dst_ip) g.bidirectional = true;
       if (tsMs(a.ts) > tsMs(g.last_ts)) {
@@ -406,7 +412,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
       if (a.tags?.length) g.tags = [...new Set([...g.tags, ...a.tags])];
     } else {
       map.set(k, {
-        key: k, severity: a.severity,
+        key: k, severity: aEff,
         rule_id: a.rule_id, src_ip: a.src_ip, dst_ip: a.dst_ip,
         proto: a.proto, dst_port: a.dst_port, description: a.description,
         tags: [...(a.tags ?? [])],
@@ -555,7 +561,14 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
       if (!showTest && a.is_test) return false;
       if (mlOnly && a.source !== 'ml') return false;
       if (suppressIrmaAsset && a.source === 'external' && a.rule_id?.startsWith('ASSET::')) return false;
-      if (severityFilters.length && !severityFilters.includes(a.severity)) return false;
+      // Severity-Filter matcht effective Severity (P0→critical, FP→low),
+      // damit der "critical"-Pill auch Boundary-Promotionen einsammelt und
+      // FP-markierte Alerts unter "low" auftauchen — konsistent zur Anzeige.
+      // Hinweis: Server-side severity-Filter (alertsExportUrl, API-Param)
+      // greift weiter auf die Original-Severity-DB-Spalte. Für Pagination
+      // mit großen Datasets ist das eine bewusste V0-Diskrepanz; die meisten
+      // User filtern lokal in der bereits geladenen Liste.
+      if (severityFilters.length && !severityFilters.includes(effectiveSeverity(a))) return false;
       if (sourceF   && a.source   !== sourceF)   return false;
       if (feedbackF === 'none' && a.feedback)     return false;
       if (feedbackF === 'fp'   && a.feedback !== 'fp') return false;
@@ -890,6 +903,10 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
                   </td>
                   {showCol('severity') && (
                     <td className="px-3 py-2" style={tdStyle('severity')}>
+                      {/* g.severity ist bereits die effective Max über alle
+                          Alerts der Gruppe (groupAlerts() berechnet das).
+                          Stern/Tooltip nicht sinnvoll auf Group-Level — das
+                          würde von Alert zu Alert variieren. */}
                       <SeverityBadge severity={g.severity} />
                     </td>
                   )}
@@ -997,14 +1014,14 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
               {filtered.map(a => (
                 <tr
                   key={a.alert_id}
-                  className={`border-b border-slate-800/50 hover:brightness-125 cursor-pointer transition-all ${ROW_SEVERITY[a.severity] ?? ''}`}
+                  className={`border-b border-slate-800/50 hover:brightness-125 cursor-pointer transition-all ${ROW_SEVERITY[effectiveSeverity(a)] ?? ''}`}
                   onClick={() => setSelected(a)}
                 >
                   <td className="px-3 py-2 text-slate-500 whitespace-nowrap overflow-hidden text-ellipsis" style={tdStyle('time')}>
                     {fmtTime(a.ts)}
                   </td>
                   {showCol('severity') && (
-                    <td className="px-3 py-2" style={tdStyle('severity')}><SeverityBadge severity={a.severity} /></td>
+                    <td className="px-3 py-2" style={tdStyle('severity')}><SeverityBadge alert={a} /></td>
                   )}
                   {egressMode !== 'off' && showCol('boundary') && (
                     <td className="px-3 py-2" style={tdStyle('boundary')}><BoundaryCell alert={a} /></td>

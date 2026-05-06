@@ -155,7 +155,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
             min-h-0 overflow-y-auto. */}
         <div className="flex-none flex items-center justify-between px-5 py-4 border-b border-slate-800">
           <div className="flex items-center gap-3 flex-wrap">
-            <SeverityBadge severity={alert.severity} />
+            <SeverityBadge alert={alert} />
             <span className="font-semibold text-cyan-100 font-mono">{alert.rule_id}</span>
             <span className="text-[10px] text-slate-500 uppercase tracking-wider font-mono px-2 py-0.5 rounded border border-slate-700">{alert.source}</span>
           </div>

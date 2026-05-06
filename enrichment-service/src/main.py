@@ -241,14 +241,30 @@ def run(cfg: Config) -> None:
             # für Alert-Detail-View-Backwards-Compat. boundary_priority kommt
             # aus V2-Klassifikator — V1-Map wird für neue Alerts nicht mehr
             # konsultiert.
-            src_zone  = db.get_zone(src_ip)
-            dst_zone  = db.get_zone(dst_ip)
-            net_known = dst_zone in ("ot", "it")  # = "dst ist in known_networks"
-            src_known = bool(_f(src_info, "trusted"))
-            dst_known = bool(_f(dst_info, "trusted"))
-            pmap_v2_raw = db.get_boundary_priority_map_v2()
-            pmap_v2     = parse_priority_map_v2(pmap_v2_raw) if pmap_v2_raw else None
-            priority    = classify_boundary_v2(src_zone, dst_zone, pmap_v2)
+            #
+            # Boundary nur klassifizieren wenn ein vollständiges
+            # Verbindungspaar vorliegt. Ohne dst_ip (z.B. IRMA-Asset-Warnings,
+            # die nur einen src_ip-Status melden) ist es definitionsgemäß
+            # KEIN Egress-Event — Boundary-Felder bleiben NULL und solche
+            # Alerts erscheinen nicht in der Boundary-View. Vor dem Fix
+            # mappte db.get_zone(None) auf "internet", was OT-Asset-Warnings
+            # fälschlich als ot/internet → P0 klassifizierte.
+            if not src_ip or not dst_ip:
+                src_zone  = None
+                dst_zone  = None
+                net_known = None
+                src_known = None
+                dst_known = None
+                priority  = None
+            else:
+                src_zone  = db.get_zone(src_ip)
+                dst_zone  = db.get_zone(dst_ip)
+                net_known = dst_zone in ("ot", "it")  # = "dst ist in known_networks"
+                src_known = bool(_f(src_info, "trusted"))
+                dst_known = bool(_f(dst_info, "trusted"))
+                pmap_v2_raw = db.get_boundary_priority_map_v2()
+                pmap_v2     = parse_priority_map_v2(pmap_v2_raw) if pmap_v2_raw else None
+                priority    = classify_boundary_v2(src_zone, dst_zone, pmap_v2)
             db.update_alert_boundary(
                 alert_id, net_known, src_known, dst_known, priority,
                 src_zone=src_zone, dst_zone=dst_zone,

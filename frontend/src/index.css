@@ -427,6 +427,13 @@
   color: #86efac;
   border-color: rgba(21, 128, 61, 0.50);
 }
+/* Effective-Severity-Indikator: Stern + dezent gestrichelter Rahmen
+   wenn die angezeigte Severity vom Original abweicht (P0→critical oder
+   FP→low). Tooltip am Element erklärt warum. */
+.cyjan-sev-derived {
+  border-style: dashed;
+  cursor: help;
+}
 
 /* ============================================================
    Dashboard KPI-Cards
