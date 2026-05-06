@@ -199,6 +199,16 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      # Lifecycle-Retention pro Bucket. Default 7 Tage für PCAPs, weil
+      # pcap-store typisch 10–20 GB pro Tag schreibt — bei 30 Tagen wäre
+      # ein 500 GB Volume nötig. Konfigurierbar in .env, greift bei
+      # nächstem Stack-Restart.
+      PCAP_RETENTION_DAYS:    ${PCAP_RETENTION_DAYS:-7}
+      EXPORTS_RETENTION_DAYS: ${EXPORTS_RETENTION_DAYS:-7}
+    # restart: "no" + idempotentes init-Skript: bei jedem
+    # `docker compose up -d --force-recreate` läuft das Skript erneut und
+    # gleicht Buckets + Lifecycle-Rules ab. Damit kommt eine versehentlich
+    # gelöschte Lifecycle-Rule beim nächsten Update von selbst zurück.
     restart: "no"
 
   # ────────────────────────────────────────────────────────────────────────────
