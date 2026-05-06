@@ -75,13 +75,9 @@ ensure_lifecycle() {
   bucket="$1"
   days="$2"
 
-  # mc ilm rule rm --all-rules entfernt alle bestehenden Rules.
-  # Falls keine da sind: exit non-zero, ignorieren wir.
-  # Falls die Sub-Variante --all-rules nicht unterstützt wird, fällt auf
-  # das alte 'mc ilm rule clear' zurück.
-  mc ilm rule rm --force --all-rules "local/$bucket" >/dev/null 2>&1 \
-    || mc ilm rule clear --force "local/$bucket" >/dev/null 2>&1 \
-    || true
+  # mc ilm rule rm --all --force entfernt alle bestehenden Rules.
+  # Wenn keine da sind, exit non-zero — ignorieren wir.
+  mc ilm rule rm --all --force "local/$bucket" >/dev/null 2>&1 || true
 
   mc ilm rule add --expiry-days "$days" "local/$bucket" >/dev/null
   echo "  $bucket: Lifecycle gesetzt ($days Tage Expiry)."
