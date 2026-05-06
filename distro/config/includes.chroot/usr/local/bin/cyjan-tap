@@ -388,6 +388,177 @@ cmd_config() {
   esac
 }
 
+cmd_update() {
+  # Pull-basiertes Tap-Update vom gepairten Master.
+  #
+  # Voraussetzung: das Tap ist gepairt (mTLS-Cert in /etc/cyjan/tap.pem +
+  # tap.key + master-ca.pem) und der Master hat ein Update-ZIP eingespielt
+  # (das hinterlässt /opt/ids/tap-update/ — master-uplink serviert daraus
+  # via /tap-update/<file>).
+  #
+  # Ablauf:
+  #   1. Manifest pullen, Version vergleichen
+  #   2. Bundle pullen, sha256 verifizieren
+  #   3. docker load
+  #   4. docker-compose.tap.yml aktualisieren
+  #   5. compose up -d --force-recreate
+  #   6. optional Host-Wartung via post-update.sh
+  #
+  # Self-Update sicher: cyjan-tap läuft als Host-Prozess, der Restart von
+  # tap-uplink/tap-api während compose up -d ist unkritisch — der Outage-
+  # Buffer fängt Alarme während der ~30 s Downtime ab und schickt sie nach.
+  local from_master=0
+  local skip_compose=0
+  local yes=0
+  shift_args=()
+  for arg in "$@"; do
+    case "$arg" in
+      --from-master)   from_master=1 ;;
+      --no-compose)    skip_compose=1 ;;  # nur load, kein up -d (für Tests)
+      -y|--yes)        yes=1 ;;
+      *)               echo "Unbekanntes Argument: $arg" >&2; exit 2 ;;
+    esac
+  done
+  if [ "$from_master" -ne 1 ]; then
+    echo "Aktuell nur '--from-master' unterstützt." >&2
+    echo "  cyjan-tap update --from-master [-y] [--no-compose]" >&2
+    exit 2
+  fi
+
+  require_curl
+  command -v zstd >/dev/null || { echo "zstd fehlt"; exit 1; }
+  command -v sha256sum >/dev/null || { echo "sha256sum fehlt"; exit 1; }
+
+  local cert="/etc/cyjan/tap.pem"
+  local key="/etc/cyjan/tap.key"
+  local ca="/etc/cyjan/master-ca.pem"
+  for f in "$cert" "$key" "$ca"; do
+    [ -r "$f" ] || { echo "FEHLER: $f fehlt oder nicht lesbar — Tap nicht gepairt?"; exit 2; }
+  done
+
+  # Master-URL aus /opt/ids/.env oder /etc/cyjan/profile lesen, dann den
+  # /uplink-Pfad gegen /tap-update/ tauschen. wss:// → https:// für curl.
+  local master_url=""
+  if [ -r "/opt/ids/.env" ]; then
+    master_url=$(grep -E '^MASTER_URL=' /opt/ids/.env | tail -1 | cut -d= -f2- | tr -d '"' || true)
+  fi
+  if [ -z "$master_url" ] && [ -r "/etc/cyjan/profile" ]; then
+    master_url=$(grep -E '^MASTER_URL=' /etc/cyjan/profile | tail -1 | cut -d= -f2- | tr -d '"' || true)
+  fi
+  if [ -z "$master_url" ]; then
+    echo "FEHLER: MASTER_URL nicht in /opt/ids/.env oder /etc/cyjan/profile gefunden." >&2
+    exit 2
+  fi
+  # wss://master:8443/uplink → https://master:8443
+  local master_base
+  master_base=$(echo "$master_url" | sed -E 's|^wss://|https://|; s|^ws://|https://|; s|/[^/]*$||')
+  echo "Master:        $master_base"
+
+  local curl_mtls=(curl --silent --show-error --fail
+                   --cert "$cert" --key "$key" --cacert "$ca"
+                   --connect-timeout 10 --max-time 1200)
+
+  # ── 1. Manifest pullen ────────────────────────────────────────────────
+  local manifest_tmp
+  manifest_tmp=$(mktemp)
+  trap 'rm -f "$manifest_tmp" "${BUNDLE_TMP:-}" "${COMPOSE_TMP:-}"' EXIT
+  echo "Hole Manifest …"
+  if ! "${curl_mtls[@]}" -o "$manifest_tmp" "$master_base/tap-update/manifest"; then
+    echo "FEHLER: Manifest-Download fehlgeschlagen. Hat der Master ein Update-ZIP eingespielt?" >&2
+    echo "  Erwartet: /opt/ids/tap-update/manifest.json am Master" >&2
+    exit 1
+  fi
+
+  local remote_version remote_sha remote_size
+  if have_jq; then
+    remote_version=$(jq -r .version "$manifest_tmp")
+    remote_sha=$(jq -r .bundle.sha256 "$manifest_tmp")
+    remote_size=$(jq -r .bundle.size "$manifest_tmp")
+  else
+    remote_version=$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d["version"])' "$manifest_tmp")
+    remote_sha=$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d["bundle"]["sha256"])' "$manifest_tmp")
+    remote_size=$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d["bundle"]["size"])' "$manifest_tmp")
+  fi
+
+  local current_version="unknown"
+  [ -r "$COMPOSE_DIR/VERSION" ] && current_version=$(tr -d '[:space:]' < "$COMPOSE_DIR/VERSION")
+  echo "Tap-Version:   $current_version"
+  echo "Master bietet: $remote_version  (bundle $((remote_size/1024/1024)) MB)"
+
+  if [ "$current_version" = "$remote_version" ]; then
+    echo "Bereits aktuell. Mit -y / --yes erzwingen falls Re-Apply gewünscht."
+    [ "$yes" -eq 1 ] || exit 0
+  fi
+
+  if [ "$yes" -ne 1 ]; then
+    read -r -p "Update einspielen? [y/N] " confirm
+    case "$confirm" in y|Y|yes) ;; *) echo "Abgebrochen."; exit 0 ;; esac
+  fi
+
+  # ── 2. Bundle pullen + Hash verifizieren ──────────────────────────────
+  BUNDLE_TMP=$(mktemp --suffix=.tar.zst)
+  echo "Lade Tap-Image-Bundle …"
+  "${curl_mtls[@]}" --output "$BUNDLE_TMP" "$master_base/tap-update/bundle"
+  local actual_sha
+  actual_sha=$(sha256sum "$BUNDLE_TMP" | awk '{print $1}')
+  if [ "$actual_sha" != "$remote_sha" ]; then
+    echo "FEHLER: SHA256-Mismatch." >&2
+    echo "  erwartet: $remote_sha" >&2
+    echo "  bekommen: $actual_sha" >&2
+    exit 1
+  fi
+  echo "Hash OK: $actual_sha"
+
+  # ── 3. docker load ────────────────────────────────────────────────────
+  local tar_tmp
+  tar_tmp=$(mktemp --suffix=.tar)
+  echo "Entpacke Bundle …"
+  zstd -d "$BUNDLE_TMP" -o "$tar_tmp" --force --quiet
+  echo "Lade Images via docker load …"
+  if [ "$EUID" -ne 0 ]; then
+    sudo docker load -i "$tar_tmp"
+  else
+    docker load -i "$tar_tmp"
+  fi
+  rm -f "$tar_tmp"
+
+  # ── 4. Compose-File aktualisieren ─────────────────────────────────────
+  COMPOSE_TMP=$(mktemp)
+  echo "Lade docker-compose.tap.yml …"
+  "${curl_mtls[@]}" --output "$COMPOSE_TMP" "$master_base/tap-update/compose"
+  if [ "$EUID" -ne 0 ]; then
+    sudo cp "$COMPOSE_TMP" "$COMPOSE_FILE"
+  else
+    cp "$COMPOSE_TMP" "$COMPOSE_FILE"
+  fi
+  echo "  → $COMPOSE_FILE aktualisiert"
+
+  # VERSION-Marker setzen, damit nachfolgende Update-Checks korrekt
+  # vergleichen können.
+  if [ "$EUID" -ne 0 ]; then
+    echo "$remote_version" | sudo tee "$COMPOSE_DIR/VERSION" > /dev/null
+  else
+    echo "$remote_version" > "$COMPOSE_DIR/VERSION"
+  fi
+
+  # ── 5. Stack hochfahren ───────────────────────────────────────────────
+  if [ "$skip_compose" -eq 1 ]; then
+    echo "--no-compose gesetzt — Stack-Restart übersprungen."
+    echo "Manuell: sudo docker compose -f $COMPOSE_FILE up -d --force-recreate"
+    return 0
+  fi
+  echo "Starte Stack neu (--force-recreate, Outage-Buffer fängt ~30 s Downtime ab) …"
+  if [ "$EUID" -ne 0 ]; then
+    sudo docker compose -f "$COMPOSE_FILE" up -d --force-recreate
+  else
+    docker compose -f "$COMPOSE_FILE" up -d --force-recreate
+  fi
+  echo
+  echo "Update auf $remote_version eingespielt."
+  echo "Status:  cyjan-tap status"
+  echo "Logs:    cyjan-tap logs follow"
+}
+
 cmd_maintenance() {
   # Wrapper auf das generische /usr/local/bin/cyjan-maintenance —
   # auf einem frisch installierten Tap-ISO liegt das Skript dort. Auf
@@ -415,6 +586,7 @@ cyjan-tap – Remote-Tap-CLI
   cyjan-tap logs follow [service]        Container-Logs (Default alle)
   cyjan-tap config get                   aktuelle Konfiguration
   cyjan-tap config set master_url <url>  Master-WSS-URL ändern (wss:// erzwungen)
+  cyjan-tap update --from-master [-y]    Tap-Bundle vom gepairten Master ziehen + applien
   cyjan-tap maintenance [--aggressive]   Docker aufräumen (dangling Images, Build-Cache)
 
 ENV:
@@ -433,6 +605,7 @@ case "${1:-status}" in
   reconnect)  shift; cmd_reconnect ;;
   logs)       shift; cmd_logs "$@" ;;
   config)     shift; cmd_config "$@" ;;
+  update)     shift; cmd_update "$@" ;;
   maintenance) shift; cmd_maintenance "$@" ;;
   -h|--help|help) usage ;;
   *) usage; exit 2 ;;

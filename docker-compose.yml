@@ -511,6 +511,11 @@ services:
       # Overrides via GET /config aus. Kein Schreibzugriff nötig.
       - signature-rules:/rules/custom:ro
       - ./signature-engine/rules:/rules/builtin:ro
+      # Tap-Update-Pfad: /opt/ids/tap-update/ wird vom System-Update-Pfad
+      # befüllt (images-tap.tar.zst + manifest.json + Compose + scripts).
+      # master-uplink serviert sie via mTLS-protected HTTP-GETs nach
+      # /tap-update/<file> für `cyjan-tap update --from-master`.
+      - /opt/ids/tap-update:/tap-update:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${UPLINK_PORT:-8443}:8443"
 

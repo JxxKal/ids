@@ -535,6 +535,12 @@ jobs:
         with:
           name: docker-images-master
 
+      - name: Tap-Bundle herunterladen
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images-tap
+          path: tap-artifacts/
+
       - name: Update-Paket zusammenstellen
         shell: bash
         run: |
@@ -567,6 +573,45 @@ jobs:
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.
           mv images-master.tar.zst "$PKG/images.tar.zst"
+
+          # ── Tap-Update-Subdir ─────────────────────────────────────────
+          # Layout entspricht dem, was master-uplink unter /tap-update/<file>
+          # ausliefert (siehe master-uplink _TAP_UPDATE_FILES). Tap zieht das
+          # via `cyjan-tap update --from-master` über mTLS ab.
+          mkdir -p "$PKG/tap-update/scripts"
+          mv tap-artifacts/images-tap.tar.zst "$PKG/tap-update/images-tap.tar.zst"
+          cp docker-compose.tap.yml            "$PKG/tap-update/docker-compose.tap.yml"
+          cp "$PKG/scripts/post-update.sh"             "$PKG/tap-update/scripts/post-update.sh"
+          cp "$PKG/scripts/daemon.json"                "$PKG/tap-update/scripts/daemon.json"
+          cp "$PKG/scripts/cyjan-maintenance"          "$PKG/tap-update/scripts/cyjan-maintenance"
+          cp "$PKG/scripts/cyjan-maintenance.service"  "$PKG/tap-update/scripts/cyjan-maintenance.service"
+          cp "$PKG/scripts/cyjan-maintenance.timer"    "$PKG/tap-update/scripts/cyjan-maintenance.timer"
+
+          BUNDLE_SHA=$(sha256sum "$PKG/tap-update/images-tap.tar.zst" | awk '{print $1}')
+          BUNDLE_SIZE=$(stat -c%s "$PKG/tap-update/images-tap.tar.zst")
+          COMPOSE_SHA=$(sha256sum "$PKG/tap-update/docker-compose.tap.yml" | awk '{print $1}')
+          BUILD_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          cat > "$PKG/tap-update/manifest.json" <<MANIFEST
+          {
+            "version": "${VERSION}",
+            "created_at": "${BUILD_TS}",
+            "bundle": {
+              "file":   "images-tap.tar.zst",
+              "sha256": "${BUNDLE_SHA}",
+              "size":   ${BUNDLE_SIZE}
+            },
+            "compose": {
+              "file":   "docker-compose.tap.yml",
+              "sha256": "${COMPOSE_SHA}"
+            }
+          }
+          MANIFEST
+
+          echo "Tap-Update-Bundle:"
+          echo "  Version:    ${VERSION}"
+          echo "  Bundle:     $(du -sh "$PKG/tap-update/images-tap.tar.zst" | cut -f1)"
+          echo "  SHA256:     ${BUNDLE_SHA}"
 
           # GeoIP-/ASN-Lite-DBs von DB-IP mit reinpacken, damit Offline-Hosts
           # nach jedem Update frische Geo-Daten haben (DB-IP veröffentlicht am
@@ -624,6 +669,20 @@ jobs:
           Idempotent — kann beliebig oft laufen, ändert nur Pfade unter
           /etc/docker/ und /etc/systemd/system/ die der API-Container nicht
           selbst bedienen kann.
+
+          ## Remote-Taps mit-versorgen
+
+          Nach dem Master-Update enthält /opt/ids/tap-update/ das passende
+          Tap-Image-Bundle, ein Manifest und das aktuelle docker-compose.tap.yml.
+          master-uplink serviert sie via mTLS unter /tap-update/<file>. Auf
+          jedem gepairten Tap reicht dann:
+
+              sudo cyjan-tap update --from-master
+
+          Pull-basiert — der Tap zieht selbst, kein Master-Push. Hash-
+          Verifikation gegen das Manifest, anschließend `docker load` +
+          `compose up -d --force-recreate`. Outage-Buffer fängt die ~30 s
+          Restart-Lücke ab.
 
           ## Notfall-Wiederherstellung
 

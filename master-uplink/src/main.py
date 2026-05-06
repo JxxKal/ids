@@ -64,6 +64,35 @@ HEARTBEAT_TIMEOUT_S = float(os.environ.get("HEARTBEAT_TIMEOUT_S", "75"))
 #   $RULES_DIR/custom/_suricata_overrides.json
 RULES_DIR = Path(os.environ.get("RULES_DIR", "/rules"))
 
+# Tap-Update-Pfad. /opt/ids/tap-update/ am Host wird per Bind-Mount nach
+# /tap-update gemappt. Inhalt entsteht durch die System-Update-Pipeline
+# (api/src/routers/update.py): das Update-ZIP enthält ein tap-update/-
+# Subdir mit images-tap.tar.zst + manifest.json + docker-compose.tap.yml +
+# scripts/. Solange dort kein manifest.json liegt, antworten wir 404.
+TAP_UPDATE_DIR = Path(os.environ.get("TAP_UPDATE_DIR", "/tap-update"))
+
+# Whitelist der via /tap-update/<...> auslieferbaren Pfade. Alles andere
+# (insb. Path-Traversal mit '..') gibt 404 — das ist die einzige Auth-
+# Schicht hier neben dem mTLS-Cert-Check, also bewusst eng halten.
+_TAP_UPDATE_FILES: dict[str, str] = {
+    "manifest":               "manifest.json",
+    "compose":                "docker-compose.tap.yml",
+    "bundle":                 "images-tap.tar.zst",
+    "scripts/post-update.sh":         "scripts/post-update.sh",
+    "scripts/daemon.json":            "scripts/daemon.json",
+    "scripts/cyjan-maintenance":      "scripts/cyjan-maintenance",
+    "scripts/cyjan-maintenance.service": "scripts/cyjan-maintenance.service",
+    "scripts/cyjan-maintenance.timer":   "scripts/cyjan-maintenance.timer",
+}
+
+_TAP_UPDATE_CONTENT_TYPES: dict[str, str] = {
+    ".json": "application/json",
+    ".yml":  "application/yaml",
+    ".yaml": "application/yaml",
+    ".zst":  "application/octet-stream",
+    ".sh":   "text/x-shellscript",
+}
+
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s [master-uplink] %(message)s",
@@ -311,9 +340,17 @@ def _make_protocol_class(auth: TapAuth):
 
     class TapProto(WebSocketServerProtocol):
         async def process_request(self, path, request_headers):
-            if path.split("?", 1)[0] != "/config":
+            base_path = path.split("?", 1)[0]
+
+            # Pfade die wir als HTTP-GET auf der gleichen Verbindung
+            # bedienen. Alles andere → return None lässt websockets den
+            # normalen WS-Upgrade laufen.
+            is_config      = base_path == "/config"
+            is_tap_update  = base_path.startswith("/tap-update/")
+            if not (is_config or is_tap_update):
                 return None
 
+            # mTLS-Cert-Check für ALLE HTTP-GETs (Config + Tap-Update).
             ssl_obj = self.transport.get_extra_info("ssl_object")
             if ssl_obj is None:
                 return (
@@ -330,14 +367,18 @@ def _make_protocol_class(auth: TapAuth):
                 )
             info = await auth.lookup(fingerprint)
             if not info or info["status"] != "active":
-                log.warning("/config-Request mit unbekanntem/revokeden Cert (fp=%s)",
-                            fingerprint[:16])
+                log.warning("HTTP-GET %s mit unbekanntem/revokeden Cert (fp=%s)",
+                            base_path, fingerprint[:16])
                 return (
                     HTTPStatus.FORBIDDEN,
                     [("Content-Type", "text/plain")],
                     b"unknown or revoked tap",
                 )
 
+            if is_tap_update:
+                return await _serve_tap_update(base_path, info)
+
+            # ─── /config (Reverse-Channel-Pull) ─────────────────────
             try:
                 body, etag = await build_config_bundle(auth)
             except Exception as exc:
@@ -370,6 +411,56 @@ def _make_protocol_class(auth: TapAuth):
             )
 
     return TapProto
+
+
+async def _serve_tap_update(path: str, tap_info: dict):
+    """Liefert Dateien aus /tap-update/ aus. Whitelist-basiert, kein
+    Path-Traversal möglich. Wird unter mTLS-Auth (siehe TapProto.process_
+    request) aufgerufen — ein gepairter Tap kann beliebig oft pullen.
+
+    Antwort: (HTTPStatus, headers, body). Body wird in den Speicher
+    geladen — bei Bundles bis ~1 GB OK, weil V1-Master typisch 8+ GB RAM
+    hat. Eine streaming-Version käme in V2 (z.B. via aiohttp-Server-Mode)
+    wenn die Bundles deutlich größer werden."""
+    sub = path[len("/tap-update/"):]
+    rel = _TAP_UPDATE_FILES.get(sub)
+    if rel is None:
+        return (
+            HTTPStatus.NOT_FOUND,
+            [("Content-Type", "text/plain")],
+            b"unknown tap-update path",
+        )
+    target = TAP_UPDATE_DIR / rel
+    if not target.exists() or not target.is_file():
+        return (
+            HTTPStatus.NOT_FOUND,
+            [("Content-Type", "text/plain")],
+            f"{rel} not staged".encode(),
+        )
+
+    try:
+        body = await asyncio.to_thread(target.read_bytes)
+    except Exception as exc:
+        log.error("tap-update read fail %s: %s", rel, exc)
+        return (
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            [("Content-Type", "text/plain")],
+            b"read error",
+        )
+
+    suffix = target.suffix.lower()
+    ctype  = _TAP_UPDATE_CONTENT_TYPES.get(suffix, "application/octet-stream")
+    log.info("tap-update %s ausgeliefert an %s (%d Bytes)",
+             sub, tap_info["name"], len(body))
+    return (
+        HTTPStatus.OK,
+        [
+            ("Content-Type", ctype),
+            ("Content-Length", str(len(body))),
+            ("Cache-Control", "no-cache"),
+        ],
+        body,
+    )
 
 
 async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
