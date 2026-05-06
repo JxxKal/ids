@@ -1,5 +1,6 @@
 #!/bin/bash
 # Cyjan IDS – Maintenance-Routine.
+#
 # Räumt unbenutzte Docker-Ressourcen weg, damit /var/lib/{docker,containerd}
 # nicht über die Zeit voll läuft. Wird vom systemd-Timer wöchentlich
 # aufgerufen, kann aber auch manuell laufen:
@@ -12,20 +13,31 @@
 #                                         # einem Disk-Voll-Fall heraus
 #                                         # erst nach docker pull/load.
 #   sudo cyjan-maintenance --dry-run     # nur anzeigen, was räumbar wäre
+#
+#   sudo cyjan-maintenance --pcap-cleanup [--days N]
+#                                       # forciert mc rm --older-than auf
+#                                       # ids-pcaps (umgeht den MinIO-Scanner-
+#                                       # Lag wenn Disk akut voll ist).
+#                                       # Default-Tage: aus /opt/ids/.env
+#                                       # PCAP_RETENTION_DAYS, sonst 7.
 
 set -euo pipefail
 
 AGGRESSIVE=0
 DRY_RUN=0
-for arg in "$@"; do
-  case "$arg" in
-    --aggressive) AGGRESSIVE=1 ;;
-    --dry-run)    DRY_RUN=1    ;;
+PCAP_CLEANUP=0
+PCAP_DAYS=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --aggressive)   AGGRESSIVE=1; shift ;;
+    --dry-run)      DRY_RUN=1; shift ;;
+    --pcap-cleanup) PCAP_CLEANUP=1; shift ;;
+    --days)         PCAP_DAYS="${2:-}"; shift 2 ;;
     -h|--help)
-      sed -n '2,18p' "$0"
+      sed -n '2,25p' "$0"
       exit 0
       ;;
-    *) echo "Unbekanntes Argument: $arg" >&2; exit 2 ;;
+    *) echo "Unbekanntes Argument: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -36,6 +48,40 @@ fi
 
 ts() { date +'%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] $*"; }
+
+# ── PCAP-Cleanup ──────────────────────────────────────────────────────────
+# Force-Trigger gegen MinIO. Wir warten nicht auf den MinIO-Scanner (1-6h),
+# sondern lassen mc explizit alles >N Tage löschen. Hilfreich wenn das Disk
+# akut voll ist und die Lifecycle-Rule erst beim nächsten Scanner-Pass
+# greifen würde.
+if [ "$PCAP_CLEANUP" -eq 1 ]; then
+  ENV_FILE="/opt/ids/.env"
+  if [ ! -r "$ENV_FILE" ]; then
+    log "FEHLER: $ENV_FILE fehlt — Cyjan vermutlich nicht installiert."
+    exit 1
+  fi
+  AKEY=$(grep -E '^MINIO_ACCESS_KEY=' "$ENV_FILE" | tail -1 | cut -d= -f2-)
+  SKEY=$(grep -E '^MINIO_SECRET_KEY=' "$ENV_FILE" | tail -1 | cut -d= -f2-)
+  if [ -z "$PCAP_DAYS" ]; then
+    PCAP_DAYS=$(grep -E '^PCAP_RETENTION_DAYS=' "$ENV_FILE" | tail -1 | cut -d= -f2-)
+    [ -z "$PCAP_DAYS" ] && PCAP_DAYS=7
+  fi
+  case "$PCAP_DAYS" in
+    ''|*[!0-9]*) log "FEHLER: --days muss positive Zahl sein, war '$PCAP_DAYS'."; exit 2 ;;
+  esac
+  log "PCAP-Cleanup: lösche Files >${PCAP_DAYS} Tage aus L/ids-pcaps/alerts/"
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "Dry-Run: würde mc rm --recursive --force --older-than ${PCAP_DAYS}d laufen lassen."
+  else
+    docker run --rm --network ids_ids-net \
+      -e "MC_HOST_L=http://${AKEY}:${SKEY}@minio:9000" \
+      --entrypoint /bin/sh \
+      minio/mc:latest \
+      -c "mc rm --recursive --force --older-than ${PCAP_DAYS}d L/ids-pcaps/alerts/ 2>&1 | tail -10; echo === Bucket-Größe danach: ===; mc du L/ids-pcaps"
+  fi
+  log "PCAP-Cleanup fertig."
+  exit 0
+fi
 
 log "Disk vorher:"
 df -h / /var/lib/docker 2>/dev/null | sed 's/^/  /'

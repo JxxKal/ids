@@ -16,6 +16,7 @@ import {
   fetchRuleFiles, fetchRuleFile, saveRuleFile, deleteRuleFile,
   fetchLearnedPatterns,
   fetchDbStats, cleanupDb, vacuumDb, setRetentionPolicy, backupDbUrl, restoreDb, fetchMaintenanceAudit,
+  fetchPcapRetention, setPcapRetention, forcePcapCleanup,
   fetchDnsResolvers, saveDnsResolvers,
   fetchSigRules, fetchSigRulesOverrides, saveSigRulesOverrides,
   fetchMlStatus, startMlTraining, pauseMlTuning, resumeMlTuning,
@@ -1308,6 +1309,9 @@ function DatabaseMaintenance() {
       {/* ── 4. Retention ─────────────────────────────────────────────────── */}
       <RetentionSection stats={stats} onDone={reload} />
 
+      {/* ── 4b. PCAP-Retention (MinIO) ───────────────────────────────────── */}
+      <PcapRetentionSection />
+
       {/* ── 5. Backup / Restore ──────────────────────────────────────────── */}
       <BackupRestoreSection onDone={reload} />
 
@@ -1557,6 +1561,170 @@ function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: (
       </div>
       {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
     </ActionCard>
+  );
+}
+
+// ── PCAP-Retention-Sektion (MinIO ids-pcaps Bucket Lifecycle) ─────────────────
+
+function PcapRetentionSection() {
+  const { t } = useTranslation();
+  const [state,    setState]    = useState<Awaited<ReturnType<typeof fetchPcapRetention>> | null>(null);
+  const [busy,     setBusy]     = useState(false);
+  const [days,     setDays]     = useState<string>('');
+  const [msg,      setMsg]      = useState('');
+  const [msgType,  setMsgType]  = useState<'ok' | 'err'>('ok');
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
+
+  const reload = () => {
+    fetchPcapRetention()
+      .then(s => {
+        setState(s);
+        // Form-Default: persisted > active > default. Erst-Setup zeigt env-Default.
+        const v = s.persisted_days ?? s.active_days ?? s.default_days;
+        setDays(String(v));
+      })
+      .catch(e => { setMsgType('err'); setMsg(String((e as Error).message)); });
+  };
+  useEffect(() => { reload(); const ti = setInterval(reload, 60_000); return () => clearInterval(ti); }, []);
+
+  const save = async () => {
+    const n = parseInt(days, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 365) {
+      setMsgType('err'); setMsg(t('settings.dbMaint.pcapDaysInvalid', { defaultValue: 'Days muss 1–365 sein.' }));
+      return;
+    }
+    setBusy(true); setMsg('');
+    try {
+      const r = await setPcapRetention(n);
+      setMsgType('ok'); setMsg(r.message);
+      reload();
+    } catch (e) {
+      setMsgType('err'); setMsg(String((e as Error).message));
+    } finally { setBusy(false); }
+  };
+
+  const runCleanup = async () => {
+    const n = parseInt(days, 10);
+    if (!Number.isFinite(n) || n < 1) return;
+    setBusy(true); setConfirmCleanup(false); setMsg('');
+    try {
+      const r = await forcePcapCleanup(n);
+      setMsgType('ok');
+      setMsg(t('settings.dbMaint.pcapCleanupResult', {
+        defaultValue: '{{deleted}} PCAPs entfernt, {{gb}} GB freigegeben.',
+        deleted: r.deleted,
+        gb: (r.bytes_freed / 1024 / 1024 / 1024).toFixed(2),
+      }));
+      reload();
+    } catch (e) {
+      setMsgType('err'); setMsg(String((e as Error).message));
+    } finally { setBusy(false); }
+  };
+
+  if (!state) {
+    return (
+      <ActionCard title={t('settings.dbMaint.pcapRetentionTitle', { defaultValue: 'PCAP-Speicher (MinIO)' })}>
+        <p className="text-slate-500 text-xs">{t('common.loading')}</p>
+      </ActionCard>
+    );
+  }
+
+  const driftWarning = state.persisted_days !== null
+    && state.active_days !== null
+    && state.persisted_days !== state.active_days;
+
+  return (
+    <ActionCard title={t('settings.dbMaint.pcapRetentionTitle', { defaultValue: 'PCAP-Speicher (MinIO)' })}>
+      <p className="text-xs text-slate-500">
+        {t('settings.dbMaint.pcapRetentionHint', {
+          defaultValue: 'Lifecycle-Regel des ids-pcaps Buckets. PCAP-Files werden nach Ablauf automatisch entfernt. Typische Schreibrate 10–20 GB/Tag — bei 7 Tagen Retention sind ~140 GB stable state.',
+        })}
+      </p>
+
+      {/* Aktueller Bucket-State */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <Stat label={t('settings.dbMaint.pcapBucketSize',  { defaultValue: 'Bucket-Größe' })}
+              value={`${state.bucket.total_gb.toFixed(1)} GB`} />
+        <Stat label={t('settings.dbMaint.pcapObjectCount', { defaultValue: 'Objekte' })}
+              value={state.bucket.object_count.toLocaleString('de-DE')} />
+        <Stat label={t('settings.dbMaint.pcapOldest',      { defaultValue: 'Ältester PCAP' })}
+              value={state.bucket.oldest_age_days != null ? `${state.bucket.oldest_age_days} Tage` : '–'} />
+        <Stat label={t('settings.dbMaint.pcapActiveRule',  { defaultValue: 'Aktive Lifecycle' })}
+              value={state.active_days != null ? `${state.active_days} Tage` : t('settings.dbMaint.pcapNoRule', { defaultValue: 'keine!' })} />
+      </div>
+
+      {state.active_days == null && (
+        <p className="text-xs text-amber-300">
+          {t('settings.dbMaint.pcapNoRuleWarn', {
+            defaultValue: 'Keine Lifecycle-Rule am Bucket aktiv — Stack neu starten, dann setzt minio-init sie automatisch. Oder hier einen Wert speichern.',
+          })}
+        </p>
+      )}
+      {driftWarning && (
+        <p className="text-xs text-amber-300">
+          {t('settings.dbMaint.pcapDriftWarn', {
+            defaultValue: 'Persisted-Wert ({{p}}d) weicht von aktiver Rule ({{a}}d) ab — UI-Save überschreibt den realen Stand.',
+            p: state.persisted_days,
+            a: state.active_days,
+          })}
+        </p>
+      )}
+
+      {/* Eingabe + Save */}
+      <div className="flex flex-wrap items-end gap-3 pt-2 border-t border-slate-800/60">
+        <div>
+          <label className="text-[10px] text-slate-500 uppercase">
+            {t('settings.dbMaint.pcapDaysLabel', { defaultValue: 'Retention (Tage)' })}
+          </label>
+          <input
+            type="number"
+            value={days}
+            onChange={e => setDays(e.target.value)}
+            min="1" max="365"
+            className="cyjan-input text-xs block mt-1 w-24"
+          />
+        </div>
+        <button
+          disabled={busy}
+          onClick={save}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40"
+        >
+          {t('settings.dbMaint.pcapSave', { defaultValue: 'Lifecycle setzen' })}
+        </button>
+        <button
+          disabled={busy || state.bucket.object_count === 0}
+          onClick={() => setConfirmCleanup(true)}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-amber-700 hover:bg-amber-600 text-white disabled:opacity-40"
+          title={t('settings.dbMaint.pcapCleanupTitle', { defaultValue: 'Sofort >N Tage alte PCAPs löschen, ohne auf den MinIO-Scanner zu warten' })}
+        >
+          {t('settings.dbMaint.pcapCleanupBtn', { defaultValue: 'Cleanup jetzt' })}
+        </button>
+        <span className="text-[10px] text-slate-600 font-mono">
+          env-Default: {state.default_days}d
+        </span>
+      </div>
+      {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
+
+      {confirmCleanup && (
+        <ConfirmDialog
+          message={t('settings.dbMaint.pcapCleanupConfirm', {
+            defaultValue: 'PCAPs >{{days}} Tage werden sofort und unwiderruflich aus MinIO gelöscht. Fortfahren?',
+            days: days,
+          })}
+          onConfirm={runCleanup}
+          onCancel={() => setConfirmCleanup(false)}
+        />
+      )}
+    </ActionCard>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded px-2 py-1.5">
+      <div className="text-[9px] text-slate-500 uppercase tracking-wider">{label}</div>
+      <div className="text-slate-200 font-mono mt-0.5">{value}</div>
+    </div>
   );
 }
 

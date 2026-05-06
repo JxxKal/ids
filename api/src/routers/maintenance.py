@@ -17,12 +17,14 @@ Sektionen:
 """
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import time
 from typing import Literal
 
 import asyncpg
+import orjson
 from bcrypt import checkpw
 from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -30,6 +32,8 @@ from pydantic import BaseModel, Field
 
 from database import get_pool
 from deps import require_admin
+
+log = logging.getLogger("maintenance")
 
 router = APIRouter(prefix="/api/maintenance", tags=["maintenance"])
 
@@ -505,3 +509,240 @@ async def audit_log(
         }
         for r in rows
     ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 8. PCAP-Retention (MinIO Lifecycle)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Aktuelle Default-Retention für ids-pcaps Bucket. minio-init setzt das beim
+# Stack-Start aus PCAP_RETENTION_DAYS env-Var (Default 7). Über die UI kann
+# der Wert zur Laufzeit geändert werden — wird in system_config persistiert
+# und beim API-Startup gegen MinIO gesynct (siehe ensure_pcap_lifecycle()).
+
+PCAP_BUCKET   = "ids-pcaps"
+PCAP_RULE_ID  = "ids-pcap-expiry-managed"
+SETTINGS_KEY  = "pcap_retention_days"
+
+
+def _build_lifecycle(days: int):
+    """LifecycleConfig-Objekt für den ids-pcaps-Bucket. Eine Rule, die
+    auf den ganzen Bucket-Inhalt wirkt und nach N Tagen löscht."""
+    from minio.lifecycleconfig import LifecycleConfig, Rule, Expiration, Filter
+    return LifecycleConfig([
+        Rule(
+            rule_id=PCAP_RULE_ID,
+            rule_filter=Filter(prefix=""),
+            status="Enabled",
+            expiration=Expiration(days=days),
+        ),
+    ])
+
+
+async def _read_pcap_setting(pool: asyncpg.Pool) -> int | None:
+    """Liest pcap_retention_days aus system_config. None wenn nicht
+    gesetzt (= UI hat noch nie was geändert, env-Var-Default greift)."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT value FROM system_config WHERE key = $1",
+            SETTINGS_KEY,
+        )
+    if not row:
+        return None
+    val = row["value"]
+    if isinstance(val, dict):
+        days = val.get("days")
+    else:
+        days = val
+    try:
+        return int(days)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _write_pcap_setting(pool: asyncpg.Pool, days: int) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO system_config (key, value)
+            VALUES ($1, $2::jsonb)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            SETTINGS_KEY, orjson.dumps({"days": days}).decode(),
+        )
+
+
+def _pcap_bucket_stats(minio_client) -> dict:
+    """Bucket-Größe + Object-Count + Alter des ältesten Objekts. Robust
+    gegen leeren Bucket. Zählt bis 50k Objects, danach summiert weiter
+    aber kein Detail-Sample mehr (sonst dauert's bei Massendaten)."""
+    import datetime as _dt
+    total_bytes = 0
+    count = 0
+    oldest_ts: _dt.datetime | None = None
+    try:
+        for obj in minio_client.list_objects(PCAP_BUCKET, recursive=True):
+            count += 1
+            if obj.size:
+                total_bytes += obj.size
+            ts = obj.last_modified
+            if ts and (oldest_ts is None or ts < oldest_ts):
+                oldest_ts = ts
+            if count >= 50000:
+                break
+    except Exception as exc:
+        log.warning("pcap-bucket-stats: %s", exc)
+    return {
+        "object_count":  count,
+        "total_bytes":   total_bytes,
+        "total_gb":      round(total_bytes / 1024 / 1024 / 1024, 2),
+        "oldest_iso":    oldest_ts.isoformat() if oldest_ts else None,
+        "oldest_age_days": (
+            (_dt.datetime.now(_dt.timezone.utc) - oldest_ts).days
+            if oldest_ts else None
+        ),
+    }
+
+
+def _read_active_lifecycle_days(minio_client) -> int | None:
+    """Liest die aktuell aktive Lifecycle-Rule am Bucket aus. None wenn
+    keine Rule gesetzt ist (Edge-Case nach Volume-Reset)."""
+    try:
+        cfg = minio_client.get_bucket_lifecycle(PCAP_BUCKET)
+    except Exception as exc:
+        log.debug("get_bucket_lifecycle %s: %s", PCAP_BUCKET, exc)
+        return None
+    if not cfg or not getattr(cfg, "rules", None):
+        return None
+    for r in cfg.rules:
+        exp = getattr(r, "expiration", None)
+        if exp is None:
+            continue
+        days = getattr(exp, "days", None)
+        if days:
+            return int(days)
+    return None
+
+
+async def ensure_pcap_lifecycle(pool: asyncpg.Pool, minio_client) -> None:
+    """Wird vom api-Startup-Hook aufgerufen. Wenn system_config einen
+    Wert hat, wird die MinIO-Lifecycle-Rule darauf gesetzt — robust
+    gegen einen minio-init-Run mit alter env-Var. Wenn system_config
+    nichts hat, no-op (env-Var-Default vom minio-init wirkt weiter)."""
+    desired = await _read_pcap_setting(pool)
+    if desired is None:
+        return
+    current = _read_active_lifecycle_days(minio_client)
+    if current == desired:
+        return
+    try:
+        minio_client.set_bucket_lifecycle(PCAP_BUCKET, _build_lifecycle(desired))
+        log.info("PCAP-Lifecycle gesynct: %s → %s Tage", current, desired)
+    except Exception as exc:
+        log.error("PCAP-Lifecycle-Sync gescheitert: %s", exc)
+
+
+@router.get("/pcap-retention", dependencies=[Depends(require_admin)])
+async def get_pcap_retention(
+    pool:  asyncpg.Pool = Depends(get_pool),
+) -> dict:
+    """Aktuelle Konfiguration + Bucket-Stats für die UI."""
+    from main import minio_client
+    persisted = await _read_pcap_setting(pool)
+    active    = _read_active_lifecycle_days(minio_client)
+    stats     = _pcap_bucket_stats(minio_client)
+    return {
+        "persisted_days": persisted,    # aus system_config (UI-Override)
+        "active_days":    active,       # aus MinIO-Bucket (real)
+        "default_days":   int(os.environ.get("PCAP_RETENTION_DAYS", "7")),
+        "bucket": {
+            "name":            PCAP_BUCKET,
+            "object_count":    stats["object_count"],
+            "total_gb":        stats["total_gb"],
+            "oldest_iso":      stats["oldest_iso"],
+            "oldest_age_days": stats["oldest_age_days"],
+        },
+    }
+
+
+class PcapRetentionUpdate(BaseModel):
+    days: int = Field(..., ge=1, le=365)
+
+
+@router.patch("/pcap-retention", dependencies=[Depends(require_admin)])
+async def set_pcap_retention(
+    body:  PcapRetentionUpdate,
+    user:  dict         = Depends(require_admin),
+    pool:  asyncpg.Pool = Depends(get_pool),
+) -> dict:
+    from main import minio_client
+    start = time.monotonic()
+    try:
+        minio_client.set_bucket_lifecycle(PCAP_BUCKET, _build_lifecycle(body.days))
+        await _write_pcap_setting(pool, body.days)
+        active = _read_active_lifecycle_days(minio_client)
+        msg = f"PCAP-Retention auf {body.days} Tage gesetzt (aktiv: {active})."
+        await _audit(pool, user, "pcap_retention",
+                     {"days": body.days}, {"active_days": active},
+                     True, None, int((time.monotonic() - start) * 1000))
+        return {"success": True, "days": body.days, "active_days": active, "message": msg}
+    except Exception as exc:
+        await _audit(pool, user, "pcap_retention",
+                     {"days": body.days}, None, False, str(exc),
+                     int((time.monotonic() - start) * 1000))
+        raise HTTPException(500, f"Lifecycle-Update gescheitert: {exc}")
+
+
+class PcapForceCleanup(BaseModel):
+    days: int = Field(..., ge=1, le=365)
+
+
+@router.post("/pcap-cleanup", dependencies=[Depends(require_admin)])
+async def pcap_force_cleanup(
+    body:  PcapForceCleanup,
+    user:  dict         = Depends(require_admin),
+    pool:  asyncpg.Pool = Depends(get_pool),
+) -> dict:
+    """Force-Trigger: löscht alle PCAPs > body.days Tage SOFORT, statt
+    auf den nächsten MinIO-Scanner-Pass zu warten. Iteriert per minio-
+    py-Client statt mc-subprocess — kein zusätzliches Container-Spawn
+    nötig.
+    """
+    import datetime as _dt
+    from main import minio_client
+    start    = time.monotonic()
+    cutoff   = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=body.days)
+    deleted  = 0
+    bytes_freed = 0
+    try:
+        # list_objects ist generator — wir sammeln zuerst Keys, dann
+        # remove_objects in Batches (S3-Limit ~1000 pro Call).
+        to_delete = []
+        for obj in minio_client.list_objects(PCAP_BUCKET, recursive=True):
+            if obj.last_modified and obj.last_modified < cutoff:
+                to_delete.append(obj.object_name)
+                if obj.size:
+                    bytes_freed += obj.size
+
+        from minio.deleteobjects import DeleteObject
+        # remove_objects ist iterator — wir consumen ihn um Errors zu
+        # erfassen.
+        chunk = 1000
+        for i in range(0, len(to_delete), chunk):
+            batch = [DeleteObject(k) for k in to_delete[i:i+chunk]]
+            for err in minio_client.remove_objects(PCAP_BUCKET, batch):
+                log.warning("pcap-cleanup remove error: %s", err)
+            deleted += len(to_delete[i:i+chunk])
+
+        msg = f"{deleted} Objects entfernt, ~{round(bytes_freed/1024/1024/1024, 2)} GB."
+        await _audit(pool, user, "pcap_cleanup",
+                     {"days": body.days},
+                     {"deleted": deleted, "bytes_freed": bytes_freed},
+                     True, None, int((time.monotonic() - start) * 1000))
+        return {"success": True, "deleted": deleted, "bytes_freed": bytes_freed,
+                "message": msg}
+    except Exception as exc:
+        await _audit(pool, user, "pcap_cleanup",
+                     {"days": body.days}, None, False, str(exc),
+                     int((time.monotonic() - start) * 1000))
+        raise HTTPException(500, f"PCAP-Cleanup gescheitert: {exc}")

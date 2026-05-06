@@ -1319,6 +1319,43 @@ export async function fetchMaintenanceAudit(limit = 100): Promise<MaintenanceAud
   return req(`/api/maintenance/audit?limit=${limit}`);
 }
 
+// ── PCAP-Retention (MinIO Lifecycle für ids-pcaps Bucket) ────────────────
+
+export interface PcapRetentionState {
+  persisted_days: number | null;   // aus system_config (UI-Override)
+  active_days:    number | null;   // aus MinIO-Bucket (real)
+  default_days:   number;          // PCAP_RETENTION_DAYS env-Var
+  bucket: {
+    name:            string;
+    object_count:    number;
+    total_gb:        number;
+    oldest_iso:      string | null;
+    oldest_age_days: number | null;
+  };
+}
+
+export async function fetchPcapRetention(): Promise<PcapRetentionState> {
+  return req('/api/maintenance/pcap-retention');
+}
+
+export async function setPcapRetention(days: number): Promise<{
+  success: boolean; days: number; active_days: number | null; message: string;
+}> {
+  return req('/api/maintenance/pcap-retention', {
+    method: 'PATCH',
+    body:   JSON.stringify({ days }),
+  });
+}
+
+export async function forcePcapCleanup(days: number): Promise<{
+  success: boolean; deleted: number; bytes_freed: number; message: string;
+}> {
+  return req('/api/maintenance/pcap-cleanup', {
+    method: 'POST',
+    body:   JSON.stringify({ days }),
+  });
+}
+
 // ── Remote Taps ───────────────────────────────────────────────────────────
 
 export async function fetchTaps(): Promise<RemoteTap[]> {

@@ -228,6 +228,16 @@ async def startup() -> None:
     # bereits archiviert ist; sonst Snapshot in MinIO ablegen.
     asyncio.create_task(reports_router.archive_loop())
 
+    # PCAP-Lifecycle-Sync: wenn UI einen abweichenden Retention-Wert in
+    # system_config persistiert hat, am MinIO durchsetzen. minio-init
+    # läuft zwar bei jedem Stack-Start mit dem env-Var-Default, würde
+    # also den UI-Override sonst überschreiben.
+    try:
+        from routers.maintenance import ensure_pcap_lifecycle
+        await ensure_pcap_lifecycle(get_pool(), minio_client)
+    except Exception as exc:
+        log.warning("PCAP-Lifecycle-Sync beim Startup fehlgeschlagen: %s", exc)
+
     log.info("API startup complete")
 
 
