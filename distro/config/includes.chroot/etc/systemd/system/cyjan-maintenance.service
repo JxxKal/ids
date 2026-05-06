@@ -1,0 +1,17 @@
+[Unit]
+Description=Cyjan IDS – wöchentliches Docker-Aufräumen
+Documentation=https://github.com/JxxKal/ids
+After=docker.service
+Requires=docker.service
+ConditionPathExists=/usr/local/bin/cyjan-maintenance
+
+[Service]
+Type=oneshot
+# Standard-Aufräumen (NICHT --aggressive). Tagged-aber-aktuell-unused
+# Images bleiben erhalten — wichtig auf Offline-Hosts, weil sonst beim
+# nächsten Restart das Image fehlt und kein Internet-Pull-Pfad zur
+# Verfügung steht.
+ExecStart=/usr/local/bin/cyjan-maintenance
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=600

@@ -32,6 +32,10 @@ systemctl enable ids-firstboot.service
 # bleiben manuell gestoppte oder nach Hard-Power-Off im Exited-Zustand
 # gelandete Container über den Reboot hinweg unten.
 systemctl enable cyjan-stack.service
+# Wöchentliches Docker-Aufräumen — verhindert dass /var/lib/containerd
+# durch alte Image-Layer + Build-Cache vollläuft. Cap pro Container-Log
+# wird zusätzlich über /etc/docker/daemon.json gesetzt (50m × 5 Files).
+systemctl enable cyjan-maintenance.timer
 
 echo "[cyjan] IDS-Verzeichnis: $IDS_DIR"
-echo "[cyjan] First-Boot- und Stack-Boot-Service aktiviert"
+echo "[cyjan] First-Boot-, Stack-Boot- und Maintenance-Timer aktiviert"

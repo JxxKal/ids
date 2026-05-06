@@ -546,10 +546,23 @@ jobs:
           PKG="cyjan-ids-update-${VERSION}"
           mkdir -p "$PKG"
 
-          cp docker-compose.yml "$PKG/"
-          cp VERSION             "$PKG/"
-          cp .env.example        "$PKG/"
-          cp -r infra/           "$PKG/infra/"
+          cp docker-compose.yml     "$PKG/"
+          cp docker-compose.tap.yml "$PKG/"
+          cp VERSION                "$PKG/"
+          cp .env.example           "$PKG/"
+          cp -r infra/              "$PKG/infra/"
+
+          # post-update.sh: optionale Host-Wartung, die der API-Update-Container
+          # nicht selbst ausführen kann (greift auf /etc/docker/ und systemd zu).
+          # User wird nach erfolgreichem GUI-Update einmal manuell zur sudo-
+          # Ausführung aufgefordert. Idempotent — re-runs sind unschädlich.
+          mkdir -p "$PKG/scripts"
+          cp distro/config/includes.chroot/etc/docker/daemon.json                    "$PKG/scripts/daemon.json"
+          cp distro/config/includes.chroot/usr/local/bin/cyjan-maintenance           "$PKG/scripts/cyjan-maintenance"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-maintenance.service "$PKG/scripts/cyjan-maintenance.service"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-maintenance.timer   "$PKG/scripts/cyjan-maintenance.timer"
+          cp scripts/post-update.sh "$PKG/scripts/post-update.sh"
+          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance"
 
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.
@@ -599,6 +612,18 @@ jobs:
           - docker-compose.yml und infra/ aktualisiert
           - Container mit `docker compose up -d` neu gestartet
           - .env, .git und Datenbank bleiben unverändert
+
+          ## Empfohlen nach dem ersten Import dieses Updates
+
+          Einmalig auf dem Host als root ausführen, damit die Container-Log-
+          Rotation (50m × 5) und der wöchentliche Docker-Maintenance-Cron
+          aktiv werden:
+
+              sudo bash /opt/ids/scripts/post-update.sh
+
+          Idempotent — kann beliebig oft laufen, ändert nur Pfade unter
+          /etc/docker/ und /etc/systemd/system/ die der API-Container nicht
+          selbst bedienen kann.
 
           ## Notfall-Wiederherstellung
 

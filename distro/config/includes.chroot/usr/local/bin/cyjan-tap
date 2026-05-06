@@ -388,6 +388,19 @@ cmd_config() {
   esac
 }
 
+cmd_maintenance() {
+  # Wrapper auf das generische /usr/local/bin/cyjan-maintenance —
+  # auf einem frisch installierten Tap-ISO liegt das Skript dort. Auf
+  # älteren Installationen, die per Update-ZIP versorgt wurden, kommt es
+  # über post-update.sh nach.
+  if ! command -v cyjan-maintenance >/dev/null 2>&1; then
+    echo "cyjan-maintenance ist nicht installiert. Auf dem Tap einmalig:" >&2
+    echo "  sudo bash /opt/ids/scripts/post-update.sh" >&2
+    exit 1
+  fi
+  exec sudo cyjan-maintenance "$@"
+}
+
 usage() {
   cat <<USAGE
 cyjan-tap – Remote-Tap-CLI
@@ -402,6 +415,7 @@ cyjan-tap – Remote-Tap-CLI
   cyjan-tap logs follow [service]        Container-Logs (Default alle)
   cyjan-tap config get                   aktuelle Konfiguration
   cyjan-tap config set master_url <url>  Master-WSS-URL ändern (wss:// erzwungen)
+  cyjan-tap maintenance [--aggressive]   Docker aufräumen (dangling Images, Build-Cache)
 
 ENV:
   TAP_API_URL    Default http://127.0.0.1:8001
@@ -419,6 +433,7 @@ case "${1:-status}" in
   reconnect)  shift; cmd_reconnect ;;
   logs)       shift; cmd_logs "$@" ;;
   config)     shift; cmd_config "$@" ;;
+  maintenance) shift; cmd_maintenance "$@" ;;
   -h|--help|help) usage ;;
   *) usage; exit 2 ;;
 esac

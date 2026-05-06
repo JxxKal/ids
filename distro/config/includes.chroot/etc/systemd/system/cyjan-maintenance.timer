@@ -1,0 +1,15 @@
+[Unit]
+Description=Wöchentlicher Trigger für cyjan-maintenance
+Documentation=https://github.com/JxxKal/ids
+
+[Timer]
+# Sonntags morgens — niedrige Last-Zeit auf den meisten OT-Netzen.
+# Persistent=true: wenn die Maschine zur geplanten Zeit aus war, läuft
+# der Job beim nächsten Boot nach (z.B. nach Stromausfall).
+OnCalendar=Sun 04:30:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=cyjan-maintenance.service
+
+[Install]
+WantedBy=timers.target

@@ -44,6 +44,8 @@ Dieses Repository (VS Code, macOS) ist die **Source of Truth** und wird auf GitH
 
 - **Niemals direkt auf einem Host editieren** — jede Änderung geht durch Git.
 - **Container-Logs bei Problemen**: `docker compose logs -f <service>` (Master) bzw. `docker compose -f docker-compose.tap.yml logs -f <service>` (Tap).
+- **Container-Log-Rotation** (seit v2.3.3): beide Compose-YAMLs deklarieren `logging: *default-logging` (50 MB × 5 Files pro Container). Zusätzlich legt der ISO-Installer `/etc/docker/daemon.json` mit denselben Limits aus, damit auch Container außerhalb des Cyjan-Stacks gecappt sind. Auf bestehenden Installationen liefert das Update-ZIP ein `scripts/post-update.sh`, das daemon.json + maintenance-Timer einmalig nachzieht (`sudo bash /opt/ids/scripts/post-update.sh`).
+- **Wöchentliches Docker-Aufräumen**: `cyjan-maintenance.timer` läuft sonntags 04:30 ein `docker system prune -f` (dangling Images + Build-Cache). Manuell auch via `sudo cyjan-maintenance` oder am Tap `cyjan-tap maintenance`. `--aggressive` macht `prune -af` (entfernt auch tagged-aber-unused Images — nur online-Hosts, sonst fehlt das Image beim nächsten Restart).
 - **ISO-Build** läuft in GitHub Actions, nicht auf den Hosts (Tag-Push `v*` oder `workflow_dispatch`). Es gibt zwei ISO-Varianten: Master-ISO (voller Stack) und Tap-ISO (`distro/tap-config/`).
 
 ## Commands

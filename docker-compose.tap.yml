@@ -15,6 +15,18 @@
 #   POSTGRES_PASSWORD  – nicht benötigt (kein lokales DB), muss aber gesetzt sein
 #                        damit die env-Substitution nicht meckert.
 
+# YAML-Anchor für Container-Log-Rotation. Greift pro Service via
+# `logging: *default-logging`. Schützt gegen den Disk-Voll-Fall, der
+# entsteht wenn ein Service in eine Retry-Schleife rennt (z.B. Sniffer
+# vs. abgestürzter Kafka-Broker → MB/s an Fehler-Logs).
+# Cap pro Container: 5 × 50 MB = 250 MB. Selbst ein Tag im Retry-Storm
+# bleibt damit unter 1 GB pro Container.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 networks:
   tap-net:
     driver: bridge
@@ -37,6 +49,7 @@ services:
     image: apache/kafka:latest
     container_name: cyjan-tap-kafka
     restart: unless-stopped
+    logging: *default-logging
     stop_grace_period: 30s
     networks: [tap-net]
     volumes:
@@ -87,6 +100,7 @@ services:
     build: ./sniffer
     container_name: cyjan-tap-sniffer
     restart: unless-stopped
+    logging: *default-logging
     network_mode: host           # AF_PACKET will den realen NIC sehen
     cap_add: [NET_ADMIN, NET_RAW]
     depends_on:
@@ -113,6 +127,7 @@ services:
     build: ./flow-aggregator
     container_name: cyjan-tap-flow-aggregator
     restart: unless-stopped
+    logging: *default-logging
     networks: [tap-net]
     depends_on:
       kafka:
@@ -124,6 +139,7 @@ services:
     build: ./signature-engine
     container_name: cyjan-tap-signature-engine
     restart: unless-stopped
+    logging: *default-logging
     networks: [tap-net]
     depends_on:
       kafka:
@@ -150,6 +166,7 @@ services:
     build: ./tap-uplink
     container_name: cyjan-tap-uplink
     restart: unless-stopped
+    logging: *default-logging
     networks: [tap-net]
     depends_on:
       kafka:
@@ -186,6 +203,7 @@ services:
     build: ./tap-api
     container_name: cyjan-tap-api
     restart: unless-stopped
+    logging: *default-logging
     networks: [tap-net]
     depends_on:
       kafka:

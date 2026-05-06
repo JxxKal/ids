@@ -15,6 +15,18 @@ networks:
       config:
         - subnet: 172.28.0.0/24
 
+# YAML-Anchor für Container-Log-Rotation. Greift pro Service via
+# `logging: *default-logging`. Schützt gegen den Disk-Voll-Fall, der
+# entsteht wenn ein Service in eine Retry-Schleife rennt (z.B. Sniffer
+# vs. abgestürzter Kafka-Broker → MB/s an Fehler-Logs).
+# Cap pro Container: 5 × 50 MB = 250 MB. Selbst ein Tag im Retry-Storm
+# bleibt damit unter 1 GB pro Container.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 volumes:
   kafka-data:
   timescaledb-data:
@@ -38,6 +50,7 @@ services:
     image: apache/kafka:latest
     container_name: ids-kafka
     restart: unless-stopped
+    logging: *default-logging
     # Sauberer Shutdown: Kafka muss vor SIGKILL die Logs committen, Partitions
     # schließen und den Controller-Quorum freigeben. Default 10s reicht im
     # Idle-Fall, ist unter Last knapp – 30s gibt Reserve für Reboots mit
@@ -91,6 +104,7 @@ services:
     image: provectuslabs/kafka-ui:latest
     container_name: ids-kafka-ui
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -105,6 +119,7 @@ services:
     image: timescale/timescaledb:latest-pg16
     container_name: ids-timescaledb
     restart: unless-stopped
+    logging: *default-logging
     # Sauberer Shutdown: PostgreSQL muss bei SIGTERM einen Smart-Shutdown-
     # Checkpoint fahren (alle dirty buffers flushen, WAL syncen). Default 10s
     # reicht bei kleiner DB, kann bei großen Hypertables (Alerts/Flows wachsen
@@ -132,6 +147,7 @@ services:
     image: redis:7-alpine
     container_name: ids-redis
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     volumes:
       - redis-data:/data
@@ -148,6 +164,7 @@ services:
     image: minio/minio:latest
     container_name: ids-minio
     restart: unless-stopped
+    logging: *default-logging
     # Sauberer Shutdown: MinIO flusht laufende PCAP-Uploads aus dem Cache,
     # schließt offene Multipart-Uploads. 30s ist reichlich für den OT-Use-
     # Case, in dem PCAPs nur ein paar MB groß sind.
@@ -192,6 +209,7 @@ services:
     build: ./flow-aggregator
     container_name: ids-flow-aggregator
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -209,6 +227,7 @@ services:
     build: ./signature-engine
     container_name: ids-signature-engine
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -239,6 +258,7 @@ services:
     build: ./ml-engine
     container_name: ids-ml-engine
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -259,6 +279,7 @@ services:
     build: ./alert-manager
     container_name: ids-alert-manager
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -303,6 +324,7 @@ services:
     build: ./enrichment-service
     container_name: ids-enrichment-service
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -331,6 +353,7 @@ services:
     build: ./pcap-store
     container_name: ids-pcap-store
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -352,6 +375,7 @@ services:
     build: ./api
     container_name: ids-api
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       timescaledb:
@@ -425,6 +449,7 @@ services:
     build: ./rule-tuner
     container_name: ids-rule-tuner
     restart: unless-stopped
+    logging: *default-logging
     profiles: [prod]
     networks: [ids-net]
     depends_on:
@@ -461,6 +486,7 @@ services:
     build: ./master-uplink
     container_name: ids-master-uplink
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       api:
@@ -492,6 +518,7 @@ services:
     build: ./frontend
     container_name: ids-frontend
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       - api
@@ -509,6 +536,7 @@ services:
     build: ./training-loop
     container_name: ids-training-loop
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -535,6 +563,7 @@ services:
     build: ./irma-bridge
     container_name: ids-irma-bridge
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     depends_on:
       kafka:
@@ -563,6 +592,7 @@ services:
     build: ./sniffer
     container_name: ids-sniffer
     restart: unless-stopped
+    logging: *default-logging
     network_mode: host
     profiles: [prod]
     depends_on:
@@ -587,6 +617,7 @@ services:
     build: ./sniffer
     container_name: ids-sniffer-test
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     profiles: [test]
     depends_on:
@@ -612,6 +643,7 @@ services:
     build: ./traffic-generator
     container_name: ids-traffic-generator
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     profiles: [test]
     depends_on:
@@ -638,6 +670,7 @@ services:
     build: ./snort
     container_name: ids-snort
     restart: unless-stopped
+    logging: *default-logging
     network_mode: host
     profiles: [snort]
     cap_add: [NET_RAW, NET_ADMIN]
@@ -659,6 +692,7 @@ services:
     build: ./snort
     container_name: ids-snort-test
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     profiles: [snort-test]
     cap_add: [NET_RAW, NET_ADMIN]
@@ -681,6 +715,7 @@ services:
     build: ./snort-bridge
     container_name: ids-snort-bridge
     restart: unless-stopped
+    logging: *default-logging
     networks: [ids-net]
     profiles: [snort, snort-test]
     depends_on:
