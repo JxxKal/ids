@@ -561,14 +561,18 @@ async def _read_pcap_setting(pool: asyncpg.Pool) -> int | None:
 
 
 async def _write_pcap_setting(pool: asyncpg.Pool, days: int) -> None:
+    # asyncpg hat einen jsonb-Codec konfiguriert (siehe database.py /
+    # andere routers wie syslog_fwd) — wir übergeben das dict direkt,
+    # kein orjson.dumps + ::jsonb-Cast (sonst wird der String doppelt
+    # JSON-enkodiert und das Read-Pattern findet den dict nicht mehr).
     async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO system_config (key, value)
-            VALUES ($1, $2::jsonb)
+            VALUES ($1, $2)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
             """,
-            SETTINGS_KEY, orjson.dumps({"days": days}).decode(),
+            SETTINGS_KEY, {"days": days},
         )
 
 
