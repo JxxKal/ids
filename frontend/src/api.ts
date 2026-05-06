@@ -1356,6 +1356,10 @@ export async function forcePcapCleanup(days: number): Promise<{
   });
 }
 
+export async function triggerTapPushUpdate(tapId: string): Promise<{ queued: boolean; tap_id: string }> {
+  return req(`/api/taps/${tapId}/trigger-update`, { method: 'POST' });
+}
+
 // ── Tap-Update-Bundle (Master-side) ──────────────────────────────────────
 
 export interface TapUpdateStatus {

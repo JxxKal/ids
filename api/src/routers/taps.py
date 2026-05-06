@@ -193,6 +193,39 @@ async def revoke_tap(
     return Response(status_code=204)
 
 
+@router.post("/{tap_id}/trigger-update", status_code=202)
+async def trigger_tap_update(
+    tap_id: UUID,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    """Setzt update_requested_at — master-uplink sieht das in seinem
+    trigger_loop und sendet einen update_now-Frame an die WebSocket-
+    Connection des Taps. Tap-uplink schreibt dann ein Trigger-File,
+    systemd-path auf dem Tap-Host führt cyjan-tap update --from-master
+    aus.
+
+    Idempotent: zweiter Aufruf re-bumpt update_requested_at, master-
+    uplink sendet erneut. Kein "schon getriggert"-Lock — falls der
+    erste Trigger nicht durchkam (Tap offline, Update-Run gefailt),
+    soll der nächste klick sofort wieder feuern."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE taps
+               SET update_requested_at = now(),
+                   update_requested_by = $2::uuid,
+                   update_acked_at     = NULL
+             WHERE id=$1 AND status='active'
+            """,
+            tap_id, admin.get("sub"),
+        )
+    if result.endswith(" 0"):
+        raise HTTPException(404, "Tap nicht gefunden oder revoked")
+    log.info("Update-Trigger für Tap %s von Admin %s", tap_id, admin.get("sub"))
+    return {"queued": True, "tap_id": str(tap_id)}
+
+
 # ── Pairing (öffentlich, Token-authentisiert) ────────────────────────────
 
 

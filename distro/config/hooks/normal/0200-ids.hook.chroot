@@ -40,6 +40,12 @@ systemctl enable cyjan-maintenance.timer
 # der Cyjan-Stack startet. Idempotent + failsoft (ignoriert virtio-/
 # Hyper-V-Synthetic-NICs die kein ethtool -G unterstützen).
 systemctl enable cyjan-mirror-tune.service
+# Tap-Update-Trigger: lauscht auf /run/cyjan-update/trigger (vom tap-uplink-
+# Container reingeschrieben wenn der Master via WebSocket "update_now"
+# sendet) und ruft den Update-Pfad als root auf dem Host auf. Greift auf
+# Tap-Hosts; auf einem Master ohne Tap-Stack kein-Op (cyjan-tap-Binary
+# da, aber kein Trigger-File schreibt rein).
+systemctl enable cyjan-tap-update.path
 
 echo "[cyjan] IDS-Verzeichnis: $IDS_DIR"
-echo "[cyjan] First-Boot-, Stack-Boot-, Maintenance-Timer und Mirror-Tune aktiviert"
+echo "[cyjan] First-Boot-, Stack-Boot-, Maintenance-Timer, Mirror-Tune und Tap-Update-Trigger aktiviert"

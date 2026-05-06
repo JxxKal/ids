@@ -26,7 +26,7 @@ import {
   type SuricataOverrideEntry,
   fetchBoundaryPriorityMapV2, saveBoundaryPriorityMapV2,
   fetchTaps, createTapPairingToken, revokeTap,
-  fetchTapUpdateStatus, triggerTapUpdateRefresh, type TapUpdateStatus,
+  fetchTapUpdateStatus, triggerTapUpdateRefresh, triggerTapPushUpdate, type TapUpdateStatus,
   fetchPendingTaps, approvePendingTap, rejectPendingTap, fetchTapAuditLog,
   type PendingTap, type TapAuditEntry,
   fetchGeoIpStatus, uploadGeoIp,
@@ -5157,6 +5157,9 @@ function RemoteTapsSettings() {
   const [revokeTarget, setRevokeTarget] = useState<RemoteTap | null>(null);
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [tokenCopied, setTokenCopied] = useState(false);
+  // "Update senden"-Button-State pro Tap
+  const [updateBusy, setUpdateBusy] = useState<string | null>(null);
+  const [updateMsg,  setUpdateMsg]  = useState<{ id: string; msg: string; kind: 'ok' | 'err' } | null>(null);
   // Auto-Pairing: Pending-Liste + Audit-Log
   const [pending, setPending] = useState<PendingTap[]>([]);
   const [showAudit, setShowAudit] = useState(false);
@@ -5471,12 +5474,40 @@ function RemoteTapsSettings() {
                     </td>
                     <td className="px-3 py-2 text-right">
                       {isActive && (
-                        <button
-                          onClick={() => setRevokeTarget(tap)}
-                          className="px-2 py-1 rounded text-[11px] bg-red-900/30 text-red-300 border border-red-700/40 hover:bg-red-900/50"
-                        >
-                          {t('settings.remoteTaps.revoke')}
-                        </button>
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            onClick={async () => {
+                              setUpdateBusy(tap.id);
+                              try {
+                                await triggerTapPushUpdate(tap.id);
+                                setUpdateMsg({ id: tap.id, msg: t('settings.remoteTaps.updateSent', { defaultValue: 'Update-Trigger gesendet' }), kind: 'ok' });
+                              } catch (e) {
+                                setUpdateMsg({ id: tap.id, msg: String((e as Error).message), kind: 'err' });
+                              } finally {
+                                setUpdateBusy(null);
+                                setTimeout(() => setUpdateMsg(m => m?.id === tap.id ? null : m), 5000);
+                              }
+                            }}
+                            disabled={updateBusy === tap.id}
+                            title={t('settings.remoteTaps.updateTrigger', { defaultValue: 'Tap zum Pull-Update vom Master triggern (sudo cyjan-tap update --from-master remote ausführen)' })}
+                            className="px-2 py-1 rounded text-[11px] bg-cyan-900/30 text-cyan-300 border border-cyan-700/40 hover:bg-cyan-900/50 disabled:opacity-40"
+                          >
+                            {updateBusy === tap.id
+                              ? '…'
+                              : t('settings.remoteTaps.update', { defaultValue: 'Update senden' })}
+                          </button>
+                          <button
+                            onClick={() => setRevokeTarget(tap)}
+                            className="px-2 py-1 rounded text-[11px] bg-red-900/30 text-red-300 border border-red-700/40 hover:bg-red-900/50"
+                          >
+                            {t('settings.remoteTaps.revoke')}
+                          </button>
+                        </div>
+                      )}
+                      {updateMsg?.id === tap.id && (
+                        <div className={`text-[10px] mt-1 ${updateMsg.kind === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
+                          {updateMsg.msg}
+                        </div>
                       )}
                     </td>
                   </tr>

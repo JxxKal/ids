@@ -1,0 +1,16 @@
+[Unit]
+Description=Cyjan Tap — Watch /run/cyjan-update/trigger
+Documentation=https://github.com/JxxKal/ids
+After=docker.service
+Requires=docker.service
+
+[Path]
+# Wenn tap-uplink einen "update_now"-Frame vom Master empfängt, schreibt
+# er ein Trigger-File hierhin (via Bind-Mount /run/cyjan-update:/host/
+# cyjan-update). systemd-path startet dann cyjan-tap-update.service,
+# der ruft den eigentlichen Update-Pfad auf.
+PathChanged=/run/cyjan-update/trigger
+Unit=cyjan-tap-update.service
+
+[Install]
+WantedBy=multi-user.target

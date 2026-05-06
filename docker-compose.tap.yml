@@ -199,6 +199,13 @@ services:
       # tap-uplink schickt den Inhalt als hello-Frame an master-uplink, damit
       # die Master-UI pro Tap die laufende Version sieht. Read-only Mount.
       - /opt/ids/VERSION:/etc/cyjan/version:ro
+      # Update-Trigger-Bind-Mount: tap-uplink schreibt hier ein Trigger-
+      # File rein wenn der Master via WebSocket "update_now" sendet. Auf
+      # dem Host watcht cyjan-tap-update.path systemd-Unit dieses File und
+      # ruft `cyjan-tap update --from-master -y` auf — host-side, weil
+      # der Container kein docker socket hat und Self-Restart sonst nicht
+      # funktioniert.
+      - /run/cyjan-update:/host/cyjan-update:rw
 
   # ───────────────────────────────────────────────────────────────────────
   # tap-api – minimaler Status/Konfig-Web-View + Maschinen-Endpunkte für

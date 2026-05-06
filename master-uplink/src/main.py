@@ -514,6 +514,10 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
     alerts_received = 0
     metrics_received = 0
 
+    # In active_taps registrieren, damit der trigger_loop den Tap pingen
+    # kann. Eintrag wird im finally weiter unten wieder entfernt.
+    _active_taps[tap_id] = ws
+
     async def heartbeat_loop() -> None:
         try:
             while True:
@@ -628,12 +632,61 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
     finally:
         hb.cancel()
         st.cancel()
+        _active_taps.pop(tap_id, None)
         # Final-Stats persistieren. Metriken zählen aktuell nicht in die
         # taps.alerts_received-Spalte rein – das wäre irreführend für die UI.
         # Falls später ein metrics_received-Counter in der DB erwünscht ist,
         # kann auth.heartbeat() um ein zweites Argument erweitert werden.
         if alerts_received:
             await auth.heartbeat(tap_id, alerts_received, peer)
+
+
+# Aktive Tap-WebSockets (in-memory). update_trigger_loop nutzt das, um
+# bei einem `update_requested_at > update_acked_at`-Eintrag in der taps-
+# Tabelle einen "update_now"-Frame an den passenden Tap zu schicken.
+_active_taps: dict[str, websockets.WebSocketServerProtocol] = {}
+
+
+async def update_trigger_loop(auth: "TapAuth") -> None:
+    """Pollt alle 5 s die taps-Tabelle nach pending Update-Triggers und
+    sendet WebSocket-Frames an die aktiven Tap-Connections. Lockless,
+    weil _active_taps und DB-State eindeutige Single-Source-of-Truths
+    sind und der Loop in einer einzigen asyncio-Task läuft."""
+    assert auth._pool is not None
+    while True:
+        try:
+            rows = await auth._pool.fetch(
+                """
+                SELECT id::text AS id, name, update_requested_at
+                  FROM taps
+                 WHERE status = 'active'
+                   AND update_requested_at IS NOT NULL
+                   AND (update_acked_at IS NULL
+                        OR update_requested_at > update_acked_at)
+                """
+            )
+            for row in rows:
+                tap_id = row["id"]
+                ws = _active_taps.get(tap_id)
+                if ws is None:
+                    # Tap aktuell nicht connected — wir warten. Sobald er
+                    # sich verbindet, greift der nächste Loop-Pass.
+                    continue
+                try:
+                    await ws.send(orjson.dumps({
+                        "type": "update_now",
+                        "ts":   row["update_requested_at"].isoformat() if row["update_requested_at"] else None,
+                    }).decode())
+                    await auth._pool.execute(
+                        "UPDATE taps SET update_acked_at = now() WHERE id = $1::uuid",
+                        tap_id,
+                    )
+                    log.info("update-trigger an %s gesendet", row["name"])
+                except Exception as exc:
+                    log.warning("update-trigger fail für %s: %s", row["name"], exc)
+        except Exception as exc:
+            log.warning("update_trigger_loop poll-error: %s", exc)
+        await asyncio.sleep(5)
 
 
 async def amain() -> None:
@@ -651,6 +704,10 @@ async def amain() -> None:
              LISTEN_HOST, LISTEN_PORT, ALERTS_TOPIC, METRICS_TOPIC)
 
     proto_cls = _make_protocol_class(auth)
+    # Update-Trigger-Loop: pollt taps.update_requested_at und sendet
+    # update_now-Frames an die aktiven Connections. Läuft parallel zum
+    # WSS-Server.
+    trigger_task = asyncio.create_task(update_trigger_loop(auth))
     async with websockets.serve(
         lambda ws: handle_tap(ws, auth, producer),
         host=LISTEN_HOST,
@@ -663,6 +720,7 @@ async def amain() -> None:
         try:
             await asyncio.Future()    # forever
         finally:
+            trigger_task.cancel()
             await auth.close()
             producer.flush(timeout=5)
 

@@ -1,0 +1,22 @@
+[Unit]
+Description=Cyjan Tap — Update vom Master ziehen (host-side)
+Documentation=https://github.com/JxxKal/ids
+After=docker.service
+Requires=docker.service
+ConditionPathExists=/usr/local/bin/cyjan-tap
+
+[Service]
+Type=oneshot
+# -y skippt die interaktive Bestätigung (wir wurden ja explizit vom
+# Master getriggert, der UI-Klick gilt als Confirmation).
+ExecStart=/usr/local/bin/cyjan-tap update --from-master -y
+# Nach erfolgreichem Update das Trigger-File wegräumen — sonst feuert
+# der path-Watcher beim nächsten ähnlichen Schreib-Event nochmal. Das
+# ExecStartPost läuft NUR bei rc=0.
+ExecStartPost=/bin/rm -f /run/cyjan-update/trigger
+# Failsoft: wenn der Update fehlschlägt, nicht den path-Watcher selbst
+# in Endlosschleife schicken. Trigger-File bleibt erhalten, beim
+# nächsten manuellen Touch oder Reboot wird es nochmal versucht.
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=600

@@ -359,6 +359,25 @@ class Uplink:
                 continue
             if msg.get("type") == "ping":
                 await ws.send(orjson.dumps({"type": "pong"}).decode())
+            elif msg.get("type") == "update_now":
+                # Master triggert Update. Wir schreiben einen Trigger-File
+                # ins host-bind-mountete /run/cyjan-update/, ein systemd-
+                # path-watcher auf dem Host läuft daraufhin
+                # `cyjan-tap update --from-master -y`. Wir können hier
+                # nicht selbst docker-Befehle absetzen — kein docker socket
+                # im tap-uplink-Container, und auch wenn er da wäre, würde
+                # ein Self-Restart das compose --force-recreate auf einen
+                # wegfallenden Trigger-Prozess setzen. Host-side ist der
+                # saubere Weg.
+                trigger_path = Path("/host/cyjan-update/trigger")
+                try:
+                    trigger_path.parent.mkdir(parents=True, exist_ok=True)
+                    trigger_path.write_text(
+                        f"{time.strftime('%Y-%m-%dT%H:%M:%S')} master={MASTER_URL}\n"
+                    )
+                    log.info("update_now-Frame empfangen — Trigger geschrieben (%s)", trigger_path)
+                except Exception as exc:
+                    log.warning("Konnte update-Trigger nicht schreiben: %s", exc)
 
 
 # ── Reverse-Channel-Polling (Master → Tap Rule-Sync) ────────────────────────
