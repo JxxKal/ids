@@ -195,6 +195,50 @@ cmd_status() {
   print_load || true
 }
 
+cmd_version() {
+  # Zeigt:
+  #   - Cyjan-IDS-Version aus /opt/ids/VERSION (vom letzten Update gesetzt)
+  #   - CLI-Sync-Status: sind /usr/local/bin/cyjan-tap und
+  #     /opt/ids/scripts/cyjan-tap identisch? Wenn nein → CLI ist nicht
+  #     aktuell, der nächste Tipp sagt wie sie ersetzt wird.
+  #   - mtime der CLI-Binary für schnelle Orientierung
+  local ids_version="(unbekannt)"
+  if [ -r "$COMPOSE_DIR/VERSION" ]; then
+    ids_version=$(tr -d '[:space:]' < "$COMPOSE_DIR/VERSION")
+  fi
+
+  local cli_running="/usr/local/bin/cyjan-tap"
+  local cli_bundle="$COMPOSE_DIR/scripts/cyjan-tap"
+  local cli_mtime="–"
+  [ -e "$cli_running" ] && cli_mtime=$(date -r "$cli_running" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "–")
+
+  local cli_sha_running="–" cli_sha_bundle="–" cli_state="?"
+  if command -v sha256sum >/dev/null 2>&1 && [ -e "$cli_running" ]; then
+    cli_sha_running=$(sha256sum "$cli_running" | cut -d' ' -f1 | cut -c1-12)
+  fi
+  if [ -e "$cli_bundle" ] && command -v sha256sum >/dev/null 2>&1; then
+    cli_sha_bundle=$(sha256sum "$cli_bundle" | cut -d' ' -f1 | cut -c1-12)
+    if [ "$cli_sha_running" = "$cli_sha_bundle" ]; then
+      cli_state="aktuell"
+    else
+      cli_state="veraltet (Bundle hat neuere Version)"
+    fi
+  elif [ ! -e "$cli_bundle" ]; then
+    cli_state="kein Bundle-Vergleich verfügbar (noch kein Update gelaufen?)"
+  fi
+
+  echo "Cyjan IDS:        $ids_version"
+  echo "Tap-CLI:          $cli_running"
+  echo "  sha256 (kurz):  $cli_sha_running"
+  echo "  letztes update: $cli_mtime"
+  echo "  Status:         $cli_state"
+  if [ "$cli_state" = "veraltet (Bundle hat neuere Version)" ]; then
+    echo
+    echo "Bundle-Stand:     $cli_bundle (sha256 $cli_sha_bundle)"
+    echo "Aktualisieren:    sudo cp $cli_bundle $cli_running"
+  fi
+}
+
 cmd_load() {
   require_curl
   case "${1:-}" in
@@ -666,6 +710,7 @@ usage() {
   cat <<USAGE
 cyjan-tap – Remote-Tap-CLI
 
+  cyjan-tap version                      Cyjan-IDS-Version + CLI-Sync-Status
   cyjan-tap status                       Verbindungs- + Last-Status anzeigen
   cyjan-tap load [follow]                nur Last-Block (CPU/RAM/Disk/Traffic/Drops)
   cyjan-tap connection follow            Live-Tail des Master-Connection-Status
@@ -686,6 +731,7 @@ USAGE
 }
 
 case "${1:-status}" in
+  version|--version|-V)  cmd_version ;;
   status)     shift; cmd_status "$@" ;;
   load)       shift; cmd_load "$@" ;;
   connection) shift; cmd_connection "$@" ;;
