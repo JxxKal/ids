@@ -20,6 +20,15 @@
 #                                       # Lag wenn Disk akut voll ist).
 #                                       # Default-Tage: aus /opt/ids/.env
 #                                       # PCAP_RETENTION_DAYS, sonst 7.
+#
+#   sudo cyjan-maintenance --refresh-tap-update
+#                                       # baut /opt/ids/tap-update/ frisch
+#                                       # aus dem aktuellen Repo + den
+#                                       # gebauten Images. Nutzbar nach
+#                                       # `git pull && compose build` am
+#                                       # Master, damit die Taps via
+#                                       # `cyjan-tap update --from-master`
+#                                       # die neue Version pullen können.
 
 set -euo pipefail
 
@@ -27,14 +36,16 @@ AGGRESSIVE=0
 DRY_RUN=0
 PCAP_CLEANUP=0
 PCAP_DAYS=""
+REFRESH_TAP=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --aggressive)   AGGRESSIVE=1; shift ;;
-    --dry-run)      DRY_RUN=1; shift ;;
-    --pcap-cleanup) PCAP_CLEANUP=1; shift ;;
-    --days)         PCAP_DAYS="${2:-}"; shift 2 ;;
+    --aggressive)        AGGRESSIVE=1; shift ;;
+    --dry-run)           DRY_RUN=1; shift ;;
+    --pcap-cleanup)      PCAP_CLEANUP=1; shift ;;
+    --days)              PCAP_DAYS="${2:-}"; shift 2 ;;
+    --refresh-tap-update) REFRESH_TAP=1; shift ;;
     -h|--help)
-      sed -n '2,25p' "$0"
+      sed -n '2,33p' "$0"
       exit 0
       ;;
     *) echo "Unbekanntes Argument: $1" >&2; exit 2 ;;
@@ -48,6 +59,18 @@ fi
 
 ts() { date +'%Y-%m-%d %H:%M:%S'; }
 log() { echo "[$(ts)] $*"; }
+
+# ── Refresh tap-update/ ──────────────────────────────────────────────────
+# Wrapper auf scripts/refresh-tap-update.sh — komplettes Skript ist im
+# Repo, damit man es auch ohne CLI laufen lassen kann.
+if [ "$REFRESH_TAP" -eq 1 ]; then
+  RT="/opt/ids/scripts/refresh-tap-update.sh"
+  if [ ! -x "$RT" ]; then
+    log "FEHLER: $RT fehlt. Repo-Stand: cd /opt/ids && git pull && chmod +x scripts/refresh-tap-update.sh"
+    exit 1
+  fi
+  exec bash "$RT"
+fi
 
 # ── PCAP-Cleanup ──────────────────────────────────────────────────────────
 # Force-Trigger gegen MinIO. Wir warten nicht auf den MinIO-Scanner (1-6h),
