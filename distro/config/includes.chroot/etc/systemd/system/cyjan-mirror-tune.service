@@ -1,0 +1,25 @@
+[Unit]
+Description=Cyjan Mirror-Interface — RX-Ringbuffer auf Maximum
+Documentation=https://github.com/JxxKal/ids
+# Interface muss da sein bevor wir tunen — network-online.target reicht
+# auf Debian Bookworm (NetworkManager / systemd-networkd haben die Iface
+# da schon UP).
+After=network-online.target
+Wants=network-online.target
+# Cyjan-Stack soll erst starten wenn der Ringbuffer hochgesetzt ist.
+# Sniffer-AF_PACKET-Bind ist nicht harmlos zur Laufzeit-Resize-Operation.
+Before=cyjan-stack.service
+ConditionPathExists=/etc/cyjan/profile
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/usr/local/bin/cyjan-mirror-tune
+StandardOutput=journal
+StandardError=journal
+# Failsoft-Skript, sollte nie failen — aber sicherheitshalber begrenzen,
+# damit ein hängendes ethtool nicht den Boot blockiert.
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

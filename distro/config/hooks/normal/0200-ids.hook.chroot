@@ -36,6 +36,10 @@ systemctl enable cyjan-stack.service
 # durch alte Image-Layer + Build-Cache vollläuft. Cap pro Container-Log
 # wird zusätzlich über /etc/docker/daemon.json gesetzt (50m × 5 Files).
 systemctl enable cyjan-maintenance.timer
+# Mirror-Interface-Tuning: setzt RX-Ringbuffer auf Pre-set-Maximum bevor
+# der Cyjan-Stack startet. Idempotent + failsoft (ignoriert virtio-/
+# Hyper-V-Synthetic-NICs die kein ethtool -G unterstützen).
+systemctl enable cyjan-mirror-tune.service
 
 echo "[cyjan] IDS-Verzeichnis: $IDS_DIR"
-echo "[cyjan] First-Boot-, Stack-Boot- und Maintenance-Timer aktiviert"
+echo "[cyjan] First-Boot-, Stack-Boot-, Maintenance-Timer und Mirror-Tune aktiviert"

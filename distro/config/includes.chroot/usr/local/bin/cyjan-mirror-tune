@@ -1,0 +1,96 @@
+#!/bin/bash
+# Cyjan Mirror-Interface-Tuning — setzt den RX-Ringbuffer auf das vom NIC
+# gemeldete Pre-set-Maximum. Wird vom systemd-Service cyjan-mirror-tune
+# beim Boot aufgerufen, kann auch manuell laufen.
+#
+# Idempotent: wenn das aktuelle Setup schon auf Max ist, no-op.
+# Failsoft: wenn der NIC-Treiber kein ethtool -G unterstützt (virtio-Net,
+# manche Hyper-V-NICs), wird nicht hart abgebrochen — sonst würde die
+# Boot-Sequenz auf einer VM mit Synthetic-NIC steckenbleiben.
+#
+# Mirror-Iface kommt aus /etc/cyjan/profile (vom Wizard befüllt). Greift
+# auf Master + Tap-Hosts gleichermaßen, weil beide ein MIRROR_INTERFACE
+# in derselben Datei führen.
+
+set -u
+
+PROFILE_FILE="/etc/cyjan/profile"
+TAG="[mirror-tune]"
+
+if [ ! -r "$PROFILE_FILE" ]; then
+  echo "$TAG $PROFILE_FILE fehlt — Wizard noch nicht durchgelaufen, überspringe."
+  exit 0
+fi
+
+# shellcheck source=/dev/null
+. "$PROFILE_FILE"
+
+IFACE="${MIRROR_INTERFACE:-}"
+if [ -z "$IFACE" ]; then
+  echo "$TAG MIRROR_INTERFACE nicht in $PROFILE_FILE — überspringe."
+  exit 0
+fi
+
+if [ ! -d "/sys/class/net/$IFACE" ]; then
+  echo "$TAG Interface $IFACE existiert nicht (entfernt? umbenannt?) — überspringe."
+  exit 0
+fi
+
+if ! command -v ethtool >/dev/null 2>&1; then
+  echo "$TAG ethtool fehlt — bitte 'sudo apt install ethtool' nachreichen."
+  exit 0
+fi
+
+# `ethtool -g` Output:
+#   Ring parameters for eth1:
+#   Pre-set maximums:
+#   RX:             4096
+#   ...
+#   Current hardware settings:
+#   RX:             256
+#   ...
+#
+# Wir parsen Pre-set-RX und Current-RX. awk-State-Machine schaltet bei
+# den Section-Headern um.
+G_OUT=$(ethtool -g "$IFACE" 2>/dev/null) || {
+  echo "$TAG $IFACE: ethtool -g nicht unterstützt (virtio/hyper-v?). Überspringe."
+  exit 0
+}
+
+RX_MAX=$(echo "$G_OUT" | awk '
+  /^Pre-set maximums:/        {sec="max";  next}
+  /^Current hardware settings:/ {sec="cur"; next}
+  sec=="max" && $1=="RX:"     {print $2; exit}
+')
+RX_CUR=$(echo "$G_OUT" | awk '
+  /^Pre-set maximums:/        {sec="max";  next}
+  /^Current hardware settings:/ {sec="cur"; next}
+  sec=="cur" && $1=="RX:"     {print $2; exit}
+')
+
+if [ -z "$RX_MAX" ] || [ -z "$RX_CUR" ]; then
+  echo "$TAG $IFACE: konnte RX-Werte aus 'ethtool -g' nicht parsen — überspringe."
+  echo "$G_OUT"
+  exit 0
+fi
+
+# n/a-Fallback (manche Treiber emitten "n/a" für nicht unterstützte Pfade)
+case "$RX_MAX" in [0-9]*) ;; *) echo "$TAG $IFACE: RX-Max ist '$RX_MAX' (nicht numerisch) — überspringe."; exit 0 ;; esac
+case "$RX_CUR" in [0-9]*) ;; *) echo "$TAG $IFACE: RX-Current ist '$RX_CUR' (nicht numerisch) — überspringe."; exit 0 ;; esac
+
+if [ "$RX_CUR" = "$RX_MAX" ]; then
+  echo "$TAG $IFACE: RX-Ringbuffer bereits auf Max ($RX_CUR) — nichts zu tun."
+  exit 0
+fi
+
+echo "$TAG $IFACE: setze RX-Ringbuffer $RX_CUR → $RX_MAX"
+if out=$(ethtool -G "$IFACE" rx "$RX_MAX" 2>&1); then
+  echo "$TAG $IFACE: erfolgreich auf RX=$RX_MAX gesetzt."
+else
+  # Manche Treiber lehnen das Resize zur Laufzeit ab (Link-State-Reset
+  # nötig). Wir loggen, brechen aber nicht — der Sniffer läuft auch mit
+  # dem alten Wert weiter, nur ggf. mit Drops bei Lastspitzen.
+  echo "$TAG $IFACE: ethtool -G failed: $out"
+  echo "$TAG     Treiber unterstützt RX-Resize zur Laufzeit evtl. nicht."
+  echo "$TAG     Manuell mit Down/Up versuchen: ip link set $IFACE down && ethtool -G $IFACE rx $RX_MAX && ip link set $IFACE up"
+fi

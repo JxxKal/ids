@@ -59,9 +59,32 @@ install -m 0644 "${SRC_DIR}/cyjan-maintenance.service"  /etc/systemd/system/cyja
 install -m 0644 "${SRC_DIR}/cyjan-maintenance.timer"    /etc/systemd/system/cyjan-maintenance.timer
 echo "[post-update] cyjan-maintenance Script + systemd-Units installiert."
 
+# ── 3) cyjan-mirror-tune Skript + systemd-Service ────────────────────────
+# Optional — Skript-Files sind nur dabei wenn das Update-ZIP sie liefert.
+# Älter Update-ZIPs (vor v2.3.9) hatten sie nicht; in dem Fall kein-Op.
+if [ -f "${SRC_DIR}/cyjan-mirror-tune" ]; then
+  install -m 0755 "${SRC_DIR}/cyjan-mirror-tune"          /usr/local/bin/cyjan-mirror-tune
+  install -m 0644 "${SRC_DIR}/cyjan-mirror-tune.service"  /etc/systemd/system/cyjan-mirror-tune.service
+  echo "[post-update] cyjan-mirror-tune Script + systemd-Service installiert."
+  if ! command -v ethtool >/dev/null 2>&1; then
+    echo "[post-update] WARNUNG: ethtool fehlt — sudo apt install -y ethtool"
+    echo "[post-update]            Mirror-tune-Service wird ohne ethtool nichts ändern (failsoft)."
+  fi
+fi
+
 systemctl daemon-reload
 systemctl enable --now cyjan-maintenance.timer
 echo "[post-update] cyjan-maintenance.timer aktiviert (nächster Lauf: $(systemctl show cyjan-maintenance.timer --property=NextElapseUSecRealtime --value 2>/dev/null || echo unbekannt))."
+
+if [ -f /etc/systemd/system/cyjan-mirror-tune.service ]; then
+  systemctl enable cyjan-mirror-tune.service
+  # Sofort ausführen — der Stack läuft schon, aber Sniffer würde den
+  # neuen Ringbuffer erst bei Restart nutzen. Das macht der Service hier
+  # vorbereitend; ein Sniffer-Restart kann der User danach selbst, wenn
+  # er sofort die effektiven Drop-Reduktionen sehen will.
+  systemctl start cyjan-mirror-tune.service || true
+  echo "[post-update] cyjan-mirror-tune.service aktiviert + einmal ausgeführt."
+fi
 
 # ── 3) Docker-Daemon neu laden, falls daemon.json sich geändert hat ──────
 # `systemctl reload docker` greift NUR den daemon.json-Wechsel ohne
