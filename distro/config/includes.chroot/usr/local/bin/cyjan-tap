@@ -512,9 +512,14 @@ cmd_update() {
                    --connect-timeout 10 --max-time 1200)
 
   # ── 1. Manifest pullen ────────────────────────────────────────────────
-  local manifest_tmp
+  local manifest_tmp=""
+  : "${BUNDLE_TMP:=}"
+  : "${COMPOSE_TMP:=}"
   manifest_tmp=$(mktemp)
-  trap 'rm -f "$manifest_tmp" "${BUNDLE_TMP:-}" "${COMPOSE_TMP:-}"' EXIT
+  # Trap überschreibt den vorherigen cert-Trap — wir müssen daher BEIDE
+  # Verzeichnisse hier aufräumen. Alle Vars mit :- für den Fall dass die
+  # Funktion vor der Initialisierung crasht (set -u-Schutz).
+  trap 'rm -rf "${cert_tmp_dir:-}" ; rm -f "${manifest_tmp:-}" "${BUNDLE_TMP:-}" "${COMPOSE_TMP:-}"' EXIT
   echo "Hole Manifest …"
   if ! "${curl_mtls[@]}" -o "$manifest_tmp" "$master_base/tap-update/manifest"; then
     echo "FEHLER: Manifest-Download fehlgeschlagen. Hat der Master ein Update-ZIP eingespielt?" >&2
