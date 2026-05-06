@@ -19,6 +19,11 @@ iputils-ping
 tcpdump
 ncat
 dnsutils
+# ethtool: Ringbuffer-Tuning + NIC-Stats (rx_dropped, ring rx) für die
+# Tap-Diagnose. `cyjan-tap status` zeigt zwar Sniffer-Drops; ringbuffer-
+# Erweiterung (`ethtool -G <iface> rx 4096`) und Driver-Counter
+# (`ethtool -S`) gehen aber nur mit dem Binary.
+ethtool
 
 # Editoren & System
 vim
