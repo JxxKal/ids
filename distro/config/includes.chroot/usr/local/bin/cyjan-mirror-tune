@@ -27,12 +27,22 @@ if [ ! -r "$ENV_FILE" ]; then
 fi
 
 # .env grep-en statt sourcen — sonst stolpern wir über Werte mit Spaces,
-# Kommentare, oder unerwartete Lines (z.B. wenn der Wizard mal multi-line
-# Werte schreibt). Der Pattern matcht 'KEY=value' und liest den Rest der
-# Zeile als Wert.
-IFACE=$(grep -E '^MIRROR_INTERFACE=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+# Kommentare oder unerwartete Lines (z.B. wenn der Wizard mal multi-line
+# Werte schreibt).
+#
+# Asymmetrie zwischen Master und Tap:
+#   Tap (.env)   → MIRROR_INTERFACE=...   (legt der Tap-Wizard an)
+#   Master (.env)→ MIRROR_IFACE=...        (klassischer Name aus
+#                                            .env.example, master-compose
+#                                            referenziert ${MIRROR_IFACE})
+# Wir lesen beide; wer gewinnt: MIRROR_INTERFACE. Fehlen beide → skip.
+_read_env() {
+  grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '"' | tr -d "'"
+}
+IFACE=$(_read_env MIRROR_INTERFACE)
+[ -z "$IFACE" ] && IFACE=$(_read_env MIRROR_IFACE)
 if [ -z "$IFACE" ]; then
-  echo "$TAG MIRROR_INTERFACE nicht in $ENV_FILE — überspringe."
+  echo "$TAG MIRROR_INTERFACE/MIRROR_IFACE nicht in $ENV_FILE — überspringe."
   exit 0
 fi
 
