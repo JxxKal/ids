@@ -569,6 +569,9 @@ jobs:
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-maintenance.timer   "$PKG/scripts/cyjan-maintenance.timer"
           cp distro/config/includes.chroot/usr/local/bin/cyjan-mirror-tune                "$PKG/scripts/cyjan-mirror-tune"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-mirror-tune.service  "$PKG/scripts/cyjan-mirror-tune.service"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-update.path      "$PKG/scripts/cyjan-tap-update.path"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-update.service   "$PKG/scripts/cyjan-tap-update.service"
+          cp distro/config/includes.chroot/etc/tmpfiles.d/cyjan-update.conf              "$PKG/scripts/cyjan-update.tmpfiles"
           # cyjan-tap CLI selbst — wird vom CLI-Update-Pfad nicht selbst
           # ersetzt (Self-Replace eines laufenden Skripts ist heikel).
           # User kann sie nach einem Update manuell mit
@@ -597,6 +600,9 @@ jobs:
           cp "$PKG/scripts/cyjan-maintenance.timer"    "$PKG/tap-update/scripts/cyjan-maintenance.timer"
           cp "$PKG/scripts/cyjan-mirror-tune"          "$PKG/tap-update/scripts/cyjan-mirror-tune"
           cp "$PKG/scripts/cyjan-mirror-tune.service"  "$PKG/tap-update/scripts/cyjan-mirror-tune.service"
+          cp "$PKG/scripts/cyjan-tap-update.path"      "$PKG/tap-update/scripts/cyjan-tap-update.path"
+          cp "$PKG/scripts/cyjan-tap-update.service"   "$PKG/tap-update/scripts/cyjan-tap-update.service"
+          cp "$PKG/scripts/cyjan-update.tmpfiles"      "$PKG/tap-update/scripts/cyjan-update.tmpfiles"
           cp "$PKG/scripts/cyjan-tap"                  "$PKG/tap-update/scripts/cyjan-tap"
 
           BUNDLE_SHA=$(sha256sum "$PKG/tap-update/images-tap.tar.zst" | awk '{print $1}')

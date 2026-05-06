@@ -35,6 +35,9 @@ cp distro/config/includes.chroot/etc/systemd/system/cyjan-maintenance.timer     
 cp distro/config/includes.chroot/usr/local/bin/cyjan-mirror-tune                tap-update/scripts/cyjan-mirror-tune
 cp distro/config/includes.chroot/etc/systemd/system/cyjan-mirror-tune.service   tap-update/scripts/cyjan-mirror-tune.service
 cp distro/config/includes.chroot/usr/local/bin/cyjan-tap                        tap-update/scripts/cyjan-tap
+cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-update.path       tap-update/scripts/cyjan-tap-update.path
+cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-update.service    tap-update/scripts/cyjan-tap-update.service
+cp distro/config/includes.chroot/etc/tmpfiles.d/cyjan-update.conf               tap-update/scripts/cyjan-update.tmpfiles
 cp scripts/post-update.sh                                                       tap-update/scripts/post-update.sh
 chmod +x tap-update/scripts/post-update.sh tap-update/scripts/cyjan-maintenance \
          tap-update/scripts/cyjan-mirror-tune tap-update/scripts/cyjan-tap

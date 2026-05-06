@@ -648,6 +648,7 @@ cmd_update() {
   for f in post-update.sh daemon.json \
            cyjan-maintenance cyjan-maintenance.service cyjan-maintenance.timer \
            cyjan-mirror-tune cyjan-mirror-tune.service \
+           cyjan-tap-update.path cyjan-tap-update.service cyjan-update.tmpfiles \
            cyjan-tap; do
     SCRIPT_TMP=$(mktemp)
     if "${curl_mtls[@]}" --output "$SCRIPT_TMP" "$master_base/tap-update/scripts/$f" 2>/dev/null; then

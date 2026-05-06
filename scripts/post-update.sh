@@ -72,6 +72,25 @@ if [ -f "${SRC_DIR}/cyjan-mirror-tune" ]; then
   fi
 fi
 
+# ── 4) Tap-Update-Trigger (cyjan-tap-update.path + .service) ─────────────
+# Greift nur auf Tap-Hosts. Wenn der Master via WebSocket "update_now"
+# sendet, schreibt tap-uplink ein File nach /run/cyjan-update/trigger,
+# der path-Watcher startet dann den Service der `cyjan-tap update --from-
+# master -y` als root auf dem Host aufruft. /run/cyjan-update wird via
+# tmpfiles.d bei jedem Boot angelegt.
+if [ -f "${SRC_DIR}/cyjan-tap-update.path" ]; then
+  install -m 0644 "${SRC_DIR}/cyjan-tap-update.path"     /etc/systemd/system/cyjan-tap-update.path
+  install -m 0644 "${SRC_DIR}/cyjan-tap-update.service"  /etc/systemd/system/cyjan-tap-update.service
+  install -m 0644 "${SRC_DIR}/cyjan-update.tmpfiles"     /etc/tmpfiles.d/cyjan-update.conf 2>/dev/null \
+    || cp "${SRC_DIR}/cyjan-update.tmpfiles" /etc/tmpfiles.d/cyjan-update.conf 2>/dev/null \
+    || true
+  # Verzeichnis sofort anlegen (vor systemctl restart, damit der bind-mount
+  # des Containers nicht ins Leere greift).
+  mkdir -p /run/cyjan-update
+  chmod 0755 /run/cyjan-update
+  echo "[post-update] cyjan-tap-update.path + .service + tmpfiles installiert."
+fi
+
 systemctl daemon-reload
 systemctl enable --now cyjan-maintenance.timer
 echo "[post-update] cyjan-maintenance.timer aktiviert (nächster Lauf: $(systemctl show cyjan-maintenance.timer --property=NextElapseUSecRealtime --value 2>/dev/null || echo unbekannt))."
@@ -84,6 +103,11 @@ if [ -f /etc/systemd/system/cyjan-mirror-tune.service ]; then
   # er sofort die effektiven Drop-Reduktionen sehen will.
   systemctl start cyjan-mirror-tune.service || true
   echo "[post-update] cyjan-mirror-tune.service aktiviert + einmal ausgeführt."
+fi
+
+if [ -f /etc/systemd/system/cyjan-tap-update.path ]; then
+  systemctl enable --now cyjan-tap-update.path
+  echo "[post-update] cyjan-tap-update.path aktiviert (lauscht auf /run/cyjan-update/trigger)."
 fi
 
 # ── 3) Docker-Daemon neu laden, falls daemon.json sich geändert hat ──────

@@ -85,6 +85,9 @@ _TAP_UPDATE_FILES: dict[str, str] = {
     "scripts/cyjan-maintenance.timer":   "scripts/cyjan-maintenance.timer",
     "scripts/cyjan-mirror-tune":         "scripts/cyjan-mirror-tune",
     "scripts/cyjan-mirror-tune.service": "scripts/cyjan-mirror-tune.service",
+    "scripts/cyjan-tap-update.path":     "scripts/cyjan-tap-update.path",
+    "scripts/cyjan-tap-update.service":  "scripts/cyjan-tap-update.service",
+    "scripts/cyjan-update.tmpfiles":     "scripts/cyjan-update.tmpfiles",
     "scripts/cyjan-tap":                 "scripts/cyjan-tap",
 }
 
