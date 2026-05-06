@@ -53,16 +53,21 @@ DEFAULT_TOKEN_TTL_MIN = 60
 
 
 class TapEntry(BaseModel):
-    id:               UUID
-    name:             str
-    site:             str | None = None
-    cert_fingerprint: str
-    cert_expires_at:  datetime
-    status:           str
-    paired_at:        datetime
-    paired_by:        str | None = None
-    last_seen:        datetime | None = None
-    alerts_received:  int
+    id:                  UUID
+    name:                str
+    site:                str | None = None
+    cert_fingerprint:    str
+    cert_expires_at:     datetime
+    status:              str
+    paired_at:           datetime
+    paired_by:           str | None = None
+    last_seen:           datetime | None = None
+    alerts_received:     int
+    # Vom Tap selbst gemeldete Version (hello-Frame beim Connect, gefüttert
+    # aus /opt/ids/VERSION via Bind-Mount). None auf alten Taps die noch
+    # kein hello senden — Frontend zeigt dort "?".
+    version:             str | None = None
+    version_reported_at: datetime | None = None
 
 
 class PairingTokenCreate(BaseModel):
@@ -112,6 +117,8 @@ def _row_to_tap(row: asyncpg.Record) -> TapEntry:
         paired_by=row["paired_by"],
         last_seen=row["last_seen"],
         alerts_received=row["alerts_received"],
+        version=row.get("version") if hasattr(row, "get") else (row["version"] if "version" in row.keys() else None),
+        version_reported_at=row.get("version_reported_at") if hasattr(row, "get") else (row["version_reported_at"] if "version_reported_at" in row.keys() else None),
     )
 
 
@@ -125,7 +132,8 @@ async def list_taps(_admin: dict = Depends(require_admin)) -> list[TapEntry]:
         rows = await conn.fetch(
             """
             SELECT id, name, site, cert_fingerprint, cert_expires_at,
-                   status, paired_at, paired_by, last_seen, alerts_received
+                   status, paired_at, paired_by, last_seen, alerts_received,
+                   version, version_reported_at
               FROM taps
              ORDER BY paired_at DESC
             """

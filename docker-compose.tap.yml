@@ -194,6 +194,11 @@ services:
       # gepullten Builtin-YAMLs + Custom-Overrides rein, signature-engine
       # liest read-only daraus.
       - signature-rules:/rules
+      # /opt/ids/VERSION: Tap-Wizard schreibt hier die installierte Version
+      # rein, cyjan-tap update --from-master überschreibt es nach jedem Pull.
+      # tap-uplink schickt den Inhalt als hello-Frame an master-uplink, damit
+      # die Master-UI pro Tap die laufende Version sieht. Read-only Mount.
+      - /opt/ids/VERSION:/etc/cyjan/version:ro
 
   # ───────────────────────────────────────────────────────────────────────
   # tap-api – minimaler Status/Konfig-Web-View + Maschinen-Endpunkte für

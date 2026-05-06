@@ -193,6 +193,22 @@ class TapAuth:
             tap_id, alerts_delta, peer,
         )
 
+    async def report_version(self, tap_id: str, version: str) -> None:
+        """Persistiert die vom Tap im hello-Frame gemeldete Version. Wird
+        nur bei Wertänderung (oder fehlendem version_reported_at) up-
+        gedated, damit der ts nicht bei jedem Reconnect rauscht."""
+        assert self._pool
+        await self._pool.execute(
+            """
+            UPDATE taps
+               SET version             = $2,
+                   version_reported_at = now()
+             WHERE id = $1
+               AND (version IS DISTINCT FROM $2 OR version_reported_at IS NULL)
+            """,
+            tap_id, version,
+        )
+
     async def get_dns_resolvers(self) -> list[str]:
         """Liest die system_config-Allowlist 'dns_resolvers'. JSONB-Spalte;
         asyncpg gibt sie als String zurück (kein automatisches JSON-Decode),
@@ -548,6 +564,15 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
 
             mtype = msg.get("type", "alert")
             if mtype == "pong":
+                continue
+            if mtype == "hello":
+                version = str(msg.get("version") or "").strip()[:64]
+                if version:
+                    try:
+                        await auth.report_version(tap_id, version)
+                        log.info("Tap %s meldet Version %s", tap_name, version)
+                    except Exception as exc:
+                        log.warning("report_version fail %s: %s", tap_name, exc)
                 continue
             if mtype == "alert":
                 alert = msg.get("payload") or {}

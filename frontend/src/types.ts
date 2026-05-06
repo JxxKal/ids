@@ -95,6 +95,11 @@ export interface RemoteTap {
   paired_by?: string | null;
   last_seen?: string | null;
   alerts_received: number;
+  // Vom Tap selbst gemeldete Version (hello-Frame beim Connect, gefüttert
+  // aus /opt/ids/VERSION). null wenn der Tap noch keinen hello geschickt
+  // hat (alte tap-uplink-Version).
+  version?: string | null;
+  version_reported_at?: string | null;
 }
 
 export interface RemoteTapPairingToken {

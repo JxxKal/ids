@@ -1356,6 +1356,30 @@ export async function forcePcapCleanup(days: number): Promise<{
   });
 }
 
+// ── Tap-Update-Bundle (Master-side) ──────────────────────────────────────
+
+export interface TapUpdateStatus {
+  bundle_present:    boolean;
+  bundle_size_bytes: number | null;
+  bundle_size_mb:    number | null;
+  manifest_version:  string | null;
+  manifest_created:  string | null;
+  manifest_sha256:   string | null;
+  refresh_running:   boolean;
+  refresh_last_ok:   boolean | null;
+  refresh_started:   number;
+  refresh_finished:  number;
+  refresh_log_tail:  string[];
+}
+
+export async function fetchTapUpdateStatus(): Promise<TapUpdateStatus> {
+  return req('/api/tap-update');
+}
+
+export async function triggerTapUpdateRefresh(): Promise<{ started: boolean; started_at: number }> {
+  return req('/api/tap-update/refresh', { method: 'POST' });
+}
+
 // ── Remote Taps ───────────────────────────────────────────────────────────
 
 export async function fetchTaps(): Promise<RemoteTap[]> {

@@ -26,6 +26,7 @@ import {
   type SuricataOverrideEntry,
   fetchBoundaryPriorityMapV2, saveBoundaryPriorityMapV2,
   fetchTaps, createTapPairingToken, revokeTap,
+  fetchTapUpdateStatus, triggerTapUpdateRefresh, type TapUpdateStatus,
   fetchPendingTaps, approvePendingTap, rejectPendingTap, fetchTapAuditLog,
   type PendingTap, type TapAuditEntry,
   fetchGeoIpStatus, uploadGeoIp,
@@ -5020,6 +5021,133 @@ function RuleOverridesSettings() {
 // am Tap-Wizard, der den Token plus Master-API-URL gegen den Pairing-Endpoint
 // einlöst.
 
+// ── TapUpdateBundleSection ──────────────────────────────────────────────────
+//
+// Zeigt das aktuell vom master-uplink ausgelieferte Tap-Update-Bundle
+// (Version aus manifest.json, Größe). Bietet einen "Bundle neu bauen"-Knopf,
+// der das Helper-Skript scripts/refresh-tap-update.sh server-seitig im API-
+// Container triggert. Polling während eines Refresh-Laufs zeigt den Live-
+// Output. Pro Tap in der Tabelle unten wird "Update verfügbar" angezeigt,
+// wenn die gemeldete tap.version vom manifest_version abweicht.
+
+function TapUpdateBundleSection({ taps }: { taps: RemoteTap[] }) {
+  const { t, i18n } = useTranslation();
+  const [status,  setStatus]  = useState<TapUpdateStatus | null>(null);
+  const [busy,    setBusy]    = useState(false);
+  const [err,     setErr]     = useState('');
+
+  // Lokales fmtAbs (das in RemoteTapsSettings ist nested und nicht
+  // sichtbar). Locale-Aware via i18n.language.
+  const fmtAbs = (iso: string): string => {
+    try { return new Date(iso).toLocaleString(i18n.language); }
+    catch { return iso; }
+  };
+
+  const reload = async () => {
+    try {
+      setStatus(await fetchTapUpdateStatus());
+      setErr('');
+    } catch (e) {
+      setErr(String((e as Error).message));
+    }
+  };
+
+  useEffect(() => {
+    reload();
+    // Polling: schneller wenn ein Refresh läuft, sonst alle 30s.
+    const ti = setInterval(reload, status?.refresh_running ? 2000 : 30000);
+    return () => clearInterval(ti);
+  }, [status?.refresh_running]);
+
+  const triggerRefresh = async () => {
+    setBusy(true); setErr('');
+    try {
+      await triggerTapUpdateRefresh();
+      // sofort einmal frisch laden — Status sollte jetzt running=true zeigen
+      await reload();
+    } catch (e) {
+      setErr(String((e as Error).message));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const activeTaps   = taps.filter(t => t.status === 'active');
+  const outdatedTaps = activeTaps.filter(t =>
+    t.version && status?.manifest_version && t.version !== status.manifest_version
+  );
+
+  return (
+    <div className="cyjan-card p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-200">
+            {t('settings.remoteTaps.bundleTitle', { defaultValue: 'Tap-Update-Bundle' })}
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {t('settings.remoteTaps.bundleHint', {
+              defaultValue: 'Was master-uplink für `cyjan-tap update --from-master` ausliefert. Nach jedem Master-Code-Update neu bauen, damit die Taps die aktuelle Version pullen können.',
+            })}
+          </p>
+        </div>
+        <button
+          onClick={triggerRefresh}
+          disabled={busy || status?.refresh_running}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40 whitespace-nowrap"
+        >
+          {status?.refresh_running
+            ? t('settings.remoteTaps.bundleRefreshing', { defaultValue: 'Bundle wird gebaut …' })
+            : t('settings.remoteTaps.bundleRebuild',     { defaultValue: 'Bundle neu bauen' })}
+        </button>
+      </div>
+
+      {/* Status-Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <Stat label={t('settings.remoteTaps.bundleVersion', { defaultValue: 'Bundle-Version' })}
+              value={status?.manifest_version ?? '–'} />
+        <Stat label={t('settings.remoteTaps.bundleSize',    { defaultValue: 'Bundle-Größe' })}
+              value={status?.bundle_size_mb != null ? `${status.bundle_size_mb} MB` : '–'} />
+        <Stat label={t('settings.remoteTaps.bundleCreated', { defaultValue: 'Erzeugt am' })}
+              value={status?.manifest_created ? fmtAbs(status.manifest_created) : '–'} />
+        <Stat label={t('settings.remoteTaps.bundleTaps',    { defaultValue: 'Taps online / outdated' })}
+              value={`${activeTaps.length} / ${outdatedTaps.length}`} />
+      </div>
+
+      {/* Outdated-Hinweis */}
+      {outdatedTaps.length > 0 && (
+        <div className="text-xs text-amber-300 bg-amber-950/20 border border-amber-800/40 rounded px-3 py-2">
+          {t('settings.remoteTaps.bundleOutdated', {
+            defaultValue: '{{n}} Tap(s) auf älterer Version: {{names}}. Auf jedem Tap als root: sudo cyjan-tap update --from-master',
+            n: outdatedTaps.length,
+            names: outdatedTaps.map(tt => `${tt.name}@${tt.version}`).join(', '),
+          })}
+        </div>
+      )}
+
+      {/* Refresh-Log (während running oder direkt nach Lauf) */}
+      {(status?.refresh_running || (status?.refresh_finished ?? 0) > 0) && (status?.refresh_log_tail?.length ?? 0) > 0 && (
+        <div className="bg-slate-950 border border-slate-800 rounded p-2 text-[10px] font-mono text-slate-400 max-h-48 overflow-y-auto">
+          {status!.refresh_log_tail.slice(-30).map((line, i) => (
+            <div key={i} className="whitespace-pre-wrap">{line}</div>
+          ))}
+        </div>
+      )}
+
+      {status && !status.refresh_running && status.refresh_last_ok === false && (
+        <p className="text-xs text-red-400">
+          {t('settings.remoteTaps.bundleRefreshFail', { defaultValue: 'Letzter Refresh-Lauf fehlgeschlagen — siehe Log oben.' })}
+        </p>
+      )}
+      {status && !status.refresh_running && status.refresh_last_ok === true && (
+        <p className="text-xs text-green-400">
+          {t('settings.remoteTaps.bundleRefreshOk', { defaultValue: 'Letzter Refresh-Lauf erfolgreich.' })}
+        </p>
+      )}
+      {err && <p className="text-xs text-red-400">{err}</p>}
+    </div>
+  );
+}
+
 function RemoteTapsSettings() {
   const { t, i18n } = useTranslation();
   const [taps, setTaps] = useState<RemoteTap[] | null>(null);
@@ -5299,6 +5427,9 @@ function RemoteTapsSettings() {
         <div className="text-xs text-slate-500 italic">{t('settings.remoteTaps.noTaps')}</div>
       )}
 
+      {/* Tap-Update-Bundle-Sektion: Status + Refresh-Trigger */}
+      <TapUpdateBundleSection taps={taps ?? []} />
+
       {taps && taps.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -5307,6 +5438,7 @@ function RemoteTapsSettings() {
                 <th className="text-left px-3 py-2">{t('settings.remoteTaps.colName')}</th>
                 <th className="text-left px-3 py-2">{t('settings.remoteTaps.colSite')}</th>
                 <th className="text-left px-3 py-2">{t('settings.remoteTaps.colStatus')}</th>
+                <th className="text-left px-3 py-2">{t('settings.remoteTaps.colVersion', { defaultValue: 'Version' })}</th>
                 <th className="text-left px-3 py-2">{t('settings.remoteTaps.colLastSeen')}</th>
                 <th className="text-right px-3 py-2">{t('settings.remoteTaps.colAlerts')}</th>
                 <th className="text-left px-3 py-2">{t('settings.remoteTaps.colCertExpires')}</th>
@@ -5324,6 +5456,9 @@ function RemoteTapsSettings() {
                       {isActive
                         ? <span className="px-1.5 py-0.5 text-[10px] rounded bg-green-900/50 text-green-300 border border-green-700/40">{t('settings.remoteTaps.statusActive')}</span>
                         : <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700/60 text-slate-400 border border-slate-600/40">{t('settings.remoteTaps.statusRevoked')}</span>}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-slate-300" title={tap.version_reported_at ? fmtAbs(tap.version_reported_at) : ''}>
+                      {tap.version || <span className="text-slate-600">–</span>}
                     </td>
                     <td className="px-3 py-2 font-mono text-slate-300" title={tap.last_seen ? fmtAbs(tap.last_seen) : ''}>
                       {fmtRelative(tap.last_seen)}

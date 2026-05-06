@@ -95,6 +95,17 @@ CONFIG_POLL_TIMEOUT_S  = float(os.environ.get("CONFIG_POLL_TIMEOUT_S",  "30"))
 CONFIG_BUNDLE_MAX_BYTES = int(os.environ.get("CONFIG_BUNDLE_MAX_BYTES", str(50 * 1024 * 1024)))
 CONFIG_SCHEMA_VERSION   = "1"
 
+# Tap-Version: kommt aus /opt/ids/VERSION via Bind-Mount auf
+# /etc/cyjan/version (siehe docker-compose.tap.yml). Wird beim Connect
+# einmal als hello-Frame an master-uplink geschickt, damit die UI im
+# Master-Frontend pro Tap die laufende Version anzeigen kann.
+TAP_VERSION_FILE = os.environ.get("TAP_VERSION_FILE", "/etc/cyjan/version")
+def _read_tap_version() -> str:
+    try:
+        return Path(TAP_VERSION_FILE).read_text().strip()
+    except Exception:
+        return "unknown"
+
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s %(levelname)s [tap-uplink] %(message)s",
@@ -274,6 +285,20 @@ class Uplink:
                     backoff = RECONNECT_MIN_S
                     log.info("WSS verbunden mit %s", MASTER_URL)
                     self._write_state("connected")
+
+                    # Hello-Frame: Tap stellt sich beim Master vor, schickt
+                    # die laufende Version + Schema-Version mit. master-
+                    # uplink persistiert das in taps.version. Failsoft —
+                    # bei Send-Fehler einfach weiter (älterer Master ohne
+                    # hello-Handler ignoriert das Frame).
+                    try:
+                        await ws.send(orjson.dumps({
+                            "type":    "hello",
+                            "version": _read_tap_version(),
+                            "schema":  CONFIG_SCHEMA_VERSION,
+                        }).decode())
+                    except Exception as exc:
+                        log.debug("hello-frame send fail (uncritical): %s", exc)
 
                     await asyncio.gather(
                         self._send_loop(ws),
