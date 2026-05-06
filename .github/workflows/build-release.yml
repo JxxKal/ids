@@ -569,8 +569,15 @@ jobs:
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-maintenance.timer   "$PKG/scripts/cyjan-maintenance.timer"
           cp distro/config/includes.chroot/usr/local/bin/cyjan-mirror-tune                "$PKG/scripts/cyjan-mirror-tune"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-mirror-tune.service  "$PKG/scripts/cyjan-mirror-tune.service"
+          # cyjan-tap CLI selbst — wird vom CLI-Update-Pfad nicht selbst
+          # ersetzt (Self-Replace eines laufenden Skripts ist heikel).
+          # User kann sie nach einem Update manuell mit
+          #   sudo cp /opt/ids/scripts/cyjan-tap /usr/local/bin/cyjan-tap
+          # einspielen. Liegt dann immer in der Fassung des aktuellen
+          # Bundles parat.
+          cp distro/config/includes.chroot/usr/local/bin/cyjan-tap                      "$PKG/scripts/cyjan-tap"
           cp scripts/post-update.sh "$PKG/scripts/post-update.sh"
-          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune"
+          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap"
 
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.
@@ -590,6 +597,7 @@ jobs:
           cp "$PKG/scripts/cyjan-maintenance.timer"    "$PKG/tap-update/scripts/cyjan-maintenance.timer"
           cp "$PKG/scripts/cyjan-mirror-tune"          "$PKG/tap-update/scripts/cyjan-mirror-tune"
           cp "$PKG/scripts/cyjan-mirror-tune.service"  "$PKG/tap-update/scripts/cyjan-mirror-tune.service"
+          cp "$PKG/scripts/cyjan-tap"                  "$PKG/tap-update/scripts/cyjan-tap"
 
           BUNDLE_SHA=$(sha256sum "$PKG/tap-update/images-tap.tar.zst" | awk '{print $1}')
           BUNDLE_SIZE=$(stat -c%s "$PKG/tap-update/images-tap.tar.zst")
