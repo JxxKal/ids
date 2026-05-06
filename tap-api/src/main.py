@@ -198,8 +198,22 @@ def _disk() -> dict:
 
 def _net_rates(iface: str) -> dict | None:
     """Mirror-Interface-Raten aus /sys/class/net/<iface>/statistics. Erster
-    Aufruf liefert nur den absoluten rx_dropped-Counter, ab dem zweiten Tick
-    auch Bps/pps."""
+    Aufruf liefert nur die absoluten Drop-Counter, ab dem zweiten Tick
+    auch Bps/pps.
+
+    Drop-Counter werden bewusst getrennt geliefert:
+      rx_dropped      → Kernel-Stack-Drop. Auf Mirror-Ports oft sehr hoch
+                        ohne dass ein echter Verlust passiert: der Kernel
+                        zählt jedes Paket als 'dropped' das nicht für die
+                        eigene MAC ist und keiner regulären Socket zu-
+                        ordenbar ist. Der AF_PACKET-Sniffer sieht diese
+                        Pakete trotzdem (PROMISC). Daher als informativ
+                        zu werten — NICHT als Ring-Buffer-Indikator.
+      hw_drops        → Summe aus rx_fifo_errors + rx_missed_errors +
+                        rx_over_errors. Das sind die echten Hardware-/
+                        Ring-Buffer-Drops, die eine ethtool-G-Erweiterung
+                        rechtfertigen. Wenn diese Zahl steigt, ist der
+                        Ring-Buffer das Bottleneck."""
     global _net_prev
     if not iface:
         return None
@@ -207,26 +221,46 @@ def _net_rates(iface: str) -> dict | None:
     if not stats_dir.is_dir():
         return None
     try:
-        def rd(f: str) -> int:
-            return int((stats_dir / f).read_text())
+        def rd(f: str, default: int = 0) -> int:
+            try:
+                return int((stats_dir / f).read_text())
+            except FileNotFoundError:
+                return default
         rx_b = rd("rx_bytes"); tx_b = rd("tx_bytes")
         rx_p = rd("rx_packets"); tx_p = rd("tx_packets")
         rx_d = rd("rx_dropped")
+        # Echte HW-Drops: viele NICs füllen NICHT alle drei Counter, daher
+        # summieren wir sie. Fehlende Files → 0 (ist kein echter Counter,
+        # aber ein vorsichtiger Default).
+        hw_drops = (
+            rd("rx_fifo_errors")
+            + rd("rx_missed_errors")
+            + rd("rx_over_errors")
+        )
         now = time.monotonic()
         prev = _net_prev.get(iface)
         _net_prev[iface] = (rx_b, tx_b, rx_p, tx_p, now)
+        base = {
+            "rx_bps":     None,
+            "tx_bps":     None,
+            "rx_pps":     None,
+            "tx_pps":     None,
+            "rx_dropped": rx_d,
+            "hw_drops":   hw_drops,
+        }
         if prev is None:
-            return {"rx_bps": None, "tx_bps": None, "rx_pps": None, "tx_pps": None, "rx_dropped": rx_d}
+            return base
         p_rx_b, p_tx_b, p_rx_p, p_tx_p, p_t = prev
         dt = now - p_t
         if dt < 0.1:
-            return {"rx_bps": None, "tx_bps": None, "rx_pps": None, "tx_pps": None, "rx_dropped": rx_d}
+            return base
         return {
             "rx_bps":     round((rx_b - p_rx_b) / dt),
             "tx_bps":     round((tx_b - p_tx_b) / dt),
             "rx_pps":     round((rx_p - p_rx_p) / dt),
             "tx_pps":     round((tx_p - p_tx_p) / dt),
             "rx_dropped": rx_d,
+            "hw_drops":   hw_drops,
         }
     except Exception:
         return None
