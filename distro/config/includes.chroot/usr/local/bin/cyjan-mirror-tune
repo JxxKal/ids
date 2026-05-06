@@ -14,20 +14,25 @@
 
 set -u
 
-PROFILE_FILE="/etc/cyjan/profile"
+# /etc/cyjan/profile enthält nur den Compose-Profil-Namen ("prod", "test"
+# oder "tap"), NICHT die env-Vars. Die echten Variablen (MIRROR_INTERFACE,
+# MASTER_URL, …) schreibt der Wizard in /opt/ids/.env. Wir greifen primär
+# .env an und nehmen profile nicht mehr in den Mund.
+ENV_FILE="/opt/ids/.env"
 TAG="[mirror-tune]"
 
-if [ ! -r "$PROFILE_FILE" ]; then
-  echo "$TAG $PROFILE_FILE fehlt — Wizard noch nicht durchgelaufen, überspringe."
+if [ ! -r "$ENV_FILE" ]; then
+  echo "$TAG $ENV_FILE fehlt — Wizard noch nicht durchgelaufen, überspringe."
   exit 0
 fi
 
-# shellcheck source=/dev/null
-. "$PROFILE_FILE"
-
-IFACE="${MIRROR_INTERFACE:-}"
+# .env grep-en statt sourcen — sonst stolpern wir über Werte mit Spaces,
+# Kommentare, oder unerwartete Lines (z.B. wenn der Wizard mal multi-line
+# Werte schreibt). Der Pattern matcht 'KEY=value' und liest den Rest der
+# Zeile als Wert.
+IFACE=$(grep -E '^MIRROR_INTERFACE=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '"' | tr -d "'")
 if [ -z "$IFACE" ]; then
-  echo "$TAG MIRROR_INTERFACE nicht in $PROFILE_FILE — überspringe."
+  echo "$TAG MIRROR_INTERFACE nicht in $ENV_FILE — überspringe."
   exit 0
 fi
 

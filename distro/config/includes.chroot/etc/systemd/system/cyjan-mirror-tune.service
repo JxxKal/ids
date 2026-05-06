@@ -9,7 +9,7 @@ Wants=network-online.target
 # Cyjan-Stack soll erst starten wenn der Ringbuffer hochgesetzt ist.
 # Sniffer-AF_PACKET-Bind ist nicht harmlos zur Laufzeit-Resize-Operation.
 Before=cyjan-stack.service
-ConditionPathExists=/etc/cyjan/profile
+ConditionPathExists=/opt/ids/.env
 
 [Service]
 Type=oneshot
