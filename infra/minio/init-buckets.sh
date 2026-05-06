@@ -66,37 +66,25 @@ ensure_bucket() {
   mc mb --ignore-existing "local/$bucket" >/dev/null
 }
 
-# Idempotente Lifecycle-Verwaltung: prüft den aktuellen Zustand, gleicht ab.
-# Wenn keine Rule da ist oder die Days-Anzahl abweicht, alle Rules entfernen +
-# eine frische setzen. Verhindert Doppel-Rules nach mehreren Re-Inits.
+# Idempotente Lifecycle-Verwaltung: das mc-Image (busybox-scratch) hat
+# weder sed noch grep, daher kein content-basierter Diff möglich. Lösung:
+# unconditional reset — alle bestehenden Rules wegnehmen, frische setzen.
+# Nach jedem Run ist der State garantiert "$days Tage", egal was vorher
+# war. Doppel-Rules nach mehreren Re-Inits sind damit auch ausgeschlossen.
 ensure_lifecycle() {
   bucket="$1"
   days="$2"
 
-  # mc ilm rule ls --json hat verschiedene Outputs je nach Version. Wir
-  # parsen "Days":N — auf älteren Versionen kommt ein "Expiration":{"Days":N}-
-  # Block, neuere flatten es. Simpler grep matcht beide.
-  current=$(mc ilm rule ls --json "local/$bucket" 2>/dev/null \
-            | grep -oE '"Days"[ :]*[0-9]+' | head -1 | grep -oE '[0-9]+' || true)
-
-  if [ "$current" = "$days" ]; then
-    echo "  $bucket: Lifecycle bereits auf $days Tage."
-    return
-  fi
-
-  if [ -n "$current" ]; then
-    echo "  $bucket: Lifecycle wird angepasst ($current → $days Tage)."
-    # mc ilm rule rm --all-rules entfernt alle bestehenden Rules.
-    # Älteres mc kennt nur '--all-rules' nicht, fallback auf das alte
-    # 'mc ilm rule clear' bzw. 'mc ilm rule rm --id <id>'.
-    mc ilm rule rm --force --all-rules "local/$bucket" >/dev/null 2>&1 \
-      || mc ilm rule clear --force "local/$bucket" >/dev/null 2>&1 \
-      || true
-  else
-    echo "  $bucket: Lifecycle wird gesetzt ($days Tage)."
-  fi
+  # mc ilm rule rm --all-rules entfernt alle bestehenden Rules.
+  # Falls keine da sind: exit non-zero, ignorieren wir.
+  # Falls die Sub-Variante --all-rules nicht unterstützt wird, fällt auf
+  # das alte 'mc ilm rule clear' zurück.
+  mc ilm rule rm --force --all-rules "local/$bucket" >/dev/null 2>&1 \
+    || mc ilm rule clear --force "local/$bucket" >/dev/null 2>&1 \
+    || true
 
   mc ilm rule add --expiry-days "$days" "local/$bucket" >/dev/null
+  echo "  $bucket: Lifecycle gesetzt ($days Tage Expiry)."
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -124,13 +112,13 @@ ensure_lifecycle "ids-exports" "$EXPORTS_DAYS"
 # ──────────────────────────────────────────────────────────────────────────────
 echo
 echo "[minio-init] Buckets:"
-mc ls local | sed 's/^/  /'
+mc ls local
 
 echo
-echo "[minio-init] Lifecycle-Status:"
+echo "[minio-init] Lifecycle-Status pro Bucket:"
 for b in ids-pcaps ids-exports; do
-  echo "  $b:"
-  mc ilm rule ls "local/$b" 2>&1 | sed 's/^/    /' | head -10
+  echo "--- $b ---"
+  mc ilm rule ls "local/$b" 2>&1
 done
 
 echo
