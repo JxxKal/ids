@@ -903,17 +903,42 @@ elif [ -n "$OFFLINE_BUNDLE" ]; then
     PROGRESS_FIFO=$(mktemp -u)
     mkfifo "$PROGRESS_FIFO"
     (
-      # Hintergrund-Worker: pv → decompress → docker load. Schickt pv-
-      # Prozente in den FIFO, am Ende ein "100" als Sentinel.
+      # Hintergrund-Worker: pv → decompress → docker load. pv schickt
+      # Prozente nach stderr in die FIFO. KEIN explizites "echo 100"
+      # hinterher: das hat früher einen FIFO-Deadlock erzeugt, weil
+      # das open(O_WRONLY) blockiert sobald gauge schon EOF gesehen
+      # hat — und gauge sieht EOF in dem Moment in dem pv exited.
       pv -n -i 1 -s "$BUNDLE_SIZE" "$OFFLINE_BUNDLE" 2>"$PROGRESS_FIFO" \
         | $DECOMPRESS \
         | docker load >>"$LOG" 2>&1
-      worker_rc=$?
-      echo 100 >"$PROGRESS_FIFO"
-      exit $worker_rc
+      exit $?
     ) &
     WORKER_PID=$!
+
+    # Phase 1: pv-Bytes-Progress (Disk-Read-Phase, ~30–60 s).
+    # gauge sieht EOF wenn pv exits → schließt sich automatisch.
     gauge "Offline-Images laden ($BUNDLE_HUMAN, ~1–2 min)..." 0 <"$PROGRESS_FIFO"
+
+    # Phase 2: docker load registriert noch die letzten Layer in seinem
+    # Image-Store (Decompressor-Buffer + Tar-Footer + Layer-Metadata).
+    # Dauert typisch 5–30 s. Ohne diesen zweiten Gauge sähe der User in
+    # der Zeit nur einen blinkenden Cursor auf schwarzem Screen.
+    if kill -0 "$WORKER_PID" 2>/dev/null; then
+      (
+        # Pseudo-Progress: oszilliert solange der Worker läuft. Wenn
+        # docker load fertig ist, exits der Worker → break, echo 100,
+        # gauge sieht EOF und schließt sich.
+        p=30
+        while kill -0 "$WORKER_PID" 2>/dev/null; do
+          echo "$p"
+          p=$(( p + 5 ))
+          [ "$p" -ge 95 ] && p=60   # zykliert 60→95→60, kein 100 vor Ende
+          sleep 1
+        done
+        echo 100
+      ) | gauge "Importiere Image-Layer in Docker (~10–30 s)..." 30 || true
+    fi
+
     wait "$WORKER_PID"; load_rc=$?
     rm -f "$PROGRESS_FIFO"
   else
