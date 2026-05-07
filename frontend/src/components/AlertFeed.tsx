@@ -862,8 +862,93 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
         </span>
       </div>
 
-      {/* Table */}
+      {/* Table (Desktop) + Card-Stack (Mobile) — gleicher overflow-Container */}
       <div className="overflow-y-auto flex-1">
+
+        {/* ── Mobile: Card-Stack ────────────────────────────── */}
+        <div className="md:hidden flex flex-col gap-2 px-1">
+          {grouped ? (
+            groups!.length === 0
+              ? <div className="text-center text-slate-600 py-12 text-xs">{t('alertFeed.noAlerts')}</div>
+              : groups!.map(g => (
+                  <div
+                    key={g.key}
+                    className={`p-3 cursor-pointer transition-all ${ROW_SEVERITY[g.severity] ?? ''}`}
+                    onClick={() => setSelected(g.latest)}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <SeverityBadge severity={g.severity} />
+                        <span className="font-medium text-slate-200 truncate text-xs">
+                          {g.rule_id ?? '–'}
+                          {g.latest.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
+                          {g.latest.source === 'external' && <span className="ml-1 text-violet-300">IRMA</span>}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-slate-500 font-mono">
+                        {g.count > 1 && <span className="px-1.5 py-0.5 rounded bg-slate-700 text-slate-300">×{g.count}</span>}
+                        <span>{fmtTime(g.last_ts)}</span>
+                      </div>
+                    </div>
+                    {g.description && (
+                      <p className="text-[11px] text-slate-400 line-clamp-1 mb-1.5">{g.description}</p>
+                    )}
+                    <div className="flex items-center justify-between text-[10px] font-mono gap-2">
+                      <div className="text-slate-400 truncate min-w-0">
+                        <span className="text-slate-500">{g.src_ip}</span>
+                        <span className="text-slate-600 mx-1">→</span>
+                        <span className="text-slate-300">{g.dst_ip}{g.latest.dst_port ? `:${g.latest.dst_port}` : ''}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                        {g.latest.feedback && <FeedbackBadge feedback={g.latest.feedback} />}
+                        <PcapButton alertId={g.latest.alert_id} available={g.latest.pcap_available} />
+                      </div>
+                    </div>
+                  </div>
+                ))
+          ) : (
+            filtered.length === 0
+              ? <div className="text-center text-slate-600 py-12 text-xs">{t('alertFeed.noAlerts')}</div>
+              : filtered.map(a => (
+                  <div
+                    key={a.alert_id}
+                    className={`p-3 cursor-pointer transition-all ${ROW_SEVERITY[effectiveSeverity(a)] ?? ''}`}
+                    onClick={() => setSelected(a)}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <SeverityBadge alert={a} />
+                        <span className="font-medium text-slate-200 truncate text-xs">
+                          {a.rule_id}
+                          {a.is_test && <span className="ml-1 text-blue-400">[TEST]</span>}
+                          {a.source === 'external' && <span className="ml-1 text-violet-300">IRMA</span>}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 text-[10px] text-slate-500 font-mono">
+                        <span>{fmtTime(a.ts)}</span>
+                      </div>
+                    </div>
+                    {a.description && (
+                      <p className="text-[11px] text-slate-400 line-clamp-1 mb-1.5">{a.description}</p>
+                    )}
+                    <div className="flex items-center justify-between text-[10px] font-mono gap-2">
+                      <div className="text-slate-400 truncate min-w-0">
+                        <span className="text-slate-500">{a.src_ip}</span>
+                        <span className="text-slate-600 mx-1">→</span>
+                        <span className="text-slate-300">{a.dst_ip}{a.dst_port ? `:${a.dst_port}` : ''}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                        {a.feedback && <FeedbackBadge feedback={a.feedback} />}
+                        <PcapButton alertId={a.alert_id} available={a.pcap_available} />
+                      </div>
+                    </div>
+                  </div>
+                ))
+          )}
+        </div>
+
+        {/* ── Desktop: Tabelle (unverändert) ────────────────── */}
+        <div className="hidden md:block">
         {grouped ? (
           /* ── Gruppierte Ansicht ─────────────────────────────── */
           <table className="w-full text-xs">
@@ -1090,6 +1175,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
             </tbody>
           </table>
         )}
+        </div>
       </div>
 
       {selected && (
