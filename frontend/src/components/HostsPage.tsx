@@ -180,8 +180,96 @@ export function HostsPage() {
         <span className="text-xs text-slate-500 ml-auto">{t('hosts.count', { count: hosts.length })}</span>
       </div>
 
-      {/* Table */}
-      <div className="card overflow-hidden">
+      {/* Mobile: Card-Stack */}
+      <div className="md:hidden flex flex-col gap-2">
+        {hosts.length === 0 && (
+          <div className="card p-6 text-center text-slate-600 text-xs">{t('hosts.noHosts')}</div>
+        )}
+        {hosts.map(h => (
+          <div key={h.ip} className="card p-3">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <button
+                type="button"
+                onClick={() => showHostConnections(h.ip)}
+                title={t('hosts.showConnectionsTitle')}
+                className="inline-flex items-center gap-1.5 font-mono text-sm text-slate-200 hover:text-cyan-300 transition-colors min-w-0"
+              >
+                <Network size={12} className="text-slate-500 shrink-0" />
+                <span className="truncate">{h.ip}</span>
+              </button>
+              <div className="shrink-0">
+                <TrustBadge trusted={h.trusted} source={h.trust_source} />
+              </div>
+            </div>
+
+            {editState?.ip === h.ip ? (
+              <div className="flex flex-col gap-2 mb-2">
+                <input
+                  autoFocus
+                  className="input"
+                  placeholder={t('hosts.columns.displayHostname')}
+                  value={editState.display_name}
+                  onChange={e => setEdit({ ...editState, display_name: e.target.value })}
+                />
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="accent-blue-500 w-4 h-4"
+                    checked={editState.trusted}
+                    onChange={e => setEdit({ ...editState, trusted: e.target.checked })}
+                  />
+                  {t('hosts.trustedToggle')}
+                </label>
+              </div>
+            ) : (
+              <div className="text-xs text-slate-300 mb-2 truncate">
+                {h.display_name || h.hostname || <span className="text-slate-600">–</span>}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-mono mb-2">
+              <div className="text-slate-500">
+                <span className="text-slate-600 mr-1">geo</span>
+                {h.geo
+                  ? [h.geo.city, h.geo.country].filter(Boolean).join(', ') || '–'
+                  : h.asn?.org ?? '–'}
+              </div>
+              <div className="text-slate-500 tabular-nums text-right">
+                <span className="text-slate-600 mr-1">ping</span>
+                {h.ping_ms != null ? `${h.ping_ms} ms` : '–'}
+              </div>
+              <div className="text-slate-600 col-span-2">
+                <span className="text-slate-700 mr-1">last seen</span>
+                {h.last_seen ? new Date(h.last_seen).toLocaleString() : '–'}
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              {editState?.ip === h.ip ? (
+                <>
+                  <button onClick={() => setEdit(null)} className="btn-ghost min-h-[40px]">{t('common.cancel')}</button>
+                  <button onClick={saveEdit}           className="btn-primary min-h-[40px]">{t('common.save')}</button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setEdit({ ip: h.ip, display_name: h.display_name ?? '', trusted: h.trusted })}
+                    className="btn-ghost min-h-[40px]"
+                  >
+                    {t('common.edit')}
+                  </button>
+                  <button onClick={() => setConfirmIp(h.ip)} className="btn-ghost text-red-500 min-h-[40px]">
+                    {t('common.delete')}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop: Tabelle (unverändert) */}
+      <div className="hidden md:block card overflow-hidden">
         <table className="w-full text-xs">
           <thead className="cyjan-table-head text-left">
             <tr>
