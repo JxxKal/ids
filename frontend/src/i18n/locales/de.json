@@ -11,7 +11,8 @@
     "save": "Speichern",
     "edit": "Bearbeiten",
     "delete": "Löschen",
-    "add": "Hinzufügen"
+    "add": "Hinzufügen",
+    "mobileDesktopHint": "Diese Sektion ist für Desktop optimiert — auf dem Handy lässt sie sich bedienen, aber Tabellen und Formulare sind hier eingeschränkt."
   },
   "errorBoundary": {
     "title": "Rendering-Fehler",

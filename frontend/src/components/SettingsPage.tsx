@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import {
-  Activity, Database, FileText, Globe, HardDrive, KeyRound, ListTree, Lock, Network, Plug, RotateCcw, Server, Sliders, Sparkles, Upload, Users,
+  Activity, ChevronDown, Database, FileText, Globe, HardDrive, KeyRound, ListTree, Lock, Menu, Network, Plug, RotateCcw, Server, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../i18n';
 import {
@@ -41,6 +41,7 @@ import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, ML
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
 import { MlFlowDiagram } from './MlFlowDiagram';
+import { MobileDesktopHint } from './MobileDesktopHint';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -6120,14 +6121,48 @@ interface SettingsPageProps {
 export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
   const { t } = useTranslation();
   const [active, setActive] = useState<SectionId>(initialSection ?? 'general');
+  // Mobile-Drawer: Sub-Sidebar wird auf <768px durch CSS aus dem Layout
+  // gehoben (position: fixed, off-screen). `navOpen` schiebt sie rein.
+  const [navOpen, setNavOpen] = useState(false);
 
   const isThorsten = active === 'thorsten';
 
-  return (
-    <div className="flex h-full overflow-hidden">
+  // Aktuelles Section-Label für die Mobile-Hamburger-Bar
+  const activeLabel = t(`settings.items.${active}`);
 
-      {/* ── Submenu (Stil wie Hauptmenü) ─────────────────────────────────── */}
-      <nav className="cyjan-settings-nav">
+  function selectSection(id: SectionId) {
+    setActive(id);
+    setNavOpen(false);
+  }
+
+  return (
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
+
+      {/* ── Mobile: Hamburger-Bar mit aktuellem Section-Namen ──────────── */}
+      <button
+        type="button"
+        onClick={() => setNavOpen(true)}
+        className="md:hidden flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/80 text-slate-200 text-sm"
+        aria-label={t('settings.openMenu', { defaultValue: 'Sektionsmenü öffnen' })}
+      >
+        <span className="flex items-center gap-2">
+          <Menu size={16} className="text-slate-400" />
+          <span className="font-medium">{activeLabel}</span>
+        </span>
+        <ChevronDown size={14} className="text-slate-500" />
+      </button>
+
+      {/* ── Mobile: Backdrop hinter dem offenen Drawer ─────────────────── */}
+      {navOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/60 z-40"
+          onClick={() => setNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ── Submenu (Desktop: statisch links · Mobile: Drawer) ─────────── */}
+      <nav className={`cyjan-settings-nav ${navOpen ? 'is-open' : ''}`}>
         {NAV_GROUPS.map(group => (
           <div key={group.key} className="cyjan-settings-nav-group">
             <div className="cyjan-settings-nav-grouplabel">{t(`settings.groups.${group.key}`)}</div>
@@ -6135,7 +6170,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActive(item.id)}
+                onClick={() => selectSection(item.id)}
                 className={`cyjan-sidebar-item ${active === item.id ? 'is-active' : ''}`}
               >
                 <span className="cyjan-sidebar-icon">{item.icon}</span>
@@ -6152,6 +6187,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
           <FuerThorsten />
         ) : (
         <div className="max-w-4xl mx-auto py-6 px-6">
+          <MobileDesktopHint />
           <div className="card p-5">
             {active === 'general'       && <GeneralSettings />}
             {active === 'users'         && <UserManagement />}

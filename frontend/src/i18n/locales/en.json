@@ -11,7 +11,8 @@
     "save": "Save",
     "edit": "Edit",
     "delete": "Delete",
-    "add": "Add"
+    "add": "Add",
+    "mobileDesktopHint": "This section is optimized for desktop — it works on mobile but tables and forms are constrained here."
   },
   "errorBoundary": {
     "title": "Rendering error",

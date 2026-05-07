@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { bulkDeleteNetworks, createNetwork, deleteNetwork, downloadNetworksExampleCsv, fetchNetworks, importNetworksCsv, updateNetwork } from '../api';
 import type { KnownNetwork, User } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
+import { MobileDesktopHint } from './MobileDesktopHint';
 
 type Kind = 'ot' | 'it';
 type ZoneFilter = 'all' | 'ot' | 'it';
@@ -292,6 +293,7 @@ export function NetworksPage({ user }: Props) {
 
   return (
     <div className="space-y-4">
+      <MobileDesktopHint />
       {/* Form */}
       <div className="card p-4">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">

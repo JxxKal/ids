@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { deleteAllTestRuns, deleteTestRun, fetchTestRuns, runTest } from '../api';
 import type { TestRun } from '../types';
+import { MobileDesktopHint } from './MobileDesktopHint';
 
 const SCENARIO_IDS = ['TEST_001', 'SCAN_001', 'DOS_SYN_001', 'RECON_003', 'DNS_DGA_001'] as const;
 
@@ -67,6 +68,7 @@ export function TestsPage() {
 
   return (
     <div className="space-y-4">
+      <MobileDesktopHint />
       {/* Scenarios */}
       <div className="card p-4">
         <h2 className="text-sm font-semibold text-slate-300 mb-3">{t('tests.title')}</h2>
