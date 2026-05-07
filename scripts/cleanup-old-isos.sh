@@ -12,7 +12,6 @@
 set -euo pipefail
 
 REPO="${REPO:-JxxKal/ids}"
-KEEP_TAG="${KEEP_TAG:-v2.3.7-iso}"   # ← welches ISO-Tag bleibt
 DRY=1
 [ "${1:-}" = "--go" ] && DRY=0
 
@@ -28,6 +27,24 @@ fi
 
 API="https://api.github.com/repos/$REPO"
 HDR=(-H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json")
+
+# KEEP_TAG bestimmen:
+# - explizit via env-Var (z.B. "v2.4.0") oder als 2. Argument → vorrangig
+# - sonst: neuestes Release das mindestens ein ISO-Asset hat
+KEEP_TAG="${KEEP_TAG:-${2:-}}"
+if [ -z "$KEEP_TAG" ]; then
+  KEEP_TAG=$(curl -sS "${HDR[@]}" "$API/releases?per_page=100" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+for r in d:
+    if any(a['name'].endswith('.iso') for a in r.get('assets', [])):
+        print(r['tag_name']); break
+")
+fi
+if [ -z "$KEEP_TAG" ]; then
+  echo "FEHLER: kein Release mit ISO-Assets gefunden — was soll behalten werden?" >&2
+  exit 1
+fi
 
 echo "Repo:      $REPO"
 echo "Keep-Tag:  $KEEP_TAG"
