@@ -516,27 +516,28 @@
   .cyjan-sidebar-nav {
     flex-direction: row;
     flex: 1;
-    overflow-x: auto;
+    /* Kein overflow-x: auto auf der Bottom-Nav: Items werden mit flex:1
+       gleichmäßig auf die verfügbare Breite verteilt — sonst scrollt die
+       Nav intern und sieht auf iOS Safari aus wie eine Page-Scrollbar. */
     gap: 2px;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-  }
-  .cyjan-sidebar-nav::-webkit-scrollbar {
-    display: none;
+    min-width: 0;
   }
   .cyjan-sidebar-item {
-    flex: 1 0 auto;
+    flex: 1 1 0;
     flex-direction: column;
     gap: 2px;
-    padding: 6px 10px;
+    padding: 6px 4px;
     font-size: 10px;
-    line-height: 1.2;
+    line-height: 1.15;
     text-align: center;
     border-left: none;
     border-bottom: 2px solid transparent;
-    min-width: 60px;
+    min-width: 0;
     min-height: 48px;
     justify-content: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .cyjan-sidebar-item.is-active {
     border-left-color: transparent;
