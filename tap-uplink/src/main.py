@@ -26,7 +26,9 @@ trotzdem hochkommen und das Pairing anbieten kann.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
+import io
 import logging
 import os
 import ssl
@@ -55,6 +57,21 @@ ALERTS_TOPIC  = os.environ.get("ALERTS_TOPIC", "alerts-raw")
 # alerts-Pfad bleibt davon unbeeinflusst.
 METRICS_TOPIC = os.environ.get("METRICS_TOPIC", "rule-metrics")
 GROUP_ID      = os.environ.get("KAFKA_GROUP_ID", "tap-uplink")
+# pcap-headers-Topic: Sniffer schreibt jedes Paket-Header-Sample rein.
+# tap-uplink hält daraus einen ±PCAP_WINDOW_S-Ringbuffer in-memory und
+# baut bei lokal-detektierten Alarmen das passende PCAP für master-uplink.
+PCAP_TOPIC      = os.environ.get("PCAP_TOPIC",       "pcap-headers")
+PCAP_WINDOW_S   = float(os.environ.get("PCAP_WINDOW_S", "60"))
+PCAP_GROUP_ID   = os.environ.get("PCAP_GROUP_ID",    "tap-uplink-pcap")
+# In-memory Ringbuffer-Cap (sliding-window). 16 MB Frame-Limit am Master
+# definiert die obere Grenze einer einzelnen PCAP-Übertragung; bei
+# typischer 60s × 18kpps × 128 Byte snaplen wären das ~140 MB roh —
+# zu viel für ein Frame. Wir limitieren die buf-Länge daher pragmatisch
+# (Drop-Oldest), damit ein Spike-Mirror keinen RAM-Run-Away erzeugt.
+PCAP_MAX_PACKETS_IN_BUF = int(os.environ.get("PCAP_MAX_PACKETS_IN_BUF", "200000"))
+# Maximale Bytes pro hochgeladenem PCAP. Bei Überschreitung droppen wir
+# den ältesten Paketanteil bis das PCAP-Bytes-Limit unterschritten ist.
+PCAP_MAX_UPLOAD_BYTES   = int(os.environ.get("PCAP_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 
 MASTER_URL    = os.environ.get("MASTER_URL", "wss://master.example.com:8443/uplink")
 # Plain ws:// gegen den master-uplink (mTLS-only Endpoint) führt zu einem
@@ -169,6 +186,200 @@ def _get_ssl_context() -> ssl.SSLContext:
     return ctx
 
 
+# ── PCAP-Builder (Mini-pcap-store, host-internal) ──────────────────────────
+# tap-uplink-V1: konsumiert pcap-headers lokal, hält ±PCAP_WINDOW_S-Ringbuffer,
+# erzeugt bei lokal-detektierten Alerts das libpcap-File und schickt es als
+# pcap_upload-Frame an master-uplink. Damit haben Tap-Alerts auch dann ein
+# PCAP, wenn der pcap-store nur am Master läuft.
+
+import base64 as _b64
+import struct as _struct
+from collections import deque as _deque
+
+_PCAP_GLOBAL_HEADER = _struct.pack(
+    "<IHHiIII",
+    0xA1B2C3D4,   # magic
+    2, 4,         # version major.minor
+    0, 0,         # thiszone, sigfigs
+    65535,        # snaplen
+    1,            # LINKTYPE_ETHERNET
+)
+_PKT_HEADER_FMT = "<IIII"
+
+
+class _PacketBuffer:
+    """Thread-safer Ringbuffer für (timestamp, raw_bytes). Cleanup beim
+    add() — ältere als max_window_s werden verworfen. cap auf
+    PCAP_MAX_PACKETS_IN_BUF schützt gegen Spike-Mirror der Memory wegfrisst."""
+    def __init__(self, max_window_s: float, max_packets: int) -> None:
+        self._max_s = max_window_s * 2 + 10
+        self._max_n = max_packets
+        self._buf: _deque[tuple[float, bytes]] = _deque()
+        self._lock = threading.Lock()
+
+    def add(self, ts: float, raw: bytes) -> None:
+        with self._lock:
+            self._buf.append((ts, raw))
+            cutoff = time.time() - self._max_s
+            while self._buf and self._buf[0][0] < cutoff:
+                self._buf.popleft()
+            while len(self._buf) > self._max_n:
+                self._buf.popleft()
+
+    def extract(self, center_ts: float, window_s: float) -> list[tuple[float, bytes]]:
+        lo = center_ts - window_s
+        hi = center_ts + window_s
+        with self._lock:
+            return [(ts, raw) for ts, raw in self._buf if lo <= ts <= hi]
+
+    def newest_ts(self) -> float:
+        with self._lock:
+            return self._buf[-1][0] if self._buf else 0.0
+
+
+def _build_pcap(packets: list[tuple[float, bytes]], max_bytes: int) -> bytes:
+    """Baut libpcap-File. Wenn das Total-Bytes-Limit überschritten würde,
+    werden die ältesten Pakete weggelassen (latest-wins-Strategie — der
+    User will eher den Trigger-Moment + danach sehen, weniger den
+    Vorlauf)."""
+    sorted_pkts = sorted(packets, key=lambda x: x[0])
+    # Größe vorberechnen, dann von vorn droppen bis es passt
+    total = len(_PCAP_GLOBAL_HEADER)
+    sizes: list[int] = []
+    for _, raw in sorted_pkts:
+        s = 16 + len(raw)
+        sizes.append(s)
+        total += s
+    drop_from_start = 0
+    while total > max_bytes and drop_from_start < len(sorted_pkts):
+        total -= sizes[drop_from_start]
+        drop_from_start += 1
+    sorted_pkts = sorted_pkts[drop_from_start:]
+
+    buf = io.BytesIO()
+    buf.write(_PCAP_GLOBAL_HEADER)
+    for ts, raw in sorted_pkts:
+        ts_sec  = int(ts)
+        ts_usec = int((ts - ts_sec) * 1_000_000)
+        pkt_len = len(raw)
+        buf.write(_struct.pack(_PKT_HEADER_FMT, ts_sec, ts_usec, pkt_len, pkt_len))
+        buf.write(raw)
+    return buf.getvalue()
+
+
+@dataclasses.dataclass
+class _PendingAlert:
+    alert_id: str
+    alert_ts: float
+    ready_at: float
+
+
+# Globale Shared-State zwischen den drei Threads (alerts-Consumer,
+# pcap-Consumer, Flush-Loop). Lock zwischen alerts-Consumer und Flush.
+_pcap_buffer  = _PacketBuffer(PCAP_WINDOW_S, PCAP_MAX_PACKETS_IN_BUF)
+_pending_lock = threading.Lock()
+_pending_alerts: list[_PendingAlert] = []
+
+
+def _kafka_pcap_consumer_thread(stop: threading.Event) -> None:
+    """Konsumiert pcap-headers vom lokalen Tap-Kafka, packt Pakete in den
+    in-memory Ringbuffer. Eigener Thread weil die Volumina (18 kpps) den
+    alerts-Consumer-Loop sonst blocken würden. auto.offset.reset=latest:
+    bei Crash/Restart fangen wir frisch an, kein Backlog-Replay (alte
+    Pakete sind eh wertlos für PCAPs zu zukünftigen Alerts)."""
+    consumer = Consumer({
+        "bootstrap.servers": KAFKA_BROKERS,
+        "group.id":          PCAP_GROUP_ID,
+        "auto.offset.reset": "latest",
+        "enable.auto.commit": True,
+        # Höhere fetch-Größe weil Volume — defaults sind oft konservativ:
+        "fetch.message.max.bytes": 10 * 1024 * 1024,
+    })
+    try:
+        consumer.subscribe([PCAP_TOPIC])
+    except Exception as exc:
+        log.warning("pcap-Consumer subscribe-Fehler: %s — Topic vmtl. nicht initialisiert", exc)
+        consumer.close()
+        return
+
+    log.info("Kafka-pcap-Consumer subscribed: %s @ %s", PCAP_TOPIC, KAFKA_BROKERS)
+    pkt_count = 0
+    try:
+        while not stop.is_set():
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    continue
+                # Topic noch nicht angelegt → resilient warten, evtl. kommt
+                # er beim nächsten init-topics-Run.
+                log.debug("pcap-Consumer Kafka-error: %s", msg.error())
+                continue
+            try:
+                pkt = orjson.loads(msg.value())
+                ts_sec  = pkt.get("ts_sec")
+                if ts_sec is None:
+                    continue
+                ts_usec = pkt.get("ts_usec", 0)
+                ts = float(ts_sec) + float(ts_usec) / 1_000_000
+                raw_b64 = pkt.get("data_b64")
+                if not raw_b64:
+                    continue
+                _pcap_buffer.add(ts, _b64.b64decode(raw_b64))
+                pkt_count += 1
+                if pkt_count % 50000 == 0:
+                    log.debug("pcap-buf: %d Pakete eingebucht", pkt_count)
+            except Exception as exc:
+                log.debug("pcap-Paket-parse Fehler: %s", exc)
+    finally:
+        consumer.close()
+        log.info("Kafka-pcap-Consumer beendet")
+
+
+def _flush_pending_pcaps_thread(diskq: DiskQueue, stop: threading.Event) -> None:
+    """Polls die pending-Liste alle 1s. Reife Alarme (ts + window_s
+    erreicht) werden zu PCAP-Files konvertiert und als pcap_upload-Frame
+    in die DiskQueue gepusht — von dort aus geht die Übertragung über
+    den existierenden _send_loop an den Master."""
+    log.info("PCAP-Flush-Thread aktiv (window=%.0fs)", PCAP_WINDOW_S)
+    while not stop.is_set():
+        time.sleep(1.0)
+        now_mono = time.monotonic()
+        ripe: list[_PendingAlert] = []
+        with _pending_lock:
+            still_pending: list[_PendingAlert] = []
+            for pa in _pending_alerts:
+                if now_mono >= pa.ready_at:
+                    ripe.append(pa)
+                else:
+                    still_pending.append(pa)
+            _pending_alerts.clear()
+            _pending_alerts.extend(still_pending)
+
+        for pa in ripe:
+            packets = _pcap_buffer.extract(pa.alert_ts, PCAP_WINDOW_S)
+            if not packets:
+                log.warning("Keine Pakete im Fenster für Alert %s", pa.alert_id[:8])
+                continue
+            try:
+                pcap_bytes = _build_pcap(packets, PCAP_MAX_UPLOAD_BYTES)
+                pcap_b64   = _b64.b64encode(pcap_bytes).decode()
+                frame = orjson.dumps({
+                    "type": "pcap_upload",
+                    "payload": {
+                        "alert_id": pa.alert_id,
+                        "pcap_b64": pcap_b64,
+                    },
+                })
+                diskq.push(frame)
+                log.info("pcap_upload für Alert %s queued (%d Pakete, %d Bytes)",
+                         pa.alert_id[:8], len(packets), len(pcap_bytes))
+            except Exception as exc:
+                log.warning("pcap_upload-Build fail %s: %s", pa.alert_id[:8], exc)
+    log.info("PCAP-Flush-Thread beendet")
+
+
 # ── Kafka-Consumer (in eigenem Thread) ───────────────────────────────────────
 
 
@@ -225,6 +436,28 @@ def _kafka_consumer_thread(diskq: DiskQueue, stop: threading.Event) -> None:
                 payload_obj = orjson.loads(payload)
                 frame = orjson.dumps({"type": ftype, "payload": payload_obj})
                 diskq.push(frame)
+                # PCAP-Pfad: bei jedem Alert einen PendingAlert anlegen,
+                # damit der Flush-Thread nach Window-Ablauf das passende
+                # PCAP aus dem in-memory Ringbuffer baut.
+                if ftype == "alert":
+                    alert_id = payload_obj.get("alert_id")
+                    ts_raw   = payload_obj.get("ts")
+                    if alert_id:
+                        try:
+                            from datetime import datetime
+                            alert_ts = datetime.fromisoformat(str(ts_raw)).timestamp() \
+                                       if ts_raw else time.time()
+                        except (ValueError, TypeError):
+                            try:
+                                alert_ts = float(ts_raw) if ts_raw else time.time()
+                            except (ValueError, TypeError):
+                                alert_ts = time.time()
+                        with _pending_lock:
+                            _pending_alerts.append(_PendingAlert(
+                                alert_id=alert_id,
+                                alert_ts=alert_ts,
+                                ready_at=time.monotonic() + PCAP_WINDOW_S,
+                            ))
             except Exception as exc:
                 log.error("Push in Queue fehlgeschlagen (%s): %s", ftype, exc)
     finally:
@@ -582,6 +815,16 @@ async def amain() -> None:
     t = threading.Thread(target=_kafka_consumer_thread, args=(diskq, stop), daemon=True)
     t.start()
 
+    # PCAP-Side: separater Consumer für pcap-headers + periodischer Flush.
+    # Beide daemon-Threads, sterben mit dem Hauptprozess. Wenn Topic
+    # pcap-headers nicht existiert (alte Tap-Init-Topics-Variante), failt
+    # der Subscribe failsoft und der Thread beendet sich — der Stack läuft
+    # ohne PCAP-Feature weiter.
+    t_pcap  = threading.Thread(target=_kafka_pcap_consumer_thread, args=(stop,), daemon=True)
+    t_flush = threading.Thread(target=_flush_pending_pcaps_thread, args=(diskq, stop), daemon=True)
+    t_pcap.start()
+    t_flush.start()
+
     # Reverse-Channel-Polling parallel zur WSS-Uplink-Schleife. Beide laufen
     # nebenher; Ausfall des einen beendet nicht den anderen.
     poll_task = asyncio.create_task(config_poll_loop())
@@ -593,6 +836,8 @@ async def amain() -> None:
         poll_task.cancel()
         stop.set()
         t.join(timeout=5)
+        t_pcap.join(timeout=5)
+        t_flush.join(timeout=5)
 
 
 if __name__ == "__main__":

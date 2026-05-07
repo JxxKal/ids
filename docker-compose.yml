@@ -515,6 +515,14 @@ services:
       UPLINK_PORT: 8443
       RULES_DIR: /rules
       LOG_LEVEL: INFO
+      # MinIO-Zugang für PCAP-Upload aus tap-uplink-Frames (V1: tap-uplink
+      # hält ±60s pcap-headers in-memory und schickt das fertige PCAP über
+      # die mTLS-WSS, master-uplink lädt es hier in den ids-pcaps-Bucket).
+      MINIO_ENDPOINT:   minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      PCAP_BUCKET:      ids-pcaps
+      PUSH_TOPIC:       alerts-enriched-push
     volumes:
       - master-ca:/var/lib/cyjan/master-ca:ro
       # Reverse-Channel: master-uplink liefert die buildin-Regeln + Custom-

@@ -32,10 +32,15 @@ from pathlib import Path
 
 import asyncpg
 import orjson
+import base64
+import io
+
 import websockets
 from confluent_kafka import Producer
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
+from minio import Minio
+from minio.error import S3Error
 from websockets.legacy.server import WebSocketServerProtocol
 
 LISTEN_HOST = os.environ.get("UPLINK_HOST", "0.0.0.0")
@@ -63,6 +68,16 @@ HEARTBEAT_TIMEOUT_S = float(os.environ.get("HEARTBEAT_TIMEOUT_S", "75"))
 #   $RULES_DIR/custom/_overrides.json
 #   $RULES_DIR/custom/_suricata_overrides.json
 RULES_DIR = Path(os.environ.get("RULES_DIR", "/rules"))
+
+# MinIO-Zugang für PCAP-Upload aus tap-uplink-Frames. tap-uplink-V1 schickt
+# fertige PCAP-Bytes über mTLS-WSS, master-uplink legt sie unter
+# alerts/<alert_id>.pcap im ids-pcaps-Bucket ab und setzt
+# alerts.pcap_available=true in Postgres.
+MINIO_ENDPOINT   = os.environ.get("MINIO_ENDPOINT",   "minio:9000")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "ids-access")
+MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "ids-secret-change-me")
+PCAP_BUCKET      = os.environ.get("PCAP_BUCKET",      "ids-pcaps")
+PUSH_TOPIC       = os.environ.get("PUSH_TOPIC",       "alerts-enriched-push")
 
 # Tap-Update-Pfad. /opt/ids/tap-update/ am Host wird per Bind-Mount nach
 # /tap-update gemappt. Inhalt entsteht durch die System-Update-Pipeline
@@ -105,6 +120,63 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+# ── PCAP-Upload aus tap-uplink-Frames ─────────────────────────────────────
+# minio-Client wird lazy initialisiert beim ersten pcap_upload — kein
+# Master-Stack-Crash wenn MinIO mal kurz nicht erreichbar ist.
+_minio_client: Minio | None = None
+_pcap_pool: asyncpg.Pool | None = None
+
+
+def _get_minio() -> Minio:
+    global _minio_client
+    if _minio_client is None:
+        _minio_client = Minio(
+            MINIO_ENDPOINT,
+            access_key=MINIO_ACCESS_KEY,
+            secret_key=MINIO_SECRET_KEY,
+            secure=False,
+        )
+    return _minio_client
+
+
+def _upload_pcap(alert_id: str, pcap_bytes: bytes) -> str | None:
+    """Lädt PCAP-Bytes nach ids-pcaps/alerts/<alert_id>.pcap. Synchron —
+    wird aus dem ws-handler über asyncio.to_thread gerufen, damit die
+    Event-Loop nicht blockiert."""
+    key = f"alerts/{alert_id}.pcap"
+    try:
+        client = _get_minio()
+        client.put_object(
+            PCAP_BUCKET,
+            key,
+            data=io.BytesIO(pcap_bytes),
+            length=len(pcap_bytes),
+            content_type="application/vnd.tcpdump.pcap",
+        )
+        return key
+    except S3Error as exc:
+        log.warning("MinIO put_object %s: %s", key, exc)
+    except Exception as exc:
+        log.warning("PCAP-Upload Fehler für %s: %s", alert_id[:8], exc)
+    return None
+
+
+async def _mark_pcap_available(alert_id: str, pcap_key: str) -> None:
+    """alerts.pcap_available = TRUE + pcap_key setzen. Lazy-Pool, weil
+    der WSS-Server ohne Master-DB läuft (nur TapAuth nutzt asyncpg)."""
+    global _pcap_pool
+    if _pcap_pool is None:
+        _pcap_pool = await asyncpg.create_pool(POSTGRES_DSN, min_size=1, max_size=2)
+    await _pcap_pool.execute(
+        """
+        UPDATE alerts
+           SET pcap_available = TRUE, pcap_key = $2
+         WHERE alert_id = $1
+        """,
+        alert_id, pcap_key,
+    )
 
 
 def _wait_for_ca() -> tuple[Path, Path]:
@@ -627,6 +699,48 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
                     log.error("Kafka produce (metric) fehlgeschlagen: %s", exc)
                 continue
 
+            if mtype == "pcap_upload":
+                # tap-uplink-V1 hat lokal die ±60s-Pakete korreliert, ein
+                # libpcap-Format-File gebaut und sendet es uns base64-
+                # encoded mit der zugehörigen alert_id. Wir laden es in
+                # MinIO unter der gleichen Key-Convention wie pcap-store
+                # (alerts/<alert_id>.pcap) und setzen pcap_available in
+                # der DB.
+                payload = msg.get("payload") or {}
+                if not isinstance(payload, dict):
+                    continue
+                alert_id = payload.get("alert_id")
+                pcap_b64 = payload.get("pcap_b64")
+                if not alert_id or not pcap_b64:
+                    log.warning("pcap_upload-Frame unvollständig von %s", tap_name)
+                    continue
+                try:
+                    pcap_bytes = base64.b64decode(pcap_b64)
+                except Exception as exc:
+                    log.warning("pcap_upload b64-decode fail %s: %s", alert_id[:8], exc)
+                    continue
+                if len(pcap_bytes) < 24:   # libpcap-global-header ist 24 Bytes
+                    log.warning("pcap_upload zu klein (%d Bytes) von %s", len(pcap_bytes), tap_name)
+                    continue
+                key = await asyncio.to_thread(_upload_pcap, alert_id, pcap_bytes)
+                if key:
+                    await _mark_pcap_available(alert_id, key)
+                    # Frontend live benachrichtigen — alerts-enriched-push ist
+                    # der Topic den die api-WebSocket-Streamer konsumiert.
+                    try:
+                        producer.produce(
+                            PUSH_TOPIC,
+                            value=orjson.dumps({"type": "pcap_available",
+                                                "data": {"alert_id": alert_id}}),
+                            callback=_delivery_cb,
+                        )
+                        producer.poll(0)
+                    except Exception as exc:
+                        log.debug("WS-broadcast pcap_available fail: %s", exc)
+                    log.info("PCAP von %s übernommen: %s (%d Bytes)",
+                             tap_name, key, len(pcap_bytes))
+                continue
+
             log.warning("Unbekannter Frame-Type von %s: %s", tap_name, mtype)
 
     except websockets.ConnectionClosed as exc:
@@ -716,8 +830,12 @@ async def amain() -> None:
         host=LISTEN_HOST,
         port=LISTEN_PORT,
         ssl=ssl_ctx,
-        ping_interval=None,           # eigener Heartbeat
-        max_size=1 * 1024 * 1024,     # 1 MB pro Frame ist großzügig für ein Alert-JSON
+        ping_interval=None,                   # eigener Heartbeat
+        # 16 MB pro Frame: Alert-JSON ist <10 KB, Metric noch kleiner. Limit
+        # ist großzügig dimensioniert für die pcap_upload-Frames (typisch
+        # 1–5 MB base64-encoded). Bei extrem high-volume-Mirror könnten die
+        # PCAPs größer werden — dann splittet tap-uplink in Chunks (V2).
+        max_size=16 * 1024 * 1024,
         create_protocol=proto_cls,
     ):
         try:

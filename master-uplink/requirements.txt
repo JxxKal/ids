@@ -3,3 +3,7 @@ asyncpg==0.29.0
 confluent-kafka==2.3.0
 orjson==3.9.15
 cryptography>=42.0.0
+# minio-py wird für PCAP-Upload aus tap-uplink-Frames in den ids-pcaps-Bucket
+# verwendet. Tap-uplink schickt fertige PCAP-Bytes über mTLS-WSS, master-uplink
+# legt sie unter alerts/<id>.pcap ab und setzt alerts.pcap_available=true.
+minio==7.2.7

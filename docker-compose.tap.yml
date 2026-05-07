@@ -176,6 +176,13 @@ services:
       ALERTS_TOPIC: alerts-raw
       METRICS_TOPIC: rule-metrics
       KAFKA_GROUP_ID: tap-uplink
+      # PCAP-Side V1: tap-uplink hält in-memory einen ±60s-Ringbuffer
+      # aus pcap-headers, baut bei Tap-Alerts das PCAP-File und schickt
+      # es als pcap_upload-Frame über die mTLS-WSS. PCAP_WINDOW_S muss
+      # konsistent mit dem Master-Setting sein, damit Tap- und Master-
+      # Alerts vergleichbare PCAPs liefern.
+      PCAP_TOPIC:    pcap-headers
+      PCAP_WINDOW_S: ${PCAP_WINDOW_S:-60}
       MASTER_URL: ${MASTER_URL:-wss://master.example.com:8443/uplink}
       TAP_CERT:  /etc/cyjan/tap.pem
       TAP_KEY:   /etc/cyjan/tap.key
