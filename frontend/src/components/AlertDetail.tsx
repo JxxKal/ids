@@ -20,7 +20,7 @@ function Row({ label, value, title }: { label: string; value?: string | number |
   if (value == null) return null;
   return (
     <div className="flex gap-3 py-1.5 border-b border-slate-800/50">
-      <span className="w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
+      <span className="w-24 md:w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
       <span
         className="text-slate-200 text-xs break-all font-mono"
         title={title || undefined}
@@ -41,7 +41,7 @@ function IpRow({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
   return (
     <div className="flex gap-3 py-1.5 border-b border-slate-800/50 items-center">
-      <span className="w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
+      <span className="w-24 md:w-40 shrink-0 text-[10px] text-slate-500 uppercase tracking-wider font-mono">{label}</span>
       <button
         type="button"
         onClick={() => showHostConnections(value)}
@@ -140,14 +140,18 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 bg-black/70 flex items-end justify-center z-50 p-0 md:items-center md:p-4"
       onClick={onClose}
     >
       <div
-        className="cyjan-card w-full max-w-3xl max-h-[90vh] rounded-xl flex flex-col"
+        className="cyjan-card w-full max-w-3xl h-[92vh] rounded-t-2xl flex flex-col md:h-auto md:max-h-[90vh] md:rounded-xl"
         onClick={e => e.stopPropagation()}
         style={{ borderLeft: `4px solid ${SEV_BORDER[alert.severity] ?? '#0ea5e9'}` }}
       >
+        {/* Mobile-Drag-Handle — visuelle Affordance dass es ein Bottom-Sheet ist */}
+        <div className="md:hidden flex-none flex justify-center pt-2 pb-1">
+          <div className="w-10 h-1 rounded-full bg-slate-600/50" />
+        </div>
         {/* Header – flex-none, bleibt fix oben. Vorher hatte die ganze Card
             overflow-y-auto und Header/Body waren Geschwister im selben
             Scroll-Container, deshalb bewegte sich der Header beim Scrollen
@@ -162,9 +166,9 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           <button
             onClick={onClose}
             title={t('common.close')}
-            className="text-[11px] px-3 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors"
+            className="text-[11px] px-3 py-2 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors min-w-[44px] flex items-center justify-center"
           >
-            ESC · ✕
+            <span className="hidden md:inline">ESC · </span>✕
           </button>
         </div>
 
