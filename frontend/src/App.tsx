@@ -252,7 +252,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
         />
 
         {tab === 'dashboard' && (
-          <div className="flex-1 overflow-hidden flex flex-col gap-4 p-5">
+          <div className="flex-1 overflow-hidden flex flex-col gap-4 p-5 pb-20 md:pb-5">
 
             {/* KPI Row */}
             <div className="flex items-stretch gap-4 flex-wrap">
@@ -428,12 +428,12 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
         )}
 
-        {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5"><GettingStartedPage onNavigate={navigateTo} /></div>}
-        {tab === 'networks' && <div className="flex-1 overflow-auto p-5"><NetworksPage user={user} /></div>}
-        {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5"><HostsPage    /></div>}
-        {tab === 'tests'    && <div className="flex-1 overflow-auto p-5"><TestsPage    /></div>}
-        {tab === 'reports'  && <div className="flex-1 overflow-auto p-5"><WeeklyReportPage /></div>}
-        {tab === 'settings' && <div className="flex-1 overflow-auto p-5"><SettingsPage key={settingsSection ?? 'default'} initialSection={settingsSection} /></div>}
+        {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><GettingStartedPage onNavigate={navigateTo} /></div>}
+        {tab === 'networks' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><NetworksPage user={user} /></div>}
+        {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><HostsPage    /></div>}
+        {tab === 'tests'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><TestsPage    /></div>}
+        {tab === 'reports'  && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><WeeklyReportPage /></div>}
+        {tab === 'settings' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><SettingsPage key={settingsSection ?? 'default'} initialSection={settingsSection} /></div>}
       </main>
 
       {showUnknown && <UnknownHostsDrawer onClose={() => setShowUnknown(false)} />}

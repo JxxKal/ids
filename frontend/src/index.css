@@ -479,3 +479,92 @@
   border-radius: 999px;
   transition: width 0.5s ease;
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   Mobile-Layout (≤767px) — Sidebar wird Bottom-Nav.
+   Tailwind-md-Breakpoint: 768px. Drunter klappt die Sidebar nach
+   unten und wird horizontal-scrollbar. Brand + Footer werden
+   ausgeblendet (Platz fehlt; Username/Version in der TopBar).
+   ───────────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  .cyjan-sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    flex-direction: row;
+    padding: 4px 6px;
+    gap: 0;
+    border-right: none;
+    border-top: 1px solid #172033;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 40;
+  }
+  .cyjan-sidebar-brand,
+  .cyjan-sidebar-footer {
+    display: none;
+  }
+  .cyjan-sidebar-nav {
+    flex-direction: row;
+    flex: 1;
+    overflow-x: auto;
+    gap: 2px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .cyjan-sidebar-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .cyjan-sidebar-item {
+    flex: 1 0 auto;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    font-size: 10px;
+    line-height: 1.2;
+    text-align: center;
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    min-width: 60px;
+    min-height: 48px;
+    justify-content: center;
+  }
+  .cyjan-sidebar-item.is-active {
+    border-left-color: transparent;
+    border-bottom-color: #0ea5e9;
+  }
+
+  /* TopBar — KPI-Pills und Username weg, Padding kleiner.
+     KPIs sind im Dashboard nochmal voll sichtbar; in der TopBar
+     auf Mobile platzfressend und redundant. */
+  .cyjan-topbar {
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .cyjan-topbar-left,
+  .cyjan-topbar-right {
+    gap: 8px;
+    min-width: 0;
+  }
+  .cyjan-topbar-left {
+    flex: 1 1 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .cyjan-topbar-left::-webkit-scrollbar {
+    display: none;
+  }
+  .cyjan-topbar-title {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .cyjan-topbar-right .cyjan-kpi,
+  .cyjan-topbar-username {
+    display: none;
+  }
+  .cyjan-topbar-user {
+    border-left: none;
+    padding-left: 0;
+  }
+}
