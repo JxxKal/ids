@@ -386,49 +386,53 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
   const base = filtered[0]??null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="relative bg-slate-900 border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden"
-        style={{width:'92vw', maxWidth:'1320px', height:'82dvh', maxHeight:'calc(100dvh - 32px)'}}
+        className="relative bg-slate-900 border border-slate-700 shadow-2xl flex flex-col overflow-hidden w-full h-[100dvh] rounded-none md:w-[92vw] md:max-w-[1320px] md:h-[82dvh] md:max-h-[calc(100dvh-32px)] md:rounded-lg"
         onClick={e=>e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-700 shrink-0">
+        {/* Header — auf Mobile flex-wrap, ESC-Button immer erreichbar */}
+        <div className="flex flex-wrap items-center gap-2 md:gap-3 px-3 py-2 md:px-4 md:py-3 border-b border-slate-700 shrink-0">
           <svg className="w-4 h-4 text-cyan-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
           </svg>
-          <span className="text-slate-300 font-mono text-sm truncate">
+          <span className="text-slate-300 font-mono text-xs md:text-sm truncate flex-1 min-w-0">
             {t('pcap.preview')} — <span className="text-cyan-400">{fn}</span>
           </span>
-          <div className="flex-1"/>
 
-          {/* Raw-Mode-Toggle: per Default zeigt das PCAP nur den Alert-Flow.
-              Mit "Vollständiges Fenster" lädt das ungefilterte ±60s-Capture
-              aus pcap-store für nachträgliche Forensik. */}
-          <label
-            className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none whitespace-nowrap"
-            title={t('pcap.fullWindowTitle')}
-          >
-            <input
-              type="checkbox"
-              checked={rawMode}
-              onChange={e => setRawMode(e.target.checked)}
-              disabled={loading}
-              className="cursor-pointer accent-cyan-500"
-            />
-            {t('pcap.fullWindow')}
-          </label>
-
-          {rawBuf && (
-            <button onClick={download} disabled={dl}
-              className="px-3 py-1 text-xs rounded border border-cyan-700/50 text-cyan-400 bg-cyan-950/30 hover:bg-cyan-900/40 transition-colors disabled:opacity-50 whitespace-nowrap">
-              {dl?'…':t('pcap.download')}
-            </button>
-          )}
+          {/* Close-Button steht direkt neben dem Filename-Span — so kann er
+              auf Mobile nicht nach hinten herausgequetscht werden, wenn
+              "Vollständiges Fenster" + Download umbrechen. min-w 44px für
+              sicheren Touch. */}
           <button onClick={onClose} title={t('common.close')}
-            className="text-[11px] px-3 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors">
-            ESC · ✕
+            className="text-[11px] px-3 py-2 md:py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors min-w-[44px] flex items-center justify-center shrink-0">
+            <span className="hidden md:inline">ESC · </span>✕
           </button>
+
+          {/* Raw-Mode-Toggle + Download wickeln auf Mobile in eine eigene
+              Zeile (basis-full), auf Desktop bleiben sie inline. */}
+          <div className="flex items-center gap-2 basis-full md:basis-auto md:ml-auto">
+            <label
+              className="flex items-center gap-1.5 text-[11px] text-slate-400 cursor-pointer select-none whitespace-nowrap"
+              title={t('pcap.fullWindowTitle')}
+            >
+              <input
+                type="checkbox"
+                checked={rawMode}
+                onChange={e => setRawMode(e.target.checked)}
+                disabled={loading}
+                className="cursor-pointer accent-cyan-500 w-4 h-4"
+              />
+              {t('pcap.fullWindow')}
+            </label>
+
+            {rawBuf && (
+              <button onClick={download} disabled={dl}
+                className="px-3 py-1.5 md:py-1 text-xs rounded border border-cyan-700/50 text-cyan-400 bg-cyan-950/30 hover:bg-cyan-900/40 transition-colors disabled:opacity-50 whitespace-nowrap">
+                {dl?'…':t('pcap.download')}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Filter bar */}

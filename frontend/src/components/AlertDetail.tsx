@@ -157,7 +157,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
             Scroll-Container, deshalb bewegte sich der Header beim Scrollen
             mit. Jetzt: card = flex-col, header = flex-none, body = flex-1
             min-h-0 overflow-y-auto. */}
-        <div className="flex-none flex items-center justify-between px-5 py-4 border-b border-slate-800">
+        <div className="flex-none flex items-center justify-between px-3 md:px-5 py-4 border-b border-slate-800">
           <div className="flex items-center gap-3 flex-wrap">
             <SeverityBadge alert={alert} />
             <span className="font-semibold text-cyan-100 font-mono">{alert.rule_id}</span>
@@ -172,7 +172,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-4">
           <p className="text-slate-300 text-xs mb-4 leading-relaxed">{alert.description}</p>
 
           <SectionTitle>Alert</SectionTitle>
@@ -277,7 +277,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
         )}
 
         {/* Actions */}
-        <div className="flex items-center gap-2 px-5 py-4 border-t border-slate-800 flex-wrap">
+        <div className="flex items-center gap-2 px-3 md:px-5 py-4 border-t border-slate-800 flex-wrap">
           {showGraph && (
             <AlertFlowPopup alert={alert} onClose={() => setShowGraph(false)} />
           )}
