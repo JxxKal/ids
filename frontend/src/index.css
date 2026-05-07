@@ -5,6 +5,14 @@
 @tailwind utilities;
 
 @layer base {
+  html, body {
+    /* Auf Mobile blocken wir horizontal-Scrollen am Root: jedes versehent-
+       liche Über-Width-Element (lange URLs in Mobile-Cards, Tabellen-
+       Reste) würde sonst die ganze Page seitwärts scrollbar machen, was
+       sich auf Touch wie ein Bug anfühlt. Auf Desktop unkritisch — da ist
+       Width sowieso berechnet. */
+    overflow-x: hidden;
+  }
   body {
     @apply text-slate-200 font-mono text-sm antialiased;
     background-color: #020617;

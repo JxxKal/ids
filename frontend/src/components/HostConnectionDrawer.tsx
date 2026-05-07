@@ -108,11 +108,11 @@ export function HostConnectionDrawer() {
           über den Header hinauswachsen lässt – exakt das Symptom mit
           dem mitscrollenden Header. */}
       <aside
-        className="fixed top-0 right-0 h-screen w-full md:w-[720px] z-50
+        className="fixed top-0 right-0 h-[100dvh] w-full md:w-[720px] z-50
                    bg-slate-950 border-l border-slate-700/60 shadow-2xl
                    flex flex-col"
       >
-        <header className="flex-none border-b border-slate-800 px-5 py-3
+        <header className="flex-none border-b border-slate-800 px-3 md:px-5 py-3
                            bg-slate-950/95 backdrop-blur flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] uppercase tracking-widest text-slate-500">{t('hostConnDrawer.title')}</p>
@@ -122,17 +122,18 @@ export function HostConnectionDrawer() {
             type="button"
             onClick={() => setIp(null)}
             title={t('common.close')}
-            className="text-[11px] px-3 py-1 rounded border border-slate-600/30
+            className="text-[11px] px-3 py-2 md:py-1 rounded border border-slate-600/30
                        text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300
-                       transition-colors inline-flex items-center gap-1.5"
+                       transition-colors inline-flex items-center gap-1.5
+                       min-w-[44px] justify-center shrink-0"
           >
-            <span>ESC</span>
-            <span className="text-slate-600">·</span>
+            <span className="hidden md:inline">ESC</span>
+            <span className="hidden md:inline text-slate-600">·</span>
             <X size={12} />
           </button>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-5">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-4 space-y-5">
           {/* Time-Range-Buttons */}
           <div className="flex items-center gap-1 bg-slate-900/60 border border-slate-700/50 rounded-lg p-1 w-fit">
             {WINDOWS.map(w => (
