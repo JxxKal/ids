@@ -586,4 +586,15 @@
   .cyjan-settings-nav.is-open {
     transform: translateX(0);
   }
+
+  /* Touch-Audit — Targets in dichter UI auf Mobile vergrößern */
+  .cyjan-topbar-logout {
+    padding: 8px;
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .cyjan-sev-badge {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
 }

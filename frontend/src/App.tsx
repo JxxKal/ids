@@ -272,7 +272,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                         key={w.id}
                         onClick={() => handleWindowSelect(w.id)}
                         title={w.id !== 'live' && w.id !== 'custom' && isActive ? t('dashboard.timeWindows.clickToRefresh') : undefined}
-                        className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-slate-800 last:border-r-0 font-mono ${
+                        className={`px-3 py-2.5 md:py-1.5 text-xs font-medium transition-colors border-r border-slate-800 last:border-r-0 font-mono ${
                           isActive
                             ? 'bg-cyan-500/15 text-cyan-200'
                             : 'bg-slate-900 text-slate-500 hover:text-slate-300 hover:bg-slate-800'

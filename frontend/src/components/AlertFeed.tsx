@@ -21,7 +21,7 @@ function PcapButton({ alertId, available }: { alertId: string; available: boolea
         onClick={e => { e.stopPropagation(); if (available) setShow(true); }}
         disabled={!available}
         title={available ? t('alertFeed.pcap.open') : t('alertFeed.pcap.unavailable')}
-        className={`px-1.5 py-0.5 rounded text-[11px] border whitespace-nowrap transition-colors ${
+        className={`px-2 py-1.5 md:px-1.5 md:py-0.5 rounded text-[11px] border whitespace-nowrap transition-colors ${
           available
             ? 'border-blue-700/50 text-blue-400 bg-blue-950/30 hover:bg-blue-900/50 hover:text-blue-300'
             : 'border-slate-700/30 text-slate-600 bg-transparent cursor-default'
@@ -448,6 +448,10 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
   // server-side anwenden kann. Lokale Filter-Logik unten greift zusätzlich
   // für Live-Mode (WebSocket broadcastet alle Alerts).
   const [taps,              setTaps]              = useState<RemoteTap[]>([]);
+  // Mobile-Filter-Drawer: alles außer Search + Severity-Pills wird auf
+  // <768px collapsed. Zähler zeigt non-default-Filter (damit User auch
+  // im collapsed-Zustand sieht ob was aktiv ist).
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -685,6 +689,40 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
             })}
           </div>
         </HelpTip>
+
+        {/* Mobile: Filter-Toggle. activeFilterCount zählt non-default
+            Werte der collapsed-Filter, damit User sie im Drawer-Zustand
+            erkennt. Severity- und Search-Filter sind extra (immer sichtbar). */}
+        {(() => {
+          const activeFilterCount =
+            (sourceF ? 1 : 0) +
+            (feedbackF ? 1 : 0) +
+            (tapFilter ? 1 : 0) +
+            (egressMode !== 'off' ? 1 : 0) +
+            (sortByPriority ? 1 : 0) +
+            (suppressIrmaAsset ? 1 : 0) +
+            (hiddenCols.size > 0 ? 1 : 0);
+          return (
+            <button
+              type="button"
+              onClick={() => setMobileFiltersOpen(o => !o)}
+              className="md:hidden ml-auto px-3 py-2 rounded text-xs font-medium border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 flex items-center gap-1.5 min-h-[36px]"
+              aria-expanded={mobileFiltersOpen}
+            >
+              <span>≡ {t('alertFeed.mobileFiltersLabel', { defaultValue: 'Filter' })}</span>
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 rounded bg-amber-500/20 text-amber-300 text-[10px]">{activeFilterCount}</span>
+              )}
+              <span className="text-slate-500 text-[10px]">{mobileFiltersOpen ? '▴' : '▾'}</span>
+            </button>
+          );
+        })()}
+
+        {/* Wrapper für Filter-Extras: auf Desktop inline, auf Mobile als
+            full-width-Block der per State ein-/ausgeblendet wird. basis-full
+            zwingt im flex-wrap-Parent in eine eigene Zeile. */}
+        <div className={`${mobileFiltersOpen ? 'flex' : 'hidden'} md:flex flex-wrap items-center gap-2 basis-full md:basis-auto md:contents`}>
+
         <HelpTip helpKey="filterSource">
           <select className="input w-28" value={sourceF} onChange={e => setSourceF(e.target.value)}
             title={t('alertFeed.filters.source')}>
@@ -856,6 +894,8 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
             </div>
           </div>
         </details>
+
+        </div>{/* /Filter-Extras-Wrapper */}
 
         <span className="text-sm font-medium text-slate-300 shrink-0">
           {rowCount} <span className="text-xs font-normal text-slate-500">{grouped && groups!.some(g => g.count > 1) ? t('alertFeed.counts.groups') : t('alertFeed.counts.alerts')}</span>
