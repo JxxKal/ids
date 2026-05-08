@@ -25,11 +25,11 @@ export function TopProtocolsCard({ alerts, showTest }: Props) {
 
   return (
     <div className="cyjan-kpi-card">
-      <div className="cyjan-kpi-card-title">{t('protocolsCard.title')}</div>
+      <div className="cyjan-kpi-card-title relative z-10">{t('protocolsCard.title')}</div>
       {rows.length === 0 && (
-        <div className="text-xs text-slate-600 py-2">{t('common.noData')}</div>
+        <div className="text-xs text-slate-600 py-2 relative z-10">{t('common.noData')}</div>
       )}
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-1.5 relative z-10">
         {rows.map(r => (
           <div
             key={r.proto}
@@ -38,9 +38,16 @@ export function TopProtocolsCard({ alerts, showTest }: Props) {
           >
             <span className="cyjan-kpi-row-label" style={{ color: '#fb923c' }}>{r.proto}</span>
             <div className="cyjan-kpi-bar" style={{ height: 4 }}>
-              <div className="cyjan-kpi-bar-fill" style={{ width: `${r.pct}%`, background: '#fb923c' }} />
+              <div
+                className="cyjan-kpi-bar-fill"
+                style={{
+                  width: `${r.pct}%`,
+                  background: '#fb923c',
+                  boxShadow: r.pct > 0 ? '0 0 6px -2px #fb923c' : 'none',
+                }}
+              />
             </div>
-            <span className="cyjan-kpi-row-value">{r.pct}%</span>
+            <span className="cyjan-kpi-row-value cyjan-tabular">{r.pct}%</span>
           </div>
         ))}
       </div>

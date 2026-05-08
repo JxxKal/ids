@@ -39,10 +39,18 @@ export function ThreatGauge() {
   const offset = circ - (value / 100) * circ;
 
   const counts = data.alert_counts ?? {};
+  // Critical/High triggern den Edge-Glow + Pulse auf der Card-Hülle —
+  // Operator soll Threat-Level auch in der peripheren Wahrnehmung
+  // erfassen, nicht nur durch genaues Hinschauen.
+  const cardClass = data.label === 'red'
+    ? 'cyjan-kpi-card is-critical flex items-center gap-4'
+    : data.label === 'orange'
+      ? 'cyjan-kpi-card is-high flex items-center gap-4'
+      : 'cyjan-kpi-card flex items-center gap-4';
 
   return (
-    <div className="cyjan-kpi-card flex items-center gap-4">
-      <svg width="120" height="120" viewBox="0 0 120 120" className="shrink-0">
+    <div className={cardClass}>
+      <svg width="120" height="120" viewBox="0 0 120 120" className="shrink-0 relative z-10">
         <circle cx="60" cy="60" r="54" fill="none" stroke="#172033" strokeWidth="8" />
         <circle
           cx="60" cy="60" r="54" fill="none"
@@ -54,34 +62,47 @@ export function ThreatGauge() {
           transform="rotate(-90 60 60)"
           style={{
             transition: 'stroke-dashoffset 0.6s ease, stroke 0.3s ease',
-            filter: `drop-shadow(0 0 6px ${color})`,
+            filter: `drop-shadow(0 0 8px ${color})`,
           }}
         />
+        {/* Display-Score: extra-bold mit tabular-nums + tighter spacing,
+            damit der Hero-Wert dramatisch wirkt — wenn 100/Kritisch da
+            steht, soll das nicht aussehen wie ein normales KPI-Tile. */}
         <text
-          x="60" y="58" textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize="26" fontWeight="700"
+          x="60" y="64" textAnchor="middle"
+          fontFamily="JetBrains Mono"
+          fontSize="32"
+          fontWeight="800"
           fill={color}
+          style={{ letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums' }}
         >
           {value}
         </text>
         <text
-          x="60" y="76" textAnchor="middle"
-          fontFamily="JetBrains Mono" fontSize="9"
+          x="60" y="82" textAnchor="middle"
+          fontFamily="JetBrains Mono" fontSize="8"
           fill="#64748b"
-          letterSpacing="0.16em"
+          letterSpacing="0.24em"
         >
           THREAT
         </text>
       </svg>
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 relative z-10">
         <div className="cyjan-kpi-card-title mb-1" style={{ marginBottom: 4 }}>
           {t('threatGauge.title', { minutes: data.window_min })}
         </div>
-        <div className="text-sm font-semibold text-cyan-100 mb-2" style={{ fontFamily: 'Inter, sans-serif' }}>
+        <div
+          className="text-sm font-semibold mb-2"
+          style={{
+            fontFamily: 'Inter, sans-serif',
+            color: data.label === 'red' ? '#fca5a5' : data.label === 'orange' ? '#fdba74' : '#bae6fd',
+            letterSpacing: '0.02em',
+          }}
+        >
           {status}
         </div>
-        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono text-slate-500">
+        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono text-slate-500 cyjan-tabular">
           <span>C: <span className="text-red-300 font-semibold">{counts.critical ?? 0}</span></span>
           <span>H: <span className="text-red-400 font-semibold">{counts.high ?? 0}</span></span>
           <span>M: <span className="text-orange-400 font-semibold">{counts.medium ?? 0}</span></span>

@@ -121,7 +121,7 @@ export function TopBar({ title, live, kpis = [], taps = [], username, onLogout }
               {kpis.map(k => (
                 <div key={k.label} className="cyjan-kpi">
                   <div className="cyjan-kpi-label">{k.label}</div>
-                  <div className="cyjan-kpi-value" style={k.color ? { color: k.color } : undefined}>
+                  <div className="cyjan-kpi-value cyjan-tabular" style={k.color ? { color: k.color } : undefined}>
                     {k.value}
                   </div>
                 </div>

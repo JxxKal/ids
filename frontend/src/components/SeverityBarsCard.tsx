@@ -32,8 +32,8 @@ export function SeverityBarsCard({ alerts, showTest }: Props) {
 
   return (
     <div className="cyjan-kpi-card">
-      <div className="cyjan-kpi-card-title">{t('severityCard.title')}</div>
-      <div className="flex flex-col gap-1.5">
+      <div className="cyjan-kpi-card-title relative z-10">{t('severityCard.title')}</div>
+      <div className="flex flex-col gap-1.5 relative z-10">
         {ROWS.map(r => {
           const v = counts[r.key];
           return (
@@ -46,10 +46,14 @@ export function SeverityBarsCard({ alerts, showTest }: Props) {
               <div className="cyjan-kpi-bar">
                 <div
                   className="cyjan-kpi-bar-fill"
-                  style={{ width: `${(v / max) * 100}%`, background: r.color }}
+                  style={{
+                    width: `${(v / max) * 100}%`,
+                    background: r.color,
+                    boxShadow: v > 0 ? `0 0 8px -2px ${r.color}` : 'none',
+                  }}
                 />
               </div>
-              <span className="cyjan-kpi-row-value">{v}</span>
+              <span className="cyjan-kpi-row-value cyjan-tabular">{v}</span>
             </div>
           );
         })}
