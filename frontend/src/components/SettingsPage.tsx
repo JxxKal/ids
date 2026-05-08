@@ -38,6 +38,7 @@ import type {
   RuleFileMeta,
 } from '../api';
 import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
+import { CollapsibleHelp } from './CollapsibleHelp';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
 import { MlFlowDiagram } from './MlFlowDiagram';
@@ -255,8 +256,98 @@ function UserManagement() {
         </form>
       )}
 
-      {/* Benutzertabelle */}
-      <div className="overflow-x-auto">
+      {/* Mobile: Card-Stack */}
+      <div className="md:hidden flex flex-col gap-2">
+        {users.map(u => {
+          const isEditing = editId === u.id;
+          return (
+            <div key={u.id} className="rounded border border-slate-800 bg-slate-900/40 p-3">
+              {isEditing ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-200 font-medium font-mono text-sm">{u.username}</span>
+                    <SourceBadge source={u.source} />
+                  </div>
+                  {u.source === 'local' && (
+                    <>
+                      <input className="input w-full text-xs" placeholder={t('settings.users.newPasswordPlaceholder')} type="password"
+                        value={editData.password ?? ''}
+                        onChange={e => setEditData(d => ({ ...d, password: e.target.value }))} />
+                      <input className="input w-full text-xs" placeholder={t('settings.users.repeatPlaceholder')} type="password"
+                        value={editData.password2 ?? ''}
+                        onChange={e => setEditData(d => ({ ...d, password2: e.target.value }))} />
+                    </>
+                  )}
+                  <input className="input w-full text-xs" placeholder={t('settings.users.email')} type="email"
+                    value={editData.email ?? u.email ?? ''}
+                    onChange={e => setEditData(d => ({ ...d, email: e.target.value }))} />
+                  <select className="input w-full text-xs"
+                    value={editData.role ?? u.role}
+                    onChange={e => setEditData(d => ({ ...d, role: e.target.value as 'admin' | 'viewer' | 'api' }))}>
+                    <option value="viewer">Viewer</option>
+                    <option value="admin">Admin</option>
+                    <option value="api">API</option>
+                  </select>
+                  {formErr && <p className="text-red-400 text-xs">{formErr}</p>}
+                  <div className="flex gap-2 justify-end">
+                    <button className="btn-ghost text-xs min-h-[40px]" onClick={() => { setEditId(null); setEditData({}); setFormErr(''); }}>{t('common.cancel')}</button>
+                    <button className="btn-primary text-xs min-h-[40px]" disabled={saving} onClick={() => handleUpdate(u.id)}>
+                      {saving ? '…' : t('common.save')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="min-w-0">
+                      <div className="text-slate-200 font-medium font-mono text-sm truncate">{u.username}</div>
+                      {u.display_name && <div className="text-[11px] text-slate-500 truncate">{u.display_name}</div>}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <RoleBadge role={u.role} />
+                      <SourceBadge source={u.source} />
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-slate-400 font-mono mb-1 truncate">{u.email ?? '—'}</div>
+                  <div className="text-[10px] text-slate-600 font-mono mb-2">
+                    <span className="text-slate-700 mr-1">last login</span>
+                    {u.last_login ? new Date(u.last_login).toLocaleString() : '—'}
+                  </div>
+                  <div className="flex gap-2 justify-end items-center">
+                    <button
+                      onClick={() => handleToggleActive(u)}
+                      className={`w-9 h-5 rounded-full transition-colors relative ${u.active ? 'bg-green-600' : 'bg-slate-700'}`}
+                      title={u.active ? t('settings.users.activeToggleOn') : t('settings.users.activeToggleOff')}
+                    >
+                      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${u.active ? 'left-4' : 'left-0.5'}`} />
+                    </button>
+                    {u.role === 'api' && (
+                      <button
+                        className="text-xs text-indigo-400 hover:text-indigo-300 px-2 py-1.5 rounded hover:bg-indigo-950/30 transition-colors min-h-[40px]"
+                        onClick={() => handleGenerateToken(u.id)}
+                        title={t('settings.users.tokenButtonTitle')}
+                      >
+                        Token
+                      </button>
+                    )}
+                    <button className="btn-ghost text-xs min-h-[40px]"
+                      onClick={() => { setEditId(u.id); setEditData({}); setFormErr(''); }}>
+                      {t('common.edit')}
+                    </button>
+                    <button className="text-xs text-red-500 hover:text-red-400 px-2 py-1.5 rounded hover:bg-red-950/30 transition-colors min-h-[40px]"
+                      onClick={() => setConfirmUser(u)}>
+                      {t('common.delete')}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop: Tabelle */}
+      <div className="hidden md:block overflow-x-auto">
       <table className="w-full text-xs">
         <thead className="cyjan-table-head">
           <tr className="text-left">
@@ -1993,14 +2084,20 @@ function MLFilterConfig() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-sm font-semibold text-slate-200">{t('settings.mlConfig.title')}</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {saveMsg === 'ok'          && <span className="text-xs text-green-400">{t('settings.saml.savedOk')}</span>}
           {saveMsg === 'retrain'     && <span className="text-xs text-blue-400">{t('settings.mlConfig.retrainTriggered')}</span>}
           {saveMsg.startsWith('err:')&& <span className="text-xs text-red-400">{saveMsg.slice(4)}</span>}
-          <button className="btn-ghost text-xs" disabled={retraining} onClick={handleRetrain}>
-            {retraining ? t('settings.mlConfig.triggering') : t('settings.mlConfig.retrainNow')}
+          <button
+            className="btn-ghost text-xs inline-flex items-center gap-1.5 whitespace-nowrap"
+            disabled={retraining}
+            onClick={handleRetrain}
+            title={t('settings.mlConfig.retrainNow')}
+          >
+            <RotateCcw size={12} />
+            <span>{retraining ? t('settings.mlConfig.triggering') : t('settings.mlConfig.retrainNow')}</span>
           </button>
           <button
             className="btn-primary text-xs"
@@ -2657,16 +2754,18 @@ function RulesList() {
           {total > 0 && <span className="ml-2 text-slate-500 font-normal">{total.toLocaleString()}</span>}
         </h2>
         <input
-          className="input text-xs w-56"
+          className="input text-xs w-full md:w-56"
           placeholder={t('settings.rules.searchPlaceholder')}
           value={search}
           onChange={e => { setSearch(e.target.value); setOffset(0); }}
         />
       </div>
 
-      <p className="text-[11px] text-slate-500 leading-relaxed">
-        {t('settings.rules.overrideHint')}
-      </p>
+      <CollapsibleHelp>
+        <p className="text-[11px] text-slate-500 leading-relaxed">
+          {t('settings.rules.overrideHint')}
+        </p>
+      </CollapsibleHelp>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
@@ -3496,9 +3595,11 @@ function IrmaSettings() {
         </label>
       </div>
 
-      <p className="text-xs text-slate-500">
-        {t('settings.irma.intro1')} <span className="text-violet-300 font-mono">external</span>{t('settings.irma.intro2')}
-      </p>
+      <CollapsibleHelp>
+        <p className="text-xs text-slate-500">
+          {t('settings.irma.intro1')} <span className="text-violet-300 font-mono">external</span>{t('settings.irma.intro2')}
+        </p>
+      </CollapsibleHelp>
 
       <div className={`space-y-4 ${!cfg.enabled ? 'opacity-50' : ''}`}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
@@ -4736,15 +4837,15 @@ function RuleOverridesSettings() {
           {t('settings.ruleOverrides.title')}
           <span className="ml-2 text-slate-500 font-normal">{rules.length}</span>
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
-            className="input text-xs w-64"
+            className="input text-xs w-full md:w-64"
             placeholder={t('settings.ruleOverrides.search')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
           <select
-            className="input text-xs w-32"
+            className="input text-xs w-full md:w-32"
             value={filter}
             onChange={e => setFilter(e.target.value as typeof filter)}
           >
@@ -4756,17 +4857,21 @@ function RuleOverridesSettings() {
         </div>
       </div>
 
-      <p className="text-xs text-slate-500 leading-relaxed">{t('settings.ruleOverrides.intro')}</p>
+      <CollapsibleHelp>
+        <p className="text-xs text-slate-500 leading-relaxed">{t('settings.ruleOverrides.intro')}</p>
+      </CollapsibleHelp>
 
       <MlTuningCard ruleIds={rules.map(r => r.id)} />
 
-      <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-900/40 border border-slate-700/40 rounded px-3 py-2">
-        <Trans
-          i18nKey="settings.ruleOverrides.scopeNote"
-          values={{ count: rules.length }}
-          components={{ strong: <strong className="text-slate-200" />, em: <em className="text-cyan-400 not-italic" /> }}
-        />
-      </div>
+      <CollapsibleHelp>
+        <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-900/40 border border-slate-700/40 rounded px-3 py-2">
+          <Trans
+            i18nKey="settings.ruleOverrides.scopeNote"
+            values={{ count: rules.length }}
+            components={{ strong: <strong className="text-slate-200" />, em: <em className="text-cyan-400 not-italic" /> }}
+          />
+        </div>
+      </CollapsibleHelp>
 
       {error && <p className="text-xs text-red-400">{error}</p>}
 
@@ -6186,9 +6291,9 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
         {isThorsten ? (
           <FuerThorsten />
         ) : (
-        <div className="max-w-4xl mx-auto py-6 px-6">
+        <div className="max-w-4xl mx-auto py-4 px-3 md:py-6 md:px-6">
           <MobileDesktopHint />
-          <div className="card p-5">
+          <div className="card p-3 md:p-5">
             {active === 'general'       && <GeneralSettings />}
             {active === 'users'         && <UserManagement />}
             {active === 'saml'          && <SamlSettings />}

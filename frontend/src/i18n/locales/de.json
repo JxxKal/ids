@@ -12,7 +12,9 @@
     "edit": "Bearbeiten",
     "delete": "Löschen",
     "add": "Hinzufügen",
-    "mobileDesktopHint": "Diese Sektion ist für Desktop optimiert — auf dem Handy lässt sie sich bedienen, aber Tabellen und Formulare sind hier eingeschränkt."
+    "mobileDesktopHint": "Diese Sektion ist für Desktop optimiert — auf dem Handy lässt sie sich bedienen, aber Tabellen und Formulare sind hier eingeschränkt.",
+    "mobileHintDismiss": "Hinweis ausblenden",
+    "helpToggle": "Was macht das hier?"
   },
   "errorBoundary": {
     "title": "Rendering-Fehler",

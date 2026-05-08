@@ -12,7 +12,9 @@
     "edit": "Edit",
     "delete": "Delete",
     "add": "Add",
-    "mobileDesktopHint": "This section is optimized for desktop — it works on mobile but tables and forms are constrained here."
+    "mobileDesktopHint": "This section is optimized for desktop — it works on mobile but tables and forms are constrained here.",
+    "mobileHintDismiss": "Hide hint",
+    "helpToggle": "What does this do?"
   },
   "errorBoundary": {
     "title": "Rendering error",
