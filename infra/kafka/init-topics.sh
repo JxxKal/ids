@@ -15,9 +15,18 @@ done
 echo "[kafka-init] Kafka bereit."
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Hilfsfunktion: Topic anlegen wenn nicht vorhanden
+# create_topic: idempotent + heilend.
+#   Topic existiert nicht → anlegen mit Retention + segment.ms.
+#   Topic existiert       → kafka-configs.sh --alter, bestehende Topics
+#                            werden auf die korrekten Retention/Segment-
+#                            Werte migriert. Kein Daten-Loss.
+#                            (Wichtig falls in einer früheren Cyjan-Version
+#                            ein Topic ohne explizite Retention angelegt
+#                            wurde — dann fiel es auf 7d Default zurück
+#                            und konnte das Disk volllaufen lassen.)
+#
 #   $1 = Topic-Name
-#   $2 = Partitionen
+#   $2 = Partitionen (nur bei Neuanlage)
 #   $3 = Retention in Millisekunden
 #   $4 = (optional) zusätzliche --config Argumente
 # ──────────────────────────────────────────────────────────────────────────────
@@ -29,7 +38,16 @@ create_topic() {
 
   if $KAFKA_BIN/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" \
       --describe --topic "$TOPIC" &>/dev/null; then
-    echo "[kafka-init] Topic '$TOPIC' existiert bereits – übersprungen."
+    local ALTER_ARGS="retention.ms=${RETENTION_MS}"
+    if [ -n "$EXTRA_CONFIG" ]; then
+      local EXTRAS
+      EXTRAS=$(echo "$EXTRA_CONFIG" | sed 's/--config //g' | tr ' ' ',' | sed 's/^,//;s/,$//')
+      [ -n "$EXTRAS" ] && ALTER_ARGS="${ALTER_ARGS},${EXTRAS}"
+    fi
+    $KAFKA_BIN/kafka-configs.sh --bootstrap-server "$BOOTSTRAP" --alter \
+      --entity-type topics --entity-name "$TOPIC" \
+      --add-config "$ALTER_ARGS" >/dev/null
+    echo "[kafka-init] Topic '$TOPIC' aktualisiert: retention=${RETENTION_MS}ms"
   else
     $KAFKA_BIN/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" \
       --create \
