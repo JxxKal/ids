@@ -453,17 +453,19 @@ async def _build_effective_config(env: dict, pool: Optional[asyncpg.Pool]) -> Co
 
 async def config_watch_loop(env: dict, pool: asyncpg.Pool, on_change) -> None:
     """Pollt alle 30s den DB-Override. Bei Änderung ruft on_change(new_cfg)
-    auf — der Supervisor entscheidet, ob ein Reconnect nötig ist oder
-    nicht."""
+    auf — wirft on_change _ReconnectRequested, propagiert das bis zum
+    Supervisor (kein except dazwischen)."""
     last: Optional[Config] = None
     while True:
         try:
             cfg = await _build_effective_config(env, pool)
-            if last is None or cfg != last:
-                last = cfg
-                await on_change(cfg)
         except Exception as exc:
             log.warning("Config-Watch-Loop-Fehler: %s", exc)
+            await asyncio.sleep(CONFIG_RELOAD_INTERVAL_S)
+            continue
+        if last is None or cfg != last:
+            last = cfg
+            await on_change(cfg)  # _ReconnectRequested propagiert bewusst
         await asyncio.sleep(CONFIG_RELOAD_INTERVAL_S)
 
 
