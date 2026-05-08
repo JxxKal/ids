@@ -22,7 +22,7 @@ import paho.mqtt.client as mqtt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from auth import require_admin
+from deps import require_admin
 
 router = APIRouter(prefix="/api/mqtt", tags=["mqtt"])
 log = logging.getLogger(__name__)
