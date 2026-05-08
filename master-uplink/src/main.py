@@ -814,7 +814,6 @@ async def amain() -> None:
         await runner.cleanup()
         await auth.close()
         producer.flush(timeout=5)
-            producer.flush(timeout=5)
 
 
 if __name__ == "__main__":
