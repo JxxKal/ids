@@ -525,19 +525,29 @@
   .cyjan-sidebar-item {
     flex: 1 1 0;
     flex-direction: column;
-    gap: 2px;
-    padding: 6px 4px;
-    font-size: 10px;
-    line-height: 1.15;
-    text-align: center;
+    gap: 0;
+    padding: 8px 4px;
     border-left: none;
     border-bottom: 2px solid transparent;
     min-width: 0;
-    min-height: 48px;
+    min-height: 52px;
     justify-content: center;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  /* Mobile: nur Icons in der Bottom-Nav, Labels weg — Item-Width war
+     für 7 Items zu eng für lesbare Labels (truncate sah hässlich aus).
+     Größere Icons als Touch-Anker, aria-label am Button für Screenreader. */
+  .cyjan-sidebar .cyjan-sidebar-label {
+    display: none;
+  }
+  .cyjan-sidebar .cyjan-sidebar-icon {
+    width: 24px;
+    height: 24px;
+  }
+  .cyjan-sidebar .cyjan-sidebar-icon svg {
+    width: 22px;
+    height: 22px;
+    stroke-width: 1.6;
   }
   .cyjan-sidebar-item.is-active {
     border-left-color: transparent;

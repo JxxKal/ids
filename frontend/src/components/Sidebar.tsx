@@ -52,9 +52,10 @@ export function Sidebar({ active, onNav, username }: Props) {
                 type="button"
                 onClick={() => onNav(item.id)}
                 className={`cyjan-sidebar-item ${isActive ? 'is-active' : ''}`}
+                aria-label={t(`sidebar.${item.id}`)}
               >
                 <span className="cyjan-sidebar-icon">{item.icon}</span>
-                {t(`sidebar.${item.id}`)}
+                <span className="cyjan-sidebar-label">{t(`sidebar.${item.id}`)}</span>
               </button>
             );
           })}
