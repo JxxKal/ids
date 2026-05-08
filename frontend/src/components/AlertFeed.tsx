@@ -913,7 +913,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
               : groups!.map(g => (
                   <div
                     key={g.key}
-                    className={`p-3 cursor-pointer transition-all ${ROW_SEVERITY[g.severity] ?? ''}`}
+                    className={`cyjan-alert-card p-3 cursor-pointer transition-all ${ROW_SEVERITY[g.severity] ?? ''}`}
                     onClick={() => setSelected(g.latest)}
                   >
                     <div className="flex items-start justify-between gap-2 mb-1.5">
@@ -952,7 +952,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
               : filtered.map(a => (
                   <div
                     key={a.alert_id}
-                    className={`p-3 cursor-pointer transition-all ${ROW_SEVERITY[effectiveSeverity(a)] ?? ''}`}
+                    className={`cyjan-alert-card p-3 cursor-pointer transition-all ${ROW_SEVERITY[effectiveSeverity(a)] ?? ''}`}
                     onClick={() => setSelected(a)}
                   >
                     <div className="flex items-start justify-between gap-2 mb-1.5">

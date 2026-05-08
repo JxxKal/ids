@@ -472,6 +472,36 @@
   padding: 8px 12px !important;
 }
 
+/* Alert-Card-Wrapper für Mobile-AlertFeed — gibt jeder Card einen subtle
+   Hex-Pattern-Overlay als ::after. Visuelle Brand-Klammer zur Login-Hero
+   und zur Body-Atmosphäre. Critical-Cards bekommen zusätzlich einen
+   sanften pulsenden Edge-Glow — Operator bemerkt critical-Alerts auch
+   beim Wegschauen vom Bildschirm. */
+.cyjan-alert-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+}
+.cyjan-alert-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='30' height='26' viewBox='0 0 30 26'><polygon points='15,1 29,9 29,17 15,25 1,17 1,9' fill='none' stroke='%2322d3ee' stroke-width='0.4' stroke-opacity='0.30'/></svg>");
+  background-size: 30px 26px;
+  opacity: 0.7;
+  mix-blend-mode: overlay;
+  z-index: 0;
+}
+.cyjan-alert-card > * { position: relative; z-index: 1; }
+.cyjan-alert-card.cyjan-row-critical {
+  animation: cyjan-alert-critical-pulse 4s ease-in-out infinite;
+}
+@keyframes cyjan-alert-critical-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.0),  0 0 16px -4px rgba(239, 68, 68, 0.18); }
+  50%      { box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25), 0 0 24px -2px rgba(239, 68, 68, 0.32); }
+}
+
 .cyjan-row-critical {
   border-left: 3px solid #ef4444 !important;
   background: rgba(127, 29, 29, 0.15);
