@@ -612,6 +612,50 @@ services:
       IRMA_SSL_VERIFY:     ${IRMA_SSL_VERIFY:-false}
 
   # ────────────────────────────────────────────────────────────────────────────
+  # MQTT-BRIDGE — Outbound-Publisher zu externem MQTT-Broker (Mosquitto/HiveMQ)
+  #
+  # Konsumiert alerts-enriched + Master-DB für State-Topics. Publiziert pro
+  # Origin (Master oder gepairter Tap) auf {prefix}/{host}/alerts/{sev}/{src}.
+  # Plus retained State auf {prefix}/{host}/threat, .../status, .../taps/.../status.
+  # Default deaktiviert — MQTT_ENABLED=true in .env aktiviert.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  mqtt-bridge:
+    build: ./mqtt-bridge
+    container_name: ids-mqtt-bridge
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      MQTT_ENABLED:               ${MQTT_ENABLED:-false}
+      KAFKA_BROKERS:              kafka:9092
+      POSTGRES_DSN:               postgresql://ids:${POSTGRES_PASSWORD}@timescaledb:5432/ids
+      MQTT_ALERTS_TOPIC:          alerts-enriched
+      MQTT_BROKER_HOST:           ${MQTT_BROKER_HOST:-}
+      MQTT_BROKER_PORT:           ${MQTT_BROKER_PORT:-8883}
+      MQTT_USE_TLS:               ${MQTT_USE_TLS:-true}
+      MQTT_TLS_VERIFY:            ${MQTT_TLS_VERIFY:-true}
+      MQTT_USERNAME:              ${MQTT_USERNAME:-}
+      MQTT_PASSWORD:              ${MQTT_PASSWORD:-}
+      MQTT_CLIENT_ID:             ${MQTT_CLIENT_ID:-}
+      MQTT_MASTER_HOST_ID:        ${MQTT_MASTER_HOST_ID:-}
+      MQTT_TOPIC_PREFIX:          ${MQTT_TOPIC_PREFIX:-cyjan}
+      MQTT_QOS_EVENTS:            ${MQTT_QOS_EVENTS:-1}
+      MQTT_QOS_STATE:             ${MQTT_QOS_STATE:-0}
+      MQTT_RATE_LIMIT_PER_SEC:    ${MQTT_RATE_LIMIT_PER_SEC:-200}
+      MQTT_INFLIGHT_MAX:          ${MQTT_INFLIGHT_MAX:-10}
+      MQTT_THREAT_INTERVAL_S:     ${MQTT_THREAT_INTERVAL_S:-30}
+      MQTT_TAP_INTERVAL_S:        ${MQTT_TAP_INTERVAL_S:-30}
+      MQTT_SEVERITY_MIN:          ${MQTT_SEVERITY_MIN:-low}
+      MQTT_SOURCES:               ${MQTT_SOURCES:-signature,ml,suricata,external}
+      MQTT_RULE_ID_BLOCKLIST:     ${MQTT_RULE_ID_BLOCKLIST:-}
+
+  # ────────────────────────────────────────────────────────────────────────────
   # SNIFFER – PRODUKTION  (docker compose --profile prod up)
   #
   # Benötigt: MIRROR_IFACE gesetzt in .env
