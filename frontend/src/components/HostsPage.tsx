@@ -96,9 +96,9 @@ export function HostsPage() {
     <div className="space-y-4">
       {/* Add host + CSV import */}
       <div className="card p-4 space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-slate-300">{t('hosts.addHost')}</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => downloadHostsExampleCsv().catch(() => {})}
               className="btn-ghost text-xs text-slate-500 hover:text-slate-300"
@@ -123,20 +123,20 @@ export function HostsPage() {
         </div>
 
         <form onSubmit={addHost} className="flex flex-wrap gap-2 items-end">
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 w-full sm:w-40">
             <span className="text-xs text-slate-500">{t('hosts.ipRequired')}</span>
             <input
               required
-              className="input w-40"
+              className="input w-full"
               placeholder="192.168.1.1"
               value={newIp}
               onChange={e => setNewIp(e.target.value)}
             />
           </label>
-          <label className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1 w-full sm:w-48">
             <span className="text-xs text-slate-500">{t('hosts.displayName')}</span>
             <input
-              className="input w-48"
+              className="input w-full"
               placeholder={t('hosts.displayNamePlaceholder')}
               value={newName}
               onChange={e => setNewName(e.target.value)}
@@ -157,9 +157,9 @@ export function HostsPage() {
       </div>
 
       {/* Filter + Search */}
-      <div className="flex gap-2 items-center">
+      <div className="flex flex-wrap gap-2 items-center">
         <input
-          className="input flex-1 max-w-xs"
+          className="input w-full md:flex-1 md:max-w-xs"
           placeholder={t('hosts.searchPlaceholder')}
           value={search}
           onChange={e => setSearch(e.target.value)}
@@ -168,7 +168,7 @@ export function HostsPage() {
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-3 py-1 rounded text-xs font-medium font-mono border transition-colors ${
+            className={`px-3 py-2 md:py-1 rounded text-xs font-medium font-mono border transition-colors ${
               filter === f
                 ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/50'
                 : 'bg-slate-900 text-slate-500 border-slate-700 hover:text-slate-300'
