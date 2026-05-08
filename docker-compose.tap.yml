@@ -152,6 +152,10 @@ services:
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
       METRICS_TOPIC:  ${METRICS_TOPIC:-rule-metrics}
       METRICS_SAMPLING_RATE: ${METRICS_SAMPLING_RATE:-0.01}
+      # Self-Traffic-Filter (analog Master-Compose): Tap-eigene IPs/CIDRs.
+      # Verhindert dass tap-uplink-Heartbeats (HTTPS zum Master) als
+      # ML-Anomaly oder als IRMA-Beacon-Pattern auftauchen.
+      IDS_OWN_IPS: ${IDS_OWN_IPS:-}
     volumes:
       # Wird vom tap-uplink-Container via Reverse-Channel-Pull gefüllt.
       # /rules/builtin/*.yml und /rules/custom/_overrides.json kommen vom

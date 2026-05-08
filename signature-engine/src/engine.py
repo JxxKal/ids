@@ -135,12 +135,35 @@ class _FlowParams:
 
 
 class SignatureEngine:
-    def __init__(self, rules_dir: str) -> None:
+    def __init__(self, rules_dir: str, own_ips=None, own_nets=None) -> None:
         self._loader  = RuleLoader(rules_dir)
         self._ctx     = RuleContext()
         self._net     = _NetHelper(self._loader)
         # {(rule_id, src_ip): last_fired_ts}
         self._cooldowns: dict[tuple[str, str], float] = {}
+        # Self-Traffic-Filter: IDS-eigene IPs/CIDRs. Flows mit src ODER dst
+        # in dieser Liste werden in evaluate() + compute_metrics() vor der
+        # Rule-Auswertung gedroppt. Verhindert FPs durch enrichment-
+        # service-ICMP-Pings, DNS-Lookups vom Master, etc.
+        self._own_ips: frozenset[str] = frozenset(own_ips or ())
+        self._own_nets = tuple(own_nets or ())
+
+    def _is_own_ip(self, ip: str) -> bool:
+        if not ip:
+            return False
+        if ip in self._own_ips:
+            return True
+        if not self._own_nets:
+            return False
+        try:
+            import ipaddress
+            ip_obj = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        for net in self._own_nets:
+            if ip_obj.version == net.version and ip_obj in net:
+                return True
+        return False
 
     def setup(self) -> None:
         self._loader.load()
@@ -153,6 +176,16 @@ class SignatureEngine:
         return len(self._loader.rules)
 
     def evaluate(self, flow: dict) -> list[dict]:
+        # Self-Traffic-Filter — Flows wo IDS selbst beteiligt ist (als
+        # Quelle ODER Ziel) werden komplett übersprungen. Verhindert dass
+        # enrichment-service-ICMP-Pings als DOS_ICMP_001-Flood, DNS-
+        # Lookups vom Master als DOS_UDP_001 oder als IRMA-Bridge-Polls
+        # als ML-Anomaly auftauchen.
+        src_ip0 = flow.get("src_ip") or ""
+        dst_ip0 = flow.get("dst_ip") or ""
+        if self._is_own_ip(src_ip0) or self._is_own_ip(dst_ip0):
+            return []
+
         # stats-Dict flach in den Flow mergen
         flat = {**flow, **flow.get("stats", {})}
         self._ctx.record(flat)
@@ -216,6 +249,12 @@ class SignatureEngine:
         """
         if not self._loader.rules:
             return []
+        # Self-Traffic-Filter (analog evaluate): IDS-eigene Flows raus —
+        # sonst landen unsere enrichment-Pings im Reservoir des
+        # rule-tuners und verschieben die DOS_ICMP_001-Schwelle.
+        if self._is_own_ip(flow.get("src_ip") or "") or self._is_own_ip(flow.get("dst_ip") or ""):
+            return []
+
         flat = {**flow, **flow.get("stats", {})}
         src_ip = flat.get("src_ip") or ""
         is_internal = self._loader.is_internal(src_ip)

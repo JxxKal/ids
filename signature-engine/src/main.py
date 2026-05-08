@@ -73,7 +73,7 @@ def _metrics_delivery_cb(err, _msg):
 
 
 def run(cfg: Config) -> None:
-    engine = SignatureEngine(cfg.rules_dir)
+    engine = SignatureEngine(cfg.rules_dir, own_ips=cfg.own_ips, own_nets=cfg.own_nets)
     engine.setup()
     log.info("Signature engine ready – %d rules loaded", engine.rule_count)
 
