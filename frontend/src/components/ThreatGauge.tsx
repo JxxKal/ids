@@ -41,7 +41,7 @@ export function ThreatGauge() {
   const counts = data.alert_counts ?? {};
 
   return (
-    <div className="cyjan-kpi-card flex items-center gap-4" style={{ flex: '0 0 auto', minWidth: 320 }}>
+    <div className="cyjan-kpi-card flex items-center gap-4">
       <svg width="120" height="120" viewBox="0 0 120 120" className="shrink-0">
         <circle cx="60" cy="60" r="54" fill="none" stroke="#172033" strokeWidth="8" />
         <circle

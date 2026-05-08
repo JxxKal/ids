@@ -491,7 +491,98 @@ export function NetworksPage({ user }: Props) {
 
       {/* Datenanzeige: Liste oder Baum */}
       {viewMode === 'list' ? (
-        <div className="card overflow-hidden">
+        <>
+        {/* Mobile: Card-Stack */}
+        <div className="md:hidden flex flex-col gap-2">
+          {filteredNetworks.length === 0 && networks.length > 0 && (
+            <div className="card p-6 text-center text-slate-600 text-xs">
+              {t('networks.noMatch', { defaultValue: 'Keine Treffer für diese Filter.' })}
+            </div>
+          )}
+          {networks.length === 0 && (
+            <div className="card p-6 text-center text-slate-600 text-xs">{t('networks.noNetworks')}</div>
+          )}
+          {filteredNetworks.map(n => {
+            const k: Kind = (n.kind === 'it' ? 'it' : 'ot');
+            const kindBadge = KIND_BADGE[k];
+            const isEditing = editId === n.id && editState;
+            return (
+              <div key={n.id} className="card p-3">
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <span className="font-mono text-sm text-slate-200 truncate">{n.cidr}</span>
+                  <span className={`inline-block px-2 py-0.5 rounded border text-[10px] font-mono uppercase shrink-0 ${kindBadge.cls}`}>
+                    {kindBadge.label}
+                  </span>
+                </div>
+
+                {isEditing ? (
+                  <div className="flex flex-col gap-2 mb-2">
+                    <input
+                      autoFocus
+                      className="input w-full"
+                      placeholder={t('networks.columns.name')}
+                      value={editState.name}
+                      onChange={e => setEditState(s => s ? { ...s, name: e.target.value } : s)}
+                    />
+                    <input
+                      className="input w-full"
+                      placeholder={t('networks.columns.description')}
+                      value={editState.description}
+                      onChange={e => setEditState(s => s ? { ...s, description: e.target.value } : s)}
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        className="h-9 w-12 rounded bg-slate-800 border border-slate-700 cursor-pointer shrink-0"
+                        value={editState.color}
+                        onChange={e => setEditState(s => s ? { ...s, color: e.target.value } : s)}
+                      />
+                      <select
+                        className="input flex-1"
+                        value={editState.kind}
+                        onChange={e => setEditState(s => s ? { ...s, kind: (e.target.value as Kind) } : s)}
+                      >
+                        <option value="ot">OT</option>
+                        <option value="it">IT</option>
+                      </select>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="text-xs text-slate-300 truncate mb-1">{n.name}</div>
+                    {n.description && (
+                      <div className="text-[11px] text-slate-500 mb-2">{n.description}</div>
+                    )}
+                    {n.color && (
+                      <div className="flex items-center gap-1.5 mb-2 text-[11px] font-mono">
+                        <span className="w-3 h-3 rounded-full inline-block" style={{ backgroundColor: n.color }} />
+                        <span className="text-slate-500">{n.color}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <div className="flex gap-2 justify-end">
+                  {isEditing ? (
+                    <>
+                      {editError && <span className="text-red-400 text-xs self-center">{editError}</span>}
+                      <button onClick={cancelEdit} className="btn-ghost min-h-[40px]">{t('common.cancel')}</button>
+                      <button onClick={saveEdit}   className="btn-primary min-h-[40px]">{t('common.save')}</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => startEdit(n)}       className="btn-ghost min-h-[40px]">{t('common.edit')}</button>
+                      <button onClick={() => setConfirmId(n.id)} className="btn-ghost min-h-[40px] text-red-500 hover:text-red-400">{t('common.delete')}</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Desktop: Tabelle */}
+        <div className="hidden md:block card overflow-hidden">
           <table className="w-full text-xs">
             <thead className="cyjan-table-head">
               <tr className="text-left">
@@ -588,6 +679,7 @@ export function NetworksPage({ user }: Props) {
             </tbody>
           </table>
         </div>
+        </>
       ) : (
         <div className="card overflow-hidden p-2">
           {filteredNetworks.length === 0 && networks.length > 0 && (
