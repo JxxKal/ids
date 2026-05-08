@@ -75,8 +75,8 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | `snort` | Suricata | ✅ | Paketerfassung auf Mirror-/Test-Interface, ET Open + OT/ICS-Regelsets, EVE JSON Output |
 | `snort-bridge` | Python | ✅ | Liest Suricata EVE JSON → normalisiert → Kafka alerts-raw (`source=suricata`) |
 | `irma-bridge` | Python | ✅ | Pollt IRMA REST-API, importiert externe Alarme → Kafka alerts-raw (`source=external`) |
-| `master-uplink` | Python | ✅ | mTLS-WSS-Endpoint (Port 8443) für Remote-Taps, nimmt Tap-Alarme ins Master-Kafka auf und serviert Reverse-Channel `/config` für Rule-Sync |
-| `tap-uplink` | Python | ✅ | *(nur Tap)* mTLS-Client zum Master, SQLite-Outage-Buffer, alle 5 min Reverse-Pull der Heuristik-Rules + Overrides |
+| `master-uplink` | Python (aiohttp) | ✅ | mTLS-Endpoint (Port 8443) für Remote-Taps. WebSocket `/uplink` für Alert-/Metric-/PCAP-Frames, `/config` für Rule-Sync, **`/tap-update/<file>` mit Streaming via `sendfile`** für Update-Bundle-Auslieferung. Pollt `taps.update_requested_at` und sendet Update-Push-Frames an die WS-Connection. |
+| `tap-uplink` | Python | ✅ | *(nur Tap)* mTLS-Client zum Master. Konsumiert lokales `alerts-raw` + `rule-metrics` und forwarded mit Outage-Buffer (SQLite, 1 GB Cap) zum Master. **Zusätzlich Mini-PCAP-Store**: konsumiert `pcap-headers`, hält ±60 s in-memory Ringbuffer, baut bei Tap-Alarmen ein libpcap-File und sendet es als `pcap_upload`-Frame. Empfängt `update_now`-Trigger vom Master und schreibt `/run/cyjan-update/trigger` (host bind-mount) — systemd-path-watcher startet `cyjan-tap update --from-master -y`. Reverse-Pull der Heuristik-Rules + Overrides + `known_networks` alle 5 min. |
 | `tap-api` | Python | ✅ | *(nur Tap)* Minimaler Status-View + Maschinen-Endpoints für die `cyjan-tap`-CLI |
 
 ---
@@ -244,6 +244,8 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 | `015_tap_auto_pair.sql` | Tap-Auto-Pairing (Pending-Liste, Audit-Log) |
 | `016_known_networks_kind.sql` | `known_networks.kind` (`ot`\|`it`) für OT-Boundary V2 |
 | `017_alerts_boundary_zones.sql` | `alerts.boundary_{src,dst}_zone` + V2-Priority-Matrix in `system_config` |
+| `018_tap_version.sql` | `taps.version` + `version_reported_at` — Tap meldet seine Version per `hello`-Frame, UI zeigt sie pro Tap |
+| `019_tap_update_trigger.sql` | `taps.update_requested_at` + `update_requested_by` + `update_acked_at` — Backbone für den Pro-Tap-Update-Push aus der Master-GUI |
 
 ---
 
@@ -268,6 +270,7 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 | `PCAP_WINDOW_S` | `60` | ±Sekunden PCAP-Fenster pro Alert |
 | `RETRAIN_INTERVAL_S` | `86400` | ML Retrain-Interval (24h) |
 | `ML_BOOTSTRAP_MIN` | `500` | Mindest-Flows vor ML-Aktivierung |
+| `IDS_OWN_IPS` | – | Self-Traffic-Filter: kommagetrennte Liste eigener IPs/CIDRs (z.B. `192.168.1.81,192.168.1.94` für Multi-IF-Master). Flows mit src ODER dst auf einer dieser IPs werden vor der Rule-Auswertung verworfen — verhindert FPs durch enrichment-ICMP-Pings (DOS_ICMP_001-Flood), Master-eigene DNS-Lookups, IRMA/iTop-Polls. Auch im Tap-Compose verfügbar. |
 | `IRMA_BASE_URL` | `https://10.133.168.115/rest` | IRMA REST-API Basis-URL |
 | `IRMA_USER` | – | IRMA-Benutzername (Rolle: RestAPI) |
 | `IRMA_PASS` | – | IRMA-Passwort |
@@ -280,6 +283,21 @@ docker compose exec -T timescaledb psql -U ids -d ids \
 ---
 
 ## Dashboard
+
+Das UI ist bewusst nicht "Standard-SaaS-Dunkel" sondern hat einen **OT-Operator-Panel-Charakter**: hexagonales Background-Pattern als Brand-Anker, segmented LED-Style-Bars für Severity (vom VU-Meter inspiriert), corner-bracket-Treatments auf KPI-Cards, pulsierender Edge-Glow auf der Threat-Gauge im Critical-State, tabular-numerals auf allen Hero-Werten (kein Wackeln beim Live-Update), staggered Page-Load-Fade-In. Gleicher Look auf Desktop und Mobile.
+
+### Mobile / Responsive
+
+Die Web-Oberfläche ist von Grund auf für Touch-Devices ausgelegt — keine "Desktop-Site mit Zoom":
+
+- **Bottom-Navigation** auf <768 px: Icon-only mit cyan-Glow auf dem aktiven Tab, Tap-Feedback (`scale(0.96)`), Glassmorphism-Hintergrund (`backdrop-blur`).
+- **TopBar Mini-Threat-Donut** zeigt den aktuellen Threat-Score (22 px-Donut + Zahl) auf **jedem** Tab — Operator sieht den Status auch beim Konfigurieren von Settings/Hosts.
+- **Card-Layouts statt Tabellen** für Alert-Feed, Hosts, Networks. Severity-Stripe links, Hex-Pattern-Atmosphäre als ::after, Critical-Pulse als sanfte 4 s-Animation.
+- **Bottom-Sheets** für Alert-Detail, PCAP-Preview, Verbindungsgraph, Host-Connections — Drag-Handle oben, full-screen-Höhe, kein Quetschen-im-Modal.
+- **Connection-Graph** rendert auf Mobile eine kompakte Connection-Liste (Proto-Stripe-Farbig, Port + Direction-Pfeil + Flow-Counter + Bytes/Pkt) statt des SVG-Graphs, der auf 390 px nicht mehr lesbar ist.
+- **Alert-Feed-Filter** sind hinter einem `≡ Filter ▾`-Toggle gebündelt; Suche + Severity-Pills bleiben oben sichtbar. Counter zeigt non-default-Filter ohne Aufklappen.
+- **Settings als Hamburger-Drawer** auf Mobile (240 px slide-in von links), Desktop unverändert mit vertikaler Sub-Sidebar.
+- **Dismissable Mobile-Hint** (`localStorage`) in Sektionen die für Desktop optimiert sind, plus collapsible Help-Texte ("Was macht das hier?") in dichten Settings-Pages.
 
 ### Alert-Feed
 
@@ -485,15 +503,24 @@ Synchronisation mit iTop IP-Management (TeemIP-Extension):
 
 Offline-Update via ZIP-Upload direkt aus dem Dashboard:
 
-1. Release-ZIP von GitHub herunterladen (enthält `images.tar.zst` + aktuelle DB-IP-Lite-GeoIP-Files)
+1. Release-ZIP von GitHub herunterladen (enthält `images.tar.zst` + aktuelle DB-IP-Lite-GeoIP-Files + `tap-update/`-Bundle für gepairte Taps)
 2. In Settings → System-Update hochladen
 3. Fortschrittsbalken (0–100%) und Live-Log verfolgen
 4. Nach ~20 Sekunden Seite neu laden
 
 **Ablauf:**
-- ZIP wird entpackt (`.env` und `.git` bleiben erhalten); GeoIP-`.mmdb`-Files landen in `/opt/ids/geoip/`
+- ZIP wird entpackt (`.env` und `.git` bleiben erhalten); GeoIP-`.mmdb`-Files landen in `/opt/ids/geoip/`, `tap-update/`-Inhalt für Pro-Tap-Push wird gestaged
 - `docker load` lädt vorgebaute Images
 - Unabhängiger Runner-Container startet `docker compose up -d --force-recreate` (überlebt api-Neustart, enrichment-service zieht die frischen GeoIP-DBs automatisch)
+- `scripts/post-update.sh` läuft idempotent durch: `daemon.json`, `cyjan-maintenance.{service,timer}`, `cyjan-mirror-tune.service`, `cyjan-tap-update.{path,service}` werden installiert/aktualisiert. Auf Bestandsystemen: `sudo bash /opt/ids/scripts/post-update.sh` einmalig nachziehen.
+
+#### PCAP-Retention
+
+MinIO-Lifecycle-Rule für den `ids-pcaps`-Bucket: Settings → System → "PCAP Retention". Default 14 Tage, einstellbar. UI zeigt aktuellen Bucket-Verbrauch (Anzahl Files + Größe). Plus Force-Cleanup-Button für sofortigen Run der Lifecycle-Rule wenn das Volume gerade zu groß wurde. Konsistent zum Hosts-/Networks-Pattern in den Settings-Pages.
+
+#### Remote-Tap-Update-Push
+
+Settings → Remote Taps zeigt pro Tap die laufende Version (aus dem `hello`-Frame des `tap-uplink`-Connects). Wenn die Master-Version neuer ist als die Tap-Version, erscheint ein **„Update senden"-Button** pro Zeile. Klick → `taps.update_requested_at = now()` → `master-uplink` pollt die Spalte alle 5 s und schickt einen `update_now`-Frame über die existierende mTLS-WS-Connection an den Tap. Tap-uplink schreibt `/host/cyjan-update/trigger`, der `cyjan-tap-update.path`-systemd-Watcher startet `cyjan-tap update --from-master -y` als root am Host. Ack über `update_acked_at`. Voraussetzung: Master hat `tap-update/`-Bundle gestaged (passiert automatisch beim System-Update).
 
 #### GeoIP-Datenbanken
 
@@ -538,6 +565,24 @@ Der spezifischste CIDR-Match gewinnt: ein `/16` mit `kind=it` mit einem darin li
 **Whitelisting**: legitimer Egress-Verkehr (z.B. Office365-Telemetrie eines bekannten Hosts) wird per `egress_whitelist`-Tabelle ausgenommen — die Korrelation läuft zur Query-Zeit, kein Batch-Update auf der `alerts`-Hypertable. UI-Pfad: Alert-Detail → „Whitelist".
 
 **Backwards-Compat**: Bestandsalerts vor Migration 017 haben `boundary_src_zone`/`boundary_dst_zone = NULL`; ihre alte `boundary_priority` aus der V1-Klassifikation bleibt unverändert. Im Wochenbericht werden sie unter „unzoned" aufgeschlüsselt. V1-Felder `boundary_net_known/_src_known/_dst_known` werden weiter befüllt für den Alert-Detail-View.
+
+---
+
+## Self-Traffic-Filter
+
+Der `enrichment-service` macht für jede Alert-IP einen ICMP-Ping als Reachability-Check + Reverse-DNS-Lookup. Wenn der Mirror-Port den Master-eigenen Traffic mit-erfasst (Switch-Span-Konfiguration), tauchen diese Pings im `flows`-Topic auf — und Heuristik-Rules wie `DOS_ICMP_001` feuern mit `src=Master-IP` als FP-Flood-Alert.
+
+Ähnliches Risiko bei Master-eigenen DNS-Lookups (DOS_UDP_001), IRMA/iTop-Polls (ML-Anomaly), Tap-Uplink-Heartbeats Richtung Master.
+
+**Filter** in der `signature-engine`: env-Var `IDS_OWN_IPS` akzeptiert kommagetrennte Liste von Single-IPs UND CIDRs:
+
+```env
+IDS_OWN_IPS=192.168.1.81,192.168.1.94,fd00::1,10.0.0.0/24
+```
+
+In `evaluate()` und `compute_metrics()` wird vor jeder Rule-Auswertung geprüft ob `src_ip OR dst_ip` einer dieser IPs entspricht. Match → keine Alerts, keine `rule-metrics`-Samples (sonst Reservoir-Kontamination im `rule-tuner`). Beide Compose-Files (Master + Tap) reichen die Variable durch.
+
+**Defense-in-Depth, kein Ersatz** für die Direction-Heuristik im `flow-aggregator`: die hat eigenständig eine ICMP-Type-Stage (Echo Reply 0/129 → src/dst gedreht, sodass `src` immer der Original-Initiator bleibt — auch bei Mid-Capture wo der Reply zuerst gesehen wurde).
 
 ---
 
@@ -1108,8 +1153,49 @@ Jeder Tap betreibt seine eigene Mini-Pipeline (Sniffer → Flow-Aggregator → S
 - `custom/_overrides.json` – Per-Regel Disable/Severity-Override/Schwellwert-Tuning
 - `custom/_suricata_overrides.json` – Per-SID Suricata-Overrides
 - `custom/*.yml` – eigene Custom-Regeln, sofern angelegt
+- `_known_networks.json` – aktuelle CIDR-Liste mit `kind` (`ot|it`) für die Tap-eigene OT-Boundary-Klassifikation
 
 `tap-uplink` pullt alle 5 min, schreibt die Files atomar ins lokale `signature-rules`-Volume und triggert die Tap-eigene `signature-engine` per inotify-mtime. Damit sind GUI-Änderungen am Master innerhalb von max. 5 min auf allen verbundenen Taps aktiv, ohne dass irgendwer manuell etwas auf dem Tap-Host macht.
+
+### Tap-PCAP (V1)
+
+Tap-Alerts brauchen genauso PCAP-Anhänge wie Master-Alerts. Da der zentrale `pcap-store` nur am Master läuft, hält der Tap einen **eigenen Mini-Store** in `tap-uplink`:
+
+- Sniffer schreibt `pcap-headers` (jedes Paket header-encoded bis snaplen) ins lokale Tap-Kafka.
+- `tap-uplink` konsumiert das Topic, hält ±60 s als in-memory-Ringbuffer (max. 500 k Pakete cap).
+- Bei einem Tap-Alarm baut tap-uplink ein libpcap-Format-File aus dem Ringbuffer (Magic 0xA1B2C3D4, LINKTYPE_ETHERNET) und sendet es als `pcap_upload`-Frame (base64) über die bestehende mTLS-WS an den Master.
+- `master-uplink` lädt das in MinIO `alerts/<id>.pcap`, setzt `alerts.pcap_available = true` und broadcastet `pcap_available` über `alerts-enriched-push` ans Frontend.
+
+Ergebnis: PCAP-Button wird auch für Tap-Alerts blau und der Download funktioniert über die normale `GET /api/alerts/{id}/pcap`-Route.
+
+### Pro-Tap Update-Push
+
+Master-GUI kann pro Tap einen Update-Befehl auslösen — ohne SSH zum Tap nötig:
+
+```
+Master-UI "Update senden"
+   │
+   ▼  PUT taps.update_requested_at = now()
+   │
+   ▼  master-uplink poll-loop alle 5s
+   │
+   ▼  send WebSocket-Frame {"type":"update_now"} über die mTLS-Connection
+   │
+   ▼  tap-uplink empfängt → schreibt /host/cyjan-update/trigger (bind-mount)
+   │
+   ▼  systemd-path-watcher cyjan-tap-update.path triggert Service
+   │
+   ▼  cyjan-tap update --from-master -y
+   │       (curl https://master:8443/tap-update/<file> mit mTLS-Client-Cert)
+   │       (Bundle wird via web.FileResponse gestreamt — sendfile-Syscall,
+   │        keine RAM-Loading-Crashes auch bei 300+ MB-Bundles)
+   │
+   ▼  docker load + compose up -d --force-recreate
+   │
+   ▼  Tap-Stack-Restart-Lücke (~30 s) wird vom Outage-Buffer abgefangen
+```
+
+Voraussetzung am Tap: einmalig `cyjan-tap-update.path` + `.service`-systemd-Units installiert (passiert automatisch durch `post-update.sh` aus jedem v2.4.x+-Bundle). Voraussetzung am Master: `tap-update/`-Bundle gestaged (geschieht beim regulären System-Update).
 
 ### CLI: `cyjan-tap`
 
@@ -1136,4 +1222,10 @@ Eigenes ISO-Build (`distro/tap-config/`), erzeugt parallel zum Master-ISO im Wor
 - `cyjan-tap` CLI in `/usr/local/bin`
 - Boot-Wizard, der das Pairing-Token + Master-URL abfragt und sofort den Stack hochfährt
 
-Update auf einem laufenden Tap: klassisch `cd /opt/ids && git pull && docker compose -f docker-compose.tap.yml build && up -d` — das ISO bringt also nur den Erstausroll; danach bleibt das Tap-Repo wie auf dem Master per `git pull` aktuell. Heuristik-Rule-Änderungen kommen ohnehin separat über den Reverse-Channel und brauchen keinen Container-Rebuild.
+Update auf einem laufenden Tap (drei Pfade, je nach Setup):
+
+1. **Master-Push aus der GUI** — *Settings → Remote Taps → "Update senden"*. Voll automatisch, kein SSH zum Tap nötig (siehe [Pro-Tap Update-Push](#pro-tap-update-push)). Setzt einen `cyjan-tap-update.path`-systemd-Watcher am Tap voraus, der ab v2.4.x mit jedem `post-update.sh`-Run installiert wird.
+2. **CLI am Tap-Host** — `sudo cyjan-tap update --from-master`: Tap zieht selbst das Bundle aus `https://master:8443/tap-update/...`. Sinnvoll wenn der Tap gerade keine WS-Connection hat (z.B. nach längerem Outage).
+3. **Klassisch via Git** — `cd /opt/ids && git pull && docker compose -f docker-compose.tap.yml build && up -d`. Fall-back wenn das Bundle am Master nicht gestaged ist.
+
+Heuristik-Rule-Änderungen kommen ohnehin separat über den Reverse-Channel (`/config`) und brauchen keinen Container-Rebuild.
