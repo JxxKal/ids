@@ -49,6 +49,36 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1;
   }
+  /* Page-Load Fade-In Stagger — wird auf Section-Container gelegt und
+     gibt allen direkten Children einen kurzen verzögerten fade+slide-up.
+     Operator merkt visuell "die Page baut sich auf", statt einem harten
+     Pop-In. Performance-light: nur opacity + transform, kein layout. */
+  .cyjan-stagger > * {
+    animation: cyjan-stagger-in 0.45s cubic-bezier(0.2, 1, 0.4, 1) backwards;
+  }
+  .cyjan-stagger > *:nth-child(1) { animation-delay: 0.04s; }
+  .cyjan-stagger > *:nth-child(2) { animation-delay: 0.10s; }
+  .cyjan-stagger > *:nth-child(3) { animation-delay: 0.16s; }
+  .cyjan-stagger > *:nth-child(4) { animation-delay: 0.22s; }
+  .cyjan-stagger > *:nth-child(5) { animation-delay: 0.28s; }
+  .cyjan-stagger > *:nth-child(n+6) { animation-delay: 0.32s; }
+  @keyframes cyjan-stagger-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  /* Reduced-motion respektieren — Operator-Kontext: auf eingeschränkten
+     Devices oder bei a11y-Settings keine fancy stagger. */
+  @media (prefers-reduced-motion: reduce) {
+    .cyjan-stagger > * {
+      animation: none;
+    }
+  }
 }
 
 @layer components {

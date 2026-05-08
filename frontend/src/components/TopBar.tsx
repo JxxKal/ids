@@ -1,8 +1,68 @@
 import { HelpCircle, LogOut } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { fetchThreatLevel } from '../api';
 import { useHelpMode } from '../hooks/useHelpMode';
 import { HelpTip } from './HelpTip';
-import type { RemoteTap } from '../types';
+import type { RemoteTap, ThreatLevel } from '../types';
+
+// Mini-Threat-Donut für die TopBar — zeigt den aktuellen Threat-Score
+// als kleinen Donut + Score, sichtbar auf allen Tabs (nicht nur
+// Dashboard). Operator sieht "wie kritisch ist es gerade" auch beim
+// Konfigurieren von Settings, Schauen auf Hosts etc. — Brand-Klammer.
+const STATUS_COLOR: Record<string, string> = {
+  green:  '#22c55e',
+  yellow: '#eab308',
+  orange: '#f97316',
+  red:    '#ef4444',
+};
+function MiniThreat() {
+  const { t } = useTranslation();
+  const [data, setData] = useState<ThreatLevel | null>(null);
+  useEffect(() => {
+    const load = () => fetchThreatLevel().then(setData).catch(() => {});
+    load();
+    const id = setInterval(load, 30_000);
+    return () => clearInterval(id);
+  }, []);
+  if (!data) return null;
+  const value = Math.max(0, Math.min(100, data.level));
+  const color = STATUS_COLOR[data.label] ?? STATUS_COLOR.green;
+  const circ = 2 * Math.PI * 9;
+  const offset = circ - (value / 100) * circ;
+  const isCritical = data.label === 'red';
+  return (
+    <div
+      className="flex items-center gap-1.5 px-2 py-1 rounded border font-mono text-[11px] cyjan-tabular shrink-0"
+      style={{
+        borderColor: data.label === 'red' ? 'rgba(239,68,68,0.45)'
+                   : data.label === 'orange' ? 'rgba(249,115,22,0.40)'
+                   : 'rgba(34,211,238,0.25)',
+        background: 'rgba(11,18,32,0.6)',
+        animation: isCritical ? 'cyjan-pulse-dot 2.4s ease-in-out infinite' : undefined,
+      }}
+      title={t('threatGauge.title', { minutes: data.window_min })}
+    >
+      <svg width="22" height="22" viewBox="0 0 22 22" className="shrink-0">
+        <circle cx="11" cy="11" r="9" fill="none" stroke="#172033" strokeWidth="2" />
+        <circle
+          cx="11" cy="11" r="9" fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform="rotate(-90 11 11)"
+          style={{
+            transition: 'stroke-dashoffset 0.6s ease, stroke 0.3s ease',
+            filter: `drop-shadow(0 0 2px ${color})`,
+          }}
+        />
+      </svg>
+      <span style={{ color, fontWeight: 700 }}>{value}</span>
+    </div>
+  );
+}
 
 interface Kpi {
   label: string;
@@ -80,6 +140,7 @@ export function TopBar({ title, live, kpis = [], taps = [], username, onLogout }
     <div className="cyjan-topbar">
       <div className="cyjan-topbar-left">
         <h1 className="cyjan-topbar-title">{title}</h1>
+        <MiniThreat />
         <HelpTip helpKey="topbarLive">
           <span className={`cyjan-live-badge ${live ? 'is-live' : 'is-offline'}`}>
             <span className="cyjan-live-dot" />

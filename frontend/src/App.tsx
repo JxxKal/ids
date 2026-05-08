@@ -255,7 +255,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
           <div className="flex-1 overflow-hidden flex flex-col gap-4 p-5 pb-20 md:pb-5">
 
             {/* KPI Row */}
-            <div className="flex items-stretch gap-4 flex-wrap">
+            <div className="flex items-stretch gap-4 flex-wrap cyjan-stagger">
               <HelpTip helpKey="threatGauge"><ThreatGauge /></HelpTip>
               <HelpTip helpKey="severityCard"><SeverityBarsCard alerts={displayAlerts} showTest={showTest} /></HelpTip>
               <HelpTip helpKey="protocolsCard"><TopProtocolsCard alerts={displayAlerts} showTest={showTest} /></HelpTip>
