@@ -1,22 +1,21 @@
 """
-master-uplink — mTLS-WebSocket-Endpunkt für Remote-Tap-Alerts.
+master-uplink — mTLS-Endpunkt für Remote-Tap-Alerts.
 
-Hört auf TCP/8443 mit Master-CA als Trust-Root und CERT_REQUIRED. Jeder
-sich verbindende Tap muss ein vom Master signiertes Cert mit CN
+Hört auf TCP/8443 (TLS, CERT_REQUIRED) mit Master-CA als Trust-Root.
+Jeder sich verbindende Tap muss ein vom Master signiertes Cert mit CN
 'tap:<uuid>' präsentieren. Wir matchen den Cert-Fingerprint gegen die
 taps-Tabelle und akzeptieren nur Verbindungen für status='active'.
 
-Pro Verbindung läuft eine Coroutine die Alert-Frames als JSON empfängt
-und in den Kafka-Topic 'alerts-raw' weiterreicht – mit zusätzlichem Feld
-tap_id, damit downstream alert-manager + frontend wissen woher er kommt.
-Heartbeat alle 30 s (server → client), bei Timeout schließt der Server.
+aiohttp-Server mit drei Endpoints:
+  • GET /uplink   — WebSocket-Upgrade, Tap pumpt Alerts/Metrics/PCAPs rein.
+  • GET /config   — Reverse-Channel-Pull: Builtin-Rules + Overrides als JSON.
+  • GET /tap-update/<file>   — Update-Bundle (images-tap.tar.zst, compose,
+                  scripts, manifest). web.FileResponse → sendfile-Streaming,
+                  damit auch 300+ MB-Bundles ohne RAM-Crash übertragen werden.
 
-Die Kommunikation in Gegenrichtung (Master → Tap) für Rule-Sync läuft
-NICHT über den WebSocket-Frame-Strom, sondern als HTTP GET /config auf
-demselben Port (mTLS-stack identisch). Implementiert als
-process_request-Hook in einer WebSocketServerProtocol-Subclass, weil die
-Legacy-Signatur (path, request_headers) sonst keinen Zugang zum
-SSL-Object und damit zum Cert-Fingerprint hat.
+Heartbeat alle 30 s (server → client) als WebSocket-Frame, bei Timeout
+schließt der Server. Update-Push via Kafka-unabhängigem Loop (taps-Tabelle
+poll alle 5s + send_str("update_now")).
 """
 from __future__ import annotations
 
@@ -27,7 +26,6 @@ import os
 import ssl
 import time
 from datetime import datetime, timezone
-from http import HTTPStatus
 from pathlib import Path
 
 import asyncpg
@@ -35,13 +33,12 @@ import orjson
 import base64
 import io
 
-import websockets
+from aiohttp import web, WSMsgType
 from confluent_kafka import Producer
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from minio import Minio
 from minio.error import S3Error
-from websockets.legacy.server import WebSocketServerProtocol
 
 LISTEN_HOST = os.environ.get("UPLINK_HOST", "0.0.0.0")
 LISTEN_PORT = int(os.environ.get("UPLINK_PORT", "8443"))
@@ -421,167 +418,121 @@ async def build_config_bundle(auth: TapAuth) -> tuple[bytes, str]:
     return body, etag
 
 
-def _make_protocol_class(auth: TapAuth):
-    """Liefert eine WebSocketServerProtocol-Subclass die /config-HTTP-GETs
-    in process_request abfängt und das Config-Bundle direkt zurückgibt
-    (HTTP 200 oder 304). Andere Pfade → None, dann läuft der WS-Upgrade
-    normal weiter.
-
-    Subclass weil die Legacy-API process_request mit Signatur
-    (path, request_headers) → Optional[(status, headers, body)] aufruft;
-    nur als Methode haben wir Zugang zu self.transport für den Cert-Lookup.
+async def _authenticate_request(request: web.Request, auth: TapAuth):
+    """mTLS-Cert-Check als gemeinsame Vorab-Prüfung für alle HTTP-Endpoints
+    und WebSocket-Upgrade. Holt Peer-Cert aus SSL-Transport, schlägt
+    fingerprint in der taps-Tabelle nach. Returnt Tap-Info-Dict oder
+    HTTP-Error-Response.
     """
-
-    class TapProto(WebSocketServerProtocol):
-        async def process_request(self, path, request_headers):
-            base_path = path.split("?", 1)[0]
-
-            # Pfade die wir als HTTP-GET auf der gleichen Verbindung
-            # bedienen. Alles andere → return None lässt websockets den
-            # normalen WS-Upgrade laufen.
-            is_config      = base_path == "/config"
-            is_tap_update  = base_path.startswith("/tap-update/")
-            if not (is_config or is_tap_update):
-                return None
-
-            # mTLS-Cert-Check für ALLE HTTP-GETs (Config + Tap-Update).
-            ssl_obj = self.transport.get_extra_info("ssl_object")
-            if ssl_obj is None:
-                return (
-                    HTTPStatus.UPGRADE_REQUIRED,
-                    [("Content-Type", "text/plain")],
-                    b"TLS required",
-                )
-            fingerprint = _peer_fingerprint(ssl_obj)
-            if not fingerprint:
-                return (
-                    HTTPStatus.UNAUTHORIZED,
-                    [("Content-Type", "text/plain")],
-                    b"client cert required",
-                )
-            info = await auth.lookup(fingerprint)
-            if not info or info["status"] != "active":
-                log.warning("HTTP-GET %s mit unbekanntem/revokeden Cert (fp=%s)",
-                            base_path, fingerprint[:16])
-                return (
-                    HTTPStatus.FORBIDDEN,
-                    [("Content-Type", "text/plain")],
-                    b"unknown or revoked tap",
-                )
-
-            if is_tap_update:
-                return await _serve_tap_update(base_path, info)
-
-            # ─── /config (Reverse-Channel-Pull) ─────────────────────
-            try:
-                body, etag = await build_config_bundle(auth)
-            except Exception as exc:
-                log.error("Config-Bundle-Build gescheitert: %s", exc)
-                return (
-                    HTTPStatus.INTERNAL_SERVER_ERROR,
-                    [("Content-Type", "text/plain")],
-                    f"bundle error: {exc}".encode(),
-                )
-
-            inm = request_headers.get("If-None-Match")
-            if inm and inm == etag:
-                return (
-                    HTTPStatus.NOT_MODIFIED,
-                    [("ETag", etag), ("Cache-Control", "no-cache")],
-                    b"",
-                )
-
-            log.info("Config-Bundle ausgeliefert an %s (%d Bytes, etag=%s)",
-                     info["name"], len(body), etag)
-            return (
-                HTTPStatus.OK,
-                [
-                    ("Content-Type", "application/json"),
-                    ("Content-Length", str(len(body))),
-                    ("Cache-Control", "no-cache"),
-                    ("ETag", etag),
-                ],
-                body,
-            )
-
-    return TapProto
+    transport = request.transport
+    ssl_obj = transport.get_extra_info("ssl_object") if transport else None
+    if ssl_obj is None:
+        return None, web.Response(status=426, text="TLS required")
+    fingerprint = _peer_fingerprint(ssl_obj)
+    if not fingerprint:
+        return None, web.Response(status=401, text="client cert required")
+    info = await auth.lookup(fingerprint)
+    if not info or info["status"] != "active":
+        log.warning("HTTP %s mit unbekanntem/revokten Cert (fp=%s)",
+                    request.path, fingerprint[:16])
+        return None, web.Response(status=403, text="unknown or revoked tap")
+    return info, None
 
 
-async def _serve_tap_update(path: str, tap_info: dict):
-    """Liefert Dateien aus /tap-update/ aus. Whitelist-basiert, kein
-    Path-Traversal möglich. Wird unter mTLS-Auth (siehe TapProto.process_
-    request) aufgerufen — ein gepairter Tap kann beliebig oft pullen.
-
-    Antwort: (HTTPStatus, headers, body). Body wird in den Speicher
-    geladen — bei Bundles bis ~1 GB OK, weil V1-Master typisch 8+ GB RAM
-    hat. Eine streaming-Version käme in V2 (z.B. via aiohttp-Server-Mode)
-    wenn die Bundles deutlich größer werden."""
-    sub = path[len("/tap-update/"):]
-    rel = _TAP_UPDATE_FILES.get(sub)
-    if rel is None:
-        return (
-            HTTPStatus.NOT_FOUND,
-            [("Content-Type", "text/plain")],
-            b"unknown tap-update path",
-        )
-    target = TAP_UPDATE_DIR / rel
-    if not target.exists() or not target.is_file():
-        return (
-            HTTPStatus.NOT_FOUND,
-            [("Content-Type", "text/plain")],
-            f"{rel} not staged".encode(),
-        )
-
+async def _http_config(request: web.Request) -> web.StreamResponse:
+    """Reverse-Channel — Tap pullt aktuelles Config-Bundle (Builtin-YAMLs +
+    Overrides + known_networks) als JSON. Klein genug (<1 MB) um
+    in-memory zu builden. ETag-Cache."""
+    auth: TapAuth = request.app["auth"]
+    info, err = await _authenticate_request(request, auth)
+    if err is not None:
+        return err
     try:
-        body = await asyncio.to_thread(target.read_bytes)
+        body, etag = await build_config_bundle(auth)
     except Exception as exc:
-        log.error("tap-update read fail %s: %s", rel, exc)
-        return (
-            HTTPStatus.INTERNAL_SERVER_ERROR,
-            [("Content-Type", "text/plain")],
-            b"read error",
-        )
+        log.error("Config-Bundle-Build gescheitert: %s", exc)
+        return web.Response(status=500, text=f"bundle error: {exc}")
 
-    suffix = target.suffix.lower()
-    ctype  = _TAP_UPDATE_CONTENT_TYPES.get(suffix, "application/octet-stream")
-    log.info("tap-update %s ausgeliefert an %s (%d Bytes)",
-             sub, tap_info["name"], len(body))
-    return (
-        HTTPStatus.OK,
-        [
-            ("Content-Type", ctype),
-            ("Content-Length", str(len(body))),
-            ("Cache-Control", "no-cache"),
-        ],
-        body,
+    if request.headers.get("If-None-Match") == etag:
+        return web.Response(status=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
+
+    log.info("Config-Bundle ausgeliefert an %s (%d Bytes, etag=%s)",
+             info["name"], len(body), etag)
+    return web.Response(
+        body=body,
+        content_type="application/json",
+        headers={"ETag": etag, "Cache-Control": "no-cache"},
     )
 
 
-async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
-    ssl_obj = ws.transport.get_extra_info("ssl_object")
+async def _http_tap_update(request: web.Request) -> web.StreamResponse:
+    """Liefert Dateien aus /tap-update/ aus. Whitelist-basiert (kein
+    Path-Traversal). Streaming via web.FileResponse — der nutzt sendfile-
+    Syscall und kopiert Bytes Zero-Copy aus dem Disk-Cache direkt in den
+    Socket. Damit funktioniert auch das 336-MB-Image-Bundle ohne den
+    Master-Heap zu sprengen.
+
+    Vorgängerversion lud target.read_bytes() komplett in den Python-Heap
+    und schrieb sie in einer transport.write() — bei großen Bundles OOM
+    oder TLS-Buffer-Overflow → curl: transfer closed."""
+    auth: TapAuth = request.app["auth"]
+    info, err = await _authenticate_request(request, auth)
+    if err is not None:
+        return err
+
+    sub = request.match_info["filename"]
+    rel = _TAP_UPDATE_FILES.get(sub)
+    if rel is None:
+        return web.Response(status=404, text="unknown tap-update path")
+    target = TAP_UPDATE_DIR / rel
+    if not target.exists() or not target.is_file():
+        return web.Response(status=404, text=f"{rel} not staged")
+
+    suffix = target.suffix.lower()
+    ctype  = _TAP_UPDATE_CONTENT_TYPES.get(suffix, "application/octet-stream")
+    size = target.stat().st_size
+    log.info("tap-update %s wird gestreamt an %s (%d Bytes, sendfile)",
+             sub, info["name"], size)
+    return web.FileResponse(
+        path=target,
+        headers={"Content-Type": ctype},
+    )
+
+
+async def handle_tap(request: web.Request) -> web.WebSocketResponse:
+    """aiohttp-Handler für /uplink-WebSocket. Vor dem upgrade machen wir den
+    mTLS-Cert-Check (gleich wie für die HTTP-Endpoints), nach Upgrade läuft
+    die Frame-Loop weiter. tap-uplink-Client nutzt websockets.connect, das
+    ist API-kompatibel mit aiohttp-Server."""
+    auth: TapAuth = request.app["auth"]
+    producer: Producer = request.app["producer"]
+
+    transport = request.transport
+    ssl_obj = transport.get_extra_info("ssl_object") if transport else None
     if ssl_obj is None:
-        log.warning("Verbindung ohne TLS – sollte nicht passieren, schließe")
-        await ws.close(code=4400, reason="TLS required")
-        return
+        return web.Response(status=426, text="TLS required")
 
     fingerprint = _peer_fingerprint(ssl_obj)
     cn = _peer_cn(ssl_obj)
-    peer = ws.remote_address[0] if ws.remote_address else "?"
+    peer = request.remote or "?"
     if not fingerprint:
-        await ws.close(code=4401, reason="no client cert")
-        return
+        return web.Response(status=401, text="no client cert")
 
     info = await auth.lookup(fingerprint)
     if not info:
         log.warning("Unbekannter Tap-Cert (cn=%s, fp=%s, peer=%s)",
                     cn, fingerprint[:16], peer)
-        await ws.close(code=4403, reason="unknown tap")
-        return
+        return web.Response(status=403, text="unknown tap")
     if info["status"] != "active":
         log.warning("Revoked Tap versucht zu connecten: name=%s peer=%s",
                     info["name"], peer)
-        await ws.close(code=4403, reason="revoked")
-        return
+        return web.Response(status=403, text="revoked")
+
+    # Frame-Limit auf 16 MB — Alert-JSON ist <10 KB, pcap_upload-Frames
+    # sind base64-encoded und bei großen PCAPs ~1–5 MB, im Extremfall
+    # mehr. Großzügig bemessen.
+    ws = web.WebSocketResponse(max_msg_size=16 * 1024 * 1024, heartbeat=None)
+    await ws.prepare(request)
 
     tap_id = info["id"]
     tap_name = info["name"]
@@ -597,9 +548,11 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
         try:
             while True:
                 await asyncio.sleep(HEARTBEAT_INTERVAL_S)
+                if ws.closed:
+                    return
                 try:
-                    await ws.send(orjson.dumps({"type": "ping"}).decode())
-                except websockets.ConnectionClosed:
+                    await ws.send_str(orjson.dumps({"type": "ping"}).decode())
+                except (ConnectionResetError, RuntimeError):
                     return
         except asyncio.CancelledError:
             return
@@ -629,12 +582,20 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
         # einen Slot belegen ohne dass Daten fließen.
         while True:
             try:
-                raw = await asyncio.wait_for(ws.recv(), timeout=HEARTBEAT_TIMEOUT_S)
+                ws_msg = await asyncio.wait_for(ws.receive(), timeout=HEARTBEAT_TIMEOUT_S)
             except asyncio.TimeoutError:
                 log.warning("Tap %s timeout – kein Frame seit %.0fs, schließe",
                             tap_name, HEARTBEAT_TIMEOUT_S)
-                await ws.close(code=4408, reason="receive timeout")
+                await ws.close(code=4408, message=b"receive timeout")
                 break
+            if ws_msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.CLOSED):
+                break
+            if ws_msg.type == WSMsgType.ERROR:
+                log.info("Tap %s WebSocket-Error: %s", tap_name, ws.exception())
+                break
+            if ws_msg.type not in (WSMsgType.TEXT, WSMsgType.BINARY):
+                continue
+            raw = ws_msg.data
             try:
                 msg = orjson.loads(raw)
             except Exception as exc:
@@ -743,9 +704,9 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
 
             log.warning("Unbekannter Frame-Type von %s: %s", tap_name, mtype)
 
-    except websockets.ConnectionClosed as exc:
+    except (ConnectionResetError, asyncio.CancelledError) as exc:
         log.info("Tap %s disconnected: %s (alerts=%d metrics=%d)",
-                 tap_name, exc.code, alerts_received, metrics_received)
+                 tap_name, exc, alerts_received, metrics_received)
     finally:
         hb.cancel()
         st.cancel()
@@ -756,12 +717,15 @@ async def handle_tap(ws, auth: TapAuth, producer: Producer) -> None:
         # kann auth.heartbeat() um ein zweites Argument erweitert werden.
         if alerts_received:
             await auth.heartbeat(tap_id, alerts_received, peer)
+        if not ws.closed:
+            await ws.close()
+    return ws
 
 
 # Aktive Tap-WebSockets (in-memory). update_trigger_loop nutzt das, um
 # bei einem `update_requested_at > update_acked_at`-Eintrag in der taps-
 # Tabelle einen "update_now"-Frame an den passenden Tap zu schicken.
-_active_taps: dict[str, websockets.WebSocketServerProtocol] = {}
+_active_taps: dict[str, web.WebSocketResponse] = {}
 
 
 async def update_trigger_loop(auth: "TapAuth") -> None:
@@ -785,12 +749,12 @@ async def update_trigger_loop(auth: "TapAuth") -> None:
             for row in rows:
                 tap_id = row["id"]
                 ws = _active_taps.get(tap_id)
-                if ws is None:
+                if ws is None or ws.closed:
                     # Tap aktuell nicht connected — wir warten. Sobald er
                     # sich verbindet, greift der nächste Loop-Pass.
                     continue
                 try:
-                    await ws.send(orjson.dumps({
+                    await ws.send_str(orjson.dumps({
                         "type": "update_now",
                         "ts":   row["update_requested_at"].isoformat() if row["update_requested_at"] else None,
                     }).decode())
@@ -817,32 +781,39 @@ async def amain() -> None:
     })
 
     ssl_ctx = _build_ssl_context()
-    log.info("master-uplink lauscht auf wss://%s:%d  (mTLS, Topics %s + %s)",
+    log.info("master-uplink lauscht auf https://%s:%d  (mTLS, Topics %s + %s)",
              LISTEN_HOST, LISTEN_PORT, ALERTS_TOPIC, METRICS_TOPIC)
 
-    proto_cls = _make_protocol_class(auth)
+    # aiohttp-Application — ein Server für WebSocket (/uplink) + HTTP-
+    # Endpoints (/config, /tap-update/<file>). FileResponse für Bundle-
+    # Streaming via sendfile-Syscall — keine RAM-Loading-Crashes mehr.
+    app = web.Application()
+    app["auth"] = auth
+    app["producer"] = producer
+    app.router.add_get("/uplink", handle_tap)
+    # Backwards-Compat: tap-uplink-Client verbindet sich gegen
+    # wss://master:8443/uplink (oder gegen die Root-URL wss://master:8443/).
+    # Damit beides funktioniert, mounten wir den Handler auch unter / .
+    app.router.add_get("/", handle_tap)
+    app.router.add_get("/config", _http_config)
+    app.router.add_get("/tap-update/{filename:.+}", _http_tap_update)
+
     # Update-Trigger-Loop: pollt taps.update_requested_at und sendet
     # update_now-Frames an die aktiven Connections. Läuft parallel zum
-    # WSS-Server.
+    # HTTP-Server.
     trigger_task = asyncio.create_task(update_trigger_loop(auth))
-    async with websockets.serve(
-        lambda ws: handle_tap(ws, auth, producer),
-        host=LISTEN_HOST,
-        port=LISTEN_PORT,
-        ssl=ssl_ctx,
-        ping_interval=None,                   # eigener Heartbeat
-        # 16 MB pro Frame: Alert-JSON ist <10 KB, Metric noch kleiner. Limit
-        # ist großzügig dimensioniert für die pcap_upload-Frames (typisch
-        # 1–5 MB base64-encoded). Bei extrem high-volume-Mirror könnten die
-        # PCAPs größer werden — dann splittet tap-uplink in Chunks (V2).
-        max_size=16 * 1024 * 1024,
-        create_protocol=proto_cls,
-    ):
-        try:
-            await asyncio.Future()    # forever
-        finally:
-            trigger_task.cancel()
-            await auth.close()
+
+    runner = web.AppRunner(app, handle_signals=True)
+    await runner.setup()
+    site = web.TCPSite(runner, host=LISTEN_HOST, port=LISTEN_PORT, ssl_context=ssl_ctx)
+    await site.start()
+    try:
+        await asyncio.Future()    # forever
+    finally:
+        trigger_task.cancel()
+        await runner.cleanup()
+        await auth.close()
+        producer.flush(timeout=5)
             producer.flush(timeout=5)
 
 

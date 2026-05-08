@@ -1,4 +1,10 @@
-websockets==12.0
+# aiohttp ersetzt die websockets-Lib für serverside Aufgaben — wir brauchen
+# jetzt streaming-fähige HTTP-Responses für /tap-update/<file> (Bundles
+# 300+ MB, das alte process_request lädt komplett in RAM und crashed).
+# aiohttp.web.FileResponse nutzt sendfile, kein RAM-Buffer.
+# WebSocket-Endpoint geht jetzt via aiohttp.web.WebSocketResponse — der
+# tap-uplink-Client (websockets.connect) ist API-kompatibel mit aiohttp-Server.
+aiohttp==3.9.5
 asyncpg==0.29.0
 confluent-kafka==2.3.0
 orjson==3.9.15
