@@ -161,6 +161,35 @@ export interface IrmaConfig {
   ssl_verify:    boolean;
 }
 
+export interface MqttConfig {
+  enabled:                boolean;
+  broker_host:            string;
+  broker_port:            number;
+  use_tls:                boolean;
+  tls_verify:             boolean;
+  username:               string;
+  password:               string;
+  client_id:              string;
+  master_host_id:         string;
+  topic_prefix:           string;
+  qos_events:             number;     // 0 | 1
+  qos_state:              number;     // 0 | 1
+  rate_limit_per_sec:     number;
+  inflight_max:           number;
+  threat_publish_interval_s: number;
+  tap_publish_interval_s: number;
+  severity_min:           'low' | 'medium' | 'high' | 'critical';
+  sources_allowed:        string[];   // signature, ml, suricata, external
+  rule_id_blocklist:      string[];   // mit Wildcard-Support: "ASSET::*"
+}
+
+export interface MqttTestResult {
+  ok:          boolean;
+  duration_ms: number;
+  test_topic:  string;
+  detail?:     string | null;
+}
+
 export interface ItopConfig {
   enabled:    boolean;
   base_url:   string;

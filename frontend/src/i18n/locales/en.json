@@ -576,6 +576,7 @@
       "db-maintenance": "Database",
       "irma": "IRMA",
       "itop": "iTop CMDB",
+      "mqtt": "MQTT bridge",
       "thorsten": "For Thorsten"
     },
     "remoteTaps": {

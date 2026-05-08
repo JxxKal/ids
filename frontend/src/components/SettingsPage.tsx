@@ -6,10 +6,11 @@ import {
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../i18n';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
-  fetchIrmaConfig, fetchItopConfig, fetchMLConfig, fetchMLStatus, fetchRuleSources,
+  fetchIrmaConfig, fetchItopConfig, fetchMLConfig, fetchMLStatus, fetchMqttConfig, fetchRuleSources,
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
   fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource, setInterfaceRole,
-  saveIrmaConfig, saveItopConfig, saveMLConfig, saveSamlConfig, saveSyslogConfig,
+  saveIrmaConfig, saveItopConfig, saveMLConfig, saveMqttConfig, saveSamlConfig, saveSyslogConfig,
+  testMqttConnection,
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
   triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname, fetchSystemStats,
   importSuricataRules,
@@ -37,7 +38,7 @@ import type {
   DbStatsResponse, MaintenanceAuditEntry,
   RuleFileMeta,
 } from '../api';
-import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
+import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, MqttConfig, RemoteTap, RemoteTapPairingToken, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
 import { CollapsibleHelp } from './CollapsibleHelp';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
@@ -3546,6 +3547,341 @@ function ItopSettings() {
   );
 }
 
+// ── MqttSettings ──────────────────────────────────────────────────────────────
+
+const MQTT_DEFAULT: MqttConfig = {
+  enabled:                false,
+  broker_host:            'mosquitto.example.com',
+  broker_port:            8883,
+  use_tls:                true,
+  tls_verify:             true,
+  username:               'cyjan',
+  password:               '',
+  client_id:              '',
+  master_host_id:         'master',
+  topic_prefix:           'cyjan',
+  qos_events:             1,
+  qos_state:              0,
+  rate_limit_per_sec:     200,
+  inflight_max:           10,
+  threat_publish_interval_s: 30,
+  tap_publish_interval_s: 30,
+  severity_min:           'low',
+  sources_allowed:        ['signature', 'ml', 'suricata', 'external'],
+  rule_id_blocklist:      [],
+};
+
+const MQTT_SOURCE_OPTIONS = ['signature', 'ml', 'suricata', 'external'] as const;
+const MQTT_SEVERITY_OPTIONS: Array<MqttConfig['severity_min']> = ['low', 'medium', 'high', 'critical'];
+
+function MqttSettings() {
+  const [cfg,    setCfg]    = useState<MqttConfig>(MQTT_DEFAULT);
+  const [saving, setSaving] = useState(false);
+  const [msg,    setMsg]    = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [showPw, setShowPw] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testRes, setTestRes] = useState<{ ok: boolean; text: string } | null>(null);
+  const [blocklistText, setBlocklistText] = useState('');
+
+  useEffect(() => {
+    fetchMqttConfig().then(c => {
+      setCfg(c);
+      setBlocklistText((c.rule_id_blocklist ?? []).join('\n'));
+    }).catch(() => {});
+  }, []);
+
+  function flash(type: 'ok' | 'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  function toggleSource(src: string) {
+    setCfg(c => {
+      const has = c.sources_allowed.includes(src);
+      return { ...c, sources_allowed: has ? c.sources_allowed.filter(s => s !== src) : [...c.sources_allowed, src] };
+    });
+  }
+
+  function parseBlocklist(text: string): string[] {
+    return text.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const final = { ...cfg, rule_id_blocklist: parseBlocklist(blocklistText) };
+      await saveMqttConfig(final);
+      setCfg(final);
+      flash('ok', 'Gespeichert. mqtt-bridge übernimmt die Änderung beim nächsten Hot-Reload-Tick (~30 s).');
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Speichern fehlgeschlagen');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    setTestRes(null);
+    try {
+      const r = await testMqttConnection({ ...cfg, rule_id_blocklist: parseBlocklist(blocklistText) });
+      if (r.ok) {
+        setTestRes({ ok: true, text: `OK — publish auf ${r.test_topic} in ${r.duration_ms} ms` });
+      } else {
+        setTestRes({ ok: false, text: `Fehlgeschlagen (${r.duration_ms} ms): ${r.detail ?? 'unbekannter Grund'}` });
+      }
+    } catch (err: unknown) {
+      setTestRes({ ok: false, text: err instanceof Error ? err.message : 'Test fehlgeschlagen' });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-200">MQTT-Bridge</h2>
+        <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
+          <input type="checkbox" className="accent-cyan-500"
+            checked={cfg.enabled}
+            onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked }))} />
+          <span className={cfg.enabled ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
+            Aktiv
+          </span>
+        </label>
+      </div>
+
+      <CollapsibleHelp>
+        <p className="text-xs text-slate-500">
+          Publiziert Alerts und State-Topics an einen externen MQTT-Broker (z.B. für SCADA/MES-Integration).
+          Topic-Schema: <span className="font-mono text-violet-300">{cfg.topic_prefix || 'cyjan'}/{cfg.master_host_id || 'master'}/events/&lt;severity&gt;/&lt;rule_id&gt;</span>.
+          Threat-State (retained): <span className="font-mono text-violet-300">{cfg.topic_prefix || 'cyjan'}/{cfg.master_host_id || 'master'}/threat</span>.
+          Tap-Status (retained): <span className="font-mono text-violet-300">{cfg.topic_prefix || 'cyjan'}/{cfg.master_host_id || 'master'}/taps/&lt;name&gt;/status</span>.
+        </p>
+      </CollapsibleHelp>
+
+      <div className={`space-y-5 ${!cfg.enabled ? 'opacity-50' : ''}`}>
+        {/* Broker */}
+        <div className="space-y-3">
+          <h3 className="text-[11px] uppercase tracking-wider text-slate-500">Broker</h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label className="text-slate-400">Host</label>
+              <input className="input font-mono"
+                placeholder="mosquitto.example.com"
+                value={cfg.broker_host}
+                onChange={e => setCfg(c => ({ ...c, broker_host: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Port</label>
+              <input className="input" type="number" min={1} max={65535}
+                value={cfg.broker_port}
+                onChange={e => setCfg(c => ({ ...c, broker_port: parseInt(e.target.value) || 8883 }))} />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">User</label>
+              <input className="input font-mono" autoComplete="off"
+                value={cfg.username}
+                onChange={e => setCfg(c => ({ ...c, username: e.target.value }))} />
+            </div>
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label className="text-slate-400">Passwort</label>
+              <div className="flex gap-2">
+                <input
+                  className="input font-mono flex-1"
+                  type={showPw ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  placeholder={cfg.password ? '••••••••' : '(leer)'}
+                  value={cfg.password}
+                  onChange={e => setCfg(c => ({ ...c, password: e.target.value }))}
+                />
+                <button type="button"
+                  onClick={() => setShowPw(v => !v)}
+                  className="btn-ghost text-xs">
+                  {showPw ? 'Verbergen' : 'Zeigen'}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-end gap-2 sm:col-span-3">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
+                <input type="checkbox" className="accent-cyan-500"
+                  checked={cfg.use_tls}
+                  onChange={e => setCfg(c => ({ ...c, use_tls: e.target.checked }))} />
+                <span className={cfg.use_tls ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
+                  TLS aktiv
+                </span>
+              </label>
+              <label className={`flex items-center gap-2 cursor-pointer select-none text-xs ml-4 ${!cfg.use_tls ? 'opacity-40' : ''}`}>
+                <input type="checkbox" className="accent-cyan-500"
+                  disabled={!cfg.use_tls}
+                  checked={cfg.tls_verify}
+                  onChange={e => setCfg(c => ({ ...c, tls_verify: e.target.checked }))} />
+                <span className={cfg.tls_verify ? 'text-cyan-300 font-medium' : 'text-slate-500'}>
+                  Zertifikat verifizieren
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Identity & Topics */}
+        <div className="space-y-3">
+          <h3 className="text-[11px] uppercase tracking-wider text-slate-500">Identität & Topics</h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-xs">
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Client-ID</label>
+              <input className="input font-mono"
+                placeholder="cyjan-master-1 (auto wenn leer)"
+                value={cfg.client_id}
+                onChange={e => setCfg(c => ({ ...c, client_id: e.target.value }))} />
+              <span className="text-[10px] text-slate-600">leer → automatisch generiert pro Boot</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Master Host-ID</label>
+              <input className="input font-mono"
+                placeholder="master"
+                value={cfg.master_host_id}
+                onChange={e => setCfg(c => ({ ...c, master_host_id: e.target.value }))} />
+              <span className="text-[10px] text-slate-600">erscheint im Topic-Pfad</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Topic-Prefix</label>
+              <input className="input font-mono"
+                placeholder="cyjan"
+                value={cfg.topic_prefix}
+                onChange={e => setCfg(c => ({ ...c, topic_prefix: e.target.value }))} />
+              <span className="text-[10px] text-slate-600">Schema nach Prefix ist fest</span>
+            </div>
+          </div>
+        </div>
+
+        {/* QoS & Rate */}
+        <div className="space-y-3">
+          <h3 className="text-[11px] uppercase tracking-wider text-slate-500">QoS & Rate-Limit</h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4 text-xs">
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">QoS Events</label>
+              <select className="input"
+                value={cfg.qos_events}
+                onChange={e => setCfg(c => ({ ...c, qos_events: parseInt(e.target.value) }))}>
+                <option value={0}>0 — at-most-once</option>
+                <option value={1}>1 — at-least-once</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">QoS State</label>
+              <select className="input"
+                value={cfg.qos_state}
+                onChange={e => setCfg(c => ({ ...c, qos_state: parseInt(e.target.value) }))}>
+                <option value={0}>0 — at-most-once</option>
+                <option value={1}>1 — at-least-once</option>
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Rate-Limit (msg/s)</label>
+              <input className="input" type="number" min={1} max={10000}
+                value={cfg.rate_limit_per_sec}
+                onChange={e => setCfg(c => ({ ...c, rate_limit_per_sec: parseInt(e.target.value) || 200 }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Inflight max</label>
+              <input className="input" type="number" min={1} max={1000}
+                value={cfg.inflight_max}
+                onChange={e => setCfg(c => ({ ...c, inflight_max: parseInt(e.target.value) || 10 }))} />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Threat-Publish (s)</label>
+              <input className="input" type="number" min={5} max={3600}
+                value={cfg.threat_publish_interval_s}
+                onChange={e => setCfg(c => ({ ...c, threat_publish_interval_s: parseInt(e.target.value) || 30 }))} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Tap-Status (s)</label>
+              <input className="input" type="number" min={5} max={3600}
+                value={cfg.tap_publish_interval_s}
+                onChange={e => setCfg(c => ({ ...c, tap_publish_interval_s: parseInt(e.target.value) || 30 }))} />
+            </div>
+          </div>
+        </div>
+
+        {/* Filter */}
+        <div className="space-y-3">
+          <h3 className="text-[11px] uppercase tracking-wider text-slate-500">Filter</h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-xs">
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Min. Severity</label>
+              <select className="input"
+                value={cfg.severity_min}
+                onChange={e => setCfg(c => ({ ...c, severity_min: e.target.value as MqttConfig['severity_min'] }))}>
+                {MQTT_SEVERITY_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <span className="text-[10px] text-slate-600">unterhalb wird unterdrückt</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Erlaubte Quellen</label>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {MQTT_SOURCE_OPTIONS.map(src => {
+                  const active = cfg.sources_allowed.includes(src);
+                  return (
+                    <button key={src} type="button"
+                      onClick={() => toggleSource(src)}
+                      className={`px-2 py-1 rounded text-[11px] font-mono border transition-colors ${
+                        active
+                          ? 'bg-cyan-500/15 border-cyan-500/60 text-cyan-200'
+                          : 'border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                      }`}>
+                      {src}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label className="text-slate-400">Rule-ID-Blocklist</label>
+              <textarea
+                className="input font-mono text-[11px]"
+                rows={3}
+                placeholder="ASSET::*&#10;DOS_ICMP_001"
+                value={blocklistText}
+                onChange={e => setBlocklistText(e.target.value)}
+              />
+              <span className="text-[10px] text-slate-600">eine Rule-ID pro Zeile, Wildcard `*` am Ende erlaubt</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-1 gap-3 flex-wrap">
+        <div className="flex flex-col gap-1">
+          {msg?.type === 'ok'  && <span className="text-xs text-green-400">{msg.text}</span>}
+          {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
+          {testRes && (
+            <span className={`text-xs ${testRes.ok ? 'text-green-400' : 'text-red-400'}`}>
+              {testRes.text}
+            </span>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button type="button" className="btn-ghost text-xs"
+            disabled={testing || !cfg.broker_host}
+            onClick={handleTest}>
+            {testing ? 'Teste…' : 'Verbindung testen'}
+          </button>
+          <button type="submit" className="btn-primary text-xs" disabled={saving}>
+            {saving ? 'Speichere…' : 'Speichern'}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+
 // ── IrmaSettings ──────────────────────────────────────────────────────────────
 
 const IRMA_DEFAULT: IrmaConfig = {
@@ -6096,7 +6432,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -6158,6 +6494,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'irma', icon: <Plug     {...ICON_PROPS} /> },
       { id: 'itop', icon: <Database {...ICON_PROPS} /> },
+      { id: 'mqtt', icon: <Network  {...ICON_PROPS} /> },
     ],
   },
   {
@@ -6315,6 +6652,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
             {active === 'syslog'        && <SyslogSettings />}
             {active === 'irma'          && <IrmaSettings />}
             {active === 'itop'          && <ItopSettings />}
+            {active === 'mqtt'          && <MqttSettings />}
             {active === 'update'        && <SystemUpdate />}
             {active === 'geoip'         && <GeoIpSettings />}
           </div>

@@ -627,6 +627,67 @@ export async function saveIrmaConfig(value: import('./types').IrmaConfig): Promi
   });
 }
 
+// ── MQTT-Bridge Config ────────────────────────────────────────────────────────
+
+const MQTT_DEFAULT: import('./types').MqttConfig = {
+  enabled:                false,
+  broker_host:            'mosquitto.example.com',
+  broker_port:            8883,
+  use_tls:                true,
+  tls_verify:             true,
+  username:               'cyjan',
+  password:               '',
+  client_id:              '',
+  master_host_id:         'master',
+  topic_prefix:           'cyjan',
+  qos_events:             1,
+  qos_state:              0,
+  rate_limit_per_sec:     200,
+  inflight_max:           10,
+  threat_publish_interval_s: 30,
+  tap_publish_interval_s: 30,
+  severity_min:           'low',
+  sources_allowed:        ['signature', 'ml', 'suricata', 'external'],
+  rule_id_blocklist:      [],
+};
+
+export async function fetchMqttConfig(): Promise<import('./types').MqttConfig> {
+  if (isDemoMode()) return MQTT_DEFAULT;
+  try {
+    const r = await req<{ key: string; value: import('./types').MqttConfig }>('/api/config/mqtt');
+    return { ...MQTT_DEFAULT, ...r.value };
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) return MQTT_DEFAULT;
+    throw e;
+  }
+}
+
+export async function saveMqttConfig(value: import('./types').MqttConfig): Promise<void> {
+  if (isDemoMode()) return;
+  await req('/api/config/mqtt', {
+    method: 'PATCH',
+    body: JSON.stringify({ value }),
+  });
+}
+
+export async function testMqttConnection(value: import('./types').MqttConfig): Promise<import('./types').MqttTestResult> {
+  if (isDemoMode()) return { ok: true, duration_ms: 42, test_topic: `${value.topic_prefix}/${value.master_host_id}/test` };
+  return await req<import('./types').MqttTestResult>('/api/mqtt/test', {
+    method: 'POST',
+    body: JSON.stringify({
+      broker_host:    value.broker_host,
+      broker_port:    value.broker_port,
+      use_tls:        value.use_tls,
+      tls_verify:     value.tls_verify,
+      username:       value.username,
+      password:       value.password,
+      client_id:      value.client_id,
+      topic_prefix:   value.topic_prefix,
+      master_host_id: value.master_host_id,
+    }),
+  });
+}
+
 export async function saveSamlConfig(value: SamlConfig): Promise<void> {
   await req('/api/config/saml', { method: 'PATCH', body: JSON.stringify({ value }) });
 }

@@ -38,7 +38,7 @@ import orjson
 import paho.mqtt.client as mqtt
 from confluent_kafka import Consumer, KafkaError, KafkaException
 
-from config import Config
+from config import Config, _env_dict, merge_db_overlay
 from topics import event_topic, status_topic, tap_status_topic, threat_topic
 
 logging.basicConfig(
@@ -418,58 +418,173 @@ async def tap_status_loop(cfg: Config, bridge: Bridge, pool: asyncpg.Pool) -> No
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Hot-Reload: Config-Watcher
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+CONFIG_RELOAD_INTERVAL_S = 30
+
+
+async def _read_db_overlay(pool: asyncpg.Pool) -> Optional[dict]:
+    """Liest system_config[key='mqtt'].value als dict zurück. None wenn
+    der Key nicht existiert oder DB nicht erreichbar ist."""
+    try:
+        row = await pool.fetchrow("SELECT value FROM system_config WHERE key = 'mqtt'")
+        if row is None or row["value"] is None:
+            return None
+        v = row["value"]
+        # asyncpg liefert JSONB normalerweise als bereits geparstes dict.
+        # Fallback für Setups die str liefern: orjson-parsen.
+        if isinstance(v, (bytes, str)):
+            return orjson.loads(v)
+        if isinstance(v, dict):
+            return v
+        return None
+    except Exception as exc:
+        log.debug("DB-Overlay-Read fehlgeschlagen: %s", exc)
+        return None
+
+
+async def _build_effective_config(env: dict, pool: Optional[asyncpg.Pool]) -> Config:
+    overlay = await _read_db_overlay(pool) if pool is not None else None
+    merged = merge_db_overlay(env, overlay)
+    return Config.from_dict(merged)
+
+
+async def config_watch_loop(env: dict, pool: asyncpg.Pool, on_change) -> None:
+    """Pollt alle 30s den DB-Override. Bei Änderung ruft on_change(new_cfg)
+    auf — der Supervisor entscheidet, ob ein Reconnect nötig ist oder
+    nicht."""
+    last: Optional[Config] = None
+    while True:
+        try:
+            cfg = await _build_effective_config(env, pool)
+            if last is None or cfg != last:
+                last = cfg
+                await on_change(cfg)
+        except Exception as exc:
+            log.warning("Config-Watch-Loop-Fehler: %s", exc)
+        await asyncio.sleep(CONFIG_RELOAD_INTERVAL_S)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def amain(cfg: Config) -> None:
+class _ReconnectRequested(Exception):
+    """Wird im Supervisor geworfen, wenn der Watcher Connection-Felder
+    geändert sieht — der Supervisor canceld dann die laufenden Loops und
+    baut Bridge + Pool neu auf."""
+
+
+async def _run_session(cfg: Config, pool: asyncpg.Pool, env: dict) -> None:
+    """Eine "Session" = 1× verbundener Bridge-Stack. Bei jedem Config-
+    Change (egal ob Connection- oder Filter-Field) wirft der Watcher
+    _ReconnectRequested → outer-Loop baut komplett neu auf. Filter-only-
+    Änderungen kommen damit mit einer wenige-Sekunden-Pause an, was
+    akzeptabel ist (Settings-Changes sind selten)."""
     bridge = Bridge(cfg)
     taps   = TapResolver(cfg.postgres_dsn)
     await taps.init()
 
-    pool = await asyncpg.create_pool(cfg.postgres_dsn, min_size=1, max_size=3)
-
     loop = asyncio.get_running_loop()
     bridge.connect(loop)
-    await asyncio.wait_for(bridge.wait_connected(), timeout=20.0)
+    try:
+        await asyncio.wait_for(bridge.wait_connected(), timeout=20.0)
+    except asyncio.TimeoutError:
+        log.warning("Connect-Timeout (20s) — bridge.shutdown + Retry in 10s")
+        bridge.shutdown()
+        await taps.close()
+        await asyncio.sleep(10)
+        raise _ReconnectRequested()
 
     log.info("Bridge online — startet Loops (events + threat + tap-status)")
-    await asyncio.gather(
-        event_consumer_loop(cfg, bridge, taps),
-        threat_publish_loop(cfg, bridge, pool),
-        tap_status_loop(cfg, bridge, pool),
-    )
+
+    async def on_config_change(new_cfg: Config) -> None:
+        if new_cfg == cfg:
+            return  # erste Iteration des Watchers → kein Reconnect
+        log.info("Config-Change erkannt → Reconnect (enabled=%s broker=%s:%d)",
+                 new_cfg.enabled, new_cfg.broker_host, new_cfg.broker_port)
+        raise _ReconnectRequested()
+
+    try:
+        await asyncio.gather(
+            event_consumer_loop(cfg, bridge, taps),
+            threat_publish_loop(cfg, bridge, pool),
+            tap_status_loop(cfg, bridge, pool),
+            config_watch_loop(env, pool, on_config_change),
+        )
+    finally:
+        bridge.shutdown()
+        await taps.close()
+
+
+async def amain() -> None:
+    """Outer supervisor: hält den DB-Pool dauerhaft, baut bei Config-Change
+    die MQTT-Session neu auf. enabled=false → Idle-Loop bis re-enabled."""
+    env = _env_dict()
+    dsn = env["postgres_dsn"]
+
+    # Pool dauerhaft halten, damit auch im idle-Zustand der Watcher die
+    # DB pollen kann.
+    pool: Optional[asyncpg.Pool] = None
+    while pool is None:
+        try:
+            pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3)
+        except Exception as exc:
+            log.warning("DB-Pool-Init fehlgeschlagen (%s) — Retry in 10s", exc)
+            await asyncio.sleep(10)
+
+    log.info("DB-Pool initialisiert — starte Config-Supervisor")
+
+    while True:
+        cfg = await _build_effective_config(env, pool)
+        if not cfg.enabled:
+            log.info("MQTT enabled=false — bridge idle, watche Config alle %ds",
+                     CONFIG_RELOAD_INTERVAL_S)
+            await _idle_until_enabled(env, pool)
+            continue
+
+        log.info("Starte mqtt-bridge | broker=%s:%d prefix=%s host=%s",
+                 cfg.broker_host, cfg.broker_port, cfg.topic_prefix, cfg.master_host_id)
+        try:
+            await _run_session(cfg, pool, env)
+        except _ReconnectRequested:
+            log.info("Reconnect angestoßen — baue Stack neu auf")
+            await asyncio.sleep(1)
+        except Exception as exc:
+            log.exception("Session crashed: %s — Retry in 10s", exc)
+            await asyncio.sleep(10)
+
+
+async def _idle_until_enabled(env: dict, pool: asyncpg.Pool) -> None:
+    """Wartet bis enabled=true. Pollt alle CONFIG_RELOAD_INTERVAL_S sec."""
+    while True:
+        await asyncio.sleep(CONFIG_RELOAD_INTERVAL_S)
+        try:
+            cfg = await _build_effective_config(env, pool)
+        except Exception:
+            continue
+        if cfg.enabled:
+            log.info("Config-Change: enabled=true → starte Bridge")
+            return
 
 
 def main() -> None:
-    cfg = Config.from_env()
-    if not cfg.enabled:
-        log.info("MQTT_ENABLED=false — bridge bleibt idle (Container läuft, "
-                 "publiziert nichts). Setze MQTT_ENABLED=true und restart.")
-        # Idle bleiben damit Compose den Container nicht restart-loop'd
-        try:
-            while True:
-                time.sleep(3600)
-        except KeyboardInterrupt:
-            sys.exit(0)
-        return
-
-    log.info("Starte mqtt-bridge | broker=%s:%d prefix=%s host=%s",
-             cfg.broker_host, cfg.broker_port, cfg.topic_prefix, cfg.master_host_id)
-
-    # SIGTERM/SIGINT-Handler für sauberes shutdown (will=offline retained)
-    bridge_ref: list = []
+    log.info("mqtt-bridge startup — env+DB-Hot-Reload aktiv")
 
     def _handle_signal(*_):
-        if bridge_ref:
-            bridge_ref[0].shutdown()
+        # SIGTERM/SIGINT — saubere shutdown übernimmt Bridge.shutdown via
+        # finally-Block in _run_session, sobald asyncio.run() abbricht.
+        log.info("Signal empfangen — fahre runter")
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT,  _handle_signal)
 
     try:
-        asyncio.run(amain(cfg))
+        asyncio.run(amain())
     except KeyboardInterrupt:
         pass
 
