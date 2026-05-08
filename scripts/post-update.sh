@@ -26,6 +26,22 @@ fi
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "[post-update] Quellverzeichnis: $SRC_DIR"
 
+# Helper: liefert den ersten existierenden Pfad einer Datei. Im Update-
+# ZIP liegen alle Quell-Dateien direkt neben post-update.sh in
+# /opt/ids/scripts/. Im git-Checkout sind sie in distro/config/
+# includes.chroot/... Der Helper überprüft beide Pfade, damit das
+# Script auch aus einem geclonten Repo direkt läuft (typisch beim
+# Bootstrap eines Hosts der noch kein Update-ZIP gesehen hat).
+REPO_ROOT="$(cd "$SRC_DIR/.." && pwd)"
+locate_src() {
+  local name="$1" subdir="$2"
+  if [ -f "${SRC_DIR}/${name}" ]; then
+    echo "${SRC_DIR}/${name}"
+  elif [ -f "${REPO_ROOT}/distro/config/includes.chroot/${subdir}/${name}" ]; then
+    echo "${REPO_ROOT}/distro/config/includes.chroot/${subdir}/${name}"
+  fi
+}
+
 # ── 1) /etc/docker/daemon.json ───────────────────────────────────────────
 # Wir mergen NICHT — wenn dort bereits eine User-Konfig liegt, wird sie
 # nur überschrieben falls sie keine log-driver-Einstellung enthält oder
@@ -78,17 +94,29 @@ fi
 # der path-Watcher startet dann den Service der `cyjan-tap update --from-
 # master -y` als root auf dem Host aufruft. /run/cyjan-update wird via
 # tmpfiles.d bei jedem Boot angelegt.
-if [ -f "${SRC_DIR}/cyjan-tap-update.path" ]; then
-  install -m 0644 "${SRC_DIR}/cyjan-tap-update.path"     /etc/systemd/system/cyjan-tap-update.path
-  install -m 0644 "${SRC_DIR}/cyjan-tap-update.service"  /etc/systemd/system/cyjan-tap-update.service
-  install -m 0644 "${SRC_DIR}/cyjan-update.tmpfiles"     /etc/tmpfiles.d/cyjan-update.conf 2>/dev/null \
-    || cp "${SRC_DIR}/cyjan-update.tmpfiles" /etc/tmpfiles.d/cyjan-update.conf 2>/dev/null \
-    || true
+TAP_PATH_SRC="$(locate_src cyjan-tap-update.path     etc/systemd/system)"
+TAP_SVC_SRC="$(locate_src  cyjan-tap-update.service  etc/systemd/system)"
+TAP_TMPFILES_SRC="$(locate_src cyjan-update.conf     etc/tmpfiles.d)"
+# Fallback: im scripts-Verzeichnis heißt die Tmpfile-Datei
+# cyjan-update.tmpfiles (per Konvention im Update-ZIP). Im git-Checkout
+# heißt sie cyjan-update.conf.
+[ -z "$TAP_TMPFILES_SRC" ] && [ -f "${SRC_DIR}/cyjan-update.tmpfiles" ] && TAP_TMPFILES_SRC="${SRC_DIR}/cyjan-update.tmpfiles"
+
+if [ -n "$TAP_PATH_SRC" ] && [ -n "$TAP_SVC_SRC" ]; then
+  install -m 0644 "$TAP_PATH_SRC"     /etc/systemd/system/cyjan-tap-update.path
+  install -m 0644 "$TAP_SVC_SRC"      /etc/systemd/system/cyjan-tap-update.service
+  if [ -n "$TAP_TMPFILES_SRC" ]; then
+    install -m 0644 "$TAP_TMPFILES_SRC" /etc/tmpfiles.d/cyjan-update.conf 2>/dev/null \
+      || cp "$TAP_TMPFILES_SRC" /etc/tmpfiles.d/cyjan-update.conf 2>/dev/null \
+      || true
+  fi
   # Verzeichnis sofort anlegen (vor systemctl restart, damit der bind-mount
   # des Containers nicht ins Leere greift).
   mkdir -p /run/cyjan-update
   chmod 0755 /run/cyjan-update
   echo "[post-update] cyjan-tap-update.path + .service + tmpfiles installiert."
+else
+  echo "[post-update] WARNUNG: cyjan-tap-update.path/service nicht gefunden — Tap-Push-Update bleibt deaktiviert."
 fi
 
 systemctl daemon-reload

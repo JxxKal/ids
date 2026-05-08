@@ -534,6 +534,42 @@
   opacity: 0.6;
   mix-blend-mode: overlay;
 }
+/* OT-HMI-Corner-Brackets — referenziert Industrial-Control-Panels und
+   Status-Boards. Subtile cyan-L-Linien an den vier Ecken machen aus dem
+   Card eine "Anzeige-Konsole" statt einem generischen UI-Tile. */
+.cyjan-kpi-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    /* top-left bracket */
+    linear-gradient(90deg, rgba(34, 211, 238, 0.45), transparent 12px) top left / 12px 1px no-repeat,
+    linear-gradient(180deg, rgba(34, 211, 238, 0.45), transparent 12px) top left / 1px 12px no-repeat,
+    /* top-right */
+    linear-gradient(270deg, rgba(34, 211, 238, 0.45), transparent 12px) top right / 12px 1px no-repeat,
+    linear-gradient(180deg, rgba(34, 211, 238, 0.45), transparent 12px) top right / 1px 12px no-repeat,
+    /* bottom-left */
+    linear-gradient(90deg, rgba(34, 211, 238, 0.45), transparent 12px) bottom left / 12px 1px no-repeat,
+    linear-gradient(0deg, rgba(34, 211, 238, 0.45), transparent 12px) bottom left / 1px 12px no-repeat,
+    /* bottom-right */
+    linear-gradient(270deg, rgba(34, 211, 238, 0.45), transparent 12px) bottom right / 12px 1px no-repeat,
+    linear-gradient(0deg, rgba(34, 211, 238, 0.45), transparent 12px) bottom right / 1px 12px no-repeat;
+}
+/* Critical-Card overschreibt die corner-brackets in rot — visuelle Code
+   "Achtung, dieser Status ist kritisch". */
+.cyjan-kpi-card.is-critical::after {
+  background:
+    linear-gradient(90deg, rgba(239, 68, 68, 0.65), transparent 12px) top left / 12px 1px no-repeat,
+    linear-gradient(180deg, rgba(239, 68, 68, 0.65), transparent 12px) top left / 1px 12px no-repeat,
+    linear-gradient(270deg, rgba(239, 68, 68, 0.65), transparent 12px) top right / 12px 1px no-repeat,
+    linear-gradient(180deg, rgba(239, 68, 68, 0.65), transparent 12px) top right / 1px 12px no-repeat,
+    linear-gradient(90deg, rgba(239, 68, 68, 0.65), transparent 12px) bottom left / 12px 1px no-repeat,
+    linear-gradient(0deg, rgba(239, 68, 68, 0.65), transparent 12px) bottom left / 1px 12px no-repeat,
+    linear-gradient(270deg, rgba(239, 68, 68, 0.65), transparent 12px) bottom right / 12px 1px no-repeat,
+    linear-gradient(0deg, rgba(239, 68, 68, 0.65), transparent 12px) bottom right / 1px 12px no-repeat;
+}
 /* Threat-Level-Card im critical-State: roter edge-glow + slow-Pulse,
    damit das wichtigste Element im Dashboard wirklich Aufmerksamkeit
    bekommt. Kein hektisches blinken — 4s-Cycle, Operator soll nicht
@@ -570,16 +606,45 @@
   color: #e0f2fe;
   text-align: right;
 }
+/* Segmented LED-Bar — inspiriert von OT-HMI-Audio-VU-Metern und SOC-
+   Status-Boards. Ein repeating-linear-gradient als pseudo-Element
+   liegt über dem Fill und teilt ihn in 8px-Cells mit 2px-Lücke. Im
+   gefüllten Bereich leuchten die Cells in der Severity-Color, der
+   ungefüllte Rest ist dunkel-blau wie "ausgeschaltete LEDs". */
 .cyjan-kpi-bar {
-  height: 6px;
-  background: #172033;
-  border-radius: 999px;
+  height: 10px;
+  background: rgba(11, 17, 32, 0.85);
+  border: 1px solid rgba(23, 32, 51, 0.8);
+  border-radius: 2px;
   overflow: hidden;
+  position: relative;
+  /* Subtile Inset-Schatten — Bar wirkt wie eingelassen, nicht aufgesetzt */
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.cyjan-kpi-bar::after {
+  /* Dunkle Segment-Divider über dem ganzen Bar-Bereich (auch über
+     dem gefüllten Teil), die LED-Cells "ausschneiden". */
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 7px,
+    rgba(2, 6, 23, 0.95) 7px,
+    rgba(2, 6, 23, 0.95) 9px
+  );
+  pointer-events: none;
+  z-index: 2;
 }
 .cyjan-kpi-bar-fill {
   height: 100%;
-  border-radius: 999px;
+  border-radius: 2px;
   transition: width 0.5s ease;
+  position: relative;
+  z-index: 1;
+  /* Inner top-highlight gibt LED-Glow-Anmutung */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 /* ─────────────────────────────────────────────────────────────────
