@@ -164,7 +164,7 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4"
       style={{
         background: 'rgba(2,6,23,0.82)',
         backdropFilter: 'blur(4px)',
@@ -174,25 +174,27 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
       <div
         role="dialog"
         aria-modal="true"
-        className="flex flex-col overflow-hidden"
+        className="flex flex-col overflow-hidden w-full h-[92vh] rounded-t-2xl md:w-[min(960px,96vw)] md:h-auto md:max-h-[90vh] md:rounded-[10px]"
         style={{
-          width: 'min(960px, 96vw)',
-          maxHeight: '90vh',
           background: 'linear-gradient(180deg, #0b1220 0%, #020617 100%)',
           border: '1px solid rgba(34,211,238,0.28)',
-          borderRadius: 10,
           boxShadow:
             '0 0 0 1px rgba(34,211,238,0.08), 0 20px 60px rgba(2,6,23,0.7), 0 0 80px rgba(34,211,238,0.08)',
           fontFamily: 'JetBrains Mono, ui-monospace, monospace',
           color: '#e2e8f0',
         }}
       >
+        {/* Mobile-Drag-Handle */}
+        <div className="md:hidden flex-none flex justify-center pt-2 pb-1">
+          <div className="w-10 h-1 rounded-full bg-slate-600/50" />
+        </div>
+
         {/* Header */}
         <div
-          className="flex items-center justify-between px-5 py-3"
+          className="flex items-center justify-between px-3 md:px-5 py-3 gap-2"
           style={{ borderBottom: '1px solid rgba(34,211,238,0.15)', background: 'rgba(15,26,45,0.6)' }}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
             <span
               className="text-[10px] font-bold uppercase tracking-[0.12em] px-2 py-0.5 rounded"
               style={{
@@ -210,16 +212,17 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
             >
               {alert.severity}
             </span>
-            <h2 className="text-[13px] font-semibold m-0" style={{ letterSpacing: 0.5 }}>
+            <h2 className="text-[13px] font-semibold m-0 min-w-0 truncate" style={{ letterSpacing: 0.5 }}>
               <span className="mr-2 text-cyan-300">{alert.rule_id}</span>
               <span className="text-slate-300">{alert.description}</span>
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="text-[11px] px-3 py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors"
+            title={t('common.close')}
+            className="text-[11px] px-3 py-2 md:py-1 rounded border border-slate-600/30 text-slate-300 hover:border-cyan-500/50 hover:text-cyan-300 transition-colors min-w-[44px] flex items-center justify-center shrink-0"
           >
-            ESC · ✕
+            <span className="hidden md:inline">ESC · </span>✕
           </button>
         </div>
 
@@ -234,12 +237,12 @@ export function AlertFlowPopup({ alert, onClose }: Props) {
           <MetaCell label="Window"     value={data ? t('flowPopup.windowValue', { minutes: data.window_min, flows: data.total_flows }) : '—'} />
         </div>
 
-        {/* Stage */}
+        {/* Stage — auf Mobile niedriger und ohne fixe min-height (HostCards
+            sind dort schmaler, sodass die Connection-Pfeile in der Mitte
+            mehr Platz haben). */}
         <div
-          className="relative"
+          className="relative h-[280px] md:h-[380px] md:min-h-[380px]"
           style={{
-            height: VB_H,
-            minHeight: VB_H,
             flexShrink: 0,
             background:
               'radial-gradient(ellipse at center, rgba(14,165,233,0.07), transparent 70%), linear-gradient(180deg, rgba(11,18,32,0.5), rgba(2,6,23,0.7))',
@@ -405,9 +408,12 @@ function FlowArc({ conn, index, total }: { conn: ConnState; index: number; total
 }
 
 function HostCard({ side, host, isAlert }: { side: 'left' | 'right'; host: { ip: string; name: string; kind: string; role?: string }; isAlert: boolean }) {
+  // Mobile: 140px Card-Width + 8px Inset = 296px Total bei 2 Cards.
+  // Restliche ~94px bleiben für die SVG-Connection-Arcs in der Mitte.
+  // Desktop: bleibt 190px + 22px Inset wie vorher.
   return (
     <div
-      className="absolute top-1/2 w-[190px] p-3.5 rounded-lg z-10"
+      className="absolute top-1/2 w-[140px] md:w-[190px] p-2.5 md:p-3.5 rounded-lg z-10"
       style={{
         transform: 'translateY(-50%)',
         background: 'rgba(11,18,32,0.92)',
@@ -416,7 +422,9 @@ function HostCard({ side, host, isAlert }: { side: 'left' | 'right'; host: { ip:
           ? '0 0 30px rgba(239,68,68,0.22)'
           : '0 0 30px rgba(34,211,238,0.12)',
         fontFamily: 'JetBrains Mono, monospace',
-        ...(side === 'left' ? { left: 22 } : { right: 22, textAlign: 'right' as const }),
+        ...(side === 'left'
+          ? { left: 'clamp(8px, 2.5vw, 22px)' }
+          : { right: 'clamp(8px, 2.5vw, 22px)', textAlign: 'right' as const }),
       }}
     >
       <div>
