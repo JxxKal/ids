@@ -217,6 +217,42 @@ class FlowState:
                 client_first = False             # SYN+ACK → src=Server
                 decided = True
 
+        # ICMP-Direction. Ohne diesen Block fällt ICMP komplett in den
+        # default first-packet=Client-Branch — bei Mid-Capture wo der
+        # Sniffer den Echo Reply zuerst sieht (Mirror-Order, NIC-Buffering),
+        # bekommen wir Direction-Vertauschung. Echo Reply mit src=Sender-
+        # des-Reply muss gedreht werden, damit src=Original-Initiator
+        # bleibt, sonst kippt die DOS_ICMP_001-Source-Attribution.
+        # Type-Codes: ICMPv4 8/0=Request/Reply, 13/14=Timestamp Req/Reply,
+        # 17/18=Address Mask Req/Reply, 3=Dest Unreach, 11=TTL exceeded;
+        # ICMPv6 128/129=Request/Reply, 1=Dest Unreach, 3=TTL exceeded.
+        if not decided and pkt.transport and pkt.transport.icmp:
+            t = pkt.transport.icmp.icmp_type
+            if pkt.transport.proto == "ICMPv6":
+                # IPv6 Echo Request 128, Reply 129
+                if t == 129:
+                    client_first = False         # Reply gesehen → src ist Responder
+                    decided = True
+                elif t == 128:
+                    client_first = True
+                    decided = True
+                elif t in (1, 2, 3, 4):
+                    # Error-Messages: src ist der Router/Responder, nicht
+                    # der Original-Sender. Drehen.
+                    client_first = False
+                    decided = True
+            else:
+                # ICMPv4
+                if t in (0, 14, 16, 18):         # Replies (Echo, Timestamp, Info, Mask)
+                    client_first = False
+                    decided = True
+                elif t in (8, 13, 15, 17):       # Requests
+                    client_first = True
+                    decided = True
+                elif t in (3, 4, 5, 11, 12):     # Error / Redirect-Messages
+                    client_first = False
+                    decided = True
+
         if not decided:
             # NAT-Heuristik: private Seite ist Client wenn andere Seite public.
             sip_priv = _is_private_ip(sip)
