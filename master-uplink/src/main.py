@@ -467,14 +467,15 @@ async def _http_config(request: web.Request) -> web.StreamResponse:
 
 async def _http_tap_update(request: web.Request) -> web.StreamResponse:
     """Liefert Dateien aus /tap-update/ aus. Whitelist-basiert (kein
-    Path-Traversal). Streaming via web.FileResponse — der nutzt sendfile-
-    Syscall und kopiert Bytes Zero-Copy aus dem Disk-Cache direkt in den
-    Socket. Damit funktioniert auch das 336-MB-Image-Bundle ohne den
-    Master-Heap zu sprengen.
+    Path-Traversal). Manuelles Chunk-Streaming via web.StreamResponse —
+    aiohttp's web.FileResponse fiel bei langen TLS-Streams (>30 MB
+    bei 337 MB Bundles) reproduzierbar mid-stream aus, vermutlich durch
+    eine unglückliche Interaktion zwischen sendfile-Fallback und SSL
+    transport. Die manuelle Variante kontrolliert Chunk-Größe, schreibt
+    via response.write() direkt in den TLS-Stream und ist über große
+    Files vorhersagbar stabil.
 
-    Vorgängerversion lud target.read_bytes() komplett in den Python-Heap
-    und schrieb sie in einer transport.write() — bei großen Bundles OOM
-    oder TLS-Buffer-Overflow → curl: transfer closed."""
+    Heap-sicher: ein einzelner 256-KB-Chunk im Speicher, kein read_bytes()."""
     auth: TapAuth = request.app["auth"]
     info, err = await _authenticate_request(request, auth)
     if err is not None:
@@ -491,12 +492,35 @@ async def _http_tap_update(request: web.Request) -> web.StreamResponse:
     suffix = target.suffix.lower()
     ctype  = _TAP_UPDATE_CONTENT_TYPES.get(suffix, "application/octet-stream")
     size = target.stat().st_size
-    log.info("tap-update %s wird gestreamt an %s (%d Bytes, sendfile)",
+    log.info("tap-update %s wird gestreamt an %s (%d Bytes, chunked)",
              sub, info["name"], size)
-    return web.FileResponse(
-        path=target,
-        headers={"Content-Type": ctype},
+
+    response = web.StreamResponse(
+        status=200,
+        headers={
+            "Content-Type":   ctype,
+            "Content-Length": str(size),
+        },
     )
+    await response.prepare(request)
+
+    chunk_size = 256 * 1024  # 256 KB — Balance aus Syscall-Overhead und Latency
+    bytes_written = 0
+    try:
+        with target.open("rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                await response.write(chunk)
+                bytes_written += len(chunk)
+        await response.write_eof()
+    except (asyncio.CancelledError, ConnectionResetError) as exc:
+        log.warning("tap-update %s an %s nach %d/%d Bytes abgebrochen: %s",
+                    sub, info["name"], bytes_written, size, exc)
+        raise
+
+    return response
 
 
 async def handle_tap(request: web.Request) -> web.WebSocketResponse:
