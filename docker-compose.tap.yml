@@ -67,6 +67,10 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_RETENTION_HOURS: "24"
+      # MUSS auf den Volume-Mountpunkt zeigen — apache/kafka-Default ist
+      # /tmp/kraft-combined-logs, was im Container-Writable-Layer landet
+      # und auf einem 32-GB-Tap die Disk innerhalb eines Tages füllt.
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"

@@ -73,6 +73,10 @@ services:
       KAFKA_LOG_RETENTION_HOURS: "168"
       KAFKA_MESSAGE_MAX_BYTES: "10485760"            # 10 MB (für PCAP-Header-Batches)
       KAFKA_REPLICA_FETCH_MAX_BYTES: "10485760"
+      # MUSS auf den Volume-Mountpunkt zeigen — apache/kafka-Default ist
+      # /tmp/kraft-combined-logs, was im Container-Writable-Layer landet
+      # und ohne Retention-Limit die Host-Disk volllaufen lässt.
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       # KRaft: feste Cluster-ID verhindert Initialisierungsfehler bei neuem Volume
       KAFKA_CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
       # Einzel-Broker: Replikation auf 1 setzen
