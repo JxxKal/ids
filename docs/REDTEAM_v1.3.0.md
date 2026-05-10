@@ -1,7 +1,8 @@
-# CYJAN Auto-RedTeam + Pattern-Federation — v1.3.0
+# CYJAN Auto-RedTeam + Pattern-Federation
 
 **Status:** Plan v0.2 (konsolidiert) · **Owner:** Architecture
-**Target Release:** v1.3.0 · **Repo:** `github.com/JxxKal/ids`
+**Target Release:** v2.5.0 (Cyjan-Versionierung, Minor-Bump nach v2.4.3)
+**Repo:** `github.com/JxxKal/ids`
 **Vorgänger-Diskussion:** Chat-Session 2026-05-08/09/10
 **Aktivierungs-Modell:** opt-in via Compose-Profil + Feature-Flag, **Default: aus**
 
