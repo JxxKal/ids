@@ -896,6 +896,7 @@ services:
       ALLOWED_SRC_CIDRS: "192.0.2.0/24,198.51.100.0/24,203.0.113.0/24"
       MAX_TIMEOUT_SEC:   "120"
       DOCKER_HOST:       "unix:///var/run/docker.sock"
+      POSTGRES_DSN:      "postgres://ids:${POSTGRES_PASSWORD:-ids-change-me}@localhost:5432/ids"
     ports:
       - "${REDTEAM_API_PORT:-8002}:8002"
     volumes:

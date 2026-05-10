@@ -18,7 +18,9 @@ from typing import Literal
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from alert_match import poll_alerts_for_rule
 from config import settings
+from db import audit_log, close_pool, init_pool
 from kali_executor import KaliExecutionError, KaliExecutor
 
 logging.basicConfig(
@@ -67,6 +69,14 @@ class RunKaliToolRequest(BaseModel):
     timeout_sec: int = Field(default=30, ge=5, le=120)
     attach_iface: bool = Field(default=True,
                                description="false = direkter exec ohne veth-Handover")
+    expected_alert_rule_id: str | None = Field(
+        default=None,
+        description=(
+            "Wenn gesetzt: nach Tool-Exit für 10s an Cyjan-API pollen, "
+            "ob ein Alert mit diesem rule_id-Prefix erschienen ist. "
+            "Result wird im matched_alerts-Feld zurückgegeben."
+        ),
+    )
 
 
 class RunKaliToolResponse(BaseModel):
@@ -79,6 +89,7 @@ class RunKaliToolResponse(BaseModel):
     timed_out:   bool
     stdout_excerpt: str = Field(max_length=2000)
     stderr_excerpt: str = Field(max_length=1000)
+    matched_alerts: list[dict] = Field(default_factory=list)
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────
@@ -98,7 +109,11 @@ async def health() -> HealthResponse:
 async def run_kali_tool(req: RunKaliToolRequest) -> RunKaliToolResponse:
     """Führt ein Pen-Test-Tool aus kali-shell aus. Target MUSS in
     ALLOWED_SRC_CIDRS (RFC 5737 TEST-NETs). Args werden serverseitig
-    durch den kali_runner gegen die Tool-Whitelist validiert."""
+    durch den kali_runner gegen die Tool-Whitelist validiert.
+
+    Audit-Log-Eintrag wird IMMER geschrieben (allowed/rejected_validation/error).
+    Wenn expected_alert_rule_id gesetzt: pollt Cyjan-API 10s nach Tool-Exit
+    auf einen Match — Result im matched_alerts-Feld."""
     run_id = str(uuid.uuid4())
     log.info("run_kali_tool: id=%s tool=%s target=%s args=%s",
              run_id, req.tool, req.target_ip, req.args)
@@ -110,8 +125,31 @@ async def run_kali_tool(req: RunKaliToolRequest) -> RunKaliToolResponse:
             attach_iface=req.attach_iface,
         )
     except KaliExecutionError as exc:
+        await audit_log(
+            mcp_tool="run_kali_tool_v1", target_ip=req.target_ip, args=req.args,
+            decision="rejected_validation", reject_reason=str(exc),
+        )
         log.warning("run_kali_tool rejected: %s", exc)
         raise HTTPException(400, str(exc))
+
+    matched: list[dict] = []
+    if req.expected_alert_rule_id:
+        matched = await poll_alerts_for_rule(
+            rule_id_prefix=req.expected_alert_rule_id,
+            window_sec=10,
+        )
+
+    await audit_log(
+        mcp_tool="run_kali_tool_v1", target_ip=req.target_ip, args=req.args,
+        decision="allowed",
+        duration_ms=result.get("duration_ms"),
+        result_summary={
+            "exit_code":     result["exit_code"],
+            "timed_out":     result["timed_out"],
+            "matched_alerts": len(matched),
+            "expected_rule": req.expected_alert_rule_id,
+        },
+    )
 
     return RunKaliToolResponse(
         run_id=run_id,
@@ -123,10 +161,53 @@ async def run_kali_tool(req: RunKaliToolRequest) -> RunKaliToolResponse:
         timed_out=result["timed_out"],
         stdout_excerpt=result.get("stdout", "")[:2000],
         stderr_excerpt=result.get("stderr", "")[:1000],
+        matched_alerts=matched,
     )
 
 
+# ─── Scenario-Loader (V1 minimal) ───────────────────────────────────────
+
+class ScenarioInfo(BaseModel):
+    scenario_id: str
+    file: str
+    rule_id: str | None
+    description: str | None
+
+
+@app.get("/redteam/scenarios", dependencies=[Depends(verify_token)])
+async def list_scenarios() -> dict:
+    """Listet Scenario-YAMLs aus /scenarios/ und /scenarios/imported/.
+    Imported-Bundles aus Pattern-Federation landen automatisch hier."""
+    import yaml
+    from pathlib import Path
+    scenarios = []
+    base = Path("/scenarios")
+    if not base.exists():
+        return {"scenarios": []}
+    for f in sorted(base.rglob("*.yml")):
+        try:
+            doc = yaml.safe_load(f.read_text())
+            if isinstance(doc, dict) and doc.get("id"):
+                scenarios.append({
+                    "scenario_id": doc["id"],
+                    "file":        str(f.relative_to(base)),
+                    "rule_id":     doc.get("rule_id"),
+                    "description": doc.get("description"),
+                })
+        except Exception as exc:
+            log.debug("scenario %s unparseable: %s", f, exc)
+    return {"scenarios": scenarios}
+
+
+# ─── Lifecycle ──────────────────────────────────────────────────────────
+
 @app.on_event("startup")
 async def _startup() -> None:
+    await init_pool(settings.postgres_dsn)
     log.info("RedTeam-Orchestrator startup. kali_container=%s, allowed_cidrs=%s",
              settings.kali_container, ",".join(settings.allowed_src_cidrs))
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    await close_pool()
