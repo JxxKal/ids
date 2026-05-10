@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 import orjson
 from confluent_kafka import Producer
@@ -185,6 +186,14 @@ app.include_router(maintenance_router.router, dependencies=_auth)
 app.include_router(tap_update_router.router,   dependencies=_auth)
 app.include_router(mqtt_router.router,          dependencies=_auth)
 app.include_router(pattern_router.router,       dependencies=_auth)
+
+# Pattern-Export ist Lab-only — wird nur registriert wenn Lab-Modus per
+# Compose-Profil + env-var aktiviert ist. Customer-Master ohne REDTEAM_ENABLED
+# kennt den Endpoint physisch nicht (Defense in Depth ggü. UI-Logic-Bypass).
+if os.environ.get("REDTEAM_ENABLED", "false").lower() == "true":
+    from routers import pattern_export as pattern_export_router
+    app.include_router(pattern_export_router.router, dependencies=_auth)
+    log.info("Pattern-Export-API aktiv (Lab-Modus, REDTEAM_ENABLED=true)")
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────

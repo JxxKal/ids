@@ -430,6 +430,11 @@ services:
       MIRROR_IFACE: ${MIRROR_IFACE:-}
       MANAGEMENT_IFACE: ${MANAGEMENT_IFACE:-}
       MASTER_CA_DIR: /var/lib/cyjan/master-ca
+      # Pattern-Federation Lab-Modus: aktiviert /api/pattern/export-Endpoint
+      # und legt CYJAN_LAB_ID als Bundle-Origin-Tag fest. Default OFF.
+      REDTEAM_ENABLED: "${REDTEAM_ENABLED:-false}"
+      CYJAN_LAB_ID:    "${CYJAN_LAB_ID:-}"
+      PATTERN_SIGNING_PASSPHRASE: "${PATTERN_SIGNING_PASSPHRASE:-}"
     volumes:
       - snort-rules:/rules
       # signature-rules-Volume für Per-Regel Overrides + Custom-YAML.
