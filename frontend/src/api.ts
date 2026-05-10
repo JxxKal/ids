@@ -1825,3 +1825,146 @@ function demoWeeklyReport(_week?: string): WeeklyReport {
     },
   };
 }
+
+// ── Feature-Flags ──────────────────────────────────────────────────────────
+
+export async function fetchFeatureFlags(): Promise<import('./types').FeatureFlags> {
+  if (isDemoMode()) {
+    return { redteam_enabled: false, pattern_export_enabled: false, pattern_import_enabled: true };
+  }
+  return await req<import('./types').FeatureFlags>('/api/system/feature-flags');
+}
+
+export async function updateFeatureFlags(
+  patch: Partial<import('./types').FeatureFlags>,
+): Promise<import('./types').FeatureFlags> {
+  if (isDemoMode()) {
+    return { redteam_enabled: false, pattern_export_enabled: false, pattern_import_enabled: true };
+  }
+  return await req<import('./types').FeatureFlags>('/api/system/feature-flags', {
+    method: 'PATCH', body: JSON.stringify(patch),
+  });
+}
+
+// ── Pattern-Federation Customer-Side ──────────────────────────────────────
+
+export async function uploadPatternBundle(file: File): Promise<import('./types').StagedBundle> {
+  if (isDemoMode()) {
+    return {
+      import_id: 'demo-staged',
+      bundle_sha256: 'demo' + 'a'.repeat(60),
+      lab_id: 'cyjan-lab-demo',
+      schema_version: 1,
+      signature_status: 'absent',
+      state: 'staged',
+      diff: {
+        rules_custom:           { added: ['MODBUS_NEW.yml'], modified: ['SCAN_001.yml'], removed: [] },
+        rules_suricata:         { added: [], modified: [], removed: [] },
+        defaults_recalibration: [{
+          rule_id: 'SCAN_001', param: 'port_count',
+          old_default: 50, new_default: 35,
+          reason: 'Lab-Sweep optimum bei 35',
+          manual_lock_at_customer: false, will_be_applied: true,
+        }],
+        tests_regression: ['SCAN_001_distributed.yml'],
+        mitre_coverage: null,
+      },
+      warnings: ['Bundle ist nicht signiert — Anwendung erfordert force_unverified=true'],
+    };
+  }
+  const fd = new FormData();
+  fd.append('file', file);
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/pattern/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return await res.json();
+}
+
+export async function applyPatternBundle(
+  importId: string,
+  components: import('./types').BundleComponent[],
+  forceUnverified: boolean = false,
+): Promise<{ import_id: string; state: string; applied: Record<string, unknown>; errors: Record<string, string> }> {
+  if (isDemoMode()) return { import_id: importId, state: 'applied', applied: {}, errors: {} };
+  return await req(`/api/pattern/apply/${importId}`, {
+    method: 'POST',
+    body: JSON.stringify({ components, force_unverified: forceUnverified }),
+  });
+}
+
+export async function fetchPatternImports(): Promise<import('./types').BundleImportRecord[]> {
+  if (isDemoMode()) return [];
+  const r = await req<{ imports: import('./types').BundleImportRecord[] }>('/api/pattern/imports');
+  return r.imports ?? [];
+}
+
+export async function fetchPatternTrustKeys(): Promise<import('./types').PatternTrustKey[]> {
+  if (isDemoMode()) return [];
+  const r = await req<{ keys: import('./types').PatternTrustKey[] }>('/api/pattern/trust-keys');
+  return r.keys ?? [];
+}
+
+export async function addPatternTrustKey(
+  labId: string, pubkeyPem: string, description: string,
+): Promise<import('./types').PatternTrustKey> {
+  return await req('/api/pattern/trust-keys', {
+    method: 'POST',
+    body: JSON.stringify({ lab_id: labId, public_key: pubkeyPem, description }),
+  });
+}
+
+export async function deletePatternTrustKey(id: string): Promise<void> {
+  await req(`/api/pattern/trust-keys/${id}`, { method: 'DELETE' });
+}
+
+// ── Pattern-Export (Lab-only) ─────────────────────────────────────────────
+
+export async function fetchSigningKeys(): Promise<import('./types').PatternSigningKey[]> {
+  if (isDemoMode()) return [];
+  try {
+    const r = await req<{ keys: import('./types').PatternSigningKey[] }>('/api/pattern/signing-keys');
+    return r.keys ?? [];
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) return [];
+    throw e;
+  }
+}
+
+export async function addSigningKey(
+  body: import('./types').PatternSigningKeyCreate,
+): Promise<import('./types').PatternSigningKey> {
+  return await req('/api/pattern/signing-keys', {
+    method: 'POST', body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSigningKey(id: string): Promise<void> {
+  await req(`/api/pattern/signing-keys/${id}`, { method: 'DELETE' });
+}
+
+export async function exportPatternBundle(body: import('./types').ExportRequest): Promise<Blob> {
+  if (isDemoMode()) return new Blob(['demo-bundle'], { type: 'application/zip' });
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/pattern/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return await res.blob();
+}
+
+export async function fetchExportLog(): Promise<import('./types').PatternExportRecord[]> {
+  if (isDemoMode()) return [];
+  try {
+    const r = await req<{ exports: import('./types').PatternExportRecord[] }>('/api/pattern/exports');
+    return r.exports ?? [];
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith('404')) return [];
+    throw e;
+  }
+}

@@ -577,6 +577,9 @@
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "mqtt": "MQTT bridge",
+      "pattern-import": "Import pattern bundle",
+      "pattern-export": "Export pattern bundle",
+      "features": "Feature flags",
       "thorsten": "For Thorsten"
     },
     "remoteTaps": {

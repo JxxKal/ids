@@ -6,7 +6,10 @@ import {
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../i18n';
 import {
   addRuleSource, applySslAcme, applySslSelfSigned, createUser, deleteRuleSource, deleteUser,
-  fetchIrmaConfig, fetchItopConfig, fetchMLConfig, fetchMLStatus, fetchMqttConfig, fetchRuleSources,
+  addPatternTrustKey, addSigningKey, applyPatternBundle, deletePatternTrustKey, deleteSigningKey,
+  exportPatternBundle, fetchExportLog, fetchFeatureFlags, fetchIrmaConfig, fetchItopConfig,
+  fetchMLConfig, fetchMLStatus, fetchMqttConfig, fetchPatternImports, fetchPatternTrustKeys,
+  fetchRuleSources, fetchSigningKeys, updateFeatureFlags, uploadPatternBundle,
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
   fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource, setInterfaceRole,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveMqttConfig, saveSamlConfig, saveSyslogConfig,
@@ -38,7 +41,12 @@ import type {
   DbStatsResponse, MaintenanceAuditEntry,
   RuleFileMeta,
 } from '../api';
-import type { InterfaceInfo, IrmaConfig, ItopConfig, ItopSyncState, MLConfig, MLStatus, MqttConfig, RemoteTap, RemoteTapPairingToken, Rule, RuleSource, SamlConfig, SystemUpdateStatus, UpdateStatus, User } from '../types';
+import type {
+  BundleComponent, BundleImportRecord, FeatureFlags, InterfaceInfo, IrmaConfig, ItopConfig,
+  ItopSyncState, MLConfig, MLStatus, MqttConfig, PatternExportRecord, PatternSigningKey,
+  PatternTrustKey, RemoteTap, RemoteTapPairingToken, Rule, RuleSource, SamlConfig, SignatureStatus,
+  StagedBundle, SystemUpdateStatus, UpdateStatus, User,
+} from '../types';
 import { CollapsibleHelp } from './CollapsibleHelp';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
@@ -3547,6 +3555,743 @@ function ItopSettings() {
   );
 }
 
+// ── FeaturesSettings ─────────────────────────────────────────────────────────
+// Zentrale Stelle für Cyjan-Feature-Toggles. Aktivierung von Lab-Features
+// (RedTeam-Tooling, Pattern-Export) zeigt erst Warning-Modal.
+
+function FeaturesSettings() {
+  const [flags, setFlags]     = useState<FeatureFlags>({
+    redteam_enabled: false, pattern_export_enabled: false, pattern_import_enabled: true,
+  });
+  const [saving, setSaving]   = useState(false);
+  const [pendingToggle, setPendingToggle] = useState<keyof FeatureFlags | null>(null);
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  useEffect(() => { fetchFeatureFlags().then(setFlags).catch(() => {}); }, []);
+
+  function flash(type: 'ok' | 'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 4000);
+  }
+
+  async function commitToggle(name: keyof FeatureFlags, value: boolean) {
+    setSaving(true);
+    try {
+      const updated = await updateFeatureFlags({ [name]: value });
+      setFlags(updated);
+      flash('ok', `${name} = ${value}`);
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Fehler');
+    } finally {
+      setSaving(false);
+      setPendingToggle(null);
+    }
+  }
+
+  function handleToggle(name: keyof FeatureFlags) {
+    const current = flags[name];
+    // Beim Aktivieren von Lab-Features: Confirmation-Modal
+    if (!current && (name === 'redteam_enabled' || name === 'pattern_export_enabled')) {
+      setPendingToggle(name);
+      return;
+    }
+    commitToggle(name, !current);
+  }
+
+  const FEATURE_META: Record<keyof FeatureFlags, { title: string; desc: string; warn?: string }> = {
+    pattern_import_enabled: {
+      title: 'Pattern-Bundle einspielen',
+      desc:  'Erlaubt das Importieren signierter Detection-Pattern-Bundles aus Lab-Systemen. Default: aktiv.',
+    },
+    pattern_export_enabled: {
+      title: 'Pattern-Bundle exportieren (Lab-Modus)',
+      desc:  'Aktiviert /api/pattern/export-Endpoint und Settings-Section zum Erstellen signierter Bundles.',
+      warn:  'NUR auf Lab-Systemen aktivieren. Customer-Installationen bleiben aus.',
+    },
+    redteam_enabled: {
+      title: 'RedTeam-Tooling (Lab-Modus)',
+      desc:  'Aktiviert redteam-orchestrator + kali-shell-Container für Auto-Pen-Tests. Erfordert zusätzlich `docker compose --profile redteam up` und REDTEAM_ENABLED=true im env.',
+      warn:  'Erweitert die Angriffsfläche durch zusätzliche privilegierte Container. NUR in dedizierten Lab-Umgebungen.',
+    },
+  };
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-200">Cyjan Feature-Flags</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Aktiviert oder deaktiviert optionale Cyjan-Module. Lab-Features sind standardmäßig aus
+          und sollten nur in dedizierten Lab-Umgebungen aktiviert werden — Customer-Installationen
+          bleiben minimal.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {(Object.keys(FEATURE_META) as Array<keyof FeatureFlags>).map(name => {
+          const meta = FEATURE_META[name];
+          const enabled = flags[name];
+          return (
+            <div key={name} className={`border rounded p-3 transition-colors ${
+              enabled ? 'border-cyan-500/40 bg-cyan-500/5' : 'border-slate-800 bg-slate-900/40'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-slate-200">{meta.title}</span>
+                    <code className="text-[10px] text-slate-600 font-mono">{name}</code>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">{meta.desc}</p>
+                  {meta.warn && (
+                    <p className="text-[11px] text-amber-400 mt-1">⚠ {meta.warn}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleToggle(name)}
+                  disabled={saving}
+                  className={`shrink-0 mt-1 px-3 py-1 rounded text-xs font-medium transition-colors ${
+                    enabled
+                      ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/60 hover:bg-cyan-500/30'
+                      : 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
+                  }`}>
+                  {enabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {pendingToggle && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-slate-900 border border-amber-500/60 rounded p-5 max-w-md space-y-3">
+            <h3 className="text-sm font-semibold text-amber-300">
+              ⚠ Lab-Feature aktivieren
+            </h3>
+            <p className="text-xs text-slate-300">
+              Du aktivierst <code className="font-mono text-amber-200">{pendingToggle}</code>.
+              {' '}{FEATURE_META[pendingToggle].warn}
+            </p>
+            <p className="text-[11px] text-slate-500">
+              Diese Aktivierung wirkt nur in Kombination mit dem passenden Compose-Profil bzw.
+              env-Var (siehe docs/REDTEAM_v1.3.0.md). Bei reiner UI-Aktivierung ohne Container-
+              Profile bleibt das Feature wirkungslos.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setPendingToggle(null)} className="btn-ghost text-xs">
+                Abbrechen
+              </button>
+              <button onClick={() => commitToggle(pendingToggle, true)}
+                className="btn-primary text-xs">
+                Trotzdem aktivieren
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {msg && (
+        <div className={`text-xs ${msg.type === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>
+          {msg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── PatternImportSettings ────────────────────────────────────────────────────
+
+const COMP_LABEL: Record<BundleComponent, { label: string; hint: string }> = {
+  'rules.custom':           { label: 'Heuristik-Rules',      hint: 'YAML-Rules ins signature-rules-Volume' },
+  'rules.suricata':         { label: 'Suricata-Rules',       hint: 'Custom-Rules ins Suricata-Volume' },
+  'defaults.recalibration': { label: 'Default-Werte',        hint: 'Vorgeschlagene Schwellwert-Defaults (manual-locked Params werden übersprungen)' },
+  'tests.regression':       { label: 'Regression-Scenarios', hint: 'Test-Scenarios ins cyjan-scenarios-Volume' },
+  'evidence.mitre':         { label: 'MITRE-Coverage',       hint: 'Informativ — wird nicht angewendet' },
+};
+
+function PatternImportSettings() {
+  const [staged,   setStaged]    = useState<StagedBundle | null>(null);
+  const [imports,  setImports]   = useState<BundleImportRecord[]>([]);
+  const [trustKeys, setTrustKeys] = useState<PatternTrustKey[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [applying, setApplying]  = useState(false);
+  const [forceUnverified, setForceUnverified] = useState(false);
+  const [selectedComponents, setSelectedComponents] = useState<Set<BundleComponent>>(new Set());
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [showTrustForm, setShowTrustForm] = useState(false);
+
+  const reload = async () => {
+    setImports(await fetchPatternImports().catch(() => []));
+    setTrustKeys(await fetchPatternTrustKeys().catch(() => []));
+  };
+  useEffect(() => { reload(); }, []);
+
+  function flash(type: 'ok' | 'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 5000);
+  }
+
+  async function handleUpload(file: File) {
+    setUploading(true); setStaged(null);
+    try {
+      const r = await uploadPatternBundle(file);
+      setStaged(r);
+      const next = new Set<BundleComponent>();
+      if (r.diff.rules_custom.added.length || r.diff.rules_custom.modified.length) next.add('rules.custom');
+      if (r.diff.rules_suricata.added.length || r.diff.rules_suricata.modified.length) next.add('rules.suricata');
+      if (r.diff.defaults_recalibration.length) next.add('defaults.recalibration');
+      if (r.diff.tests_regression.length) next.add('tests.regression');
+      setSelectedComponents(next);
+      setForceUnverified(false);
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Upload fehlgeschlagen');
+    } finally { setUploading(false); }
+  }
+
+  async function handleApply() {
+    if (!staged) return;
+    setApplying(true);
+    try {
+      const r = await applyPatternBundle(staged.import_id, Array.from(selectedComponents), forceUnverified);
+      const errCount = Object.keys(r.errors).length;
+      if (!errCount) flash('ok', `Bundle angewendet — ${Object.keys(r.applied).length} Komponenten.`);
+      else flash('err', `Teil-Apply: ${errCount} Komponenten fehlerhaft.`);
+      setStaged(null); reload();
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Apply fehlgeschlagen');
+    } finally { setApplying(false); }
+  }
+
+  function toggleComp(c: BundleComponent) {
+    const next = new Set(selectedComponents);
+    next.has(c) ? next.delete(c) : next.add(c);
+    setSelectedComponents(next);
+  }
+
+  const sigBadge = (s: SignatureStatus) => {
+    const styles: Record<SignatureStatus, string> = {
+      valid:      'bg-emerald-500/15 border-emerald-500/60 text-emerald-300',
+      invalid:    'bg-red-500/15      border-red-500/60      text-red-300',
+      absent:     'bg-amber-500/15    border-amber-500/60    text-amber-300',
+      unverified: 'bg-slate-500/15    border-slate-500/60    text-slate-300',
+    };
+    return (
+      <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${styles[s]}`}>
+        Signatur: {s}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-200">Pattern-Bundle einspielen</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Importiert Detection-Patterns (Heuristik-Rules, Suricata-Rules, Regression-Tests, MITRE-Coverage)
+          aus einer Lab-Umgebung. Lab-spezifische Schwellwerte und ML-Modelle werden bewusst NICHT
+          übernommen — der lokale rule-tuner verfeinert die Defaults am eigenen Netz.
+        </p>
+      </div>
+
+      <div className="border border-slate-800 rounded p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[11px] uppercase tracking-wider text-slate-500">
+            Vertrauenswürdige Lab-Keys ({trustKeys.length})
+          </h3>
+          <button onClick={() => setShowTrustForm(s => !s)} className="btn-ghost text-xs">
+            {showTrustForm ? 'Schließen' : '+ Key hinzufügen'}
+          </button>
+        </div>
+        {trustKeys.length === 0 && !showTrustForm && (
+          <p className="text-[11px] text-slate-600">
+            Keine Lab-Keys konfiguriert. Bundles ohne Signatur können nur mit `force_unverified` angewendet werden.
+          </p>
+        )}
+        {trustKeys.map(k => (
+          <div key={k.id} className="flex items-center gap-3 text-xs py-1">
+            <span className="font-mono text-slate-300">{k.lab_id}</span>
+            <span className="font-mono text-[10px] text-slate-600">{k.pubkey_sha256.slice(0, 16)}…</span>
+            {k.description && <span className="text-slate-500">— {k.description}</span>}
+            <button
+              onClick={async () => { await deletePatternTrustKey(k.id); reload(); }}
+              className="ml-auto text-red-400 hover:text-red-300 text-[10px]">
+              Entfernen
+            </button>
+          </div>
+        ))}
+        {showTrustForm && <TrustKeyForm onAdded={() => { reload(); setShowTrustForm(false); }} />}
+      </div>
+
+      {!staged && (
+        <div
+          className="border-2 border-dashed border-slate-700 rounded p-6 text-center hover:border-cyan-500/50 transition-colors"
+          onDragOver={e => { e.preventDefault(); }}
+          onDrop={e => {
+            e.preventDefault();
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.endsWith('.zip')) handleUpload(file);
+          }}>
+          <p className="text-sm text-slate-400">Bundle-ZIP hier ablegen oder</p>
+          <label className="btn-primary text-xs mt-3 inline-block cursor-pointer">
+            Datei wählen
+            <input type="file" accept=".zip" hidden
+              onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+          </label>
+          {uploading && <p className="text-xs text-cyan-400 mt-3">Lade hoch + validiere …</p>}
+        </div>
+      )}
+
+      {staged && (
+        <div className="border border-cyan-500/40 rounded p-4 space-y-4 bg-cyan-500/5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-slate-400">Lab-ID:</span>
+                <span className="font-mono text-xs text-slate-200">{staged.lab_id ?? '(unsigniert)'}</span>
+                {sigBadge(staged.signature_status)}
+              </div>
+              <p className="text-[10px] text-slate-600 font-mono">SHA-256: {staged.bundle_sha256.slice(0, 32)}…</p>
+            </div>
+            <button onClick={() => setStaged(null)} className="btn-ghost text-xs">Verwerfen</button>
+          </div>
+
+          {staged.warnings.length > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/40 rounded p-2">
+              {staged.warnings.map((w, i) => (
+                <p key={i} className="text-[11px] text-amber-300">⚠ {w}</p>
+              ))}
+            </div>
+          )}
+
+          <DiffSection
+            label="Heuristik-Rules"
+            count={staged.diff.rules_custom.added.length + staged.diff.rules_custom.modified.length}
+            selected={selectedComponents.has('rules.custom')}
+            onToggle={() => toggleComp('rules.custom')}>
+            {staged.diff.rules_custom.added.length > 0 && (
+              <div className="text-[11px]">
+                <span className="text-emerald-400">+ neu:</span>{' '}
+                {staged.diff.rules_custom.added.map(f => <span key={f} className="font-mono ml-2">{f}</span>)}
+              </div>
+            )}
+            {staged.diff.rules_custom.modified.length > 0 && (
+              <div className="text-[11px]">
+                <span className="text-amber-400">~ geändert:</span>{' '}
+                {staged.diff.rules_custom.modified.map(f => <span key={f} className="font-mono ml-2">{f}</span>)}
+              </div>
+            )}
+          </DiffSection>
+
+          <DiffSection
+            label="Suricata-Rules"
+            count={staged.diff.rules_suricata.added.length + staged.diff.rules_suricata.modified.length}
+            selected={selectedComponents.has('rules.suricata')}
+            onToggle={() => toggleComp('rules.suricata')}>
+            <p className="text-[11px] text-slate-500">
+              {staged.diff.rules_suricata.added.length} neu · {staged.diff.rules_suricata.modified.length} geändert
+            </p>
+          </DiffSection>
+
+          <DiffSection
+            label="Default-Werte (Recalibration)"
+            count={staged.diff.defaults_recalibration.length}
+            selected={selectedComponents.has('defaults.recalibration')}
+            onToggle={() => toggleComp('defaults.recalibration')}>
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="text-slate-500">
+                  <th className="text-left font-normal py-1">Rule</th>
+                  <th className="text-left font-normal">Param</th>
+                  <th className="text-right font-normal">Alt</th>
+                  <th className="text-right font-normal">Neu</th>
+                  <th className="text-left font-normal pl-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {staged.diff.defaults_recalibration.map((d, i) => (
+                  <tr key={i} className="border-t border-slate-800/40">
+                    <td className="py-1 font-mono text-slate-300">{d.rule_id}</td>
+                    <td className="font-mono text-slate-400">{d.param}</td>
+                    <td className="text-right text-slate-500">{d.old_default ?? '—'}</td>
+                    <td className="text-right text-slate-200">{d.new_default}</td>
+                    <td className="pl-3">
+                      {d.manual_lock_at_customer ? (
+                        <span className="text-amber-400">manuell gesperrt — übersprungen</span>
+                      ) : d.will_be_applied ? (
+                        <span className="text-emerald-400">wird übernommen</span>
+                      ) : (
+                        <span className="text-slate-500">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </DiffSection>
+
+          <DiffSection
+            label="Regression-Scenarios"
+            count={staged.diff.tests_regression.length}
+            selected={selectedComponents.has('tests.regression')}
+            onToggle={() => toggleComp('tests.regression')}>
+            <p className="text-[11px] text-slate-500">
+              {staged.diff.tests_regression.length} Scenarios werden in den lokalen Test-Pool gelegt.
+            </p>
+          </DiffSection>
+
+          {staged.diff.mitre_coverage && staged.diff.mitre_coverage.techniques.length > 0 && (
+            <div className="border border-slate-800 rounded p-3">
+              <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+                MITRE ATT&CK Coverage (informativ)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {staged.diff.mitre_coverage.techniques.map(t => (
+                  <span key={t.technique_id}
+                    className="px-2 py-1 text-[10px] font-mono bg-slate-800/60 border border-slate-700 rounded text-slate-300">
+                    {t.technique_id} · {t.detection_count}/{t.run_count}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {staged.signature_status !== 'valid' && (
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" className="accent-amber-500"
+                checked={forceUnverified}
+                onChange={e => setForceUnverified(e.target.checked)} />
+              <span className="text-amber-300">
+                Anwendung trotz fehlender/ungültiger Signatur erzwingen (force_unverified)
+              </span>
+            </label>
+          )}
+
+          <div className="flex justify-between items-center pt-2">
+            <p className="text-[11px] text-slate-500">
+              {selectedComponents.size} Komponente(n) ausgewählt
+            </p>
+            <button onClick={handleApply} className="btn-primary text-xs"
+              disabled={applying || selectedComponents.size === 0
+                || (staged.signature_status !== 'valid' && !forceUnverified)}>
+              {applying ? 'Wende an…' : 'Anwenden'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+          Historie ({imports.length})
+        </h3>
+        <div className="space-y-1">
+          {imports.slice(0, 10).map(i => (
+            <div key={i.id} className="flex items-center gap-3 text-xs py-1 border-b border-slate-800/40">
+              <span className={`px-2 py-0.5 rounded text-[10px] ${
+                i.state === 'applied' ? 'bg-emerald-500/15 text-emerald-300' :
+                i.state === 'rejected' ? 'bg-red-500/15 text-red-300' :
+                'bg-slate-700/50 text-slate-400'
+              }`}>{i.state}</span>
+              <span className="font-mono text-slate-400">{i.lab_id ?? '(unsigned)'}</span>
+              <span className="text-slate-600">{new Date(i.uploaded_at).toLocaleString()}</span>
+              <span className="font-mono text-[10px] text-slate-700 ml-auto">
+                {i.bundle_sha256.slice(0, 12)}…
+              </span>
+            </div>
+          ))}
+          {imports.length === 0 && (
+            <p className="text-[11px] text-slate-600">Noch keine Bundles importiert.</p>
+          )}
+        </div>
+      </div>
+
+      {msg && (
+        <div className={`text-xs ${msg.type === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>
+          {msg.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffSection({ label, count, selected, onToggle, children }: {
+  label: string; count: number; selected: boolean;
+  onToggle: () => void; children: ReactNode;
+}) {
+  if (count === 0) return null;
+  return (
+    <div className={`border rounded p-3 transition-colors ${
+      selected ? 'border-cyan-500/40 bg-cyan-500/5' : 'border-slate-800 bg-slate-900/40'
+    }`}>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" className="accent-cyan-500" checked={selected} onChange={onToggle} />
+        <span className="text-xs font-medium text-slate-200">{label}</span>
+        <span className="text-[10px] text-slate-500 font-mono ml-auto">({count})</span>
+      </label>
+      {selected && <div className="mt-2 ml-6">{children}</div>}
+    </div>
+  );
+}
+
+function TrustKeyForm({ onAdded }: { onAdded: () => void }) {
+  const [labId, setLabId] = useState('');
+  const [pubkey, setPubkey] = useState('');
+  const [desc, setDesc] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function submit() {
+    setBusy(true); setErr('');
+    try {
+      await addPatternTrustKey(labId.trim(), pubkey.trim(), desc.trim());
+      onAdded();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Fehler');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="space-y-2 mt-2 p-3 bg-slate-900/40 rounded">
+      <input className="input text-xs font-mono w-full" placeholder="Lab-ID, z.B. cyjan-lab-jxxk"
+        value={labId} onChange={e => setLabId(e.target.value)} />
+      <textarea className="input text-[10px] font-mono w-full" rows={5}
+        placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----&#10;…&#10;-----END PGP PUBLIC KEY BLOCK-----"
+        value={pubkey} onChange={e => setPubkey(e.target.value)} />
+      <input className="input text-xs w-full" placeholder="Beschreibung (optional)"
+        value={desc} onChange={e => setDesc(e.target.value)} />
+      <div className="flex justify-end gap-2">
+        {err && <span className="text-xs text-red-400 mr-auto self-center">{err}</span>}
+        <button onClick={submit} className="btn-primary text-xs" disabled={busy || !labId || !pubkey}>
+          {busy ? 'Speichere…' : 'Hinzufügen'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+// ── PatternExportSettings (Lab-only) ─────────────────────────────────────────
+
+function PatternExportSettings() {
+  const [signingKeys, setSigningKeys] = useState<PatternSigningKey[]>([]);
+  const [exports, setExports]         = useState<PatternExportRecord[]>([]);
+  const [exporting, setExporting]     = useState(false);
+  const [labRunId, setLabRunId]       = useState('');
+  const [description, setDescription] = useState('');
+  const [signKeyId, setSignKeyId]     = useState('');
+  const [components, setComponents]   = useState<Set<BundleComponent>>(
+    new Set<BundleComponent>(['rules.custom', 'rules.suricata', 'tests.regression', 'evidence.mitre']),
+  );
+  const [showKeyForm, setShowKeyForm] = useState(false);
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  const reload = async () => {
+    setSigningKeys(await fetchSigningKeys().catch(() => []));
+    setExports(await fetchExportLog().catch(() => []));
+  };
+
+  useEffect(() => {
+    reload();
+    setLabRunId(`lab-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`);
+  }, []);
+
+  function flash(type: 'ok' | 'err', text: string) {
+    setMsg({ type, text });
+    setTimeout(() => setMsg(null), 5000);
+  }
+
+  function toggleComp(c: BundleComponent) {
+    const next = new Set(components);
+    next.has(c) ? next.delete(c) : next.add(c);
+    setComponents(next);
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      const blob = await exportPatternBundle({
+        components: Array.from(components),
+        sign_with_key_id: signKeyId || null,
+        description, lab_run_id: labRunId,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cyjan-pattern-${labRunId}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      flash('ok', `Bundle erstellt: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+      reload();
+    } catch (err: unknown) {
+      flash('err', err instanceof Error ? err.message : 'Export fehlgeschlagen');
+    } finally { setExporting(false); }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-200">Pattern-Bundle exportieren</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Erstellt ein signiertes Bundle mit den vom Auto-RedTeam validierten Detection-Improvements.
+          Lab-spezifische Werte (rule-tuner ml-Tunings, ML-Modelle, Baselines) werden bewusst nicht
+          eingeschlossen — Customer übernimmt nur generische Verbesserungen.
+        </p>
+      </div>
+
+      <div className="border border-slate-800 rounded p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-[11px] uppercase tracking-wider text-slate-500">
+            Signing-Keys ({signingKeys.length})
+          </h3>
+          <button onClick={() => setShowKeyForm(s => !s)} className="btn-ghost text-xs">
+            {showKeyForm ? 'Schließen' : '+ Key hinzufügen'}
+          </button>
+        </div>
+        {signingKeys.map(k => (
+          <div key={k.id} className="flex items-center gap-3 text-xs py-1">
+            <span className="font-mono text-slate-300">{k.lab_id} · {k.key_id}</span>
+            <span className="font-mono text-[10px] text-slate-600">{k.pubkey_sha256.slice(0, 16)}…</span>
+            <button
+              onClick={async () => { await deleteSigningKey(k.id); reload(); }}
+              className="ml-auto text-red-400 hover:text-red-300 text-[10px]">
+              Entfernen
+            </button>
+          </div>
+        ))}
+        {showKeyForm && <SigningKeyForm onAdded={() => { reload(); setShowKeyForm(false); }} />}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+        <div className="flex flex-col gap-1">
+          <label className="text-slate-400">Lab-Run-ID</label>
+          <input className="input font-mono"
+            value={labRunId} onChange={e => setLabRunId(e.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-slate-400">Signing-Key</label>
+          <select className="input"
+            value={signKeyId} onChange={e => setSignKeyId(e.target.value)}>
+            <option value="">— unsigniert (Customer braucht force_unverified) —</option>
+            {signingKeys.filter(k => k.enabled).map(k => (
+              <option key={k.id} value={k.id}>{k.lab_id} · {k.key_id}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1 sm:col-span-2">
+          <label className="text-slate-400">Beschreibung (optional)</label>
+          <textarea className="input text-[11px]" rows={2}
+            placeholder="z.B. 'Quartals-Update — 3 neue Modbus-Rules, SCAN_001 neu kalibriert'"
+            value={description} onChange={e => setDescription(e.target.value)} />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500">Komponenten</h3>
+        {(Object.keys(COMP_LABEL) as BundleComponent[]).map(c => (
+          <label key={c} className="flex items-start gap-2 cursor-pointer text-xs py-1">
+            <input type="checkbox" className="accent-cyan-500 mt-0.5"
+              checked={components.has(c)} onChange={() => toggleComp(c)} />
+            <div>
+              <span className="font-mono text-slate-200">{c}</span>
+              <span className="block text-[10px] text-slate-500">{COMP_LABEL[c].hint}</span>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      {!signKeyId && (
+        <div className="bg-amber-500/10 border border-amber-500/40 rounded p-2">
+          <p className="text-[11px] text-amber-300">
+            ⚠ Bundle wird unsigniert exportiert. Customer-Apply braucht `force_unverified=true`.
+            Für Production: Signing-Key konfigurieren.
+          </p>
+        </div>
+      )}
+
+      <div className="flex justify-between items-center">
+        <div>
+          {msg?.type === 'ok'  && <span className="text-xs text-emerald-400">{msg.text}</span>}
+          {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
+        </div>
+        <button onClick={handleExport} className="btn-primary text-xs"
+          disabled={exporting || components.size === 0}>
+          {exporting ? 'Exportiere…' : 'Bundle erstellen + Download'}
+        </button>
+      </div>
+
+      <div>
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+          Letzte Exports ({exports.length})
+        </h3>
+        <div className="space-y-1">
+          {exports.slice(0, 10).map(e => (
+            <div key={e.id} className="flex items-center gap-3 text-xs py-1 border-b border-slate-800/40">
+              <span className="font-mono text-slate-300">{e.lab_run_id}</span>
+              <span className="text-slate-500">{(e.bundle_size / 1024 / 1024).toFixed(2)} MB</span>
+              <span className="text-slate-600">{new Date(e.exported_at).toLocaleString()}</span>
+              {e.description && <span className="text-slate-500 italic truncate">— {e.description}</span>}
+            </div>
+          ))}
+          {exports.length === 0 && (
+            <p className="text-[11px] text-slate-600">Noch keine Bundles exportiert.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SigningKeyForm({ onAdded }: { onAdded: () => void }) {
+  const [labId, setLabId] = useState('');
+  const [keyId, setKeyId] = useState('');
+  const [pubkeyPem, setPubkeyPem] = useState('');
+  const [privkeyPath, setPrivkeyPath] = useState('');
+  const [desc, setDesc] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function submit() {
+    setBusy(true); setErr('');
+    try {
+      await addSigningKey({
+        lab_id: labId.trim(), key_id: keyId.trim(),
+        pubkey_pem: pubkeyPem.trim(), privkey_path: privkeyPath.trim(),
+        description: desc.trim() || undefined,
+      });
+      onAdded();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Fehler');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="space-y-2 mt-2 p-3 bg-slate-900/40 rounded">
+      <div className="grid grid-cols-2 gap-2">
+        <input className="input text-xs font-mono" placeholder="Lab-ID"
+          value={labId} onChange={e => setLabId(e.target.value)} />
+        <input className="input text-xs font-mono" placeholder="Key-ID, z.B. prod-2026Q2"
+          value={keyId} onChange={e => setKeyId(e.target.value)} />
+      </div>
+      <input className="input text-xs font-mono w-full"
+        placeholder="Privkey-Pfad (z.B. /etc/cyjan/signing-keys/prod.pem)"
+        value={privkeyPath} onChange={e => setPrivkeyPath(e.target.value)} />
+      <textarea className="input text-[10px] font-mono w-full" rows={5}
+        placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----&#10;…&#10;-----END PGP PUBLIC KEY BLOCK-----"
+        value={pubkeyPem} onChange={e => setPubkeyPem(e.target.value)} />
+      <input className="input text-xs w-full" placeholder="Beschreibung (optional)"
+        value={desc} onChange={e => setDesc(e.target.value)} />
+      <div className="flex justify-end gap-2">
+        {err && <span className="text-xs text-red-400 mr-auto self-center">{err}</span>}
+        <button onClick={submit} className="btn-primary text-xs"
+          disabled={busy || !labId || !keyId || !pubkeyPem || !privkeyPath}>
+          {busy ? 'Speichere…' : 'Hinzufügen'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 // ── MqttSettings ──────────────────────────────────────────────────────────────
 
 const MQTT_DEFAULT: MqttConfig = {
@@ -6432,7 +7177,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'pattern-import' | 'pattern-export' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -6492,9 +7237,12 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'integrations',
     items: [
-      { id: 'irma', icon: <Plug     {...ICON_PROPS} /> },
-      { id: 'itop', icon: <Database {...ICON_PROPS} /> },
-      { id: 'mqtt', icon: <Network  {...ICON_PROPS} /> },
+      { id: 'irma',           icon: <Plug     {...ICON_PROPS} /> },
+      { id: 'itop',           icon: <Database {...ICON_PROPS} /> },
+      { id: 'mqtt',           icon: <Network  {...ICON_PROPS} /> },
+      { id: 'pattern-import', icon: <Upload   {...ICON_PROPS} /> },
+      { id: 'pattern-export', icon: <Upload   {...ICON_PROPS} /> },
+      { id: 'features',       icon: <Sliders  {...ICON_PROPS} /> },
     ],
   },
   {
@@ -6567,6 +7315,23 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
   // gehoben (position: fixed, off-screen). `navOpen` schiebt sie rein.
   const [navOpen, setNavOpen] = useState(false);
 
+  // Feature-Flags steuern conditional Section-Sichtbarkeit (z.B. Pattern-Export
+  // nur bei Lab-Modus). Werden beim Mount geladen + bei jedem Section-Wechsel
+  // refreshed (billig, gibt Live-Update wenn jemand parallel toggled).
+  const [features, setFeatures] = useState<FeatureFlags>({
+    redteam_enabled: false, pattern_export_enabled: false, pattern_import_enabled: true,
+  });
+  useEffect(() => { fetchFeatureFlags().then(setFeatures).catch(() => {}); }, []);
+
+  // Dynamisch gefilterte NAV_GROUPS: Pattern-Export-Section nur sichtbar wenn
+  // pattern_export_enabled=true (Lab-Modus). Customer-Master sieht den Tab nicht.
+  const navGroups = useMemo(() => NAV_GROUPS.map(g => ({
+    ...g,
+    items: g.items.filter(i =>
+      i.id !== 'pattern-export' || features.pattern_export_enabled,
+    ),
+  })).filter(g => g.items.length > 0), [features]);
+
   const isThorsten = active === 'thorsten';
 
   // Aktuelles Section-Label für die Mobile-Hamburger-Bar
@@ -6605,7 +7370,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
 
       {/* ── Submenu (Desktop: statisch links · Mobile: Drawer) ─────────── */}
       <nav className={`cyjan-settings-nav ${navOpen ? 'is-open' : ''}`}>
-        {NAV_GROUPS.map(group => (
+        {navGroups.map(group => (
           <div key={group.key} className="cyjan-settings-nav-group">
             <div className="cyjan-settings-nav-grouplabel">{t(`settings.groups.${group.key}`)}</div>
             {group.items.map(item => (
@@ -6653,6 +7418,9 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
             {active === 'irma'          && <IrmaSettings />}
             {active === 'itop'          && <ItopSettings />}
             {active === 'mqtt'          && <MqttSettings />}
+            {active === 'pattern-import' && <PatternImportSettings />}
+            {active === 'pattern-export' && <PatternExportSettings />}
+            {active === 'features'       && <FeaturesSettings />}
             {active === 'update'        && <SystemUpdate />}
             {active === 'geoip'         && <GeoIpSettings />}
           </div>

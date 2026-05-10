@@ -190,6 +190,126 @@ export interface MqttTestResult {
   detail?:     string | null;
 }
 
+// ── Cyjan Feature-Flags ─────────────────────────────────────────────────────
+
+export interface FeatureFlags {
+  redteam_enabled:        boolean;
+  pattern_export_enabled: boolean;
+  pattern_import_enabled: boolean;
+}
+
+// ── Pattern-Federation (Customer + Lab) ─────────────────────────────────────
+
+export type BundleComponent =
+  | 'rules.custom'
+  | 'rules.suricata'
+  | 'defaults.recalibration'
+  | 'tests.regression'
+  | 'evidence.mitre';
+
+export type SignatureStatus = 'valid' | 'invalid' | 'absent' | 'unverified';
+export type BundleState     = 'staged' | 'applied' | 'rejected' | 'expired';
+
+export interface BundleDiff {
+  rules_custom:           { added: string[]; modified: string[]; removed: string[] };
+  rules_suricata:         { added: string[]; modified: string[]; removed: string[] };
+  defaults_recalibration: Array<{
+    rule_id:                  string;
+    param:                    string;
+    old_default:              number | null;
+    new_default:              number;
+    reason:                   string;
+    manual_lock_at_customer:  boolean;
+    will_be_applied:          boolean;
+  }>;
+  tests_regression:       string[];
+  mitre_coverage?:        {
+    schema_version: number;
+    techniques: Array<{
+      technique_id:     string;
+      detection_count:  number;
+      run_count:        number;
+      scenarios: Array<{
+        scenario_id:      string;
+        expected_rule_id: string | null;
+        run_count:        number;
+        detected_count:   number;
+        tpr:              number;
+      }>;
+    }>;
+  } | null;
+}
+
+export interface StagedBundle {
+  import_id:         string;
+  bundle_sha256:     string;
+  lab_id:            string | null;
+  schema_version:    number;
+  signature_status:  SignatureStatus;
+  state:             BundleState;
+  diff:              BundleDiff;
+  warnings:          string[];
+  rejected_reason?:  string | null;
+}
+
+export interface BundleImportRecord {
+  id:                 string;
+  bundle_sha256:      string;
+  bundle_size:        number;
+  lab_id:             string | null;
+  state:              BundleState;
+  signature_status:   SignatureStatus;
+  components_applied: Record<string, unknown>;
+  uploaded_at:        string;
+  applied_at?:        string | null;
+}
+
+export interface PatternTrustKey {
+  id:            string;
+  lab_id:        string;
+  pubkey_sha256: string;
+  description?:  string;
+  enabled:       boolean;
+  added_at:      string;
+}
+
+// ── Pattern-Export (Lab-only) ───────────────────────────────────────────────
+
+export interface PatternSigningKey {
+  id:            string;
+  lab_id:        string;
+  key_id:        string;
+  pubkey_sha256: string;
+  enabled:       boolean;
+  description?:  string;
+  created_at:    string;
+}
+
+export interface PatternSigningKeyCreate {
+  lab_id:       string;
+  key_id:       string;
+  pubkey_pem:   string;
+  privkey_path: string;
+  description?: string;
+}
+
+export interface ExportRequest {
+  components:        BundleComponent[];
+  sign_with_key_id:  string | null;
+  description:       string;
+  lab_run_id?:       string;
+}
+
+export interface PatternExportRecord {
+  id:                  string;
+  bundle_sha256:       string;
+  bundle_size:         number;
+  lab_run_id:          string;
+  components_exported: Record<string, unknown>;
+  exported_at:         string;
+  description?:        string;
+}
+
 export interface ItopConfig {
   enabled:    boolean;
   base_url:   string;
