@@ -22,6 +22,7 @@ RUN apt-get update -qq \
       tcpdump \
       nmap \
       hydra \
+      libcap2-bin \
       python3 \
       python3-yaml \
       python3-pymodbus \
@@ -29,6 +30,14 @@ RUN apt-get update -qq \
  && apt-get autoremove -y \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* /var/cache/apt /tmp/* /var/tmp/*
+
+# File-Capabilities setzen — wir laufen non-root mit cap_drop ALL +
+# cap_add NET_RAW. Damit non-setuid-Binaries die NET_RAW-Capability auch
+# tatsächlich nutzen, brauchen sie das file-cap. apt-get strippt das
+# manchmal in --no-install-recommends; setcap idempotent.
+RUN setcap cap_net_raw+ep /usr/bin/ping \
+ && setcap cap_net_raw,cap_net_admin,cap_net_bind_service+ep /usr/bin/nmap.nmap \
+ || true
 
 # Non-root user — UID 1000 matched Default-Host-User
 RUN groupadd -g 1000 redteam \
