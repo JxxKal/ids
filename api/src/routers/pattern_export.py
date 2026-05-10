@@ -252,10 +252,10 @@ async def export_bundle(
             INSERT INTO pattern_export_log
                 (bundle_sha256, bundle_size, lab_run_id, components_exported,
                  signed_with_key_id, description)
-            VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6)
             """,
             bundle_sha, len(raw), lab_run_id,
-            json.dumps(component_manifest),
+            component_manifest,
             sig_key_id_uuid, req.description,
         )
 

@@ -498,11 +498,14 @@ async def update_feature_flags(
             if k in KNOWN_FEATURE_FLAGS:
                 current[k] = bool(v)
 
+        # asyncpg jsonb-codec encoded dict→JSON selbst — kein json.dumps
+        # davor, sonst wird die Spalte als doppelt-encodierter String
+        # geschrieben und der nächste GET wirft beim dict(str)-Cast.
         await conn.execute(
             """
-            INSERT INTO system_config (key, value) VALUES ('features', $1::jsonb)
+            INSERT INTO system_config (key, value) VALUES ('features', $1)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
             """,
-            json.dumps(current),
+            current,
         )
     return await get_feature_flags(pool)

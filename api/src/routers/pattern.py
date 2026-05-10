@@ -258,13 +258,13 @@ async def upload_bundle(
                 (bundle_sha256, bundle_size, lab_id, lab_run_id, bundle_schema_ver,
                  cyjan_version_at_import, state, signature_status,
                  components_offered, diff_summary, storage_path)
-            VALUES ($1, $2, $3, $4, $5, $6, 'staged', $7, $8::jsonb, $9::jsonb, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, 'staged', $7, $8, $9, $10)
             RETURNING id::text
             """,
             bundle_sha, len(raw), manifest.lab_id, manifest.lab_run_id,
             manifest.schema_version, _read_cyjan_version(),
-            sig_status, json.dumps(manifest.components),
-            json.dumps(diff.model_dump()), str(storage),
+            sig_status, manifest.components,
+            diff.model_dump(), str(storage),
         )
 
     return StagedBundle(
@@ -342,12 +342,12 @@ async def apply_bundle(
         await conn.execute(
             """
             UPDATE pattern_bundle_imports
-            SET state = $2, components_applied = $3::jsonb,
+            SET state = $2, components_applied = $3,
                 rejected_reason = $4, applied_at = now()
             WHERE id = $1::uuid
             """,
             import_id, new_state,
-            json.dumps({"applied": applied, "errors": errors}),
+            {"applied": applied, "errors": errors},
             json.dumps(errors) if errors else None,
         )
 
@@ -656,10 +656,10 @@ async def _apply_default_recalibration(
         await conn.execute(
             """
             INSERT INTO system_config (key, value)
-            VALUES ('sig_rule_overrides', $1::jsonb)
+            VALUES ('sig_rule_overrides', $1)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
             """,
-            json.dumps(overrides),
+            overrides,
         )
 
     return {"applied": applied_count, "skipped_manual_lock": skipped_count}
