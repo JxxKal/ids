@@ -822,3 +822,94 @@ services:
       SNORT_ALERT_FILE: /var/log/suricata/eve.json
       TEST_MODE: ${TEST_MODE:-false}
       SURICATA_OVERRIDES_FILE: /sig-rules/custom/_suricata_overrides.json
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # KALI-SHELL (Lab-only — Compose-Profile `redteam`)
+  #
+  # Minimal hardened Kali-Container für Auto-RedTeam. Network-isoliert
+  # (network_mode: none), read-only Rootfs, non-root, seccomp-locked.
+  # Kommuniziert nur über docker exec vom redteam-orchestrator —
+  # keine offenen Ports, keine Listener. Default-CMD = sleep infinity.
+  # Sicherheits-Details siehe docs/REDTEAM_v1.3.0.md §3.2.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  kali-shell:
+    build: ./kali-shell
+    container_name: ids-kali
+    profiles: ["redteam"]
+    restart: unless-stopped
+    logging: *default-logging
+    network_mode: none           # CRITICAL: kein Netz — veth on-demand
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW                  # nmap raw sockets
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64M
+      - /run:rw,noexec,nosuid,size=8M
+      - /var/tmp:rw,noexec,nosuid,size=8M
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:./kali-shell/seccomp.json
+    pids_limit: 100
+    mem_limit: 512m
+    cpus: 1.0
+    user: "1000:1000"
+    healthcheck:
+      test: ["CMD", "test", "-x", "/usr/bin/nmap"]
+      interval: 60s
+      timeout: 5s
+      retries: 2
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # REDTEAM-ORCHESTRATOR (Lab-only)
+  #
+  # Hostet Scenario-Runner, REST-API und MCP-Server. Ruft kali-shell-Tools
+  # via `docker exec` auf. Lock-serialisiert: ein veth-Handover gleichzeitig.
+  # Docker-Socket-Mount: Root-Equivalent am Host — daher gehärteter
+  # Container (non-root, kein extra-cap). Sicherheits-Details s. §3.1.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  redteam-orchestrator:
+    build: ./redteam-orchestrator
+    container_name: ids-redteam-orchestrator
+    profiles: ["redteam"]
+    restart: unless-stopped
+    logging: *default-logging
+    cap_add:
+      - NET_ADMIN              # ip link set ... netns für veth-Handover
+    # network_mode: host ist nötig für netns-Manipulation. Bedeutet aber
+    # auch volle Host-Net-Sichtbarkeit — der Container muss daher selbst
+    # gehärtet sein und auf nicht-routbare Test-IPs limitiert sein.
+    network_mode: host
+    depends_on:
+      api:
+        condition: service_started
+      kali-shell:
+        condition: service_started
+    environment:
+      CYJAN_API_BASE:    "http://localhost:8001"
+      CYJAN_API_TOKEN:   "${REDTEAM_API_TOKEN:-}"
+      CYJAN_TEST_IFACE:  "cyjan-inject"
+      ALLOWED_SRC_CIDRS: "192.0.2.0/24,198.51.100.0/24,203.0.113.0/24"
+      MAX_TIMEOUT_SEC:   "120"
+      DOCKER_HOST:       "unix:///var/run/docker.sock"
+    ports:
+      - "${REDTEAM_API_PORT:-8002}:8002"
+    volumes:
+      - cyjan-scenarios:/scenarios:ro
+      # WARNUNG: Docker-Socket-Mount = Root-Equivalent am Host. Der :ro-Flag
+      # schützt nur das Inode der Socket-Datei, NICHT die Reads/Writes
+      # darüber. Mit dem Socket kann der Orchestrator beliebige Container
+      # starten (auch privileged --pid=host). Hier akzeptiert weil:
+      #  - `redteam`-Profile muss explizit aktiviert sein
+      #  - Container selbst läuft non-root, no extra caps außer NET_ADMIN
+      # V2: dedizierter nsenter-Sidecar statt Socket-Mount.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

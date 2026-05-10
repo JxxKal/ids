@@ -1,0 +1,48 @@
+# Tool-Whitelist für kali-shell. Der Runner lehnt alles ab was hier
+# nicht gelistet ist. forbidden_flags wird gegen jeden arg-Token
+# geprüft (exact match oder prefix mit "=").
+# require_target=true erzwingt explicit target_ip im JSON-Request.
+
+tools:
+  nmap:
+    binary: /usr/bin/nmap
+    max_args: 30
+    forbidden_flags:
+      - "--script"      # Keine NSE-Scripts — Full-FS-Access
+      - "-iL"           # Keine File-basierten Target-Listen
+      - "-oN"           # Kein Output-to-File
+      - "-oX"
+      - "-oG"
+      - "--datadir"
+    require_target: true
+
+  hydra:
+    binary: /usr/bin/hydra
+    max_args: 20
+    forbidden_flags:
+      - "-R"            # Kein Restore-from-File
+      - "-o"            # Kein Output-to-File
+    require_target: true
+
+  modbus-cli:
+    binary: /usr/bin/modbus
+    max_args: 15
+    forbidden_flags: []
+    require_target: true
+
+  ncat:
+    binary: /usr/bin/ncat
+    max_args: 10
+    forbidden_flags:
+      - "-e"            # Keine Command-Execution
+      - "--exec"
+      - "--sh-exec"
+      - "-l"            # Kein Listen-Modus
+      - "--listen"
+    require_target: true
+
+  ping:
+    binary: /usr/bin/ping
+    max_args: 8
+    forbidden_flags: []
+    require_target: true

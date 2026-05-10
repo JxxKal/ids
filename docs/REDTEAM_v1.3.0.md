@@ -312,18 +312,32 @@ Phasen 4–7 ergänzen den automatisierten Loop, sind aber keine Voraussetzung.
    REDTEAM_ENABLED=true
    CYJAN_LAB_ID=cyjan-lab-jxxk
    ```
-3. `docker compose --profile prod --profile redteam up -d`
-4. UI: `Settings → System → Features → RedTeam-Tooling aktivieren` (Modal-Warning bestätigen)
-5. UI: `Settings → System → Features → Pattern-Export aktivieren`
-6. Lab-Engineer registriert Signing-Key:
+3. **Lab-only Images selbst bauen** (Customer-Update-ZIP enthält sie aus
+   Sicherheitsgründen NICHT):
+   ```bash
+   sudo docker compose --profile redteam build kali-shell redteam-orchestrator
+   ```
+4. `sudo docker compose --profile prod --profile redteam up -d`
+5. UI: `Settings → System → Features → RedTeam-Tooling aktivieren` (Modal-Warning bestätigen)
+6. UI: `Settings → System → Features → Pattern-Export aktivieren`
+7. Lab-Engineer registriert Signing-Key:
    ```bash
    sudo cp lab-signing.pem /etc/cyjan/signing-keys/prod-2026Q2.pem
    # via UI: Settings → Integrations → Pattern-Export → Signing-Keys → Hinzufügen
    ```
-7. RedTeam-Loop läuft (Auto, KI-getrieben oder manuell via MCP-Client)
-8. Engineer pflegt `_defaults_recalibration.yml` mit reviewten Erkenntnissen
-9. UI: `Pattern-Export → Bundle erstellen` → ZIP-Download
-10. Bundle an Customer-Site übergeben (USB/Mail/HTTPS-Drop)
+8. RedTeam-Loop läuft (Auto, KI-getrieben oder manuell via MCP-Client)
+9. Engineer pflegt `_defaults_recalibration.yml` mit reviewten Erkenntnissen
+10. UI: `Pattern-Export → Bundle erstellen` → ZIP-Download
+11. Bundle an Customer-Site übergeben (USB/Mail/HTTPS-Drop)
+
+**Wichtig: nach jedem Cyjan-System-Update den `redteam`-Build wiederholen**,
+weil Customer-Update-ZIPs die RedTeam-Images bewusst nicht enthalten:
+
+```bash
+cd /opt/ids && git pull
+sudo docker compose --profile redteam build kali-shell redteam-orchestrator
+sudo docker compose --profile prod --profile redteam up -d --force-recreate
+```
 
 -----
 
