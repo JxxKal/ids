@@ -25,7 +25,6 @@ RUN apt-get update -qq \
       python3 \
       python3-yaml \
       python3-pymodbus \
-      modbus-cli \
       netcat-openbsd \
  && apt-get autoremove -y \
  && apt-get clean \

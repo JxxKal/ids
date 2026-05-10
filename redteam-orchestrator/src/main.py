@@ -63,7 +63,7 @@ class HealthResponse(BaseModel):
 
 
 class RunKaliToolRequest(BaseModel):
-    tool:       Literal["nmap", "hydra", "modbus-cli", "ncat", "ping"]
+    tool:       Literal["nmap", "hydra", "ncat", "ping"]
     target_ip:  str = Field(min_length=7, max_length=45)
     args:       list[str] = Field(default_factory=list, max_length=30)
     timeout_sec: int = Field(default=30, ge=5, le=120)

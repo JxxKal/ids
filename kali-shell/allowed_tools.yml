@@ -24,12 +24,6 @@ tools:
       - "-o"            # Kein Output-to-File
     require_target: true
 
-  modbus-cli:
-    binary: /usr/bin/modbus
-    max_args: 15
-    forbidden_flags: []
-    require_target: true
-
   ncat:
     binary: /usr/bin/ncat
     max_args: 10
