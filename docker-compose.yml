@@ -850,18 +850,17 @@ services:
       - /tmp:rw,noexec,nosuid,size=64M
       - /run:rw,noexec,nosuid,size=8M
       - /var/tmp:rw,noexec,nosuid,size=8M
-    security_opt:
-      - no-new-privileges:true
-      # Default Docker-Seccomp-Profil greift (blockt ptrace/mount/bpf/
-      # kexec/init_module/etc.). Custom-Profil als V2 — die zusätzliche
-      # Härtung lohnt aktuell nicht den Maintenance-Aufwand (jedes Tool-
-      # Update braucht Syscall-Audit). Defense-in-Depth bleibt: cap_drop ALL +
-      # cap_add NET_RAW + read_only + network_mode none + non-root.
-      # - seccomp:./kali-shell/seccomp.json
+    # KEIN no-new-privileges hier: blockiert sonst File-Capabilities
+    # beim execve (ping/nmap brauchen cap_net_raw=ep). Härtung durch
+    # cap_drop ALL + cap_add NET_RAW: auch root hat dann nur NET_RAW
+    # und kann nichts darüber hinaus.
+    # Default Docker-Seccomp-Profil greift trotzdem (ptrace, mount, bpf,
+    # kexec, init_module etc. geblockt) — Custom-Profil als V2.
     pids_limit: 100
     mem_limit: 512m
     cpus: 1.0
-    user: "1000:1000"
+    # user-mapping bewusst nicht: cap_drop ALL macht root harmlos,
+    # File-Caps brauchen execve mit nnp=0 → würde mit --user kollidieren.
     healthcheck:
       test: ["CMD", "test", "-x", "/usr/bin/nmap"]
       interval: 60s
