@@ -33,7 +33,21 @@ CREATE INDEX IF NOT EXISTS idx_redteam_audit_decision_ts
   ON redteam_audit_log(decision, ts DESC) WHERE decision <> 'allowed';
 
 -- Compression nach 90 Tagen — forensisch wertvoll bleibt es länger,
--- aber Storage soll nicht endlos wachsen.
+-- aber Storage soll nicht endlos wachsen. TimescaleDB >=2.18 erfordert
+-- explizites SET (timescaledb.compress = true) vor add_compression_policy.
+-- DO-Block damit die Migration auf älteren Versionen (die das schon im
+-- create_hypertable inkludieren) nicht failt.
+DO $$
+BEGIN
+    BEGIN
+        EXECUTE 'ALTER TABLE redteam_audit_log SET (timescaledb.compress = true)';
+    EXCEPTION WHEN OTHERS THEN
+        -- bereits aktiv oder Version unterstützt es nicht — beides OK
+        NULL;
+    END;
+END
+$$;
+
 SELECT add_compression_policy('redteam_audit_log', interval '90 days', if_not_exists => TRUE);
 
 -- Hard-Lock: kein UPDATE/DELETE auf Audit-Einträgen
