@@ -437,3 +437,72 @@ async def update_config(
             key, dict(body.value),
         )
     return ConfigResponse(key=row["key"], value=dict(row["value"]))
+
+
+# ── Feature-Flags ───────────────────────────────────────────────────────────
+# Cyjan-weite Feature-Toggles (RedTeam, Pattern-Federation etc). Frontend
+# pollt /system/feature-flags beim Start und entscheidet welche Settings-
+# Sections gerendert werden. Gates AUSSCHLIESSLICH UI/Endpoint-Sichtbarkeit
+# — die echte Aktivierung passiert über Compose-Profile (Container-Existenz)
+# UND die Flag-Werte hier (Defense in Depth).
+
+# Whitelist der erlaubten Flag-Namen — verhindert dass User über die API
+# beliebige neue Felder anlegt. Ergänzen wenn neue Features dazukommen.
+KNOWN_FEATURE_FLAGS = {
+    "redteam_enabled",
+    "pattern_export_enabled",
+    "pattern_import_enabled",
+}
+
+
+class FeatureFlags(BaseModel):
+    redteam_enabled:        bool = False
+    pattern_export_enabled: bool = False
+    pattern_import_enabled: bool = True
+
+
+class FeatureFlagsUpdate(BaseModel):
+    redteam_enabled:        bool | None = None
+    pattern_export_enabled: bool | None = None
+    pattern_import_enabled: bool | None = None
+
+
+@router.get("/system/feature-flags", response_model=FeatureFlags,
+            summary="Cyjan-Feature-Flags lesen (RedTeam, Pattern-Federation, …)")
+async def get_feature_flags(pool: asyncpg.Pool = Depends(get_pool)) -> FeatureFlags:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT value FROM system_config WHERE key = 'features'")
+    raw = dict(row["value"]) if row and row["value"] else {}
+    # Defaults: nur pattern_import ist standardmäßig an
+    return FeatureFlags(
+        redteam_enabled=bool(raw.get("redteam_enabled", False)),
+        pattern_export_enabled=bool(raw.get("pattern_export_enabled", False)),
+        pattern_import_enabled=bool(raw.get("pattern_import_enabled", True)),
+    )
+
+
+@router.patch("/system/feature-flags", response_model=FeatureFlags,
+              summary="Feature-Flags partiell aktualisieren (admin only)")
+async def update_feature_flags(
+    body: FeatureFlagsUpdate,
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> FeatureFlags:
+    """Patch-Semantik: nur Felder die in der Request !=None sind werden
+    geschrieben. Nicht erkannte Keys werden ignoriert."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT value FROM system_config WHERE key = 'features'")
+        current = dict(row["value"]) if row and row["value"] else {}
+
+        patch = body.model_dump(exclude_unset=True, exclude_none=True)
+        for k, v in patch.items():
+            if k in KNOWN_FEATURE_FLAGS:
+                current[k] = bool(v)
+
+        await conn.execute(
+            """
+            INSERT INTO system_config (key, value) VALUES ('features', $1::jsonb)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            json.dumps(current),
+        )
+    return await get_feature_flags(pool)
