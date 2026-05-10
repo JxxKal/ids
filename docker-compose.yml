@@ -39,6 +39,8 @@ volumes:
   irma-data:      # Persistiert letzte bekannte IRMA-Alarm-ID
   ids-certs:      # TLS-Zertifikate (API schreibt, nginx liest)
   master-ca:      # Master-CA für mTLS-Auth der Remote-Taps (api schreibt, master-uplink liest)
+  pattern-staging: # Pattern-Federation: Tempdir für hochgeladene Bundles während Diff/Apply
+  cyjan-scenarios: # Pattern-Federation: importierte Regression-Test-Scenarios (Lab-Profil liest read-only)
 
 services:
 
@@ -437,6 +439,11 @@ services:
       - ml-models:/models
       - ids-certs:/certs
       - master-ca:/var/lib/cyjan/master-ca
+      # Pattern-Federation: Bundle-Staging-Tempdir + Scenarios-Volume
+      # (für tests.regression aus importierten Bundles). Volume kann auch
+      # leer bleiben wenn redteam-Profil nicht aktiv ist.
+      - pattern-staging:/var/lib/cyjan/pattern-staging
+      - cyjan-scenarios:/cyjan-scenarios
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/ids:/opt/ids
       - ./infra/timescaledb/migrations:/migrations:ro

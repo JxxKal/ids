@@ -54,6 +54,7 @@ from routers import reports as reports_router
 from routers import taps as taps_router
 from routers import tap_update as tap_update_router
 from routers import mqtt as mqtt_router
+from routers import pattern as pattern_router
 from routers import ssl as ssl_router
 from routers import system as system_router
 from routers import update as update_router
@@ -183,6 +184,7 @@ app.include_router(itop_router,            dependencies=_auth)
 app.include_router(maintenance_router.router, dependencies=_auth)
 app.include_router(tap_update_router.router,   dependencies=_auth)
 app.include_router(mqtt_router.router,          dependencies=_auth)
+app.include_router(pattern_router.router,       dependencies=_auth)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
