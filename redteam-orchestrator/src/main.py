@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -31,14 +32,34 @@ logging.basicConfig(
 )
 log = logging.getLogger("redteam-orchestrator")
 
+executor = KaliExecutor()
+
+# FastMCP 3.x StreamableHTTPSessionManager braucht den lifespan-Context der
+# MCP-App, kombiniert mit unserem eigenen DB-Pool-Setup. Lifespan-Context-
+# Manager der MCP-App umwickeln und unsere init_pool/close_pool drin laufen
+# lassen. Sonst RuntimeError beim ersten /mcp-Call: "task group is not
+# initialized".
+_mcp_app = mcp.http_app()
+
+
+@asynccontextmanager
+async def lifespan(_app: "FastAPI"):  # noqa: F821
+    await init_pool(settings.postgres_dsn)
+    log.info("RedTeam-Orchestrator startup. kali_container=%s, allowed_cidrs=%s",
+             settings.kali_container, ",".join(settings.allowed_src_cidrs))
+    # Verschachteln des MCP-Lifespan damit FastMCP intern initialisiert wird
+    async with _mcp_app.lifespan(_app):
+        yield
+    await close_pool()
+
+
 app = FastAPI(
     title="Cyjan RedTeam-Orchestrator",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
-
-executor = KaliExecutor()
 
 
 # ─── Auth ────────────────────────────────────────────────────────────────
@@ -200,23 +221,9 @@ async def list_scenarios() -> dict:
     return {"scenarios": scenarios}
 
 
-# ─── Lifecycle ──────────────────────────────────────────────────────────
-
-@app.on_event("startup")
-async def _startup() -> None:
-    await init_pool(settings.postgres_dsn)
-    log.info("RedTeam-Orchestrator startup. kali_container=%s, allowed_cidrs=%s",
-             settings.kali_container, ",".join(settings.allowed_src_cidrs))
-
-
-@app.on_event("shutdown")
-async def _shutdown() -> None:
-    await close_pool()
-
-
 # ─── MCP-Server-Mount ────────────────────────────────────────────────────
-# FastMCP-App als Sub-Application unter /mcp. Claude/AI-Clients verbinden
-# über http://master:8002/mcp (Streamable-HTTP-Transport seit FastMCP 3.x —
-# sse_app() ist veraltet, http_app() liefert das passende Starlette-App).
-# Auth läuft über CYJAN_API_TOKEN als URL-Query oder Header.
-app.mount("/mcp", mcp.http_app())
+# Mount der MCP-Sub-App. Endpoint: http://master:8002/mcp/mcp/
+# (sub-prefix /mcp + interner route /mcp = doppelt; FastMCP 3.x macht
+# das so, Claude/MCP-Clients sind damit kompatibel).
+# WICHTIG: Es ist die SELBE _mcp_app die oben in lifespan reingeht.
+app.mount("/mcp", _mcp_app)
