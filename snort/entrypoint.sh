@@ -208,6 +208,24 @@ app-layer:
       enabled: yes
     snmp:
       enabled: yes
+    # Suricata-7-additions — auf 6.x werden diese keys ignoriert (warning),
+    # auf 7.x aktivieren sie die nativen Parser:
+    http2:
+      enabled: yes
+    quic:
+      enabled: yes
+    mqtt:
+      enabled: yes
+    bittorrent-dht:
+      enabled: yes
+    tftp:
+      enabled: yes
+    ike:
+      enabled: yes
+    sip:
+      enabled: yes
+    pgsql:
+      enabled: yes
 
 classification-file: /etc/suricata/classification.config
 reference-config-file: /etc/suricata/reference.config
