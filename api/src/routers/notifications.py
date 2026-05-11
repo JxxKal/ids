@@ -228,13 +228,11 @@ async def update_channel(
     return ChannelOut(**dict(row))
 
 
-@router.delete("/channels/{channel_id}",
-               status_code=204,
-               dependencies=[Depends(require_admin)])
+@router.delete("/channels/{channel_id}", dependencies=[Depends(require_admin)])
 async def delete_channel(
     channel_id: UUID,
     pool:       asyncpg.Pool = Depends(get_pool),
-) -> None:
+) -> dict:
     async with pool.acquire() as conn:
         result = await conn.execute(
             "DELETE FROM notification_channels WHERE id = $1",
@@ -242,6 +240,7 @@ async def delete_channel(
         )
     if result.endswith("0"):
         raise HTTPException(404, "Channel not found")
+    return {"ok": True}
 
 
 @router.post("/channels/{channel_id}/test", dependencies=[Depends(require_admin)])
