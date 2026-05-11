@@ -72,72 +72,73 @@ class KaliExecutor:
     _HOST_IP_CIDR   = "192.0.2.254/24"
     _KALI_IP_CIDR   = "192.0.2.1/24"
 
-    async def _attach_iface_unlocked(self) -> None:
-        """Veth-Pair frisch anlegen, peer-Seite am Host konfigurieren,
-        kali-Seite ins kali-Net-Namespace + IP zuweisen. Stateless —
-        ein Pair pro Tool-Run, beim Detach komplett gelöscht.
+    async def setup_veth_pair_once(self) -> None:
+        """Idempotent: erstellt veth-Pair, konfiguriert Host-Peer, schiebt
+        kali-Seite in den kali-Namespace. Wird beim orchestrator-Startup
+        einmal aufgerufen — nicht pro Tool-Run.
 
-        Vorteil ggü. persistentem veth: kein Detach-Permission-Problem
-        (mount-ns-Operationen via `ip -n` brauchen CAP_SYS_ADMIN+
-        Mount-Manipulation, was im Container kompliziert ist). `ip link
-        del cy-inj-peer` löscht das ganze Pair atomar — egal in welchem
-        Namespace die andere Seite steckt."""
-        # Vorab cleanup falls vorheriger Run nicht sauber detached hat
-        await self._exec("ip", "link", "del", self._PEER_IFACE)  # ignore rc
+        Vorteil: cy-inj-peer ist persistent am Host → Sniffer kann
+        kontinuierlich dort capture'n. Tool-Runs sind no-op auf dem Pair,
+        die kali-Seite bleibt im kali-namespace.
 
+        Idempotenz:
+        - Pair existiert schon → ip link add wirft "File exists", ok
+        - Host-Peer-IP existiert schon → ip addr add wirft "exists", ok
+        - kali-Seite ist schon im kali-namespace → ip link set netns wirft
+          "Device not found" weil iface aus Host-Sicht weg ist, ok"""
+        # 1. Pair anlegen (idempotent)
         rc, _, err = await self._exec(
             "ip", "link", "add", settings.test_iface,
             "type", "veth", "peer", "name", self._PEER_IFACE,
         )
-        if rc != 0:
-            raise KaliExecutionError(f"veth-Pair-Creation failed: {err.strip()}")
+        pair_existed = rc != 0 and "exists" in err.lower()
+        if rc != 0 and not pair_existed:
+            log.error("veth-Pair-Creation failed: %s", err.strip())
+            return
 
-        # Host-Peer-Seite konfigurieren
-        rc, _, err = await self._exec(
-            "ip", "addr", "add", self._HOST_IP_CIDR, "dev", self._PEER_IFACE,
-        )
-        if rc != 0 and "exists" not in err.lower():
-            raise KaliExecutionError(f"host-peer addr add failed: {err.strip()}")
-        rc, _, err = await self._exec("ip", "link", "set", self._PEER_IFACE, "up")
-        if rc != 0:
-            raise KaliExecutionError(f"host-peer link up failed: {err.strip()}")
+        # 2. Host-Peer konfigurieren (idempotent)
+        await self._exec("ip", "addr", "add", self._HOST_IP_CIDR, "dev", self._PEER_IFACE)
+        await self._exec("ip", "link", "set", self._PEER_IFACE, "up")
 
-        # Container-Seite ins kali-Net-Namespace verschieben
+        # 3. kali-Seite ins kali-namespace (idempotent: wenn schon dort, fail = ok)
         pid = await self._get_container_pid()
         rc, _, err = await self._exec(
             "ip", "link", "set", settings.test_iface, "netns", str(pid),
         )
-        if rc != 0:
-            raise KaliExecutionError(f"ip link set netns failed: {err.strip()}")
+        if rc != 0 and "does not exist" not in err.lower():
+            log.warning("link set netns failed (vielleicht schon im kali-ns?): %s", err.strip())
 
-        # IP + up im kali-Namespace
-        rc, _, err = await self._exec(
+        # 4. IP + up im kali-namespace (idempotent)
+        await self._exec(
             "nsenter", "-t", str(pid), "-n",
             "ip", "addr", "add", self._KALI_IP_CIDR, "dev", settings.test_iface,
         )
-        if rc != 0 and "exists" not in err.lower():
-            raise KaliExecutionError(f"kali addr add failed: {err.strip()}")
-        rc, _, err = await self._exec(
+        await self._exec(
             "nsenter", "-t", str(pid), "-n",
             "ip", "link", "set", settings.test_iface, "up",
         )
-        if rc != 0:
-            raise KaliExecutionError(f"kali link up failed: {err.strip()}")
-
-        log.info("Veth-Pair %s↔%s up (kali pid=%d, %s ↔ %s)",
+        log.info("Veth-Pair %s↔%s persistent (kali-pid=%d, %s ↔ %s)",
                  settings.test_iface, self._PEER_IFACE, pid,
                  self._KALI_IP_CIDR, self._HOST_IP_CIDR)
 
-    async def _detach_iface_unlocked(self) -> None:
-        """`ip link del <peer>` löscht das ganze Pair atomar — egal in
-        welchem Namespace die andere Seite steckt. Keine Permission-
-        oder Mount-NS-Probleme wie beim `ip link set ... netns`-Pfad."""
-        rc, _, err = await self._exec("ip", "link", "del", self._PEER_IFACE)
+    async def _attach_iface_unlocked(self) -> None:
+        """No-op — veth ist persistent über setup_veth_pair_once eingerichtet.
+        Tool-Run verifiziert nur die Existenz, damit ein verlorenes Pair
+        (z.B. kali-Container restart) gleich beim ersten Run erkannt wird."""
+        # Sanity: kali-Seite muss im kali-namespace sein, IP gesetzt
+        pid = await self._get_container_pid()
+        rc, _, _ = await self._exec(
+            "nsenter", "-t", str(pid), "-n",
+            "ip", "link", "show", settings.test_iface,
+        )
         if rc != 0:
-            log.warning("veth-pair delete failed: %s", err.strip())
-        else:
-            log.info("Veth-Pair %s↔%s removed",
-                     settings.test_iface, self._PEER_IFACE)
+            # Pair verloren — re-setup einmal versuchen
+            log.warning("Veth nicht im kali-ns sichtbar — re-setup")
+            await self.setup_veth_pair_once()
+
+    async def _detach_iface_unlocked(self) -> None:
+        """No-op bei persistentem Setup — veth bleibt bestehen zwischen Runs."""
+        pass
 
     async def run_with_iface(
         self, tool: str, target_ip: str, args: list[str], timeout_sec: int = 30,

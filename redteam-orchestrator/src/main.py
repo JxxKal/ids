@@ -50,6 +50,13 @@ async def lifespan(_app: "FastAPI"):  # noqa: F821
     await init_pool(settings.postgres_dsn)
     log.info("RedTeam-Orchestrator startup. kali_container=%s, allowed_cidrs=%s",
              settings.kali_container, ",".join(settings.allowed_src_cidrs))
+    # veth-Pair persistent einrichten — wird vom Sniffer kontinuierlich
+    # capture'd. Tool-Runs verschieben das veth nicht mehr, das spart
+    # Race-Conditions zwischen attach/detach und Sniffer-Reopen.
+    try:
+        await executor.setup_veth_pair_once()
+    except Exception as exc:
+        log.warning("setup_veth_pair_once failed (Lab-Setup-Check): %s", exc)
     # Verschachteln des MCP-Lifespan damit FastMCP intern initialisiert wird
     async with _mcp_app.lifespan(_app):
         yield
