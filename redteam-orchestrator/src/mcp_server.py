@@ -169,11 +169,6 @@ async def create_payload_scenario_v1(
         description="Transport-Protokoll. udp z.B. für DNS, tcp für HTTP/Modbus.",
     ),
     target_port: int = Field(ge=1, le=65535),
-    description: str = Field(
-        default="",
-        max_length=500,
-        description="Kurze Beschreibung was der Payload signaturmäßig auslöst.",
-    ),
     payload_b64: str = Field(
         max_length=5500,
         description=(
@@ -182,6 +177,11 @@ async def create_payload_scenario_v1(
             "Für L7-Signatur-Detection: Modbus-PDU, HTTP-Request-Header-"
             "Pattern, DNS-Query mit Custom-Subdomain, OPC-UA-Frame etc."
         ),
+    ),
+    description: str = Field(
+        default="",
+        max_length=500,
+        description="Kurze Beschreibung was der Payload signaturmäßig auslöst.",
     ),
     expected_alert_rule_id: str | None = Field(
         default=None, max_length=128,
