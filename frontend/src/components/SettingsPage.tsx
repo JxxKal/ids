@@ -10,8 +10,8 @@ import {
   exportPatternBundle, fetchExportLog, fetchFeatureFlags, fetchIrmaConfig, fetchItopConfig,
   fetchMLConfig, fetchMLStatus, fetchMqttConfig, fetchPatternImports, fetchPatternTrustKeys,
   fetchRedTeamAuditLog, fetchRedTeamHealth, fetchRedTeamScenarios,
-  fetchRuleSources, fetchSigningKeys, runRedTeamScenario, runRedTeamTool,
-  updateFeatureFlags, uploadPatternBundle,
+  fetchRuleSources, fetchSigningKeys, previewPatternExport, runRedTeamScenario,
+  runRedTeamTool, updateFeatureFlags, uploadPatternBundle,
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
   fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource, setInterfaceRole,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveMqttConfig, saveSamlConfig, saveSyslogConfig,
@@ -2420,19 +2420,30 @@ function RuleFileEditor() {
   // ohne Suche praktisch unauffindbar.
   const [search, setSearch] = useState('');
   const [showBuiltin, setShowBuiltin] = useState(true);
+  const [aiOnly, setAiOnly] = useState(false);
 
-  // Sortierung: Custom zuerst (alphabetisch), dann builtin (alphabetisch).
-  // Plus optionaler Substring-Filter auf den Dateinamen.
+  // Sortierung: KI-Files zuerst (Sichtbarkeit), dann Custom, dann builtin.
+  // Plus Substring-Filter auf Dateinamen + optional aiOnly.
   const filteredFiles = useMemo(() => {
     const q = search.trim().toLowerCase();
     return [...files]
       .filter(f => showBuiltin || !f.builtin)
+      .filter(f => !aiOnly || f.ai_rule_count > 0)
       .filter(f => !q || f.name.toLowerCase().includes(q))
       .sort((a, b) => {
+        // KI-Files immer ganz oben
+        if ((a.ai_rule_count > 0) !== (b.ai_rule_count > 0)) {
+          return a.ai_rule_count > 0 ? -1 : 1;
+        }
         if (a.builtin !== b.builtin) return a.builtin ? 1 : -1;
         return a.name.localeCompare(b.name);
       });
-  }, [files, search, showBuiltin]);
+  }, [files, search, showBuiltin, aiOnly]);
+
+  const totalAiRules = useMemo(
+    () => files.reduce((acc, f) => acc + (f.ai_rule_count || 0), 0),
+    [files],
+  );
 
   const dirty = content !== orig;
 
@@ -2583,6 +2594,20 @@ function RuleFileEditor() {
               {t('settings.rules.editorShowingCount', { shown: filteredFiles.length, total: files.length })}
             </span>
           </label>
+          {totalAiRules > 0 && (
+            <label
+              className="flex items-center gap-1.5 text-[10px] px-1 cursor-pointer text-violet-300"
+              title="Filter: nur Files mit KI-erzeugten Custom-Rules anzeigen"
+            >
+              <input
+                type="checkbox"
+                className="accent-violet-500"
+                checked={aiOnly}
+                onChange={e => setAiOnly(e.target.checked)}
+              />
+              <span>🤖 Nur KI-erzeugte ({totalAiRules})</span>
+            </label>
+          )}
           <div className="space-y-1 max-h-[440px] overflow-y-auto pr-1">
           {filteredFiles.length === 0 && !busy && (
             <p className="text-[11px] text-slate-500 italic px-2 py-3">{t('settings.rules.noFiles')}</p>
@@ -2602,6 +2627,14 @@ function RuleFileEditor() {
             >
               <div className="flex items-center gap-1.5">
                 <span className="font-mono truncate flex-1">{f.name}</span>
+                {f.ai_rule_count > 0 && (
+                  <span
+                    className="px-1 py-0.5 text-[9px] rounded bg-violet-500/15 text-violet-300 border border-violet-500/40"
+                    title="Datei enthält KI-erzeugte Custom-Rules (metadata:author cyjan-ai)"
+                  >
+                    🤖 KI {f.ai_rule_count}
+                  </span>
+                )}
                 {f.builtin && <span className="px-1 py-0.5 text-[9px] rounded bg-slate-700/40 text-slate-500 border border-slate-600/30">built-in</span>}
               </div>
               <div className="flex items-center gap-3 text-[10px] text-slate-500 mt-0.5">
@@ -2622,6 +2655,20 @@ function RuleFileEditor() {
             </p>
           ) : (
             <>
+              {/* KI-Banner wenn Datei AI-Rules enthält */}
+              {(() => {
+                const meta = files.find(f => f.name === selected);
+                if (!meta || meta.ai_rule_count === 0) return null;
+                return (
+                  <div className="bg-violet-500/10 border border-violet-500/40 rounded px-3 py-2 text-[11px] text-violet-200">
+                    🤖 <strong>{meta.ai_rule_count}</strong> KI-erzeugte Custom-Rule(n) in dieser Datei.
+                    Suche nach <code className="font-mono bg-violet-500/20 px-1 rounded">metadata:author cyjan-ai</code>
+                    {' '}im Editor unten. KI-Rules nutzen die SID-Range
+                    {' '}<code className="font-mono">9000000-9999999</code> — ET-Open + Suricata-Builtin sind dort
+                    nie zu finden.
+                  </div>
+                );
+              })()}
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-xs text-slate-200">{selected}</span>
                 {dirty && <span className="text-[10px] text-amber-400">{t('settings.rules.unsaved')}</span>}
@@ -3928,46 +3975,136 @@ function RedTeamSettings() {
       <ScenarioRunner scenarios={scenarios} onAuditChange={reload} />
 
       {/* Audit-Log */}
-      <div className="border border-slate-800 rounded p-3">
-        <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
-          Audit-Log (letzte {auditLog.length})
-        </h3>
-        <table className="w-full text-[11px]">
-          <thead>
-            <tr className="text-slate-500">
-              <th className="text-left font-normal py-1">Zeit</th>
-              <th className="text-left font-normal">Tool</th>
-              <th className="text-left font-normal">Target</th>
-              <th className="text-left font-normal">Entscheidung</th>
-              <th className="text-right font-normal">Dauer</th>
-            </tr>
-          </thead>
-          <tbody>
-            {auditLog.map(e => (
-              <tr key={e.id} className="border-t border-slate-800/40">
-                <td className="py-1 text-slate-500 font-mono">{new Date(e.ts).toLocaleString()}</td>
-                <td className="font-mono text-slate-300">{e.mcp_tool}</td>
-                <td className="font-mono text-slate-400">{e.target_ip ?? '—'}</td>
+      <AuditLogTable entries={auditLog} />
+    </div>
+  );
+}
+
+
+// ── AuditLogTable — formatiert was tatsächlich getestet wurde ──────────────
+//
+// Das mcp_tool-Feld allein ("run_payload_scenario_v1") sagt nichts aus —
+// der eigentliche Test (welches Scenario, welches Tool, welche Rule) sitzt
+// im result_summary-JSONB. Diese Komponente zieht die relevanten Felder
+// raus und macht's lesbar.
+
+function AuditLogTable({ entries }: { entries: import('../types').RedTeamAuditEntry[] }) {
+  function describe(e: import('../types').RedTeamAuditEntry): {
+    label: string; detail: string; iconClass: string;
+  } {
+    const rs = (e.result_summary || {}) as Record<string, unknown>;
+    const tool = e.mcp_tool;
+
+    if (tool === 'run_payload_scenario_v1') {
+      const sid = String(rs.scenario_id ?? '?');
+      const sent = rs.sent_bytes ?? '?';
+      const matched = rs.matched_alerts;
+      const matchedStr = matched != null ? `, alerts=${matched}` : '';
+      const via = rs.via ? ` (${rs.via})` : '';
+      return {
+        label: `Scenario ${sid}${via}`,
+        detail: `sent=${sent} B${matchedStr}` + (rs.expected_rule ? `, erwartet=${rs.expected_rule}` : ''),
+        iconClass: 'text-violet-300',
+      };
+    }
+    if (tool === 'run_kali_tool_v1') {
+      const expected = rs.expected_rule ?? '';
+      const exit = rs.exit_code ?? '?';
+      const matched = rs.matched_alerts;
+      let toolDetail = '';
+      try {
+        const argsArr = JSON.parse(e.args_excerpt || '[]');
+        if (Array.isArray(argsArr) && argsArr.length > 0) toolDetail = ` ${argsArr.join(' ')}`;
+      } catch { /* ignore */ }
+      return {
+        label: `Tool kali` + (toolDetail || ''),
+        detail: `exit=${exit}` + (matched != null ? `, alerts=${matched}` : '') +
+                (expected ? `, erwartet=${expected}` : ''),
+        iconClass: 'text-cyan-300',
+      };
+    }
+    if (tool === 'create_payload_scenario_v1') {
+      const sid = String(rs.scenario_id ?? '?');
+      return {
+        label: `Scenario angelegt: ${sid}`,
+        detail: String(rs.path ?? ''),
+        iconClass: 'text-emerald-300',
+      };
+    }
+    if (tool === 'delete_payload_scenario_v1') {
+      const sid = String(rs.scenario_id ?? '?');
+      return {
+        label: `Scenario gelöscht: ${sid}`,
+        detail: rs.removed ? 'removed=true' : 'nicht gefunden',
+        iconClass: 'text-slate-400',
+      };
+    }
+    if (tool === 'create_suricata_rule_v1') {
+      const sid = String(rs.sid ?? '?');
+      const replaced = rs.replaced_existing ? ' (ersetzt)' : '';
+      return {
+        label: `Suricata-Rule SID ${sid} geschrieben${replaced}`,
+        detail: `${rs.proto ?? '?'}/${rs.dst_port ?? '?'} — ${String(rs.msg ?? '').slice(0, 60)}`,
+        iconClass: 'text-amber-300',
+      };
+    }
+    if (tool === 'delete_suricata_rule_v1') {
+      return {
+        label: `Suricata-Rule SID ${rs.sid ?? '?'} gelöscht`,
+        detail: rs.removed ? 'removed=true' : 'nicht gefunden',
+        iconClass: 'text-slate-400',
+      };
+    }
+    return { label: tool, detail: '', iconClass: 'text-slate-400' };
+  }
+
+  return (
+    <div className="border border-slate-800 rounded p-3">
+      <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+        Audit-Log (letzte {entries.length})
+      </h3>
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="text-slate-500">
+            <th className="text-left font-normal py-1 w-36">Zeit</th>
+            <th className="text-left font-normal w-72">Aktion</th>
+            <th className="text-left font-normal">Details</th>
+            <th className="text-left font-normal w-24">Target</th>
+            <th className="text-left font-normal w-28">Entscheidung</th>
+            <th className="text-right font-normal w-16">Dauer</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(e => {
+            const d = describe(e);
+            return (
+              <tr key={e.id} className="border-t border-slate-800/40 align-top">
+                <td className="py-1.5 text-slate-500 font-mono whitespace-nowrap">
+                  {new Date(e.ts).toLocaleString()}
+                </td>
+                <td className={`font-mono ${d.iconClass} truncate`}>{d.label}</td>
+                <td className="text-slate-400 truncate">{d.detail}</td>
+                <td className="font-mono text-slate-500">{e.target_ip ?? '—'}</td>
                 <td>
                   <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                     e.decision === 'allowed' ? 'bg-emerald-500/15 text-emerald-300' :
                     'bg-red-500/15 text-red-300'
                   }`}>{e.decision}</span>
                   {e.reject_reason && (
-                    <span className="text-slate-500 ml-2">— {e.reject_reason.slice(0, 50)}</span>
+                    <div className="text-slate-500 text-[10px] mt-0.5">{e.reject_reason.slice(0, 60)}</div>
                   )}
                 </td>
-                <td className="text-right text-slate-400">
+                <td className="text-right text-slate-400 font-mono whitespace-nowrap">
                   {e.duration_ms !== null ? `${e.duration_ms} ms` : '—'}
                 </td>
               </tr>
-            ))}
-            {auditLog.length === 0 && (
-              <tr><td colSpan={5} className="py-2 text-slate-600 text-center">Noch keine Einträge.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            );
+          })}
+          {entries.length === 0 && (
+            <tr><td colSpan={6} className="py-2 text-slate-600 text-center">Noch keine Einträge.</td></tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -4488,6 +4625,204 @@ function TrustKeyForm({ onAdded }: { onAdded: () => void }) {
 }
 
 
+// ── ExportPreview — Drill-Down was im Bundle drin ist ───────────────────────
+//
+// Vor dem eigentlichen Export-Click kann der Lab-Engineer nochmal genau
+// sehen: welche Rules + Scenarios werden gepackt, wie viel davon KI-
+// generiert, wie groß wird das Bundle. Ohne diese Vorschau ist der Export
+// eine Black Box — gut für Audit + Reproduzierbarkeit aber schlecht für
+// "ups, ich wollte das DOS-Override gar nicht mit rausschicken".
+
+function ExportPreview({
+  components, labRunId, description,
+}: {
+  components: Set<BundleComponent>;
+  labRunId:    string;
+  description: string;
+}) {
+  const [preview, setPreview] = useState<import('../types').ExportPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const p = await previewPatternExport({
+        components: Array.from(components) as BundleComponent[],
+        sign_with_key_id: null,
+        description, lab_run_id: labRunId,
+      });
+      setPreview(p);
+      setExpanded(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const fmtSize = (b: number) => b < 1024 ? `${b} B` : b < 1024*1024 ? `${(b/1024).toFixed(1)} KB` : `${(b/1024/1024).toFixed(2)} MB`;
+
+  return (
+    <div className="border border-slate-800 rounded p-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500">
+          Inhalt-Vorschau {preview && <span className="normal-case text-slate-600 lowercase">— {fmtSize(preview.estimated_size)} geschätzt</span>}
+        </h3>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading || components.size === 0}
+          className="btn-ghost text-[11px]"
+        >
+          {loading ? 'Lade…' : preview ? 'Aktualisieren' : 'Anzeigen'}
+        </button>
+      </div>
+      {error && <p className="text-red-400 text-[11px] mt-2">{error}</p>}
+      {preview && expanded && (
+        <div className="mt-3 space-y-3">
+          {Object.entries(preview.components).length === 0 && (
+            <p className="text-[11px] text-slate-500 italic">
+              Keine Files matchen die gewählten Komponenten — Bundle würde leer sein.
+            </p>
+          )}
+
+          {preview.components['rules.custom'] && (
+            <ExportPreviewSection
+              title="rules.custom — Cyjan signature-engine YAMLs"
+              titleColor="text-cyan-300"
+              summary={`${preview.components['rules.custom'].file_count} Files`}
+            >
+              {preview.components['rules.custom'].files.map(f => (
+                <div key={f.name} className="flex items-center gap-3 text-[11px] py-0.5">
+                  <span className="font-mono text-slate-300 flex-1 truncate">{f.name}</span>
+                  <span className="font-mono text-slate-500">{f.rule_id}</span>
+                  <span className="text-slate-600 tabular-nums w-16 text-right">{fmtSize(f.size_bytes)}</span>
+                </div>
+              ))}
+            </ExportPreviewSection>
+          )}
+
+          {preview.components['rules.suricata'] && (
+            <ExportPreviewSection
+              title="rules.suricata — Custom + KI-Suricata-Rules"
+              titleColor="text-amber-300"
+              summary={
+                <>
+                  {preview.components['rules.suricata'].file_count} Files
+                  {preview.components['rules.suricata'].ai_rule_count > 0 && (
+                    <span className="ml-2 px-1.5 rounded bg-violet-500/15 text-violet-300 text-[10px]">
+                      🤖 {preview.components['rules.suricata'].ai_rule_count} KI-Rules
+                    </span>
+                  )}
+                </>
+              }
+            >
+              {preview.components['rules.suricata'].files.map(f => (
+                <div key={f.name} className="flex items-center gap-3 text-[11px] py-0.5">
+                  <span className="font-mono text-slate-300 flex-1 truncate">{f.name}</span>
+                  {f.ai_rule_count > 0 && (
+                    <span className="px-1 text-[10px] rounded bg-violet-500/15 text-violet-300">
+                      🤖 {f.ai_rule_count}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-slate-600">{f.source}</span>
+                  <span className="text-slate-600 tabular-nums w-16 text-right">{fmtSize(f.size_bytes)}</span>
+                </div>
+              ))}
+            </ExportPreviewSection>
+          )}
+
+          {preview.components['tests.regression'] && (
+            <ExportPreviewSection
+              title="tests.regression — Payload-Scenarios"
+              titleColor="text-emerald-300"
+              summary={
+                <>
+                  {preview.components['tests.regression'].file_count} YAMLs
+                  {preview.components['tests.regression'].ai_scenario_count > 0 && (
+                    <span className="ml-2 px-1.5 rounded bg-violet-500/15 text-violet-300 text-[10px]">
+                      🤖 {preview.components['tests.regression'].ai_scenario_count} KI-generiert
+                    </span>
+                  )}
+                  {preview.components['tests.regression'].builtin_count > 0 && (
+                    <span className="ml-2 px-1.5 rounded bg-cyan-500/15 text-cyan-300 text-[10px]">
+                      📦 {preview.components['tests.regression'].builtin_count} Builtin
+                    </span>
+                  )}
+                </>
+              }
+            >
+              {preview.components['tests.regression'].files.map(f => (
+                <div key={f.path} className="flex items-center gap-3 text-[11px] py-0.5">
+                  <span className="font-mono text-slate-300 flex-1 truncate">{f.path}</span>
+                  <span className={`text-[10px] ${
+                    f.origin === 'ai-generated'   ? 'text-violet-300' :
+                    f.origin === 'builtin-template' ? 'text-cyan-300' :
+                                                      'text-slate-500'
+                  }`}>{f.origin}</span>
+                  <span className="text-slate-600 tabular-nums w-16 text-right">{fmtSize(f.size_bytes)}</span>
+                </div>
+              ))}
+            </ExportPreviewSection>
+          )}
+
+          {preview.components['defaults.recalibration'] && (
+            <div className="text-[11px] py-1">
+              <span className="text-cyan-300 font-mono">defaults.recalibration</span>{' '}
+              <span className="text-slate-500">
+                — {preview.components['defaults.recalibration'].entry_count} Param-Recalibration-Entries
+              </span>
+            </div>
+          )}
+
+          {preview.components['evidence.mitre'] && (
+            <div className="text-[11px] py-1">
+              <span className="text-cyan-300 font-mono">evidence.mitre</span>{' '}
+              <span className="text-slate-500">
+                — MITRE-Coverage über {preview.components['evidence.mitre'].technique_count} Techniques
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function ExportPreviewSection({
+  title, titleColor = 'text-slate-300', summary, children,
+}: {
+  title:      string;
+  titleColor?: string;
+  summary:    ReactNode;
+  children:   ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between gap-2 text-[11px] py-1 hover:bg-slate-800/30 rounded px-1"
+      >
+        <span className={`font-mono font-semibold ${titleColor}`}>
+          {open ? '▼' : '▶'} {title}
+        </span>
+        <span className="text-slate-400">{summary}</span>
+      </button>
+      {open && (
+        <div className="pl-4 border-l border-slate-700/40 ml-1 mt-1 space-y-0">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ── PatternExportSettings (Lab-only) ─────────────────────────────────────────
 
 function PatternExportSettings() {
@@ -4616,6 +4951,12 @@ function PatternExportSettings() {
           </label>
         ))}
       </div>
+
+      <ExportPreview
+        components={components}
+        labRunId={labRunId}
+        description={description}
+      />
 
       {!signKeyId && (
         <div className="bg-amber-500/10 border border-amber-500/40 rounded p-2">

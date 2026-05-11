@@ -504,18 +504,20 @@ export async function fetchHostConnections(
 }
 
 export interface RuleFileMeta {
-  name:     string;
-  size:     number;
-  rules:    number;
-  modified: number;
-  builtin:  boolean;
+  name:          string;
+  size:          number;
+  rules:         number;
+  modified:      number;
+  builtin:       boolean;
+  ai_rule_count: number;
 }
 
 export interface RuleFileContent {
-  name:    string;
-  content: string;
-  size:    number;
-  rules:   number;
+  name:          string;
+  content:       string;
+  size:          number;
+  rules:         number;
+  ai_rule_count: number;
 }
 
 export interface RuleFileSaveResponse {
@@ -1944,6 +1946,17 @@ export async function addSigningKey(
 
 export async function deleteSigningKey(id: string): Promise<void> {
   await req(`/api/pattern/signing-keys/${id}`, { method: 'DELETE' });
+}
+
+export async function previewPatternExport(
+  body: import('./types').ExportRequest,
+): Promise<import('./types').ExportPreview> {
+  if (isDemoMode()) {
+    return { components: {}, estimated_size: 0, requested: body.components } as import('./types').ExportPreview;
+  }
+  return await req<import('./types').ExportPreview>("/api/pattern/export/preview", {
+    method: "POST", body: JSON.stringify(body),
+  });
 }
 
 export async function exportPatternBundle(body: import('./types').ExportRequest): Promise<Blob> {

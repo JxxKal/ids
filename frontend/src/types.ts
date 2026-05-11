@@ -377,6 +377,55 @@ export interface RedTeamAuditEntry {
   args_excerpt:   string;
 }
 
+// ── Pattern-Export-Preview ──────────────────────────────────────────────────
+// Spiegelt das component_manifest aus pattern_export.py:preview_export
+
+export interface ExportPreviewSuricataFile {
+  name:           string;
+  sha256:         string;
+  ai_rule_count:  number;
+  size_bytes:     number;
+  source:         'active' | 'legacy';
+}
+
+export interface ExportPreviewCustomFile {
+  name:       string;
+  rule_id:    string;
+  sha256:     string;
+  size_bytes: number;
+}
+
+export interface ExportPreviewScenarioFile {
+  path:       string;
+  sha256:     string;
+  origin:     'ai-generated' | 'builtin-template' | 'other';
+  size_bytes: number;
+}
+
+export interface ExportPreview {
+  components: {
+    'rules.custom'?: {
+      file_count: number;
+      files:      ExportPreviewCustomFile[];
+    };
+    'rules.suricata'?: {
+      file_count:    number;
+      ai_rule_count: number;
+      files:         ExportPreviewSuricataFile[];
+    };
+    'tests.regression'?: {
+      file_count:        number;
+      ai_scenario_count: number;
+      builtin_count:     number;
+      files:             ExportPreviewScenarioFile[];
+    };
+    'defaults.recalibration'?: { entry_count: number };
+    'evidence.mitre'?: { technique_count: number };
+  };
+  estimated_size: number;
+  requested:      string[];
+}
+
 export interface PatternExportRecord {
   id:                  string;
   bundle_sha256:       string;

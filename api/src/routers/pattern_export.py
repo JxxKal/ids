@@ -167,6 +167,73 @@ async def delete_signing_key(key_id: str, pool: asyncpg.Pool = Depends(get_pool)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@router.post("/export/preview", dependencies=[Depends(require_admin)])
+async def preview_export(
+    req: ExportRequest,
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> dict:
+    """Liefert das Manifest, das Bundle-Export erzeugen WÜRDE — ohne den
+    ZIP zu bauen oder zu signieren. Frontend nutzt das fürs Drill-Down
+    'was packe ich gerade ein?' bevor der eigentliche Export läuft.
+
+    Schreibt KEINEN Audit-Eintrag (Audit ist für tatsächliche Exports)."""
+    component_manifest: dict[str, Any] = {}
+
+    if "rules.custom" in req.components:
+        files = await _collect_custom_rules(None)
+        if files:
+            component_manifest["rules.custom"] = {"file_count": len(files), "files": files}
+
+    if "rules.suricata" in req.components:
+        files = await _collect_suricata_rules(None)
+        if files:
+            ai_total = sum(f.get("ai_rule_count", 0) for f in files)
+            component_manifest["rules.suricata"] = {
+                "file_count":     len(files),
+                "ai_rule_count":  ai_total,
+                "files":          files,
+            }
+
+    if "defaults.recalibration" in req.components:
+        recal = await _collect_recalibration()
+        if recal:
+            component_manifest["defaults.recalibration"] = {
+                "entry_count": len(recal.get("recalibrations") or []),
+            }
+
+    if "tests.regression" in req.components:
+        files = await _collect_regression_tests(None)
+        if files:
+            ai_scenarios = sum(1 for f in files if f.get("origin") == "ai-generated")
+            builtin_scen = sum(1 for f in files if f.get("origin") == "builtin-template")
+            component_manifest["tests.regression"] = {
+                "file_count":          len(files),
+                "ai_scenario_count":   ai_scenarios,
+                "builtin_count":       builtin_scen,
+                "files":               files,
+            }
+
+    if "evidence.mitre" in req.components:
+        lab_run_id = req.lab_run_id or f"preview-{datetime.now(timezone.utc):%Y-%m-%d-%H%M}"
+        mitre_data = await _collect_mitre_coverage(pool, lab_run_id)
+        if mitre_data:
+            component_manifest["evidence.mitre"] = {
+                "technique_count": len(mitre_data.get("techniques") or []),
+            }
+
+    # Grob-Größen-Schätzung — Summe aller file size_bytes plus 5% YAML-Overhead
+    est = 0
+    for comp in component_manifest.values():
+        for f in (comp.get("files") or []):
+            est += f.get("size_bytes") or len(f.get("sha256", "")) * 2
+
+    return {
+        "components":         component_manifest,
+        "estimated_size":     est,
+        "requested":          list(req.components),
+    }
+
+
 @router.post("/export", dependencies=[Depends(require_admin)])
 async def export_bundle(
     req: ExportRequest,
@@ -314,7 +381,8 @@ async def list_exports(pool: asyncpg.Pool = Depends(get_pool), limit: int = 50) 
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-async def _collect_custom_rules(zf: zipfile.ZipFile) -> list[dict]:
+async def _collect_custom_rules(zf: zipfile.ZipFile | None) -> list[dict]:
+    """zf=None → Preview-Modus, kein File-Write, nur Listing."""
     if not CUSTOM_RULES_DIR.exists():
         return []
     out = []
@@ -331,11 +399,13 @@ async def _collect_custom_rules(zf: zipfile.ZipFile) -> list[dict]:
             continue
 
         clean_yaml = yaml.safe_dump(doc, sort_keys=False)
-        zf.writestr(f"rules/custom/{f.name}", clean_yaml)
+        if zf is not None:
+            zf.writestr(f"rules/custom/{f.name}", clean_yaml)
         out.append({
-            "name":    f.name,
-            "rule_id": doc["id"],
-            "sha256":  _sha256_str(clean_yaml),
+            "name":       f.name,
+            "rule_id":    doc["id"],
+            "sha256":     _sha256_str(clean_yaml),
+            "size_bytes": len(clean_yaml.encode()),
         })
     return out
 
@@ -366,11 +436,13 @@ def _is_lab_or_ai_rules_file(name: str) -> bool:
     return False
 
 
-async def _collect_suricata_rules(zf: zipfile.ZipFile) -> list[dict]:
+async def _collect_suricata_rules(zf: zipfile.ZipFile | None) -> list[dict]:
     """Sammelt Lab-curated + AI-authored Suricata-Rules aus /rules + Legacy
     /sig-rules/suricata (dedup by Filename, /rules gewinnt). ETOpen-Tarball-
     Files werden geskipped — die kommen beim Customer aus dessen update-
-    sources.txt + sind sonst >50 MB Bundle-Overhead."""
+    sources.txt + sind sonst >50 MB Bundle-Overhead.
+
+    zf=None → Preview-Modus, kein File-Write, nur Listing."""
     out: list[dict] = []
     seen: set[str] = set()
     for base in (SURICATA_RULES_DIR, SURICATA_RULES_DIR_LEGACY):
@@ -383,7 +455,8 @@ async def _collect_suricata_rules(zf: zipfile.ZipFile) -> list[dict]:
                 continue
             seen.add(f.name)
             content = f.read_bytes()
-            zf.writestr(f"rules/suricata/{f.name}", content)
+            if zf is not None:
+                zf.writestr(f"rules/suricata/{f.name}", content)
             out.append({
                 "name":           f.name,
                 "sha256":         hashlib.sha256(content).hexdigest(),
@@ -423,7 +496,8 @@ async def _collect_recalibration() -> dict | None:
     return doc
 
 
-async def _collect_regression_tests(zf: zipfile.ZipFile) -> list[dict]:
+async def _collect_regression_tests(zf: zipfile.ZipFile | None) -> list[dict]:
+    """zf=None → Preview-Modus."""
     if not SCENARIOS_DIR.exists():
         return []
     out = []
@@ -433,16 +507,18 @@ async def _collect_regression_tests(zf: zipfile.ZipFile) -> list[dict]:
             continue
         rel = f.relative_to(SCENARIOS_DIR)
         content = f.read_bytes()
-        zf.writestr(f"tests/regression/{rel}", content)
+        if zf is not None:
+            zf.writestr(f"tests/regression/{rel}", content)
         # Origin-Tag fürs Manifest: templates/ = Builtin (Image-shipped),
         # generated/ = KI-via-MCP. Customer-Admin sieht so im Bundle-
         # Review wie viel autonom vs builtin reinkam.
         origin = "ai-generated" if "generated" in f.parts else (
                  "builtin-template" if "templates" in f.parts else "other")
         out.append({
-            "path":   str(rel),
-            "sha256": hashlib.sha256(content).hexdigest(),
-            "origin": origin,
+            "path":       str(rel),
+            "sha256":     hashlib.sha256(content).hexdigest(),
+            "origin":     origin,
+            "size_bytes": len(content),
         })
     return out
 

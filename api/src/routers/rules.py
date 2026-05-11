@@ -331,6 +331,19 @@ def _count_rules_in(path: Path) -> int:
     return n
 
 
+_AI_AUTHOR_MARKER = "metadata:author cyjan-ai"
+
+
+def _count_ai_rules_in(path: Path) -> int:
+    """Zählt Rules mit `metadata:author cyjan-ai` — wir markieren alle vom
+    MCP-Tool create_suricata_rule_v1 geschriebenen Rules so. Nutzer sieht
+    so im File-Editor sofort: 'die Datei enthält N AI-authored Rules'."""
+    try:
+        return path.read_text(errors="ignore").count(_AI_AUTHOR_MARKER)
+    except OSError:
+        return 0
+
+
 def _extract_tar_safely(data: bytes, dest: Path) -> list[str]:
     """Entpackt nur *.rules-Files, ignoriert Pfade die `..` oder absolute
     Wege enthalten. Schreibt jeden Eintrag als basename direkt nach `dest`."""
@@ -492,18 +505,20 @@ _PROTECTED_FILE_NAMES  = {"update-sources.txt", "sources.json", "update.trigger"
 
 
 class RuleFileMeta(BaseModel):
-    name:       str
-    size:       int
-    rules:      int
-    modified:   float
-    builtin:    bool
+    name:          str
+    size:          int
+    rules:         int
+    modified:      float
+    builtin:       bool
+    ai_rule_count: int = 0   # Zählt Rules mit `metadata:author cyjan-ai`
 
 
 class RuleFileContent(BaseModel):
-    name:    str
-    content: str
-    size:    int
-    rules:   int
+    name:          str
+    content:       str
+    size:          int
+    rules:         int
+    ai_rule_count: int = 0
 
 
 class RuleFileSaveRequest(BaseModel):
@@ -591,6 +606,7 @@ async def list_rule_files() -> list[RuleFileMeta]:
             rules=_count_rules_in(path),
             modified=stat.st_mtime,
             builtin=_is_builtin(path),
+            ai_rule_count=_count_ai_rules_in(path),
         ))
     return out
 
@@ -614,6 +630,7 @@ async def get_rule_file(name: str) -> RuleFileContent:
         content=content,
         size=path.stat().st_size,
         rules=_count_rules_in(path),
+        ai_rule_count=_count_ai_rules_in(path),
     )
 
 
