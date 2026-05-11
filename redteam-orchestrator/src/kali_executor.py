@@ -106,24 +106,34 @@ class KaliExecutor:
                  settings.test_iface, pid)
 
     async def _detach_iface_unlocked(self) -> None:
+        """Holt das veth aus dem kali-namespace zurück in den Host-namespace.
+
+        Trick: kali's net-ns als named-netns am Host registrieren (Symlink in
+        /var/run/netns/), dann mit `ip -n <name>` vom orchestrator aus
+        operieren. "netns 1" wird dann im orchestrator-PID-Kontext (= Host
+        wegen pid:host) aufgelöst und trifft Host-init.
+
+        iproute2's `set netns <path>`-Form akzeptiert nur Name/PID/FD,
+        keinen absoluten Pfad — daher der Symlink-Umweg."""
         try:
             pid = await self._get_container_pid()
         except KaliExecutionError as exc:
             log.warning("kali-shell PID nicht ermittelbar (Container weg?): %s", exc)
             return
-        # WICHTIG: "netns 1" innerhalb von nsenter bezieht sich auf die
-        # PID 1 im KALI-Namespace (kali-internal init), nicht auf Host-init.
-        # Wir wollen das veth zurück in den HOST-Namespace, also den Pfad
-        # zum Host-init-net-ns als netns-Argument benutzen. Im orchestrator
-        # läuft mit pid:host, daher zeigt /proc/1/ns/net auf den Host-init-
-        # net-namespace — nsenter wechselt nur net-ns, mount-ns bleibt, also
-        # ist /proc weiterhin der Host-proc.
-        rc, _, err = await self._exec(
-            "nsenter", "-t", str(pid), "-n",
-            "ip", "link", "set", settings.test_iface, "netns", "/proc/1/ns/net",
-        )
-        if rc != 0:
-            log.warning("detach %s failed: %s", settings.test_iface, err.strip())
+
+        ns_link = f"/var/run/netns/cy-detach-{pid}"
+        await self._exec("mkdir", "-p", "/var/run/netns")
+        # Atomic-symlink: ln -sfn überschreibt sauber wenn schon existiert
+        await self._exec("ln", "-sfn", f"/proc/{pid}/ns/net", ns_link)
+        try:
+            rc, _, err = await self._exec(
+                "ip", "-n", f"cy-detach-{pid}",
+                "link", "set", settings.test_iface, "netns", "1",
+            )
+            if rc != 0:
+                log.warning("detach %s failed: %s", settings.test_iface, err.strip())
+        finally:
+            await self._exec("rm", "-f", ns_link)
 
     async def run_with_iface(
         self, tool: str, target_ip: str, args: list[str], timeout_sec: int = 30,
