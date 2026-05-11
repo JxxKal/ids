@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { deleteAllTestRuns, deleteTestRun, fetchTestRuns, runTest } from '../api';
-import type { TestRun } from '../types';
+import {
+  deleteAllTestRuns, deleteTestRun, fetchTestRuns, runTest,
+  fetchFeatureFlags, fetchRedTeamScenarios,
+} from '../api';
+import type { TestRun, FeatureFlags } from '../types';
+import type { RedTeamScenario } from '../types';
 import { MobileDesktopHint } from './MobileDesktopHint';
+import { ScenarioRunner } from './ScenarioRunner';
 
+// Synthetische Tests — Traffic-Generator injiziert Flows direkt in Kafka.
+// Bewusst hardcoded, weil die Backend-Logik je Scenario unterschiedlich ist
+// (DOS_SYN_001 generiert N SYNs pro Sekunde, DNS_DGA_001 entropy-DNS-Pakete).
 const SCENARIO_IDS = ['TEST_001', 'SCAN_001', 'DOS_SYN_001', 'RECON_003', 'DNS_DGA_001'] as const;
 
 function statusColor(status: string) {
@@ -21,13 +29,28 @@ export function TestsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError]           = useState('');
 
+  // Feature-Flag + Payload-Scenarios (nur sichtbar wenn redteam_enabled=true)
+  const [flags, setFlags]                 = useState<FeatureFlags | null>(null);
+  const [payloadScenarios, setPayloadScenarios] = useState<RedTeamScenario[]>([]);
+
   const load = () =>
     fetchTestRuns()
       .then(setRuns)
       .catch(() => {});
 
+  const loadPayload = async () => {
+    try {
+      const f = await fetchFeatureFlags();
+      setFlags(f);
+      if (f.redteam_enabled) {
+        setPayloadScenarios(await fetchRedTeamScenarios().catch(() => []));
+      }
+    } catch { /* feature-flags endpoint unavailable → keep payload-section hidden */ }
+  };
+
   useEffect(() => {
     load();
+    loadPayload();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);
   }, []);
@@ -69,9 +92,20 @@ export function TestsPage() {
   return (
     <div className="space-y-4">
       <MobileDesktopHint />
-      {/* Scenarios */}
+
+      {/* ───── Section 1: Synthetische Tests ─────
+         Traffic-Generator injiziert Flows direkt in Kafka — kein echter
+         Netzwerk-Traffic. Zweck: Smoketest der Signature-Engine. */}
       <div className="card p-4">
-        <h2 className="text-sm font-semibold text-slate-300 mb-3">{t('tests.title')}</h2>
+        <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+          <h2 className="text-sm font-semibold text-slate-300">
+            🧪 Synthetische Tests
+          </h2>
+          <p className="text-[11px] text-slate-500">
+            Traffic-Generator → Kafka-Flows (kein Netzwerk-Verkehr).
+            Smoketest der Cyjan-Signature-Engine.
+          </p>
+        </div>
         {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {SCENARIO_IDS.map(id => (
@@ -93,7 +127,28 @@ export function TestsPage() {
         </div>
       </div>
 
-      {/* Run Log */}
+      {/* ───── Section 2: Payload-Szenarios (RedTeam) ─────
+         Nur sichtbar wenn redteam_enabled=true. Spielt YAML-basierte Byte-
+         Payloads via kali-shell → veth → cy-inj-peer-Listener; voller
+         Pipeline-Test inkl. Suricata-Detection. */}
+      {flags?.redteam_enabled && (
+        <div className="card p-4">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+            <h2 className="text-sm font-semibold text-violet-300">
+              🎯 Payload-Szenarios (RedTeam)
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              kali-shell → veth → Listener. Echter Pen-Test der vollen Pipeline
+              (Sniffer + Suricata + AI-Rules). Lab-only.
+            </p>
+          </div>
+          <ScenarioRunner scenarios={payloadScenarios} onAuditChange={loadPayload} />
+        </div>
+      )}
+
+      {/* ───── Section 3: Run Log (Synthetische Tests) ─────
+         Nur synth-Runs hier — RedTeam-Runs landen in redteam_audit_log und
+         sind unter Settings → RedTeam tooling sichtbar. */}
       <div className="card overflow-hidden">
         <div className="px-4 py-2 border-b border-slate-800 flex justify-between items-center">
           <h2 className="text-sm font-semibold text-slate-300">{t('tests.logTitle')}</h2>
@@ -160,6 +215,13 @@ export function TestsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Cross-Link für RedTeam-Audit-Log */}
+      {flags?.redteam_enabled && (
+        <p className="text-[11px] text-slate-600 text-center">
+          RedTeam-Audit-Log (alle MCP-/REST-Aktionen) unter <em>Settings → RedTeam tooling</em>
+        </p>
+      )}
     </div>
   );
 }
