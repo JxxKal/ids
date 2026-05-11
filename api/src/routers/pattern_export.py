@@ -559,14 +559,21 @@ async def _collect_mitre_coverage(pool: asyncpg.Pool, lab_run_id: str) -> dict:
     for row in rows:
         try:
             doc = yaml.safe_load(row["yaml_source"]) or {}
-            tags = doc.get("tags") or []
+            # Builtin-Templates (Phase-A) + KI-Scenarios haben MITRE-IDs im
+            # eigenen `mitre:`-Feld. Legacy-Scenarios listeten sie im `tags:`-
+            # Feld — beide Quellen nehmen.
+            mitre_field = doc.get("mitre") or []
+            tags_field  = doc.get("tags")  or []
+            all_candidates = list(mitre_field) + list(tags_field)
         except Exception:
-            tags = []
+            all_candidates = []
         mitre_tags = [
-            t for t in tags
+            t for t in all_candidates
             if isinstance(t, str) and t.startswith("T")
             and t[1:].split(".")[0].isdigit()
         ]
+        # Deduplikate (z.B. wenn T0846 doppelt in tags+mitre stand)
+        mitre_tags = sorted(set(mitre_tags))
         for tt in mitre_tags:
             tech = techniques.setdefault(tt, {
                 "technique_id": tt, "scenarios": [],

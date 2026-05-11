@@ -26,6 +26,12 @@ from alert_match import poll_alerts_for_rule
 from config import settings
 from db import audit_log, get_pool
 from kali_executor import KaliExecutionError, KaliExecutor
+from run_logger import (
+    log_scenario_run,
+    log_tool_run,
+    mark_scenario_disabled,
+    register_scenario,
+)
 from scenario_store import (
     ScenarioValidationError,
     delete_scenario,
@@ -120,6 +126,12 @@ async def run_kali_tool_v1(
             "matched_alerts": len(matched),
             "expected_rule": expected_alert_rule_id,
         },
+    )
+    await log_tool_run(
+        tool=tool, target_ip=target_ip, args=args,
+        exit_code=result["exit_code"], duration_ms=result.get("duration_ms"),
+        matched_count=len(matched), expected_rule_id=expected_alert_rule_id,
+        timed_out=result["timed_out"],
     )
 
     return {
@@ -239,6 +251,18 @@ async def create_payload_scenario_v1(
         decision="allowed",
         result_summary={"scenario_id": scenario_id, "path": str(path)},
     )
+    # In DB-Registry aufnehmen — sonst taucht KI-Scenario nicht in
+    # MITRE-Coverage-Aggregaten auf.
+    await register_scenario({
+        "id":                     scenario_id,
+        "description":            description,
+        "protocol":               protocol,
+        "target_port":            target_port,
+        "payload_b64":            payload_b64,
+        "expected_alert_rule_id": expected_alert_rule_id,
+        "tags":                   tags,
+        "mitre":                  mitre,
+    })
     return {
         "ok": True, "scenario_id": scenario_id, "path": str(path),
         "next_step": (
@@ -303,6 +327,15 @@ async def run_payload_scenario_v1(
             "expected_rule": expected,
         },
     )
+    await log_scenario_run(
+        scenario_id=scenario_id,
+        target_ip=target_ip,
+        exit_code=int(result.get("exit_code", -1)),
+        duration_ms=result.get("duration_ms"),
+        matched_count=len(matched),
+        expected_rule_id=expected,
+        matched_rule_ids=[a.get("rule_id", "") for a in matched if a.get("rule_id")],
+    )
     return {
         "ok": True, "run_id": run_id,
         "scenario_id": scenario_id,
@@ -329,6 +362,10 @@ async def delete_payload_scenario_v1(scenario_id: str) -> dict[str, Any]:
         decision="allowed",
         result_summary={"scenario_id": scenario_id, "removed": removed},
     )
+    if removed:
+        # Registry-Row markieren als enabled=false (Historie bleibt für
+        # MITRE-Coverage-Look-Backs erhalten).
+        await mark_scenario_disabled(scenario_id)
     return {"ok": True, "scenario_id": scenario_id, "removed": removed}
 
 

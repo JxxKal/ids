@@ -160,6 +160,24 @@ def delete_scenario(scenario_id: str) -> bool:
     return False
 
 
+def list_all_scenarios() -> list[dict[str, Any]]:
+    """Liest ALLE Scenarios aus templates/, generated/ und imported/.
+    Wird beim Startup für die DB-Registry-Befüllung benutzt — register_scenario
+    Wird einmal je Datei aufgerufen."""
+    out: list[dict[str, Any]] = []
+    for base in (TEMPLATES_DIR, GENERATED_DIR, IMPORTED_DIR):
+        if not base.is_dir():
+            continue
+        for f in sorted(base.glob("*.yml")):
+            try:
+                doc = yaml.safe_load(f.read_text())
+                if isinstance(doc, dict) and doc.get("id"):
+                    out.append(doc)
+            except yaml.YAMLError as exc:
+                log.warning("list_all_scenarios skip %s: %s", f, exc)
+    return out
+
+
 def seed_builtin_templates() -> int:
     """Kopiert alle YAMLs aus /opt/cyjan/templates/ in /scenarios/templates/.
     Wird beim Orchestrator-Startup aufgerufen. Image = source of truth →

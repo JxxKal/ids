@@ -24,8 +24,14 @@ from config import settings
 from db import audit_log, close_pool, init_pool
 from kali_executor import KaliExecutionError, KaliExecutor
 from mcp_server import mcp
+from run_logger import (
+    log_scenario_run,
+    log_tool_run,
+    register_scenario,
+)
 from scenario_store import (
     ScenarioValidationError,
+    list_all_scenarios,
     load_scenario,
     seed_builtin_templates,
 )
@@ -68,6 +74,16 @@ async def lifespan(_app: "FastAPI"):  # noqa: F821
         seed_builtin_templates()
     except Exception as exc:
         log.warning("seed_builtin_templates failed: %s", exc)
+    # DB-Registry mit allen Scenarios befüllen — Voraussetzung damit
+    # MITRE-Coverage-Matrix im Bundle/WeeklyReport echte Zahlen zeigt.
+    try:
+        seeded = 0
+        for sc in list_all_scenarios():
+            await register_scenario(sc)
+            seeded += 1
+        log.info("redteam_scenarios-Registry: %d Einträge upserted", seeded)
+    except Exception as exc:
+        log.warning("register_scenario startup-batch failed: %s", exc)
     # Verschachteln des MCP-Lifespan damit FastMCP intern initialisiert wird
     async with _mcp_app.lifespan(_app):
         yield
@@ -192,6 +208,12 @@ async def run_kali_tool(req: RunKaliToolRequest) -> RunKaliToolResponse:
             "matched_alerts": len(matched),
             "expected_rule": req.expected_alert_rule_id,
         },
+    )
+    await log_tool_run(
+        tool=req.tool, target_ip=req.target_ip, args=req.args,
+        exit_code=result["exit_code"], duration_ms=result.get("duration_ms"),
+        matched_count=len(matched), expected_rule_id=req.expected_alert_rule_id,
+        timed_out=result["timed_out"],
     )
 
     return RunKaliToolResponse(
@@ -326,6 +348,15 @@ async def run_scenario_rest(req: RunScenarioRequest) -> RunScenarioResponse:
             "matched_alerts": len(matched),
             "expected_rule":  expected,
         },
+    )
+    await log_scenario_run(
+        scenario_id=req.scenario_id,
+        target_ip=req.target_ip,
+        exit_code=int(result.get("exit_code", -1)),
+        duration_ms=result.get("duration_ms"),
+        matched_count=len(matched),
+        expected_rule_id=expected,
+        matched_rule_ids=[a.get("rule_id", "") for a in matched if a.get("rule_id")],
     )
 
     return RunScenarioResponse(
