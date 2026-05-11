@@ -24,7 +24,11 @@ from config import settings
 from db import audit_log, close_pool, init_pool
 from kali_executor import KaliExecutionError, KaliExecutor
 from mcp_server import mcp
-from scenario_store import seed_builtin_templates
+from scenario_store import (
+    ScenarioValidationError,
+    load_scenario,
+    seed_builtin_templates,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -215,8 +219,10 @@ class ScenarioInfo(BaseModel):
 
 @app.get("/redteam/scenarios", dependencies=[Depends(verify_token)])
 async def list_scenarios() -> dict:
-    """Listet Scenario-YAMLs aus /scenarios/ und /scenarios/imported/.
-    Imported-Bundles aus Pattern-Federation landen automatisch hier."""
+    """Listet Scenario-YAMLs aus /scenarios/templates/, /scenarios/generated/
+    und /scenarios/imported/. Pattern-Federation-Imports landen unter
+    imported/, builtin-Templates aus dem Image unter templates/, KI-via-MCP
+    unter generated/."""
     import yaml
     from pathlib import Path
     scenarios = []
@@ -228,14 +234,114 @@ async def list_scenarios() -> dict:
             doc = yaml.safe_load(f.read_text())
             if isinstance(doc, dict) and doc.get("id"):
                 scenarios.append({
-                    "scenario_id": doc["id"],
-                    "file":        str(f.relative_to(base)),
-                    "rule_id":     doc.get("rule_id"),
-                    "description": doc.get("description"),
+                    "scenario_id":            doc["id"],
+                    "file":                   str(f.relative_to(base)),
+                    "rule_id":                doc.get("rule_id"),
+                    "expected_alert_rule_id": doc.get("expected_alert_rule_id"),
+                    "description":            doc.get("description"),
+                    "protocol":               doc.get("protocol"),
+                    "target_port":            doc.get("target_port"),
+                    "tags":                   doc.get("tags", []),
+                    "mitre":                  doc.get("mitre", []),
                 })
         except Exception as exc:
             log.debug("scenario %s unparseable: %s", f, exc)
     return {"scenarios": scenarios}
+
+
+# ─── Scenario-Run-Endpoint (Phase-A: UI-Friendly Run-Button) ────────────
+
+class RunScenarioRequest(BaseModel):
+    scenario_id: str = Field(min_length=1, max_length=64)
+    target_ip:   str = Field(min_length=7, max_length=45)
+    timeout_sec: int = Field(default=10, ge=1, le=60)
+
+
+class RunScenarioResponse(BaseModel):
+    run_id:            str
+    scenario_id:       str
+    target_ip:         str
+    target_port:       int
+    protocol:          str
+    sent_bytes:        int | None
+    exit_code:         int
+    duration_ms:       int | None
+    stderr_excerpt:    str = Field(default="", max_length=500)
+    matched_alerts:    list[dict] = Field(default_factory=list)
+    detection_success: bool | None
+    expected_rule:     str | None
+
+
+@app.post("/redteam/scenarios/run",
+          response_model=RunScenarioResponse,
+          dependencies=[Depends(verify_token)])
+async def run_scenario_rest(req: RunScenarioRequest) -> RunScenarioResponse:
+    """Spielt ein Payload-Scenario gegen target_ip ab. Lädt YAML aus
+    /scenarios/{generated|templates|imported}, sendet den base64-encoded
+    Payload via ncat aus der kali-shell und pollt 10s für expected_alert
+    falls im YAML gesetzt. Audit-Log wird IMMER geschrieben.
+
+    Dieselbe Semantik wie MCP-Tool `run_payload_scenario_v1` — nur als
+    REST für das UI."""
+    run_id = str(uuid.uuid4())
+    log.info("run_scenario_rest: id=%s scenario=%s target=%s",
+             run_id, req.scenario_id, req.target_ip)
+
+    try:
+        scenario = load_scenario(req.scenario_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc))
+    except ScenarioValidationError as exc:
+        raise HTTPException(400, str(exc))
+
+    try:
+        result = await executor.run_payload_with_iface(
+            target_ip=req.target_ip,
+            target_port=int(scenario["target_port"]),
+            protocol=scenario["protocol"],
+            payload_b64=scenario["payload_b64"],
+            timeout_sec=req.timeout_sec,
+        )
+    except KaliExecutionError as exc:
+        await audit_log(
+            mcp_tool="run_payload_scenario_v1", target_ip=req.target_ip,
+            decision="rejected_validation", reject_reason=str(exc),
+            result_summary={"scenario_id": req.scenario_id, "via": "rest"},
+        )
+        raise HTTPException(400, str(exc))
+
+    matched: list[dict] = []
+    expected = scenario.get("expected_alert_rule_id")
+    if expected:
+        matched = await poll_alerts_for_rule(rule_id_prefix=expected, window_sec=10)
+
+    await audit_log(
+        mcp_tool="run_payload_scenario_v1", target_ip=req.target_ip,
+        decision="allowed", duration_ms=result.get("duration_ms"),
+        result_summary={
+            "scenario_id":    req.scenario_id,
+            "via":            "rest",
+            "sent_bytes":     result.get("sent_bytes"),
+            "exit_code":      result.get("exit_code"),
+            "matched_alerts": len(matched),
+            "expected_rule":  expected,
+        },
+    )
+
+    return RunScenarioResponse(
+        run_id=run_id,
+        scenario_id=req.scenario_id,
+        target_ip=req.target_ip,
+        target_port=int(result.get("target_port", scenario["target_port"])),
+        protocol=str(result.get("protocol", scenario["protocol"])),
+        sent_bytes=result.get("sent_bytes"),
+        exit_code=int(result.get("exit_code", -1)),
+        duration_ms=result.get("duration_ms"),
+        stderr_excerpt=str(result.get("stderr", ""))[:500],
+        matched_alerts=matched,
+        detection_success=(len(matched) > 0 if expected else None),
+        expected_rule=expected,
+    )
 
 
 # ─── MCP-Server-Mount ────────────────────────────────────────────────────

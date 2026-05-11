@@ -2000,6 +2000,15 @@ export async function fetchRedTeamScenarios(): Promise<import("./types").RedTeam
   } catch { return []; }
 }
 
+export async function runRedTeamScenario(
+  body: import("./types").RedTeamScenarioRunRequest,
+): Promise<import("./types").RedTeamScenarioRunResponse> {
+  return await req<import("./types").RedTeamScenarioRunResponse>(
+    "/api/redteam/scenarios/run",
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
 export async function fetchRedTeamAuditLog(limit = 50): Promise<import("./types").RedTeamAuditEntry[]> {
   if (isDemoMode()) return [];
   try {

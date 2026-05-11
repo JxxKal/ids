@@ -6,10 +6,11 @@ Origin nutzen wir die cyjan-api als Proxy — selbe Auth-Boundary, selbes
 Logging.
 
 Endpoints:
-  GET  /api/redteam/health          — Orchestrator-Health (200 wenn Lab-Mode)
-  POST /api/redteam/run             — Pen-Test-Tool ausführen
-  GET  /api/redteam/scenarios       — Scenario-Liste
-  GET  /api/redteam/audit-log       — letzte Audit-Einträge
+  GET  /api/redteam/health           — Orchestrator-Health (200 wenn Lab-Mode)
+  POST /api/redteam/run              — Pen-Test-Tool ausführen
+  GET  /api/redteam/scenarios        — Scenario-Liste
+  POST /api/redteam/scenarios/run    — Scenario-Payload abspielen
+  GET  /api/redteam/audit-log        — letzte Audit-Einträge
 
 Aktivierung: nur registriert wenn REDTEAM_ENABLED=true (selbe env-Var wie
 beim pattern_export-Router-Mount). Customer-Master kennt den Endpoint
@@ -43,6 +44,12 @@ class RunRequest(BaseModel):
     timeout_sec: int = 30
     expected_alert_rule_id: str | None = None
     attach_iface: bool = True
+
+
+class RunScenarioRequest(BaseModel):
+    scenario_id: str = Field(min_length=1, max_length=64)
+    target_ip:   str = Field(min_length=7, max_length=45)
+    timeout_sec: int = Field(default=10, ge=1, le=60)
 
 
 @router.get("/health", dependencies=[Depends(require_admin)])
@@ -82,6 +89,25 @@ async def scenarios() -> dict[str, Any]:
             return r.json()
     except httpx.HTTPError as exc:
         return {"scenarios": [], "error": str(exc)}
+
+
+@router.post("/scenarios/run", dependencies=[Depends(require_admin)])
+async def run_scenario(req: RunScenarioRequest) -> dict[str, Any]:
+    """Spielt ein Payload-Scenario ab. Body: scenario_id + target_ip
+    (+ optional timeout_sec). Orchestrator lädt das YAML aus templates/
+    | generated/ | imported/ und feuert es via ncat aus der kali-shell."""
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+            r = await cli.post(
+                f"{ORCHESTRATOR_URL}/redteam/scenarios/run",
+                json=req.model_dump(),
+            )
+            if r.status_code >= 400:
+                raise HTTPException(r.status_code, r.text)
+            return r.json()
+    except httpx.HTTPError as exc:
+        log.warning("orchestrator unreachable: %s", exc)
+        raise HTTPException(503, f"orchestrator nicht erreichbar: {exc}")
 
 
 @router.get("/audit-log", dependencies=[Depends(require_admin)])

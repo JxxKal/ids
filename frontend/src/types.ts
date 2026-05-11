@@ -333,11 +333,36 @@ export interface RedTeamRunResponse {
 }
 
 export interface RedTeamScenario {
+  scenario_id:             string;
+  file:                    string;
+  rule_id?:                string | null;
+  expected_alert_rule_id?: string | null;
+  description?:            string | null;
+  protocol?:               'tcp' | 'udp' | null;
+  target_port?:            number | null;
+  tags?:                   string[];
+  mitre?:                  string[];
+}
+
+export interface RedTeamScenarioRunRequest {
   scenario_id: string;
-  file:        string;
-  rule_id?:    string | null;
-  description?: string | null;
-  tags?:       string[];
+  target_ip:   string;
+  timeout_sec?: number;
+}
+
+export interface RedTeamScenarioRunResponse {
+  run_id:            string;
+  scenario_id:       string;
+  target_ip:         string;
+  target_port:       number;
+  protocol:          string;
+  sent_bytes:        number | null;
+  exit_code:         number;
+  duration_ms:       number | null;
+  stderr_excerpt:    string;
+  matched_alerts:    Array<{ rule_id: string; severity?: string; signature?: string }>;
+  detection_success: boolean | null;
+  expected_rule:     string | null;
 }
 
 export interface RedTeamAuditEntry {
