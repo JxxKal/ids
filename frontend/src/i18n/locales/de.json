@@ -577,6 +577,7 @@
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "mqtt": "MQTT-Bridge",
+      "notifications": "Benachrichtigungen",
       "pattern-import": "Pattern-Bundle einspielen",
       "pattern-export": "Pattern-Bundle exportieren",
       "redteam": "RedTeam-Tooling",

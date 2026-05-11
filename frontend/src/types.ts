@@ -377,6 +377,68 @@ export interface RedTeamAuditEntry {
   args_excerpt:   string;
 }
 
+// ── Notification-Channels ───────────────────────────────────────────────────
+
+export type NotificationChannelType = 'webhook' | 'ntfy' | 'email' | string;
+export type SeverityLevel = 'low' | 'medium' | 'high' | 'critical';
+
+export interface NotificationChannel {
+  id:                  string;
+  user_id:             string | null;
+  name:                string;
+  type:                NotificationChannelType;
+  config:              Record<string, unknown>;
+  enabled:             boolean;
+  severity_min:        SeverityLevel;
+  rule_prefix_filter:  string | null;
+  source_filter:       string[] | null;
+  throttle_seconds:    number;
+  created_at:          string;
+  updated_at:          string;
+  last_used:           string | null;
+}
+
+export interface NotificationChannelCreate {
+  name:                string;
+  type:                NotificationChannelType;
+  config:              Record<string, unknown>;
+  enabled?:            boolean;
+  severity_min?:       SeverityLevel;
+  rule_prefix_filter?: string | null;
+  source_filter?:      string[] | null;
+  throttle_seconds?:   number;
+}
+
+export interface NotificationChannelUpdate {
+  name?:               string;
+  config?:             Record<string, unknown>;
+  enabled?:            boolean;
+  severity_min?:       SeverityLevel;
+  rule_prefix_filter?: string | null;
+  source_filter?:      string[] | null;
+  throttle_seconds?:   number;
+}
+
+export interface NotificationDelivery {
+  id:          number;
+  ts:          string;
+  channel_id:  string;
+  alert_id:    string | null;
+  rule_id:     string | null;
+  severity:    string | null;
+  status:      'sent' | 'failed' | 'rate_limited' | 'filtered' | 'disabled';
+  status_code: number | null;
+  latency_ms:  number | null;
+  error:       string | null;
+}
+
+export interface NotificationTypesInfo {
+  types:           string[];
+  severity_levels: SeverityLevel[];
+  source_options:  string[];
+}
+
+
 // ── Pattern-Export-Preview ──────────────────────────────────────────────────
 // Spiegelt das component_manifest aus pattern_export.py:preview_export
 

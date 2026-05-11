@@ -2102,3 +2102,50 @@ export async function generateMcpToken(
     body: JSON.stringify(body),
   });
 }
+
+
+// ── Notification-Channels ──────────────────────────────────────────────────
+
+export async function fetchNotificationTypes(): Promise<import("./types").NotificationTypesInfo> {
+  if (isDemoMode()) return { types: ['webhook','ntfy','email'], severity_levels: ['low','medium','high','critical'], source_options: ['signature','ml','suricata','external'] };
+  return await req<import("./types").NotificationTypesInfo>('/api/notifications/types');
+}
+
+export async function fetchNotificationChannels(): Promise<import("./types").NotificationChannel[]> {
+  if (isDemoMode()) return [];
+  return await req<import("./types").NotificationChannel[]>('/api/notifications/channels');
+}
+
+export async function createNotificationChannel(
+  body: import("./types").NotificationChannelCreate,
+): Promise<import("./types").NotificationChannel> {
+  return await req<import("./types").NotificationChannel>('/api/notifications/channels', {
+    method: 'POST', body: JSON.stringify(body),
+  });
+}
+
+export async function updateNotificationChannel(
+  id: string,
+  body: import("./types").NotificationChannelUpdate,
+): Promise<import("./types").NotificationChannel> {
+  return await req<import("./types").NotificationChannel>(`/api/notifications/channels/${id}`, {
+    method: 'PATCH', body: JSON.stringify(body),
+  });
+}
+
+export async function deleteNotificationChannel(id: string): Promise<void> {
+  await req(`/api/notifications/channels/${id}`, { method: 'DELETE' });
+}
+
+export async function testNotificationChannel(id: string): Promise<{ok: boolean; channel: string}> {
+  return await req(`/api/notifications/channels/${id}/test`, { method: 'POST' });
+}
+
+export async function fetchNotificationDeliveries(
+  channelId?: string, limit = 100,
+): Promise<import("./types").NotificationDelivery[]> {
+  if (isDemoMode()) return [];
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (channelId) qs.set('channel_id', channelId);
+  return await req<import("./types").NotificationDelivery[]>(`/api/notifications/deliveries?${qs}`);
+}

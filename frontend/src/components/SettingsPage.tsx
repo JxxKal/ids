@@ -54,6 +54,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
 import { MlFlowDiagram } from './MlFlowDiagram';
 import { MobileDesktopHint } from './MobileDesktopHint';
+import { NotificationSettings } from './NotificationSettings';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -7668,7 +7669,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'notifications' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -7731,6 +7732,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'irma',           icon: <Plug     {...ICON_PROPS} /> },
       { id: 'itop',           icon: <Database {...ICON_PROPS} /> },
       { id: 'mqtt',           icon: <Network  {...ICON_PROPS} /> },
+      { id: 'notifications',  icon: <Plug     {...ICON_PROPS} /> },
       { id: 'pattern-import', icon: <Upload   {...ICON_PROPS} /> },
       { id: 'pattern-export', icon: <Upload   {...ICON_PROPS} /> },
       { id: 'redteam',        icon: <Sparkles {...ICON_PROPS} /> },
@@ -7912,6 +7914,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
             {active === 'irma'          && <IrmaSettings />}
             {active === 'itop'          && <ItopSettings />}
             {active === 'mqtt'          && <MqttSettings />}
+            {active === 'notifications' && <NotificationSettings />}
             {active === 'pattern-import' && <PatternImportSettings />}
             {active === 'pattern-export' && <PatternExportSettings />}
             {active === 'redteam'        && <RedTeamSettings />}
