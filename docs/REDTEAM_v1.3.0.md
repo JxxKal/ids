@@ -349,13 +349,15 @@ in den Container-namespace verschiebt. Das veth-Pair muss am Host
 Run mit `attach_iface=true` einen Lab-Setup-Fehler:
 
 ```bash
-# 1. Veth-Pair am Host anlegen (cyjan-inject + Peer)
-sudo ip link add cyjan-inject type veth peer name cyjan-inject-peer
+# 1. Veth-Pair am Host anlegen (cyjan-inject + Peer).
+#    WICHTIG: Linux IFNAMSIZ-Limit ist 16 Zeichen — der Peer-Name muss
+#    kürzer sein (cy-inj-peer = 11, passt; cyjan-inject-peer = 17, failt).
+sudo ip link add cyjan-inject type veth peer name cy-inj-peer
 
 # 2. Peer-Seite mit RFC-5737-TEST-NET-IP versehen (Gegenstück zum
 #    target_ip, das die Tools dann anpingen können)
-sudo ip addr add 192.0.2.254/24 dev cyjan-inject-peer
-sudo ip link set cyjan-inject-peer up
+sudo ip addr add 192.0.2.254/24 dev cy-inj-peer
+sudo ip link set cy-inj-peer up
 
 # 3. Persistent über reboots: systemd-network oder /etc/network/interfaces
 #    je nach Distribution — für Lab-Sandboxes meist nicht nötig
