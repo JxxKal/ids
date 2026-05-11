@@ -2,7 +2,9 @@
 
 Passives Netzwerk-IDS das an einem Mirror-Port eines Switches Traffic mitschneidet, anhand von Signaturen und ML Alarme erzeugt und ein Webdashboard mit Self-Learning-Feedback-Loop bietet. Spezieller Fokus auf **OT/ICS-Umgebungen** (SCADA, Modbus, DNP3, EtherNet/IP, BACnet).
 
-**Scope:** Nur Header-Analyse – kein SSL Deep Inspection, kein Payload-Zugriff.
+**Scope:** Header-Analyse + L7-Byte-Pattern-Detection via Suricata 7. Optionale **RedTeam-Pipeline** (Lab-only) für Auto-Pen-Test + KI-Feedback-Loop via MCP — schreibt Custom-Suricata-Rules autonom zur Detection-Gap-Schließung.
+
+**Compliance:** MITRE ATT&CK Coverage-Matrix + Mapping auf NIS-2 / ISO 27001:2022 / BSI IT-Grundschutz im Wochenbericht.
 
 ---
 
@@ -54,6 +56,29 @@ Mirror Port
 PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 ```
 
+### Optional: RedTeam-Pipeline (Lab-only)
+
+```
+[KI/Operator]                       ┌── /scenarios/templates/    (Image-shipped, 8 Builtin)
+     │ MCP @ :8002/mcp              │── /scenarios/generated/    (KI via MCP)
+     ▼                              │── /scenarios/imported/     (Pattern-Federation)
+┌──────────────────────┐            │
+│ redteam-orchestrator │────────────┘
+│  (Python/FastMCP)    │
+│ — REST + 11 MCP-Tools│            ┌── /rules/cyjan-ai.rules     (AI-Custom-Rules,
+│ — schreibt Audit +   │            │     SID 9000000-9999999)
+│   redteam_results    │────────────┘     → /rules/update.trigger
+└────┬─────────────────┘                  → Suricata-Live-Reload
+     │ docker exec
+     ▼
+┌──────────────┐  veth-pair (192.0.2.1↔.254, persistent)
+│ kali-shell   │ ─────────────────► [redteam-listener]  ◄── Sniffer
+│ ncat / nmap  │                    (ncat sinks on        captures cy-inj-peer
+│ / hping3     │                     ICS+Windows ports)   → flow-aggregator
+└──────────────┘                                          → Suricata 7 (multi-iface)
+                                                          → alerts → MITRE-Coverage
+```
+
 ---
 
 ## Module
@@ -78,6 +103,9 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | `master-uplink` | Python (aiohttp) | ✅ | mTLS-Endpoint (Port 8443) für Remote-Taps. WebSocket `/uplink` für Alert-/Metric-/PCAP-Frames, `/config` für Rule-Sync, **`/tap-update/<file>` mit Streaming via `sendfile`** für Update-Bundle-Auslieferung. Pollt `taps.update_requested_at` und sendet Update-Push-Frames an die WS-Connection. |
 | `tap-uplink` | Python | ✅ | *(nur Tap)* mTLS-Client zum Master. Konsumiert lokales `alerts-raw` + `rule-metrics` und forwarded mit Outage-Buffer (SQLite, 1 GB Cap) zum Master. **Zusätzlich Mini-PCAP-Store**: konsumiert `pcap-headers`, hält ±60 s in-memory Ringbuffer, baut bei Tap-Alarmen ein libpcap-File und sendet es als `pcap_upload`-Frame. Empfängt `update_now`-Trigger vom Master und schreibt `/run/cyjan-update/trigger` (host bind-mount) — systemd-path-watcher startet `cyjan-tap update --from-master -y`. Reverse-Pull der Heuristik-Rules + Overrides + `known_networks` alle 5 min. |
 | `tap-api` | Python | ✅ | *(nur Tap)* Minimaler Status-View + Maschinen-Endpoints für die `cyjan-tap`-CLI |
+| `redteam-orchestrator` | Python FastAPI + FastMCP | ✅ | *(Lab-Profile)* MCP-Server unter `:8002/mcp/` mit 11 Tools für KI-Auto-Pen-Test. Ruft `kali-shell` via `docker exec`, verwaltet Payload-Scenarios (Builtin-Templates, KI-generated, Pattern-Federation-imported), schreibt AI-Suricata-Rules (SID 9000000-9999999), persistiert Run-Ergebnisse in `redteam_results` für MITRE-Coverage. Service-JWT aus `API_SECRET_KEY`. |
+| `redteam-listener` | Alpine + ncat | ✅ | *(Lab-Profile)* TCP-Sinks auf `192.0.2.254` für 20 ICS-/Windows-Standard-Ports (Modbus, S7, OPC-UA, IEC-104, BACnet, MQTT, LDAP, SMB, RDP, …). Erlaubt vollständigen TCP-Handshake für Payload-Scenarios → Sniffer sieht L7-Bytes statt nur SYN. `network_mode: host`, bindet IP-qualifiziert. |
+| `kali-shell` | Kali Linux | ✅ | *(Lab-Profile)* Sandboxed-Container für Pen-Test-Tools (nmap, hping3, hydra, ncat). `network_mode: none` — Netzwerk-Zugriff nur via veth-Pair vom Orchestrator. Whitelisted-CIDRs (RFC 5737 TEST-NETs) erzwungen. |
 
 ---
 
@@ -90,9 +118,12 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | Datenbank | TimescaleDB (PostgreSQL 16, Hypertables) |
 | Cache / Enrichment | Redis 7 |
 | PCAP Storage | MinIO (S3-kompatibel) |
+| L7 Signature Engine | **Suricata 7.0** (Debian Trixie) — KRB5/SMB/DCERPC/Modbus/DNP3/ENIP/HTTP2/QUIC/MQTT/TFTP/SIP/PgSQL native Parser, JA3/JA4 Fingerprinting, ~49.000 ET-Open-Rules |
 | ML | Python, Scikit-learn (IsolationForest), River (Online-Scaler) |
 | API | Python FastAPI + WebSocket |
 | Frontend | React + Vite + TypeScript + Tailwind CSS |
+| RedTeam-Tooling (Lab-only) | Python FastMCP 3.x, Kali Linux Container, Alpine + ncat Listener-Sidecar |
+| Compliance-Mapping | Cyjan-curated MITRE-ATT&CK → NIS-2 / ISO 27001:2022 / BSI IT-Grundschutz (Python-Modul `api/src/compliance.py`) |
 | Deployment | Docker Compose / Debian Live ISO |
 
 ---
@@ -1058,24 +1089,37 @@ PCAP-Dateien sind im nativen libpcap-Format (`LINKTYPE_ETHERNET`). Sie enthalten
 
 ## Suricata Integration (optional)
 
-Suricata läuft als parallele Detection-Engine auf demselben Mirror-Port. Alerts fließen über einen Bridge-Service in die bestehende Kafka-Pipeline.
+Suricata **7.0** (Debian Trixie Base) läuft als parallele L7-Signature-Engine. Multi-Interface-Capture (`SNORT_IFACE` space-separated) erlaubt parallele Erfassung von Mgmt-Mirror UND dem RedTeam-veth (`cy-inj-peer`). Alerts fließen über `snort-bridge` als `eve.json`-Stream in die bestehende Kafka-Pipeline.
 
 ```
 Mirror Port ──► Rust Sniffer ──► Signature Engine ─┐
               │                ──► ML Engine         ├──► alerts-raw ──► Alert-Manager
-              └──► Suricata ──► eve.json ──► snort-bridge ──────────────┘
+              └──► Suricata 7 ──► eve.json ──► snort-bridge ──────────────┘
+                  (af-packet, multi-iface, 32 worker threads)
 ```
 
 Suricata-Alerts erscheinen mit `source=suricata`, `rule_id=SURICATA:GID:SID:REV`. Feedback und Enrichment funktionieren identisch zu eigenen Signaturen.
+
+### Suricata 7 Features
+
+| Bereich | Native App-Layer-Parser |
+|---|---|
+| Web | HTTP/1.x, HTTP/2 (mit Decompression), QUIC, TLS (JA3 + JA4), FTP |
+| AD / Auth | SMB, KRB5, DCERPC, NFS, NTLM (tracked across SMB/HTTP) |
+| ICS / OT | Modbus, DNP3, ENIP |
+| IoT / Mgmt | MQTT, BitTorrent-DHT, TFTP, SNMP, NTP, IKE, SIP, RDP, SSH, PgSQL |
+
+`HOME_NET` ist um RFC-5737-TEST-NETs (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) erweitert, damit ET-Rules `from $HOME_NET` auch RedTeam-Sidechain-Traffic erfassen.
 
 ### Regelsets
 
 | `SNORT_RULESET` | Quelle | Signaturen |
 |---|---|---|
-| `emerging-threats` (Standard) | emergingthreats.net | ~40.000 ET Open |
+| `emerging-threats` (Standard) | emergingthreats.net | ~49.000 ET Open (Suricata-7-Format) |
 | `none` | – | 0 |
+| `cyjan-ai.rules` | Lokal (KI via MCP) | SID 9000000-9999999 — siehe RedTeam-Pipeline |
 
-Live-Reload: Dashboard → Settings → Regelquellen → Update starten (SIGUSR2 an Suricata, kein Neustart).
+Live-Reload: Dashboard → Settings → Regelquellen → Update starten. Schreibt `/rules/update.trigger`; der Suricata-Entrypoint pollt das alle 30s und ruft `suricatasc -c ruleset-reload-rules` über den unix-command-socket (kein Container-Restart).
 
 ---
 
@@ -1229,3 +1273,182 @@ Update auf einem laufenden Tap (drei Pfade, je nach Setup):
 3. **Klassisch via Git** — `cd /opt/ids && git pull && docker compose -f docker-compose.tap.yml build && up -d`. Fall-back wenn das Bundle am Master nicht gestaged ist.
 
 Heuristik-Rule-Änderungen kommen ohnehin separat über den Reverse-Channel (`/config`) und brauchen keinen Container-Rebuild.
+
+---
+
+## RedTeam-Tooling — KI-Auto-Pen-Test + Detection-Hardening (Lab-only)
+
+Optionales Compose-Profil `redteam` für vollautomatisierten Pen-Test und Detection-Gap-Schließung über MCP. **Nicht für Customer-Produktion gedacht** — die KI sendet aktiv Pakete und schreibt neue Suricata-Rules. Bewusst getrennt vom Customer-Stack durch das `redteam`-Profile.
+
+### Komponenten
+
+| Service | Rolle |
+|---|---|
+| `kali-shell` | Sandbox für Kali-Tools (nmap, hping3, hydra, ncat) — `network_mode: none`, nur per veth erreichbar. |
+| `redteam-orchestrator` | FastMCP-Server auf `:8002/mcp/`. Verwaltet Scenarios + Rules, koordiniert kali-Aufrufe. |
+| `redteam-listener` | Alpine + ncat: bindet 20 ICS-/Windows-Standard-Ports auf `192.0.2.254` damit TCP-Handshakes vollständig durchgehen und der Sniffer den L7-Payload sieht. |
+
+### Netzwerk-Layout
+
+Ein persistentes `veth`-Pair `cyjan-inject ↔ cy-inj-peer` verbindet den `kali-shell`-Container (`192.0.2.1/24`) mit dem Host-Netzwerk (`192.0.2.254/24`). Suricata 7 captured via `SNORT_IFACE="<mirror> cy-inj-peer"` beide Interfaces — Mgmt-Mirror UND RedTeam-Sidechain. Allowed-Source-CIDRs: nur `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24` (RFC 5737 TEST-NETs).
+
+### MCP-Tools (11 total)
+
+```
+run_kali_tool_v1              — nmap/hping3/hydra/ncat/ping ausführen
+list_scenarios_v1             — Builtin/Generated/Imported-Scenarios listen
+create_payload_scenario_v1    — YAML mit base64-Payload anlegen
+run_payload_scenario_v1       — Scenario gegen TEST-NET-IP abspielen
+delete_payload_scenario_v1    — KI-generated Scenario entfernen
+recent_alerts_for_target_v1   — DB-Alerts für target_ip + dst_port + window
+recent_flow_summary_v1        — Flow-Stats + Suricata-app_proto aus eve.json
+create_suricata_rule_v1       — Custom-Rule in /rules/cyjan-ai.rules + Reload
+list_suricata_custom_rules_v1 — AI-Rules-Inventar
+delete_suricata_rule_v1       — AI-Rule entfernen
+get_audit_log_v1              — Eigene MCP-Aktionen einsehen
+```
+
+### KI-Auto-Feedback-Loop
+
+Beispiel-Workflow den die KI fährt:
+
+```
+User:  "Test mein OPC-UA-Server auf 192.0.2.254:4840"
+KI:
+  1. create_payload_scenario_v1(OPCUA_HELLO, content="HELF…")
+  2. run_payload_scenario_v1 → matched_alerts=0, detection_success=false
+  3. recent_flow_summary_v1 → app_proto=- (Suricata sieht's nicht als OPC-UA)
+  4. create_suricata_rule_v1(sid=9000042,
+       msg="OPC UA Hello Probe (HELF magic)",
+       content_hex="48 45 4c 46", port=4840)
+  5. (wait 35s — Suricata-entrypoint pollt update.trigger)
+  6. run_payload_scenario_v1 → matched_alerts=[{rule_id: "SURICATA:1:9000042:1",
+                                                 severity: "high"}]
+  7. → "Detection-Gap geschlossen, Rule 9000042 in /rules/cyjan-ai.rules"
+```
+
+Die SID-Range **9000000-9999999** ist für KI-authored Rules reserviert (kollidiert weder mit Suricata-Builtin 1.x noch ET-Open 2.x). Alle Rules tragen `metadata:author cyjan-ai` für Audit-Visibility im RuleFileEditor.
+
+### Builtin Payload-Templates (8 + 20 Compliance-Pack)
+
+Image-shipped unter `/scenarios/templates/`:
+
+| Template | Protokoll/Port | Zweck |
+|---|---|---|
+| `S7_COTP_CR` | TCP/102 | Siemens S7-300/400 COTP Connection Request (PLC-Fingerprint) |
+| `S7_READ_SZL_MODID` | TCP/102 | S7Comm Read-SZL Module-Identification (plcscan-style) |
+| `OPCUA_HELLO_WINCC` | TCP/4840 | OPC UA Hello an WinCC-Endpoint |
+| `HASP_PROBE_WINCC` | TCP/1947 | Sentinel-HASP License-Manager-Probe |
+| `IFIX_PROFICY_PROBE` | TCP/2010 | GE iFix Proficy iClient-Probe |
+| `KERBEROS_AS_REQ_NOPREAUTH` | TCP/88 | AS-REP-Roasting (T1558.004) |
+| `SMB1_NEGOTIATE` | TCP/445 | SMBv1 Negotiate (legacy/EternalBlue) |
+| `NTLM_NEGOTIATE_TYPE1` | TCP/445 | NTLMSSP Type 1 Message |
+
+Plus **Compliance-Pack** (KI-generated, persistent in `/scenarios/generated/`): LDAP-Anon, LDAP-Null-PW, Telnet, FTP-Anon, POP3/IMAP/SMTP-plaintext, HTTP-Basic-Auth, TLS-SSLv3+RC4, RDP-no-NLA, WinRM-unencrypted, SSH-Legacy, Modbus-FC5/FC8, IEC-104-STARTDT, BACnet Who-Is, MQTT-no-auth, DNS-Tunnel, HTTP-NTLM, TFTP-RRQ. Mit 18 zugehörigen Custom-AI-Suricata-Rules (SID 9000200-9000218).
+
+### UI
+
+`Settings → RedTeam tooling` zeigt:
+
+- **Manueller Tool-Run** (nmap/hping3/…) mit Args-Whitelist + Expected-Rule-Polling
+- **Payload-Scenarios**: pro Scenario-Card Run-Button, Filter, Group-by-Origin (templates/generated/imported), Inline-Result (sent_bytes, exit_code, matched_alerts, detection_success)
+- **Audit-Log**: semantisch beschriebene Aktionen (color-coded nach Typ: scenario violett, kali cyan, AI-rule amber), mobile-fit Card-Layout
+
+`Settings → Custom signatures`: `cyjan-ai.rules` ist mit `🤖 KI N`-Badge markiert, separate Filter-Checkbox "Nur KI-erzeugte (N)", Editor-Banner mit SID-Range-Hinweis.
+
+### Aktivieren
+
+```bash
+# In .env zusätzlich:
+REDTEAM_API_TOKEN=optional-shared-secret  # leer = JWT-Mint aus API_SECRET_KEY
+REDTEAM_API_PORT=8002
+
+# Stack starten
+docker compose --profile prod --profile snort --profile redteam up -d
+
+# Feature-Flag im Frontend aktivieren (sonst nicht sichtbar):
+# Settings → Feature flags → "RedTeam tooling enabled" → speichern
+```
+
+MCP-Endpoint: `http://<master>:8002/mcp/` (Streamable-HTTP-Transport). Auth via shared `CYJAN_API_TOKEN` oder Service-JWT.
+
+---
+
+## Compliance & MITRE-Coverage
+
+Der Wochenbericht enthält eine **Compliance-Section** mit MITRE-ATT&CK-Coverage und Cyjan-curated Mapping auf NIS-2 / ISO 27001:2022 / BSI IT-Grundschutz.
+
+### Datenfluss
+
+```
+RedTeam-Pipeline               api/src/compliance.py            Frontend
+─────────────                  ────────────────────             ─────────
+                               COMPLIANCE_MAPPING:
+[run_payload_scenario]         T1558.004 → [
+   ↓                              NIS-2 Art-21(2)(i),
+[redteam_results.insert]          ISO-27001 A.8.5,
+   ↓ ts, detected, …              BSI APP.2.2.A18              WeeklyReportPage
+                               ]                              ComplianceSection
+GET /api/reports/weekly  ─►   _compliance_summary()      ─►   ├ KPI-Boxen
+                               · MITRE-Aggregat              ├ MITRE-Tabelle
+                               · framework_coverage()        ├ Gap-Warnung
+                               · Evidence-Artifacts          ├ NIS-2-Card
+                                                             ├ ISO-27001-Card
+                                                             └ BSI-Card
+```
+
+### Mapping-Beispiele (Auszug aus `COMPLIANCE_MAPPING`)
+
+| MITRE-Technique | NIS-2 | ISO 27001 | BSI IT-Grundschutz |
+|---|---|---|---|
+| T1558.004 AS-REP Roasting | Art-21(2)(i) IAM | A.8.5 Secure auth | APP.2.2.A18 |
+| T1573.002 Asymmetric Crypto | Art-21(2)(h) Crypto | A.8.24 Crypto-Use | NET.3.3.A4 TLS-Config |
+| T0855 Unauthorized ICS-Cmd | Art-21(2)(c) Vuln-Mgmt | A.8.7 Malware-Schutz | IND.2.2.A11 Modbus-Filter |
+| T1071.004 DNS-C2 | Art-21(2)(g) Netz-Monitor | A.8.16 Monitoring | DER.2.1.A7 DNS-Tunnel-Erk. |
+| T1021.001 RDP | Art-21(2)(j) Remote-Access | A.8.21 Network-Services | OPS.1.2.5.A8 RDP-Härtung |
+
+25+ MITRE-IDs sind direkt gemappt; Sub-Techniques fallen automatisch auf Parent-Mapping zurück (z.B. T1558.004 zieht zusätzlich T1558-Mapping).
+
+### Wochenbericht-Output
+
+`Settings → Weekly Report` zeigt:
+
+1. **KPI-Reihe** — Techniques getestet, mit Detection, Lab-Runs, True-Positive-Rate (color-coded: ≥80% grün, 50-80% amber, <50% rot)
+2. **MITRE-Technique-Tabelle** — pro T-ID die Scenarios + run_count + detection_count + TPR + Hover-Link auf attack.mitre.org
+3. **Detection-Gap-Warnung** (gelb) — Techniques mit 0 Detection trotz Runs, mit Handlungs-Empfehlung "Custom-Rule schreiben via MCP create_suricata_rule_v1"
+4. **Framework-Cards** pro Standard (NIS-2 / ISO-27001 / BSI) mit Control-Liste, technique_ids pro Control, runs/detected-Counts
+5. **Evidence-Artefakte** — Pointer zu den JSON-Pfaden im Report + DB-Tabelle für Auditor
+
+### Bundle-Export
+
+Pattern-Federation-Bundle (`POST /api/pattern/export`) trägt `evidence.mitre`-Komponente: MITRE-Coverage-Matrix als `evidence/mitre-coverage-matrix.json` mit per-Technique-Aggregat über letzte 30 Tage. Customer-Auditor kann das Bundle als signierten Compliance-Beleg archivieren.
+
+Komponenten-Vorschau im UI (`Settings → Export pattern bundle → Anzeigen`):
+
+```
+rules.suricata    1 Files  🤖 18 KI-Rules
+  cyjan-ai.rules  🤖 18    active     2.1 KB
+tests.regression  29 YAMLs  🤖 21 KI-generiert  📦 8 Builtin
+  templates/HASP_PROBE_WINCC.yml      builtin-template  618 B
+  generated/MODBUS_WRITE_COIL_FC5.yml ai-generated      328 B
+  …
+evidence.mitre    — MITRE-Coverage über N Techniques
+```
+
+`metadata:author cyjan-ai` im Rule-File macht die Origin transparent für Customer-Audit.
+
+---
+
+## Releases & Versionierung
+
+Aktueller Stand: **v2.5.4** (siehe [GitHub Releases](https://github.com/JxxKal/ids/releases)).
+
+| Tag-Format | Auslöser | Artefakte |
+|---|---|---|
+| `vN.M.P` (Patch) | Tag-Push | Update-ZIP (~1.5 GB) — Customer lädt unter `Settings → System-Update` hoch |
+| `vN.0.0` (Major) | Tag-Push | Update-ZIP **+** Master-ISO **+** Tap-ISO |
+| `workflow_dispatch` | Manuell mit `build_iso=true` | Beide |
+
+Update-ZIP-Apply auf Customer-Seite: `docker load` aus `images.tar.zst`, dann eigenständiger Runner-Container ruft `docker compose up -d --force-recreate` (siehe `api/src/routers/update.py:_spawn_compose_up_runner`). `--force-recreate` ist nötig weil neue Images den gleichen `:latest`-Tag aber andere Digests haben.
+
+**Stand v2.5.4:** Phase-A/B/C RedTeam-Pipeline + 18 Custom-AI-Suricata-Rules + 20 Compliance-Pack-Scenarios + MITRE-Compliance-Wochenbericht + Suricata 7-Upgrade + UX-Pass (AI-Sichtbarkeit, mobile-fit Audit-Log, Bundle-Export-Preview).
