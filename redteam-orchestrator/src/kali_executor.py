@@ -68,6 +68,18 @@ class KaliExecutor:
             raise KaliExecutionError(f"unable to parse PID: {out!r}") from exc
 
     async def _attach_iface_unlocked(self) -> None:
+        # Pre-Check: existiert das veth überhaupt? Wenn nicht, sauberer
+        # Fehler statt kryptisches "netns value invalid" weiter unten.
+        rc, _, _ = await self._exec("ip", "link", "show", settings.test_iface)
+        if rc != 0:
+            raise KaliExecutionError(
+                f"veth '{settings.test_iface}' nicht gefunden. "
+                f"Lab-Setup-Schritt fehlt: veth-Pair muss am Host vor dem "
+                f"ersten attach_iface=true-Aufruf eingerichtet sein "
+                f"(z.B. `ip link add {settings.test_iface} type veth peer name "
+                f"{settings.test_iface}-peer`). Alternativ attach_iface=false "
+                f"verwenden — Tool läuft dann ohne Netz-Konnektivität."
+            )
         pid = await self._get_container_pid()
         rc, _, err = await self._exec(
             "ip", "link", "set", settings.test_iface, "netns", str(pid),

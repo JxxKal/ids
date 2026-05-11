@@ -36,10 +36,11 @@ RUN apt-get update -qq \
 # cap_add NET_RAW. Damit non-setuid-Binaries die NET_RAW-Capability auch
 # tatsächlich nutzen, brauchen sie das file-cap. apt-get strippt das
 # manchmal in --no-install-recommends; setcap idempotent.
-RUN setcap cap_net_raw+ep /usr/bin/ping \
- && setcap cap_net_raw,cap_net_admin,cap_net_bind_service+ep /usr/bin/nmap.nmap \
- && setcap cap_net_raw+ep /usr/sbin/hping3 \
- || true
+# setcap einzeln statt &&-verkettet — sonst bricht die erste fehlende
+# Binary die ganze Kette und || true swallowed nur den Combined-Exit.
+RUN setcap cap_net_raw+ep /usr/bin/ping || true
+RUN setcap cap_net_raw,cap_net_admin,cap_net_bind_service+ep /usr/bin/nmap || true
+RUN setcap cap_net_raw+ep /usr/sbin/hping3 || true
 
 # Non-root user — UID 1000 matched Default-Host-User
 RUN groupadd -g 1000 redteam \

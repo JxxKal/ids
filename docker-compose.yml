@@ -889,6 +889,7 @@ services:
     logging: *default-logging
     cap_add:
       - NET_ADMIN              # ip link set ... netns für veth-Handover
+      - SYS_PTRACE             # Zugriff auf /proc/<pid>/ns/net anderer Prozesse
     # network_mode: host ist nötig für netns-Manipulation. Bedeutet aber
     # auch volle Host-Net-Sichtbarkeit — der Container muss daher selbst
     # gehärtet sein und auf nicht-routbare Test-IPs limitiert sein.
