@@ -160,6 +160,29 @@ class KaliExecutor:
             finally:
                 await self._detach_iface_unlocked()
 
+    async def run_payload_with_iface(
+        self, target_ip: str, target_port: int, protocol: str,
+        payload_b64: str, timeout_sec: int = 10,
+    ) -> dict[str, Any]:
+        """Sendet einen Application-Layer-Payload via ncat --send-only.
+        Für Signatur-Detection-Tests (Modbus, OPC-UA, HTTP-Pattern etc.).
+        Veth-attach immer aktiv — Payloads ohne Netz machen keinen Sinn."""
+        self._validate_target_local(target_ip)
+        async with self._iface_lock:
+            await self._attach_iface_unlocked()
+            try:
+                cmd_json = json.dumps({
+                    "mode": "payload",
+                    "target_ip": target_ip,
+                    "target_port": target_port,
+                    "protocol": protocol,
+                    "payload_b64": payload_b64,
+                    "timeout_sec": timeout_sec,
+                }).encode()
+                return await self._exec_runner(cmd_json, timeout_sec)
+            finally:
+                await self._detach_iface_unlocked()
+
     async def _run_inner(
         self, tool: str, target_ip: str, args: list[str], timeout_sec: int,
     ) -> dict[str, Any]:
@@ -167,6 +190,12 @@ class KaliExecutor:
             "tool": tool, "target_ip": target_ip,
             "args": args, "timeout_sec": timeout_sec,
         }).encode()
+        return await self._exec_runner(cmd_json, timeout_sec)
+
+    async def _exec_runner(self, cmd_json: bytes, timeout_sec: int) -> dict[str, Any]:
+        """Shared subprocess-Helper für tool-mode + payload-mode. Schickt
+        die JSON-Payload an `docker exec -i ids-kali python3 kali_runner.py`
+        und parsed das JSON-Result."""
         outer_timeout = int(timeout_sec * 1.5) + 10
 
         proc = await asyncio.create_subprocess_exec(

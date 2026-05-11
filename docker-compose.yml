@@ -919,7 +919,10 @@ services:
     ports:
       - "${REDTEAM_API_PORT:-8002}:8002"
     volumes:
-      - cyjan-scenarios:/scenarios:ro
+      # Orchestrator schreibt jetzt auch — KI-generierte Payload-Scenarios
+      # landen in /scenarios/generated/. Imported-Scenarios aus Pattern-
+      # Federation kommen weiterhin von der API über das selbe Volume.
+      - cyjan-scenarios:/scenarios
       # WARNUNG: Docker-Socket-Mount = Root-Equivalent am Host. Der :ro-Flag
       # schützt nur das Inode der Socket-Datei, NICHT die Reads/Writes
       # darüber. Mit dem Socket kann der Orchestrator beliebige Container
