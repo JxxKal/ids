@@ -22,6 +22,7 @@ from alert_match import poll_alerts_for_rule
 from config import settings
 from db import audit_log, close_pool, init_pool
 from kali_executor import KaliExecutionError, KaliExecutor
+from mcp_server import mcp
 
 logging.basicConfig(
     level=logging.INFO,
@@ -211,3 +212,10 @@ async def _startup() -> None:
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await close_pool()
+
+
+# ─── MCP-Server-Mount ────────────────────────────────────────────────────
+# FastMCP-App als Sub-Application unter /mcp. Claude/AI-Clients verbinden
+# über http://master:8002/mcp/sse (Server-Sent-Events Transport).
+# Auth läuft über CYJAN_API_TOKEN als URL-Query oder Header.
+app.mount("/mcp", mcp.sse_app())
