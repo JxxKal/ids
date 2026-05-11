@@ -1,66 +1,52 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  deleteAllTestRuns, deleteTestRun, fetchTestRuns, runTest,
-  fetchFeatureFlags, fetchRedTeamScenarios,
+  runTest, fetchFeatureFlags, fetchRedTeamScenarios, fetchRedTeamHealth,
 } from '../api';
-import type { TestRun, FeatureFlags } from '../types';
-import type { RedTeamScenario } from '../types';
+import type { FeatureFlags, RedTeamScenario, RedTeamHealth } from '../types';
 import { MobileDesktopHint } from './MobileDesktopHint';
 import { ScenarioRunner } from './ScenarioRunner';
+import { ManualToolRun } from './ManualToolRun';
+import { UnifiedRunLog } from './UnifiedRunLog';
 
 // Synthetische Tests — Traffic-Generator injiziert Flows direkt in Kafka.
-// Bewusst hardcoded, weil die Backend-Logik je Scenario unterschiedlich ist
-// (DOS_SYN_001 generiert N SYNs pro Sekunde, DNS_DGA_001 entropy-DNS-Pakete).
+// Hardcoded weil die Generator-Logik pro Scenario unterschiedlich ist
+// (DOS_SYN_001 = N SYNs/sec, DNS_DGA_001 = high-entropy DNS-Pakete, …).
 const SCENARIO_IDS = ['TEST_001', 'SCAN_001', 'DOS_SYN_001', 'RECON_003', 'DNS_DGA_001'] as const;
 
-function statusColor(status: string) {
-  switch (status) {
-    case 'completed': return 'text-green-400';
-    case 'failed':    return 'text-red-400';
-    default:          return 'text-yellow-400';
-  }
-}
 
 export function TestsPage() {
   const { t } = useTranslation();
-  const [runs, setRuns]             = useState<TestRun[]>([]);
-  const [running, setRunning]       = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [error, setError]           = useState('');
+  const [running, setRunning] = useState<string | null>(null);
+  const [error, setError]     = useState('');
+  const [reloadKey, setReloadKey] = useState(0);  // bumped nach jedem Run → UnifiedRunLog refresht
 
-  // Feature-Flag + Payload-Scenarios (nur sichtbar wenn redteam_enabled=true)
-  const [flags, setFlags]                 = useState<FeatureFlags | null>(null);
+  // Feature-Flag + RedTeam-Daten
+  const [flags, setFlags]                       = useState<FeatureFlags | null>(null);
   const [payloadScenarios, setPayloadScenarios] = useState<RedTeamScenario[]>([]);
+  const [health, setHealth]                     = useState<RedTeamHealth | null>(null);
 
-  const load = () =>
-    fetchTestRuns()
-      .then(setRuns)
-      .catch(() => {});
-
-  const loadPayload = async () => {
+  const loadRedTeam = async () => {
     try {
       const f = await fetchFeatureFlags();
       setFlags(f);
       if (f.redteam_enabled) {
         setPayloadScenarios(await fetchRedTeamScenarios().catch(() => []));
+        setHealth(await fetchRedTeamHealth().catch(() => ({ reachable: false, error: 'fetch error' })));
       }
-    } catch { /* feature-flags endpoint unavailable → keep payload-section hidden */ }
+    } catch {
+      /* feature-flags-endpoint unavailable → RedTeam-Section hidden */
+    }
   };
 
-  useEffect(() => {
-    load();
-    loadPayload();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
-  }, []);
+  useEffect(() => { loadRedTeam(); }, []);
 
-  const trigger = async (scenarioId: string) => {
+  const triggerSynth = async (scenarioId: string) => {
     setRunning(scenarioId);
     setError('');
     try {
       await runTest(scenarioId);
-      load();
+      setReloadKey(k => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.errorGeneric'));
     } finally {
@@ -68,37 +54,18 @@ export function TestsPage() {
     }
   };
 
-  const handleDelete = async (runId: string) => {
-    setDeletingId(runId);
-    try {
-      await deleteTestRun(runId);
-      setRuns(prev => prev.filter(r => r.id !== runId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('tests.deleteFailed'));
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const handleDeleteAll = async () => {
-    try {
-      await deleteAllTestRuns();
-      setRuns([]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('tests.deleteFailed'));
-    }
-  };
+  const bumpLog = () => setReloadKey(k => k + 1);
 
   return (
     <div className="space-y-4">
       <MobileDesktopHint />
 
-      {/* ───── Section 1: Synthetische Tests ─────
+      {/* ───── 🧪 Synthetische Tests ─────
          Traffic-Generator injiziert Flows direkt in Kafka — kein echter
-         Netzwerk-Traffic. Zweck: Smoketest der Signature-Engine. */}
+         Netzwerk-Traffic. Smoketest der Cyjan-Signature-Engine. */}
       <div className="card p-4">
         <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-          <h2 className="text-sm font-semibold text-slate-300">
+          <h2 className="text-sm font-semibold text-blue-300">
             🧪 Synthetische Tests
           </h2>
           <p className="text-[11px] text-slate-500">
@@ -106,7 +73,7 @@ export function TestsPage() {
             Smoketest der Cyjan-Signature-Engine.
           </p>
         </div>
-        {error && <p className="text-red-400 text-xs mb-3">{error}</p>}
+        {error && <p className="text-red-400 text-xs mb-3 break-words">{error}</p>}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {SCENARIO_IDS.map(id => (
             <div key={id} className="bg-slate-800/50 border border-slate-700 rounded p-3 flex flex-col gap-2">
@@ -116,7 +83,7 @@ export function TestsPage() {
                 <p className="text-blue-500 text-xs font-mono mt-1">{id}</p>
               </div>
               <button
-                onClick={() => trigger(id)}
+                onClick={() => triggerSynth(id)}
                 disabled={running !== null}
                 className="btn-primary self-start mt-auto"
               >
@@ -127,10 +94,9 @@ export function TestsPage() {
         </div>
       </div>
 
-      {/* ───── Section 2: Payload-Szenarios (RedTeam) ─────
-         Nur sichtbar wenn redteam_enabled=true. Spielt YAML-basierte Byte-
-         Payloads via kali-shell → veth → cy-inj-peer-Listener; voller
-         Pipeline-Test inkl. Suricata-Detection. */}
+      {/* ───── 🎯 Payload-Szenarios (RedTeam) ─────
+         Nur sichtbar wenn redteam_enabled. Spielt YAML-basierte Byte-
+         Payloads via kali-shell → veth → listener → echter Pipeline-Test. */}
       {flags?.redteam_enabled && (
         <div className="card p-4">
           <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
@@ -138,90 +104,43 @@ export function TestsPage() {
               🎯 Payload-Szenarios (RedTeam)
             </h2>
             <p className="text-[11px] text-slate-500">
-              kali-shell → veth → Listener. Echter Pen-Test der vollen Pipeline
-              (Sniffer + Suricata + AI-Rules). Lab-only.
+              kali-shell → veth → Listener. Voller Pipeline-Test (Sniffer + Suricata + AI-Rules).
+              Lab-only.
             </p>
           </div>
-          <ScenarioRunner scenarios={payloadScenarios} onAuditChange={loadPayload} />
+          {/* Orchestrator-Health-Indikator */}
+          {health && !health.reachable && (
+            <div className="bg-amber-500/10 border border-amber-500/40 rounded p-2 text-[11px] text-amber-300 mb-3">
+              ⚠ Orchestrator nicht erreichbar — Runs werden 503 zurückbekommen.
+              {health.error && <span className="text-amber-400/70 ml-2 break-words">{health.error}</span>}
+            </div>
+          )}
+          <ScenarioRunner scenarios={payloadScenarios} onAuditChange={bumpLog} />
         </div>
       )}
 
-      {/* ───── Section 3: Run Log (Synthetische Tests) ─────
-         Nur synth-Runs hier — RedTeam-Runs landen in redteam_audit_log und
-         sind unter Settings → RedTeam tooling sichtbar. */}
-      <div className="card overflow-hidden">
-        <div className="px-4 py-2 border-b border-slate-800 flex justify-between items-center">
-          <h2 className="text-sm font-semibold text-slate-300">{t('tests.logTitle')}</h2>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-500">{t('tests.refreshHint')}</span>
-            {runs.length > 0 && (
-              <button
-                onClick={handleDeleteAll}
-                className="text-xs text-slate-500 hover:text-red-400 transition-colors"
-                title={t('tests.deleteAllTitle')}
-              >
-                {t('tests.deleteAll')}
-              </button>
-            )}
-          </div>
-        </div>
-        <table className="w-full text-xs">
-          <thead className="cyjan-table-head text-left">
-            <tr>
-              <th>{t('tests.columns.time')}</th>
-              <th>{t('tests.columns.scenario')}</th>
-              <th>{t('tests.columns.status')}</th>
-              <th>{t('tests.columns.expected')}</th>
-              <th>{t('tests.columns.triggered')}</th>
-              <th>{t('tests.columns.latency')}</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {runs.length === 0 && (
-              <tr>
-                <td colSpan={7} className="text-center text-slate-600 py-8">{t('tests.noRuns')}</td>
-              </tr>
-            )}
-            {runs.map(r => (
-              <tr key={r.id} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                <td className="px-4 py-2 text-slate-500 whitespace-nowrap">
-                  {new Date(r.started_at).toLocaleTimeString()}
-                </td>
-                <td className="px-4 py-2 text-slate-300">{r.scenario_id}</td>
-                <td className={`px-4 py-2 font-medium ${statusColor(r.status)}`}>{r.status}</td>
-                <td className="px-4 py-2 text-slate-400">{r.expected_rule ?? '–'}</td>
-                <td className="px-4 py-2">
-                  {r.triggered == null ? '–' : r.triggered
-                    ? <span className="text-green-400">✓</span>
-                    : <span className="text-red-400">✗</span>
-                  }
-                </td>
-                <td className="px-4 py-2 text-slate-400 tabular-nums">
-                  {r.latency_ms != null ? `${r.latency_ms} ms` : '–'}
-                </td>
-                <td className="px-4 py-2">
-                  <button
-                    onClick={() => handleDelete(r.id)}
-                    disabled={deletingId === r.id}
-                    className="text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40"
-                    title={t('tests.deleteEntryTitle')}
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Cross-Link für RedTeam-Audit-Log */}
+      {/* ───── 🔧 Manueller Tool-Run ─────
+         Direkter kali-Tool-Aufruf (nmap/hping3/etc.) — Lab-only, nur wenn
+         redteam_enabled. Audit-Eintrag landet im Run-Log unten. */}
       {flags?.redteam_enabled && (
-        <p className="text-[11px] text-slate-600 text-center">
-          RedTeam-Audit-Log (alle MCP-/REST-Aktionen) unter <em>Settings → RedTeam tooling</em>
-        </p>
+        <div className="card p-4">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+            <h2 className="text-sm font-semibold text-cyan-300">
+              🔧 Manueller Tool-Run
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              Direkter kali-shell-Aufruf (nmap/hping3/hydra/ncat/ping) — One-Shot ohne YAML.
+            </p>
+          </div>
+          <ManualToolRun onRunComplete={bumpLog} />
+        </div>
       )}
+
+      {/* ───── Unified Run Log ─────
+         Merged: test_runs (synthetisch) + redteam_audit_log (alle MCP-/REST-
+         Aktionen). Chronologisch absteigend, color-coded nach Aktionstyp,
+         Filter-Chips pro Typ. */}
+      <UnifiedRunLog key={reloadKey} redteamEnabled={!!flags?.redteam_enabled} />
     </div>
   );
 }

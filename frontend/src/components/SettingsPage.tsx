@@ -9,9 +9,9 @@ import {
   addPatternTrustKey, addSigningKey, applyPatternBundle, deletePatternTrustKey, deleteSigningKey,
   exportPatternBundle, fetchExportLog, fetchFeatureFlags, fetchIrmaConfig, fetchItopConfig,
   fetchMLConfig, fetchMLStatus, fetchMqttConfig, fetchPatternImports, fetchPatternTrustKeys,
-  fetchRedTeamAuditLog, fetchRedTeamHealth, fetchRedTeamScenarios,
+  fetchRedTeamHealth,
   fetchRuleSources, fetchSigningKeys, previewPatternExport,
-  runRedTeamTool, updateFeatureFlags, uploadPatternBundle,
+  updateFeatureFlags, uploadPatternBundle,
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
   fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource, setInterfaceRole,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveMqttConfig, saveSamlConfig, saveSyslogConfig,
@@ -3611,78 +3611,22 @@ function ItopSettings() {
 // (nmap/hping3/hydra/ncat/ping), Audit-Log aller MCP-/REST-Aktionen.
 
 function RedTeamSettings() {
-  const [health, setHealth]       = useState<import('../types').RedTeamHealth | null>(null);
-  const [scenarios, setScenarios] = useState<import('../types').RedTeamScenario[]>([]);
-  const [auditLog, setAuditLog]   = useState<import('../types').RedTeamAuditEntry[]>([]);
-  const [running, setRunning]     = useState(false);
-  const [result, setResult]       = useState<import('../types').RedTeamRunResponse | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [health, setHealth] = useState<import('../types').RedTeamHealth | null>(null);
 
-  // Form state. Beim Tool-Wechsel werden die Args auf sinnvolle Defaults
-  // resetted — sonst sind ping-Args (-c 1 -W 2) für nmap nutzlos.
-  type ToolName = import('../types').RedTeamRunRequest['tool'];
-  const TOOL_DEFAULTS: Record<ToolName, string> = {
-    ping:   '-c 1 -W 2',
-    nmap:   '-sS -p 22,80,443 -Pn',
-    hping3: '-c 3 -S -p 80',
-    hydra:  '-l admin -P /dev/null -t 1 -f',
-    ncat:   '-z -w 2',
-  };
-  const [tool, setToolRaw] = useState<ToolName>('ping');
-  const [argsStr, setArgsStr] = useState(TOOL_DEFAULTS.ping);
-  const [argsManuallyEdited, setArgsManuallyEdited] = useState(false);
-  function setTool(t: ToolName) {
-    setToolRaw(t);
-    // Nur den Default überschreiben wenn der User die Args nicht selbst
-    // geändert hat — sonst frisst Tool-Wechsel die manuelle Anpassung.
-    if (!argsManuallyEdited) setArgsStr(TOOL_DEFAULTS[t]);
-  }
-  // Default 192.0.2.254 = Host-Peer (pingbar). 192.0.2.1 ist kali selbst und
-  // pingt sich nur selbst → 100% packet loss. Andere TEST-NET-IPs sind
-  // unbeantwortet (kein Backend), aber Pakete fließen über die veth-Bridge
-  // raus und werden vom Sniffer mitgelesen — gut für Detection-Tests.
-  const [targetIp, setTargetIp]       = useState('192.0.2.254');
-  const [timeoutSec, setTimeoutSec]   = useState(30);
-  const [attachIface, setAttachIface] = useState(false);
-  const [expectedRuleId, setExpectedRuleId] = useState('');
-
-  const reload = async () => {
-    setHealth(await fetchRedTeamHealth().catch(() => ({ reachable: false, error: 'fetch error' })));
-    setScenarios(await fetchRedTeamScenarios().catch(() => []));
-    setAuditLog(await fetchRedTeamAuditLog(20).catch(() => []));
-  };
-
-  useEffect(() => { reload(); }, []);
-
-  async function handleRun() {
-    setRunning(true); setResult(null); setErr(null);
-    try {
-      const r = await runRedTeamTool({
-        tool, target_ip: targetIp,
-        args: argsStr.split(/\s+/).filter(Boolean),
-        timeout_sec: timeoutSec,
-        attach_iface: attachIface,
-        expected_alert_rule_id: expectedRuleId.trim() || null,
-      });
-      setResult(r);
-      reload(); // Audit-Log refreshen
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : 'Run fehlgeschlagen');
-    } finally {
-      setRunning(false);
-    }
-  }
+  useEffect(() => {
+    fetchRedTeamHealth()
+      .then(setHealth)
+      .catch(() => setHealth({ reachable: false, error: 'fetch error' }));
+  }, []);
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-sm font-semibold text-slate-200">RedTeam-Tooling (Lab-Modus)</h2>
         <p className="text-xs text-slate-500 mt-1">
-          Manuelle Steuerung des redteam-orchestrators. Tool-Aufrufe gehen an die
-          kali-shell, sind auf RFC-5737-TEST-NETs (192.0.2/24, 198.51.100/24, 203.0.113/24)
-          beschränkt und werden in <code className="font-mono">redteam_audit_log</code> persistiert.
-          Für KI-getriebene Auto-Loops: MCP-Endpoint unter
-          {' '}<code className="font-mono text-violet-300">http://host:8002/mcp/</code>.
+          Orchestrator-Status für die RedTeam-Pipeline. Test-Aktionen + Run-Log
+          sind im Hauptmenü → <em>Szenarien</em>; das hier ist nur das Status-Panel +
+          MCP-Endpoint-Info für KI-Clients.
         </p>
       </div>
 
@@ -3692,269 +3636,53 @@ function RedTeamSettings() {
           ? 'border-emerald-500/40 bg-emerald-500/5'
           : 'border-amber-500/40 bg-amber-500/5'
       }`}>
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-3 text-xs flex-wrap">
           <span className={health?.reachable ? 'text-emerald-300' : 'text-amber-300'}>
             ● {health?.reachable ? 'Orchestrator erreichbar' : 'Orchestrator NICHT erreichbar'}
           </span>
           {health?.kali_container && (
             <span className="text-slate-400">kali=<code className="font-mono">{health.kali_container}</code></span>
           )}
-          {health?.error && <span className="text-amber-400">— {health.error}</span>}
+          {health?.error && <span className="text-amber-400 break-words">— {health.error}</span>}
         </div>
         {health?.allowed_src_cidrs && (
-          <p className="text-[10px] text-slate-500 mt-1 font-mono">
+          <p className="text-[10px] text-slate-500 mt-1 font-mono break-words">
             allowed_cidrs: {health.allowed_src_cidrs.join(', ')}
           </p>
         )}
       </div>
 
-      {/* Run-Form */}
-      <div className="border border-slate-800 rounded p-3 space-y-3">
-        <h3 className="text-[11px] uppercase tracking-wider text-slate-500">Manueller Tool-Run</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-          <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Tool</label>
-            <select className="input" value={tool}
-              onChange={e => setTool(e.target.value as ToolName)}>
-              <option value="ping">ping</option>
-              <option value="nmap">nmap</option>
-              <option value="hping3">hping3</option>
-              <option value="hydra">hydra</option>
-              <option value="ncat">ncat</option>
-            </select>
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-2">
-            <label className="text-slate-400">Target-IP (TEST-NET)</label>
-            <input className="input font-mono" value={targetIp}
-              onChange={e => setTargetIp(e.target.value)} placeholder="192.0.2.254" />
-            <span className="text-[10px] text-slate-600">
-              <code>192.0.2.254</code> = Host-Peer (pingbar). <code>192.0.2.1</code> = kali selbst.
-              Andere TEST-NET-IPs (z.B. <code>192.0.2.10</code>) sind unbeantwortet,
-              werden aber vom Sniffer mitgelesen — gut für Detection-Tests.
-            </span>
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-3">
-            <label className="text-slate-400">Args (Space-separated, Tool-Whitelist serverseitig)</label>
-            <input className="input font-mono" value={argsStr}
-              onChange={e => { setArgsStr(e.target.value); setArgsManuallyEdited(true); }}
-              placeholder="-c 1 -W 2" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-slate-400">Timeout (s)</label>
-            <input className="input" type="number" min={5} max={120}
-              value={timeoutSec} onChange={e => setTimeoutSec(parseInt(e.target.value) || 30)} />
-          </div>
-          <div className="flex flex-col gap-1 sm:col-span-2">
-            <label className="text-slate-400">Expected Alert Rule (optional)</label>
-            <input className="input font-mono" value={expectedRuleId}
-              onChange={e => setExpectedRuleId(e.target.value)} placeholder="SCAN_001" />
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer text-xs sm:col-span-3">
-            <input type="checkbox" className="accent-cyan-500"
-              checked={attachIface} onChange={e => setAttachIface(e.target.checked)} />
-            <span className={attachIface ? 'text-cyan-300' : 'text-slate-500'}>
-              veth-Handover (cyjan-inject) aktivieren
-            </span>
-          </label>
-        </div>
-        <div className="flex justify-between items-center">
-          <div>
-            {err && <span className="text-xs text-red-400">{err}</span>}
-            {result && (
-              <span className={`text-xs ${result.exit_code === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                exit={result.exit_code} · {result.duration_ms} ms · {result.matched_alerts.length} alerts
-              </span>
-            )}
-          </div>
-          <button className="btn-primary text-xs"
-            disabled={running || !targetIp.trim()}
-            onClick={handleRun}>
-            {running ? 'Läuft…' : 'Run'}
-          </button>
-        </div>
-        {result && (
-          <div className="space-y-2 mt-2">
-            {result.stdout_excerpt && (
-              <pre className="text-[10px] bg-slate-900/60 border border-slate-800 rounded p-2 overflow-x-auto font-mono text-slate-300">{result.stdout_excerpt}</pre>
-            )}
-            {result.stderr_excerpt && (
-              <pre className="text-[10px] bg-red-500/5 border border-red-500/30 rounded p-2 overflow-x-auto font-mono text-red-300">{result.stderr_excerpt}</pre>
-            )}
-          </div>
-        )}
+      {/* Cross-Link ins Hauptmenü — wo alle Tests + der Audit-Trail leben */}
+      <div className="border border-violet-500/30 bg-violet-500/5 rounded p-3 text-xs space-y-2">
+        <p className="text-violet-300">
+          🎯 <strong>Tests &amp; Audit-Trail</strong> sind komplett im Hauptmenü →{' '}
+          <em>Szenarien</em> zusammengefasst:
+        </p>
+        <ul className="text-slate-400 text-[11px] space-y-0.5 ml-4">
+          <li>🧪 Synthetische Cyjan-Tests (Traffic-Generator)</li>
+          <li>🎯 Payload-Szenarios (kali → veth → Listener, voller L7-Pipeline-Test)</li>
+          <li>🔧 Manueller Tool-Run (nmap/hping3/hydra/ncat/ping)</li>
+          <li>📋 Unified Run-Log (alle drei Quellen chronologisch, gefiltert nach Typ)</li>
+        </ul>
       </div>
 
-      {/* Payload-Szenarios wurden ins Hauptmenü "Szenarien" verschoben —
-          dort sind sie ein Klick näher und können neben den synthetischen
-          Cyjan-Tests gefahren werden. */}
-      {scenarios.length > 0 && (
-        <div className="border border-violet-500/30 bg-violet-500/5 rounded p-3 text-xs">
-          <p className="text-violet-300">
-            🎯 <strong>{scenarios.length}</strong> Payload-Szenarios verfügbar — siehe{' '}
-            <em>Hauptmenü → Szenarien</em>{' '}
-            (Section "Payload-Szenarios", nur sichtbar wenn dieses Feature-Flag aktiv ist).
-          </p>
-          <p className="text-slate-500 mt-1 text-[11px]">
-            Diese Section bleibt für reine Tooling-Wartung: Orchestrator-Health, manueller Tool-Run
-            (nmap/hping3/…), Audit-Log aller MCP-Aktionen.
-          </p>
-        </div>
-      )}
-
-      {/* Audit-Log */}
-      <AuditLogTable entries={auditLog} />
-    </div>
-  );
-}
-
-
-// ── AuditLogTable — formatiert was tatsächlich getestet wurde ──────────────
-//
-// Das mcp_tool-Feld allein ("run_payload_scenario_v1") sagt nichts aus —
-// der eigentliche Test (welches Scenario, welches Tool, welche Rule) sitzt
-// im result_summary-JSONB. Diese Komponente zieht die relevanten Felder
-// raus und macht's lesbar.
-
-function AuditLogTable({ entries }: { entries: import('../types').RedTeamAuditEntry[] }) {
-  function describe(e: import('../types').RedTeamAuditEntry): {
-    label: string; detail: string; iconClass: string;
-  } {
-    const rs = (e.result_summary || {}) as Record<string, unknown>;
-    const tool = e.mcp_tool;
-
-    if (tool === 'run_payload_scenario_v1') {
-      const sid = String(rs.scenario_id ?? '?');
-      const sent = rs.sent_bytes ?? '?';
-      const matched = rs.matched_alerts;
-      const matchedStr = matched != null ? `, alerts=${matched}` : '';
-      const via = rs.via ? ` (${rs.via})` : '';
-      return {
-        label: `Scenario ${sid}${via}`,
-        detail: `sent=${sent} B${matchedStr}` + (rs.expected_rule ? `, erwartet=${rs.expected_rule}` : ''),
-        iconClass: 'text-violet-300',
-      };
-    }
-    if (tool === 'run_kali_tool_v1') {
-      const expected = rs.expected_rule ?? '';
-      const exit = rs.exit_code ?? '?';
-      const matched = rs.matched_alerts;
-      let toolDetail = '';
-      try {
-        const argsArr = JSON.parse(e.args_excerpt || '[]');
-        if (Array.isArray(argsArr) && argsArr.length > 0) toolDetail = ` ${argsArr.join(' ')}`;
-      } catch { /* ignore */ }
-      return {
-        label: `Tool kali` + (toolDetail || ''),
-        detail: `exit=${exit}` + (matched != null ? `, alerts=${matched}` : '') +
-                (expected ? `, erwartet=${expected}` : ''),
-        iconClass: 'text-cyan-300',
-      };
-    }
-    if (tool === 'create_payload_scenario_v1') {
-      const sid = String(rs.scenario_id ?? '?');
-      return {
-        label: `Scenario angelegt: ${sid}`,
-        detail: String(rs.path ?? ''),
-        iconClass: 'text-emerald-300',
-      };
-    }
-    if (tool === 'delete_payload_scenario_v1') {
-      const sid = String(rs.scenario_id ?? '?');
-      return {
-        label: `Scenario gelöscht: ${sid}`,
-        detail: rs.removed ? 'removed=true' : 'nicht gefunden',
-        iconClass: 'text-slate-400',
-      };
-    }
-    if (tool === 'create_suricata_rule_v1') {
-      const sid = String(rs.sid ?? '?');
-      const replaced = rs.replaced_existing ? ' (ersetzt)' : '';
-      return {
-        label: `Suricata-Rule SID ${sid} geschrieben${replaced}`,
-        detail: `${rs.proto ?? '?'}/${rs.dst_port ?? '?'} — ${String(rs.msg ?? '').slice(0, 60)}`,
-        iconClass: 'text-amber-300',
-      };
-    }
-    if (tool === 'delete_suricata_rule_v1') {
-      return {
-        label: `Suricata-Rule SID ${rs.sid ?? '?'} gelöscht`,
-        detail: rs.removed ? 'removed=true' : 'nicht gefunden',
-        iconClass: 'text-slate-400',
-      };
-    }
-    return { label: tool, detail: '', iconClass: 'text-slate-400' };
-  }
-
-  return (
-    <div className="border border-slate-800 rounded p-3">
-      <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
-        Audit-Log (letzte {entries.length})
-      </h3>
-
-      {entries.length === 0 && (
-        <p className="py-2 text-slate-600 text-center text-[11px]">Noch keine Einträge.</p>
-      )}
-
-      {/* Card-Liste — responsive ohne fixed column widths. Lange Action-Labels
-          und Details brechen mit break-words um, statt die Seite zu sprengen.
-          Auf Mobile passt jede Card in den Viewport, auf Desktop ist die Card
-          breit genug für mehrere Felder horizontal. */}
-      <div className="space-y-1.5">
-        {entries.map(e => {
-          const d = describe(e);
-          return (
-            <div
-              key={e.id}
-              className="bg-slate-900/30 border border-slate-800/60 rounded p-2 text-[11px]"
-            >
-              {/* Header-Zeile: Zeit (links) — Entscheidung + Dauer (rechts).
-                  flex-wrap fängt mobile-tiefe Viewports ab. */}
-              <div className="flex items-baseline justify-between gap-2 mb-1 flex-wrap">
-                <span className="text-slate-500 font-mono text-[10px] whitespace-nowrap">
-                  {new Date(e.ts).toLocaleString()}
-                </span>
-                <div className="flex items-baseline gap-2 ml-auto">
-                  <span
-                    className={`px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap ${
-                      e.decision === 'allowed'
-                        ? 'bg-emerald-500/15 text-emerald-300'
-                        : 'bg-red-500/15 text-red-300'
-                    }`}
-                  >
-                    {e.decision}
-                  </span>
-                  <span className="text-slate-400 font-mono text-[10px] tabular-nums whitespace-nowrap">
-                    {e.duration_ms !== null ? `${e.duration_ms} ms` : '—'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Aktion — semantische Beschreibung, color-coded. */}
-              <div className={`font-mono ${d.iconClass} break-words`}>{d.label}</div>
-
-              {/* Details — secondary line, target inline am Ende. */}
-              {(d.detail || e.target_ip) && (
-                <div className="text-slate-400 mt-0.5 break-words">
-                  {d.detail}
-                  {e.target_ip && (
-                    <span className="text-slate-600 ml-2 font-mono">→ {e.target_ip}</span>
-                  )}
-                </div>
-              )}
-
-              {e.reject_reason && (
-                <div className="text-red-400 text-[10px] mt-0.5 break-words">
-                  {e.reject_reason}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      {/* MCP-Endpoint-Info für KI-Integration */}
+      <div className="border border-slate-800 rounded p-3 text-xs space-y-1">
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500">MCP-Endpoint für KI-Clients</h3>
+        <p className="text-slate-400">
+          Streamable-HTTP-Transport unter{' '}
+          <code className="font-mono text-violet-300">http://&lt;host&gt;:8002/mcp/</code> mit 11 registered tools
+          (run_kali_tool_v1, create_payload_scenario_v1, run_payload_scenario_v1,
+          create_suricata_rule_v1, recent_alerts_for_target_v1, recent_flow_summary_v1, …).
+        </p>
+        <p className="text-slate-500 text-[10px]">
+          Auth via <code className="font-mono">CYJAN_API_TOKEN</code> env-var oder Service-JWT
+          aus <code className="font-mono">API_SECRET_KEY</code>.
+        </p>
       </div>
     </div>
   );
 }
-
 
 // ── FeaturesSettings ─────────────────────────────────────────────────────────
 // Zentrale Stelle für Cyjan-Feature-Toggles. Aktivierung von Lab-Features
