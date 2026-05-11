@@ -848,8 +848,9 @@ services:
     cap_drop:
       - ALL
     cap_add:
-      - NET_RAW                  # nmap raw sockets
-      - NET_BIND_SERVICE
+      - NET_RAW                  # ping/hping3/nmap raw sockets
+      - NET_ADMIN                # nmap SYN-Stealth-Scan, manuelle IP-Konfig
+      - NET_BIND_SERVICE         # ncat privileged ports
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64M
