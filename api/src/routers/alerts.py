@@ -87,6 +87,7 @@ async def list_alerts(
     severity:           str | None   = None,
     source:             str | None   = None,
     rule_id:            str | None   = None,
+    rule_id_prefix:     str | None   = None,
     src_ip:             str | None   = None,
     ts_from:            float | None = None,
     ts_to:              float | None = None,
@@ -124,6 +125,15 @@ async def list_alerts(
     if rule_id:
         filters.append(f"a.rule_id = ${idx}")
         params.append(rule_id); idx += 1
+    if rule_id_prefix:
+        # Prefix-Match — wichtig für Suricata-SIDs: YAML deklariert
+        # "SURICATA:1:2067085", DB speichert "SURICATA:1:2067085:1" mit
+        # Revision. Auch für gruppierte Custom-Rules ("MODBUS_*").
+        # Escape LIKE-Wildcards damit User-Input nicht versehentlich
+        # über die SID-Range hinaus matcht.
+        safe = rule_id_prefix.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+        filters.append(f"a.rule_id LIKE ${idx} ESCAPE '\\'")
+        params.append(safe + "%"); idx += 1
     if src_ip:
         filters.append(f"a.src_ip = ${idx}::inet")
         params.append(src_ip); idx += 1
