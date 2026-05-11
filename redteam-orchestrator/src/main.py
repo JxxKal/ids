@@ -39,7 +39,10 @@ executor = KaliExecutor()
 # Manager der MCP-App umwickeln und unsere init_pool/close_pool drin laufen
 # lassen. Sonst RuntimeError beim ersten /mcp-Call: "task group is not
 # initialized".
-_mcp_app = mcp.http_app()
+# path="/" damit der Mount-Endpoint nicht /mcp/mcp wird sondern /mcp.
+# Default-Path in FastMCP 3.x ist /mcp — kombiniert mit unserem Sub-Mount
+# unter /mcp gäbe das den doppelten Pfad.
+_mcp_app = mcp.http_app(path="/")
 
 
 @asynccontextmanager
@@ -222,8 +225,7 @@ async def list_scenarios() -> dict:
 
 
 # ─── MCP-Server-Mount ────────────────────────────────────────────────────
-# Mount der MCP-Sub-App. Endpoint: http://master:8002/mcp/mcp/
-# (sub-prefix /mcp + interner route /mcp = doppelt; FastMCP 3.x macht
-# das so, Claude/MCP-Clients sind damit kompatibel).
-# WICHTIG: Es ist die SELBE _mcp_app die oben in lifespan reingeht.
+# Endpoint: http://master:8002/mcp/  (Streamable-HTTP Transport)
+# Claude/MCP-Clients verbinden POST /mcp/ mit JSON-RPC-Payload.
+# Es ist die SELBE _mcp_app die oben in lifespan reingeht.
 app.mount("/mcp", _mcp_app)
