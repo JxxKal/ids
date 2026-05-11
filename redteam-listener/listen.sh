@@ -44,7 +44,9 @@ echo "$LOG_PREFIX $PEER_IP sichtbar. Versuche Bind auf: $PORTS"
 bound=0
 failed=0
 for port in $PORTS; do
-    ncat -l -k -s "$PEER_IP" -p "$port" --recv-only >/dev/null 2>&1 &
+    # ncat-listen-Syntax: address port als POSITIONAL args (NICHT -s/-p —
+    # die sind Connect-Mode). -l -k --recv-only ist listen+keep-open+sink.
+    ncat -l -k --recv-only "$PEER_IP" "$port" >/dev/null 2>&1 &
     pid=$!
     sleep 0.1
     if kill -0 "$pid" 2>/dev/null; then
