@@ -332,7 +332,11 @@ class RuleLoader:
         files: list[Path] = []
         if self._rules_dir.is_dir():
             # rglob durchsucht auch Unterverzeichnisse (builtin/, custom/, …)
-            files = list(self._rules_dir.rglob("*.yml"))
+            # Underscore-Prefix = Config-Datei (z.B. _overrides.json,
+            # _defaults_recalibration.yml, _known_networks.json) — ist KEIN
+            # Rule-File und wird übersprungen ohne Warning.
+            files = [f for f in self._rules_dir.rglob("*.yml")
+                     if not f.name.startswith("_")]
         else:
             log.warning("Rules dir not found: %s", self._rules_dir)
 
