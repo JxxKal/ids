@@ -776,7 +776,9 @@ services:
       - snort-alerts:/var/log/suricata
       - snort-rules:/etc/suricata/rules
     environment:
-      SNORT_IFACE: ${MIRROR_IFACE:-eth1}
+      # Space-separated — Mgmt-Mirror UND RedTeam-veth gleichzeitig
+      # capturen damit Signatur-Detection auch L7-Payloads von kali sieht.
+      SNORT_IFACE: ${SNORT_IFACE:-${MIRROR_IFACE:-eth1} cy-inj-peer}
       SNORT_RULESET: ${SNORT_RULESET:-emerging-threats}
       SNORT_UPDATE_RULES: ${SNORT_UPDATE_RULES:-false}
 

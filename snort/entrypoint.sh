@@ -3,7 +3,9 @@
 # Suricata Entrypoint
 #
 # Umgebungsvariablen:
-#   SNORT_IFACE          Interface für Paketerfassung  (Standard: eth0)
+#   SNORT_IFACE          Interfaces für Paketerfassung — SPACE-SEPARATED.
+#                        Beispiel: "enp84s0 cy-inj-peer" capturet Mgmt-Mirror
+#                        UND RedTeam-veth. (Standard: eth0)
 #   SNORT_RULESET        emerging-threats | none        (Standard: emerging-threats)
 #   SNORT_UPDATE_RULES   true = Regeln beim Start laden (Standard: false)
 #
@@ -87,19 +89,62 @@ elif [ "$RULESET" != "none" ]; then
     fi
 fi
 
-# ─── Minimale suricata.yaml generieren ────────────────────────────────────────
+# ─── Iface-Availability — auf bis zu 60s warten ─────────────────────────────
+# cy-inj-peer wird vom redteam-orchestrator zur Laufzeit angelegt. Wenn
+# snort vor dem orchestrator startet, ist der veth noch nicht da → wir
+# warten, skipen aber fehlende nach Timeout (graceful degrade: lieber
+# auf Mgmt-Iface allein laufen als gar nicht).
+AVAILABLE_IFACES=""
+for one_iface in $IFACE; do
+    deadline=$(( $(date +%s) + 60 ))
+    while ! ip link show "$one_iface" >/dev/null 2>&1; do
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "[suricata] WARNUNG: Iface $one_iface nach 60s nicht da — skip"
+            one_iface=""
+            break
+        fi
+        echo "[suricata] warte auf Iface $one_iface ..."
+        sleep 2
+    done
+    [ -n "$one_iface" ] && AVAILABLE_IFACES="$AVAILABLE_IFACES $one_iface"
+done
+AVAILABLE_IFACES=$(echo "$AVAILABLE_IFACES" | xargs)  # trim
+
+if [ -z "$AVAILABLE_IFACES" ]; then
+    echo "[suricata] FATAL: kein einziges Iface aus '$IFACE' verfügbar"
+    exit 1
+fi
+
+# ─── af-packet-Blöcke pro Interface generieren ─────────────────────────────────
+# Pro Iface eigener cluster-id (sonst rejected Suricata).
+AF_PACKET_BLOCK=""
+CLUSTER_ID=99
+for one_iface in $AVAILABLE_IFACES; do
+    AF_PACKET_BLOCK="${AF_PACKET_BLOCK}
+  - interface: ${one_iface}
+    cluster-id: ${CLUSTER_ID}
+    cluster-type: cluster_flow
+    defrag: yes
+    use-mmap: yes
+    tpacket-v3: yes"
+    CLUSTER_ID=$((CLUSTER_ID - 1))
+done
+
+# ─── suricata.yaml generieren ─────────────────────────────────────────────────
 cat > /tmp/suricata.yaml << YAML
 %YAML 1.1
 ---
 vars:
   address-groups:
-    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,127.0.0.0/8,::1]"
+    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,127.0.0.0/8,192.0.2.0/24,198.51.100.0/24,203.0.113.0/24]"
     EXTERNAL_NET: "!\$HOME_NET"
   port-groups:
     HTTP_PORTS: "80"
     SHELLCODE_PORTS: "!80"
     SSH_PORTS: 22
     FTP_PORTS: 21
+    MODBUS_PORTS: 502
+    KERBEROS_PORTS: 88
 
 default-log-dir: ${LOG_DIR}
 
@@ -112,11 +157,7 @@ outputs:
         - alert
         - drop
 
-af-packet:
-  - interface: default
-    cluster-id: 99
-    cluster-type: cluster_flow
-    defrag: yes
+af-packet:${AF_PACKET_BLOCK}
 
 default-rule-path: ${RULES_DIR}
 rule-files:
@@ -137,6 +178,36 @@ app-layer:
       enabled: yes
     dns:
       enabled: yes
+    # ICS/SCADA — wichtig für Modbus/DNP3/ENIP-Detection
+    modbus:
+      enabled: yes
+      detection-ports:
+        dp: 502
+    dnp3:
+      enabled: yes
+      detection-ports:
+        dp: 20000
+    enip:
+      enabled: yes
+      detection-ports:
+        dp: 44818
+    # Windows-Auth — wichtig für Kerberos/SMB/NTLM
+    smb:
+      enabled: yes
+      detection-ports:
+        dp: 139,445
+    krb5:
+      enabled: yes
+    dcerpc:
+      enabled: yes
+    nfs:
+      enabled: yes
+    ntp:
+      enabled: yes
+    rdp:
+      enabled: yes
+    snmp:
+      enabled: yes
 
 classification-file: /etc/suricata/classification.config
 reference-config-file: /etc/suricata/reference.config
@@ -146,11 +217,13 @@ unix-command:
   filename: /var/run/suricata-command.socket
 YAML
 
-echo "[suricata] Starte auf Interface ${IFACE}"
+echo "[suricata] Starte auf Interfaces: ${AVAILABLE_IFACES}"
 echo "[suricata] Alerts → ${LOG_DIR}/eve.json"
 
 # ─── Suricata im Hintergrund starten ──────────────────────────────────────────
-suricata -c /tmp/suricata.yaml -i "$IFACE" -l "$LOG_DIR" &
+# KEIN -i mehr (sonst überschreibt CLI alle af-packet-Blöcke aus der yaml).
+# --af-packet aktiviert den Capture-Mode aus der yaml-Config.
+suricata -c /tmp/suricata.yaml --af-packet -l "$LOG_DIR" &
 SURICATA_PID=$!
 echo "[suricata] PID ${SURICATA_PID}"
 
