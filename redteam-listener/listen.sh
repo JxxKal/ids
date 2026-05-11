@@ -3,9 +3,10 @@
 #
 # Bindet pro Ziel-Port einen ncat-Listener AUSSCHLIESSLICH auf 192.0.2.254
 # (Host-Seite des cyjan-inject↔cy-inj-peer veth-Pairs). Andere Host-Services
-# auf 0.0.0.0:<port> bleiben unberührt — wir teilen uns den Port-Namespace
-# (network_mode: host), kollidieren aber nicht, weil unsere Binds IP-
-# qualifiziert sind.
+# auf 0.0.0.0:<port> würden mit unserem IP-qualifizierten Bind kollidieren
+# (Linux: 0.0.0.0:X reserviert <jede-IP>:X). Daher binden wir nur auf Ports
+# die der Host nicht selbst belegt — Bind-Failures werden geloggt + skipped,
+# Container stirbt deswegen nicht.
 #
 # Warum: Signatur-Detection-Tests aus kali brauchen TCP-Handshake-Vollendung,
 # sonst kommt nur SYN auf die Leitung. Mit dem Listener wird der Payload
@@ -18,12 +19,13 @@
 set -eu
 
 PEER_IP="${PEER_IP:-192.0.2.254}"
-PORTS="${PORTS:-22 23 25 53 80 88 102 110 135 139 143 161 389 443 445 502 587 636 1433 1521 1947 2010 3268 3389 4840 5450}"
+# Default-Port-Set: ICS- + Windows-Standard-Service-Ports, die typischerweise
+# auf einem Linux-IDS-Host NICHT belegt sind. Bei kollidierenden Ports wird
+# pro Port geloggt + skipped (siehe try_bind unten).
+PORTS="${PORTS:-88 102 110 135 139 143 161 389 445 502 587 636 1433 1521 1947 2010 3268 3389 4840 5450}"
 LOG_PREFIX="[redteam-listener]"
 
 # Warte bis veth-Pair vom Orchestrator gesetzt + IP zugewiesen ist.
-# Tries: 60×2s = 2 min. Wenn die Wartezeit reißt, ist der Orchestrator
-# selbst nicht hochgekommen — der Listener stirbt und Docker restartet.
 i=0
 while ! ip -4 addr show 2>/dev/null | grep -qw "$PEER_IP"; do
     i=$((i + 1))
@@ -35,23 +37,31 @@ while ! ip -4 addr show 2>/dev/null | grep -qw "$PEER_IP"; do
     sleep 2
 done
 
-echo "$LOG_PREFIX $PEER_IP sichtbar. Binde Listener auf: $PORTS"
+echo "$LOG_PREFIX $PEER_IP sichtbar. Versuche Bind auf: $PORTS"
 
+# Pro Port: ncat in den Hintergrund + 100ms warten + kill -0 prüfen ob noch
+# am Leben. Wenn nicht (=Bind-Fehler), log + weiter. Sonst PID merken.
 bound=0
+failed=0
 for port in $PORTS; do
-    # -l listen, -k keep-open (re-accept nach Disconnect), -s bind-addr,
-    # --recv-only stille Senke, stdout → /dev/null
     ncat -l -k -s "$PEER_IP" -p "$port" --recv-only >/dev/null 2>&1 &
-    bound=$((bound + 1))
+    pid=$!
+    sleep 0.1
+    if kill -0 "$pid" 2>/dev/null; then
+        bound=$((bound + 1))
+    else
+        failed=$((failed + 1))
+        echo "$LOG_PREFIX :${port} BIND-FAIL (Port wohl Host-belegt) — skip"
+    fi
 done
 
-echo "$LOG_PREFIX $bound Listener gestartet auf $PEER_IP. Warte auf SIGTERM..."
+echo "$LOG_PREFIX $bound Listener gebunden, $failed übersprungen. Bleibe aktiv."
 
-# Trap SIGTERM für sauberen Shutdown (kill child-ncats)
+# Trap für sauberen Shutdown
 trap 'echo "$LOG_PREFIX SIGTERM — stoppe alle ncat-children"; kill $(jobs -p) 2>/dev/null; exit 0' TERM INT
 
-# Bleib am Leben: wait blockiert bis irgendein Background-Job stirbt.
-# Wenn einer stirbt — restart durch docker (unless-stopped).
-wait -n
-echo "$LOG_PREFIX ein Listener ist gestorben — Container exit für Restart"
-exit 1
+# tail -f keeps the container alive unabhängig davon ob einzelne ncats
+# später sterben. Healthcheck (ss -ltn auf 192.0.2.254 >= 5) deckt
+# Gesamt-Funktionalität ab.
+tail -f /dev/null &
+wait $!

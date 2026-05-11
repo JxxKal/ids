@@ -979,9 +979,11 @@ services:
         condition: service_started
     environment:
       PEER_IP: "192.0.2.254"
-      # Default-Port-Set: ICS + Windows + Standard-Service-Ports. Komma-
-      # oder space-separated, override per .env wenn weitere Ports gebraucht.
-      PORTS: "22 23 25 53 80 88 102 110 135 139 143 161 389 443 445 502 587 636 1433 1521 1947 2010 3268 3389 4840 5450"
+      # Default-Port-Set: nur ICS- + Windows-Service-Ports die auf einem
+      # Linux-IDS-Host typischerweise NICHT belegt sind (kein sshd, kein
+      # Frontend-Caddy/Nginx, kein Postfix/Dovecot). Host-Konflikte führen
+      # zu Skip-Log, nicht zu Restart-Loop.
+      PORTS: "88 102 110 135 139 143 161 389 445 502 587 636 1433 1521 1947 2010 3268 3389 4840 5450"
     healthcheck:
       # ss zeigt Listening-Sockets; mindestens 5 davon erwartet wenn ok
       test: ["CMD-SHELL", "ss -ltn | grep -c '192.0.2.254:' | awk '$1 >= 5 {exit 0} {exit 1}'"]
