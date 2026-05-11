@@ -929,6 +929,13 @@ services:
       # landen in /scenarios/generated/. Imported-Scenarios aus Pattern-
       # Federation kommen weiterhin von der API über das selbe Volume.
       - cyjan-scenarios:/scenarios
+      # Phase-B: snort-rules-Volume RW für AI-Custom-Rules. Orchestrator
+      # schreibt /rules/cyjan-ai.rules + /rules/update.trigger;
+      # snort-entrypoint pollt den Trigger und lädt via suricatasc reload.
+      - snort-rules:/rules
+      # Phase-B: eve.json read-only — für recent_flow_summary_v1 (Suricata
+      # app_proto, smb-events, krb5-Telemetrie).
+      - snort-alerts:/var/log/suricata:ro
       # WARNUNG: Docker-Socket-Mount = Root-Equivalent am Host. Der :ro-Flag
       # schützt nur das Inode der Socket-Datei, NICHT die Reads/Writes
       # darüber. Mit dem Socket kann der Orchestrator beliebige Container

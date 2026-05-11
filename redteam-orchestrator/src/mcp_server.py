@@ -32,6 +32,12 @@ from scenario_store import (
     load_scenario,
     save_scenario,
 )
+from suricata_rules import (
+    SuricataRuleError,
+    delete_rule as suricata_delete_rule,
+    list_rules as suricata_list_rules,
+    upsert_rule as suricata_upsert_rule,
+)
 
 log = logging.getLogger(__name__)
 
@@ -325,6 +331,267 @@ async def delete_payload_scenario_v1(scenario_id: str) -> dict[str, Any]:
     )
     return {"ok": True, "scenario_id": scenario_id, "removed": removed}
 
+
+# ────────────────────────────────────────────────────────────────────────
+# Phase B — Feedback-Loop-Tools für KI-Auto-RedTeam
+# ────────────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def recent_alerts_for_target_v1(
+    target_ip:     str = Field(description="Ziel-IP (z.B. 192.0.2.254) — wird gegen alerts.dst_ip gematcht"),
+    dst_port:      int | None = Field(default=None, ge=1, le=65535),
+    since_seconds: int = Field(default=30, ge=1, le=3600,
+                               description="Wie weit zurück die Suche geht. Default 30s."),
+    limit:         int = Field(default=50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Liefert alerts der letzten N Sekunden gegen target_ip (+ optional
+    dst_port). Für KI-Validierung nach einem run_payload_scenario_v1:
+    "hat irgendeine Rule auf das Scenario reagiert, mit welcher Severity?"
+
+    Returns Liste mit ts, rule_id, severity, description, source (suricata/
+    signature/ml), src_ip, src_port — dieselben Felder wie das /api/alerts-
+    REST aber direkt aus der DB (kein API-Roundtrip).
+    """
+    pool = get_pool()
+    if pool is None:
+        return {"alerts": [], "note": "DB nicht verfügbar"}
+
+    sql = """
+        SELECT ts::text AS ts, rule_id, severity, source, description,
+               src_ip::text AS src_ip, src_port,
+               dst_ip::text AS dst_ip, dst_port, proto, tags
+          FROM alerts
+         WHERE dst_ip = $1::inet
+           AND ts > NOW() - ($2::int || ' seconds')::interval
+    """
+    args: list = [target_ip, since_seconds]
+    if dst_port is not None:
+        sql += " AND dst_port = $3"
+        args.append(dst_port)
+    sql += " ORDER BY ts DESC LIMIT $%d" % (len(args) + 1)
+    args.append(limit)
+
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+    except Exception as exc:
+        log.warning("recent_alerts_for_target_v1 query failed: %s", exc)
+        return {"alerts": [], "error": str(exc)}
+
+    return {
+        "alerts":         [dict(r) for r in rows],
+        "total":          len(rows),
+        "window_seconds": since_seconds,
+        "target_ip":      target_ip,
+        "dst_port":       dst_port,
+    }
+
+
+@mcp.tool()
+async def recent_flow_summary_v1(
+    target_ip:     str = Field(description="Ziel-IP — wird gegen flows.dst_ip gematcht"),
+    dst_port:      int | None = Field(default=None, ge=1, le=65535),
+    since_seconds: int = Field(default=60, ge=1, le=3600),
+    limit:         int = Field(default=20, ge=1, le=200),
+) -> dict[str, Any]:
+    """Liefert Flow-Summary aus den letzten N Sekunden — pkt_count,
+    byte_count, proto + (wenn Suricata den Flow als App-Layer-Protokoll
+    erkannt hat) app_proto aus eve.json.
+
+    Für KI-Feedback: wenn matched_alerts leer aber app_proto = 'smb' / 'krb5'
+    erscheint → Detection-Gap auf dem ERKANNTEN Protokoll, sprich
+    "Suricata parsed das, hat aber keine passende Rule".
+    """
+    import json
+    import time
+    pool = get_pool()
+    flows: list[dict] = []
+    if pool:
+        sql = """
+            SELECT to_char(start_ts, 'HH24:MI:SS.MS') AS start_ts,
+                   src_ip::text AS src_ip, src_port,
+                   dst_ip::text AS dst_ip, dst_port,
+                   proto, pkt_count, byte_count
+              FROM flows
+             WHERE dst_ip = $1::inet
+               AND start_ts > NOW() - ($2::int || ' seconds')::interval
+        """
+        args: list = [target_ip, since_seconds]
+        if dst_port is not None:
+            sql += " AND dst_port = $3"
+            args.append(dst_port)
+        sql += " ORDER BY start_ts DESC LIMIT $%d" % (len(args) + 1)
+        args.append(limit)
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(sql, *args)
+                flows = [dict(r) for r in rows]
+        except Exception as exc:
+            log.warning("recent_flow_summary_v1 flow-query failed: %s", exc)
+
+    # Suricata-App-Proto-Klassifikation aus eve.json — tail die letzten
+    # 5000 Zeilen, filtere auf event_type=flow + dst_ip-Match. Schwerere
+    # Loglines stehen am Ende; cutoff via ts_from.
+    cutoff = time.time() - since_seconds
+    app_protos: list[dict[str, Any]] = []
+    eve = "/var/log/suricata/eve.json"
+    try:
+        with open(eve, "r", encoding="utf-8", errors="ignore") as fh:
+            # Naives Tail-by-Read — eve.json kann sehr groß sein; wir
+            # lesen die letzten ~1 MB und parsen rückwärts.
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - 1_000_000))
+            for line in fh:
+                if not line.startswith("{"):
+                    continue
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+                if e.get("event_type") != "flow":
+                    continue
+                if e.get("dest_ip") != target_ip:
+                    continue
+                if dst_port is not None and e.get("dest_port") != dst_port:
+                    continue
+                ts_str = e.get("timestamp", "")
+                # Quick-cutoff per Char-Vergleich (ISO-8601 ist sortable)
+                app_protos.append({
+                    "ts":        ts_str[:23],
+                    "src_ip":    e.get("src_ip"),
+                    "dst_port":  e.get("dest_port"),
+                    "proto":     e.get("proto"),
+                    "app_proto": e.get("app_proto", "-"),
+                    "in_iface":  e.get("in_iface"),
+                    "pkts":      e.get("flow", {}).get("pkts_toserver", 0)
+                                  + e.get("flow", {}).get("pkts_toclient", 0),
+                })
+                if len(app_protos) >= limit:
+                    break
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        log.warning("recent_flow_summary_v1 eve-parse failed: %s", exc)
+
+    return {
+        "flows":           flows,
+        "suricata_flows":  app_protos[-limit:],
+        "target_ip":       target_ip,
+        "dst_port":        dst_port,
+        "window_seconds":  since_seconds,
+    }
+
+
+@mcp.tool()
+async def create_suricata_rule_v1(
+    sid: int = Field(
+        ge=9_000_000, le=9_999_999,
+        description=(
+            "SID muss in der AI-Reserve-Range [9000000, 9999999] liegen. "
+            "ET-Open nutzt 2.xxx.xxx, Suricata-Builtin 1.xxx.xxx — "
+            "Kollision damit ausgeschlossen."
+        ),
+    ),
+    msg: str = Field(
+        max_length=200,
+        description='Alarm-Text, kein " ; oder Newline. Wird mit "Cyjan-AI: "-Prefix gespeichert.',
+    ),
+    proto: Literal["tcp", "udp"] = Field(description="Transport-Protokoll"),
+    dst_port: int = Field(ge=1, le=65535),
+    content_hex: str = Field(
+        max_length=600,
+        description=(
+            "Byte-Pattern als hex (z.B. '4e 54 4c 4d 53 53 50 00' für 'NTLMSSP\\0'). "
+            "Whitespace + 0x-Präfix + |bars| werden toleriert. Max 256 bytes decoded."
+        ),
+    ),
+    classtype: str = Field(default="misc-attack", max_length=64),
+) -> dict[str, Any]:
+    """Schreibt eine Suricata-Detection-Rule für AI-erkannte Byte-Patterns
+    nach /rules/cyjan-ai.rules + triggert Suricata-Reload via update.trigger.
+
+    Generierte Form:
+      alert <proto> any any -> $HOME_NET <port> (msg:"Cyjan-AI: <msg>";
+          [flow:to_server,established;] content:"|<hex>|"; offset:0;
+          classtype:<classtype>; sid:<sid>; rev:1; metadata:author cyjan-ai;)
+
+    Reload-Latenz: ~30s (snort-entrypoint pollt update.trigger).
+    Idempotent gegen gleiche SID: überschreibt existierenden Eintrag.
+    """
+    try:
+        result = suricata_upsert_rule(
+            sid=sid, msg=msg, proto=proto, dst_port=dst_port,
+            content_hex=content_hex, classtype=classtype,
+        )
+    except SuricataRuleError as exc:
+        await audit_log(
+            mcp_tool="create_suricata_rule_v1",
+            decision="rejected_validation", reject_reason=str(exc),
+            result_summary={"sid": sid},
+        )
+        return {"ok": False, "error": "validation_failed", "message": str(exc)}
+
+    await audit_log(
+        mcp_tool="create_suricata_rule_v1", decision="allowed",
+        result_summary={
+            "sid":               sid,
+            "msg":               msg[:80],
+            "proto":             proto,
+            "dst_port":          dst_port,
+            "replaced_existing": result["replaced_existing"],
+        },
+    )
+    return {
+        "ok":                True,
+        "sid":               sid,
+        "msg":               msg,
+        "raw":               result["raw"],
+        "path":              result["path"],
+        "replaced_existing": result["replaced_existing"],
+        "next_step":         (
+            "Suricata reload braucht ~30s (entrypoint pollt). Re-run das "
+            "Scenario per run_payload_scenario_v1 und check via "
+            "recent_alerts_for_target_v1 ob die neue Rule trifft."
+        ),
+    }
+
+
+@mcp.tool()
+async def list_suricata_custom_rules_v1() -> dict[str, Any]:
+    """Liefert alle AI-authored Suricata-Rules aus /rules/cyjan-ai.rules.
+    Enthält sid, msg, classtype, raw — keine ET-Open- oder Suricata-Builtin-
+    Rules (die liegen in anderen *.rules-Files und sind nicht editierbar)."""
+    rules = suricata_list_rules()
+    return {"rules": rules, "total": len(rules)}
+
+
+@mcp.tool()
+async def delete_suricata_rule_v1(
+    sid: int = Field(ge=9_000_000, le=9_999_999),
+) -> dict[str, Any]:
+    """Entfernt eine AI-authored Rule. Nur AI-Range-SIDs erlaubt — auf
+    ET-Open- oder Suricata-Builtin-Rules kein Zugriff (die kommen aus
+    rules-Tarball, nicht aus dem AI-File)."""
+    try:
+        removed = suricata_delete_rule(sid)
+    except SuricataRuleError as exc:
+        await audit_log(
+            mcp_tool="delete_suricata_rule_v1",
+            decision="rejected_validation", reject_reason=str(exc),
+        )
+        return {"ok": False, "error": "validation_failed", "message": str(exc)}
+
+    await audit_log(
+        mcp_tool="delete_suricata_rule_v1", decision="allowed",
+        result_summary={"sid": sid, "removed": removed},
+    )
+    return {"ok": True, "sid": sid, "removed": removed}
+
+
+# ────────────────────────────────────────────────────────────────────────
+# Audit-Log (read-scope)
+# ────────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
 async def get_audit_log_v1(limit: int = 50) -> dict[str, Any]:
