@@ -9,7 +9,8 @@ import {
   addPatternTrustKey, addSigningKey, applyPatternBundle, deletePatternTrustKey, deleteSigningKey,
   exportPatternBundle, fetchExportLog, fetchFeatureFlags, fetchIrmaConfig, fetchItopConfig,
   fetchMLConfig, fetchMLStatus, fetchMqttConfig, fetchPatternImports, fetchPatternTrustKeys,
-  fetchRuleSources, fetchSigningKeys, updateFeatureFlags, uploadPatternBundle,
+  fetchRedTeamAuditLog, fetchRedTeamHealth, fetchRedTeamScenarios,
+  fetchRuleSources, fetchSigningKeys, runRedTeamTool, updateFeatureFlags, uploadPatternBundle,
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
   fetchSystemUpdateStatus, fetchUsers, generateApiToken, getInterfaces, getItopSyncStatus, patchRuleSource, setInterfaceRole,
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveMqttConfig, saveSamlConfig, saveSyslogConfig,
@@ -3554,6 +3555,224 @@ function ItopSettings() {
     </form>
   );
 }
+
+// ── RedTeamSettings (Lab-only, feature_flag.redteam_enabled) ────────────────
+
+function RedTeamSettings() {
+  const [health, setHealth]       = useState<import('../types').RedTeamHealth | null>(null);
+  const [scenarios, setScenarios] = useState<import('../types').RedTeamScenario[]>([]);
+  const [auditLog, setAuditLog]   = useState<import('../types').RedTeamAuditEntry[]>([]);
+  const [running, setRunning]     = useState(false);
+  const [result, setResult]       = useState<import('../types').RedTeamRunResponse | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Form state
+  const [tool, setTool]               = useState<import('../types').RedTeamRunRequest['tool']>('ping');
+  const [targetIp, setTargetIp]       = useState('192.0.2.1');
+  const [argsStr, setArgsStr]         = useState('-c 1 -W 2');
+  const [timeoutSec, setTimeoutSec]   = useState(30);
+  const [attachIface, setAttachIface] = useState(false);
+  const [expectedRuleId, setExpectedRuleId] = useState('');
+
+  const reload = async () => {
+    setHealth(await fetchRedTeamHealth().catch(() => ({ reachable: false, error: 'fetch error' })));
+    setScenarios(await fetchRedTeamScenarios().catch(() => []));
+    setAuditLog(await fetchRedTeamAuditLog(20).catch(() => []));
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  async function handleRun() {
+    setRunning(true); setResult(null); setErr(null);
+    try {
+      const r = await runRedTeamTool({
+        tool, target_ip: targetIp,
+        args: argsStr.split(/\s+/).filter(Boolean),
+        timeout_sec: timeoutSec,
+        attach_iface: attachIface,
+        expected_alert_rule_id: expectedRuleId.trim() || null,
+      });
+      setResult(r);
+      reload(); // Audit-Log refreshen
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Run fehlgeschlagen');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-200">RedTeam-Tooling (Lab-Modus)</h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Manuelle Steuerung des redteam-orchestrators. Tool-Aufrufe gehen an die
+          kali-shell, sind auf RFC-5737-TEST-NETs (192.0.2/24, 198.51.100/24, 203.0.113/24)
+          beschränkt und werden in <code className="font-mono">redteam_audit_log</code> persistiert.
+          Für KI-getriebene Auto-Loops: MCP-Endpoint unter
+          {' '}<code className="font-mono text-violet-300">http://host:8002/mcp/</code>.
+        </p>
+      </div>
+
+      {/* Health-Block */}
+      <div className={`border rounded p-3 ${
+        health?.reachable
+          ? 'border-emerald-500/40 bg-emerald-500/5'
+          : 'border-amber-500/40 bg-amber-500/5'
+      }`}>
+        <div className="flex items-center gap-3 text-xs">
+          <span className={health?.reachable ? 'text-emerald-300' : 'text-amber-300'}>
+            ● {health?.reachable ? 'Orchestrator erreichbar' : 'Orchestrator NICHT erreichbar'}
+          </span>
+          {health?.kali_container && (
+            <span className="text-slate-400">kali=<code className="font-mono">{health.kali_container}</code></span>
+          )}
+          {health?.error && <span className="text-amber-400">— {health.error}</span>}
+        </div>
+        {health?.allowed_src_cidrs && (
+          <p className="text-[10px] text-slate-500 mt-1 font-mono">
+            allowed_cidrs: {health.allowed_src_cidrs.join(', ')}
+          </p>
+        )}
+      </div>
+
+      {/* Run-Form */}
+      <div className="border border-slate-800 rounded p-3 space-y-3">
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500">Manueller Tool-Run</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Tool</label>
+            <select className="input" value={tool}
+              onChange={e => setTool(e.target.value as typeof tool)}>
+              <option value="ping">ping</option>
+              <option value="nmap">nmap</option>
+              <option value="hydra">hydra</option>
+              <option value="ncat">ncat</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <label className="text-slate-400">Target-IP (TEST-NET)</label>
+            <input className="input font-mono" value={targetIp}
+              onChange={e => setTargetIp(e.target.value)} placeholder="192.0.2.1" />
+          </div>
+          <div className="flex flex-col gap-1 sm:col-span-3">
+            <label className="text-slate-400">Args (Space-separated, Tool-Whitelist serverseitig)</label>
+            <input className="input font-mono" value={argsStr}
+              onChange={e => setArgsStr(e.target.value)} placeholder="-c 1 -W 2" />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-slate-400">Timeout (s)</label>
+            <input className="input" type="number" min={5} max={120}
+              value={timeoutSec} onChange={e => setTimeoutSec(parseInt(e.target.value) || 30)} />
+          </div>
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <label className="text-slate-400">Expected Alert Rule (optional)</label>
+            <input className="input font-mono" value={expectedRuleId}
+              onChange={e => setExpectedRuleId(e.target.value)} placeholder="SCAN_001" />
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer text-xs sm:col-span-3">
+            <input type="checkbox" className="accent-cyan-500"
+              checked={attachIface} onChange={e => setAttachIface(e.target.checked)} />
+            <span className={attachIface ? 'text-cyan-300' : 'text-slate-500'}>
+              veth-Handover (cyjan-inject) aktivieren
+            </span>
+          </label>
+        </div>
+        <div className="flex justify-between items-center">
+          <div>
+            {err && <span className="text-xs text-red-400">{err}</span>}
+            {result && (
+              <span className={`text-xs ${result.exit_code === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                exit={result.exit_code} · {result.duration_ms} ms · {result.matched_alerts.length} alerts
+              </span>
+            )}
+          </div>
+          <button className="btn-primary text-xs"
+            disabled={running || !targetIp.trim()}
+            onClick={handleRun}>
+            {running ? 'Läuft…' : 'Run'}
+          </button>
+        </div>
+        {result && (
+          <div className="space-y-2 mt-2">
+            {result.stdout_excerpt && (
+              <pre className="text-[10px] bg-slate-900/60 border border-slate-800 rounded p-2 overflow-x-auto font-mono text-slate-300">{result.stdout_excerpt}</pre>
+            )}
+            {result.stderr_excerpt && (
+              <pre className="text-[10px] bg-red-500/5 border border-red-500/30 rounded p-2 overflow-x-auto font-mono text-red-300">{result.stderr_excerpt}</pre>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Scenarios */}
+      <div className="border border-slate-800 rounded p-3">
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+          Verfügbare Scenarios ({scenarios.length})
+        </h3>
+        <p className="text-[11px] text-slate-600 mb-2">
+          YAMLs aus <code className="font-mono">/cyjan-scenarios/</code> — werden auch durch
+          Pattern-Federation-Imports erweitert.
+        </p>
+        <div className="space-y-1 max-h-48 overflow-y-auto">
+          {scenarios.map(s => (
+            <div key={s.scenario_id} className="text-[11px] font-mono py-1 border-b border-slate-800/40">
+              <span className="text-slate-300">{s.scenario_id}</span>
+              {s.rule_id && <span className="text-slate-500 ml-2">→ {s.rule_id}</span>}
+              {s.description && <span className="text-slate-600 ml-2">— {s.description}</span>}
+            </div>
+          ))}
+          {scenarios.length === 0 && (
+            <p className="text-[11px] text-slate-600">Keine Scenarios vorhanden.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Audit-Log */}
+      <div className="border border-slate-800 rounded p-3">
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
+          Audit-Log (letzte {auditLog.length})
+        </h3>
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="text-slate-500">
+              <th className="text-left font-normal py-1">Zeit</th>
+              <th className="text-left font-normal">Tool</th>
+              <th className="text-left font-normal">Target</th>
+              <th className="text-left font-normal">Entscheidung</th>
+              <th className="text-right font-normal">Dauer</th>
+            </tr>
+          </thead>
+          <tbody>
+            {auditLog.map(e => (
+              <tr key={e.id} className="border-t border-slate-800/40">
+                <td className="py-1 text-slate-500 font-mono">{new Date(e.ts).toLocaleString()}</td>
+                <td className="font-mono text-slate-300">{e.mcp_tool}</td>
+                <td className="font-mono text-slate-400">{e.target_ip ?? '—'}</td>
+                <td>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                    e.decision === 'allowed' ? 'bg-emerald-500/15 text-emerald-300' :
+                    'bg-red-500/15 text-red-300'
+                  }`}>{e.decision}</span>
+                  {e.reject_reason && (
+                    <span className="text-slate-500 ml-2">— {e.reject_reason.slice(0, 50)}</span>
+                  )}
+                </td>
+                <td className="text-right text-slate-400">
+                  {e.duration_ms !== null ? `${e.duration_ms} ms` : '—'}
+                </td>
+              </tr>
+            ))}
+            {auditLog.length === 0 && (
+              <tr><td colSpan={5} className="py-2 text-slate-600 text-center">Noch keine Einträge.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 
 // ── FeaturesSettings ─────────────────────────────────────────────────────────
 // Zentrale Stelle für Cyjan-Feature-Toggles. Aktivierung von Lab-Features
@@ -7177,7 +7396,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'pattern-import' | 'pattern-export' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -7242,6 +7461,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'mqtt',           icon: <Network  {...ICON_PROPS} /> },
       { id: 'pattern-import', icon: <Upload   {...ICON_PROPS} /> },
       { id: 'pattern-export', icon: <Upload   {...ICON_PROPS} /> },
+      { id: 'redteam',        icon: <Sparkles {...ICON_PROPS} /> },
       { id: 'features',       icon: <Sliders  {...ICON_PROPS} /> },
     ],
   },
@@ -7327,9 +7547,11 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
   // pattern_export_enabled=true (Lab-Modus). Customer-Master sieht den Tab nicht.
   const navGroups = useMemo(() => NAV_GROUPS.map(g => ({
     ...g,
-    items: g.items.filter(i =>
-      i.id !== 'pattern-export' || features.pattern_export_enabled,
-    ),
+    items: g.items.filter(i => {
+      if (i.id === 'pattern-export') return features.pattern_export_enabled;
+      if (i.id === 'redteam')        return features.redteam_enabled;
+      return true;
+    }),
   })).filter(g => g.items.length > 0), [features]);
 
   const isThorsten = active === 'thorsten';
@@ -7420,6 +7642,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
             {active === 'mqtt'          && <MqttSettings />}
             {active === 'pattern-import' && <PatternImportSettings />}
             {active === 'pattern-export' && <PatternExportSettings />}
+            {active === 'redteam'        && <RedTeamSettings />}
             {active === 'features'       && <FeaturesSettings />}
             {active === 'update'        && <SystemUpdate />}
             {active === 'geoip'         && <GeoIpSettings />}

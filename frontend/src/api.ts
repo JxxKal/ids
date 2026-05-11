@@ -1968,3 +1968,44 @@ export async function fetchExportLog(): Promise<import('./types').PatternExportR
     throw e;
   }
 }
+
+
+// ── RedTeam (Lab-only) ─────────────────────────────────────────────────────
+
+export async function fetchRedTeamHealth(): Promise<import("./types").RedTeamHealth> {
+  if (isDemoMode()) return { reachable: false, error: "Demo-Mode" };
+  try {
+    return await req<import("./types").RedTeamHealth>("/api/redteam/health");
+  } catch (e: unknown) {
+    if (e instanceof Error && e.message.startsWith("404")) {
+      return { reachable: false, error: "REDTEAM_ENABLED=false" };
+    }
+    throw e;
+  }
+}
+
+export async function runRedTeamTool(
+  body: import("./types").RedTeamRunRequest,
+): Promise<import("./types").RedTeamRunResponse> {
+  return await req<import("./types").RedTeamRunResponse>("/api/redteam/run", {
+    method: "POST", body: JSON.stringify(body),
+  });
+}
+
+export async function fetchRedTeamScenarios(): Promise<import("./types").RedTeamScenario[]> {
+  if (isDemoMode()) return [];
+  try {
+    const r = await req<{ scenarios: import("./types").RedTeamScenario[] }>("/api/redteam/scenarios");
+    return r.scenarios ?? [];
+  } catch { return []; }
+}
+
+export async function fetchRedTeamAuditLog(limit = 50): Promise<import("./types").RedTeamAuditEntry[]> {
+  if (isDemoMode()) return [];
+  try {
+    const r = await req<{ entries: import("./types").RedTeamAuditEntry[] }>(
+      `/api/redteam/audit-log?limit=${limit}`,
+    );
+    return r.entries ?? [];
+  } catch { return []; }
+}

@@ -300,6 +300,58 @@ export interface ExportRequest {
   lab_run_id?:       string;
 }
 
+// ── RedTeam (Lab-only) ──────────────────────────────────────────────────────
+
+export interface RedTeamHealth {
+  reachable:         boolean;
+  status?:           string;
+  kali_container?:   string;
+  allowed_src_cidrs?: string[];
+  error?:            string;
+}
+
+export interface RedTeamRunRequest {
+  tool:        'nmap' | 'hydra' | 'ncat' | 'ping';
+  target_ip:   string;
+  args:        string[];
+  timeout_sec: number;
+  expected_alert_rule_id?: string | null;
+  attach_iface: boolean;
+}
+
+export interface RedTeamRunResponse {
+  run_id:         string;
+  tool:           string;
+  target_ip:      string;
+  args:           string[];
+  exit_code:      number;
+  duration_ms:    number;
+  timed_out:      boolean;
+  stdout_excerpt: string;
+  stderr_excerpt: string;
+  matched_alerts: unknown[];
+}
+
+export interface RedTeamScenario {
+  scenario_id: string;
+  file:        string;
+  rule_id?:    string | null;
+  description?: string | null;
+  tags?:       string[];
+}
+
+export interface RedTeamAuditEntry {
+  id:             number;
+  ts:             string;
+  mcp_tool:       string;
+  target_ip:      string | null;
+  decision:       'allowed' | 'rejected_validation' | 'rejected_rate_limit';
+  reject_reason:  string | null;
+  duration_ms:    number | null;
+  result_summary: Record<string, unknown> | null;
+  args_excerpt:   string;
+}
+
 export interface PatternExportRecord {
   id:                  string;
   bundle_sha256:       string;

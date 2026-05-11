@@ -192,8 +192,10 @@ app.include_router(pattern_router.router,       dependencies=_auth)
 # kennt den Endpoint physisch nicht (Defense in Depth ggü. UI-Logic-Bypass).
 if os.environ.get("REDTEAM_ENABLED", "false").lower() == "true":
     from routers import pattern_export as pattern_export_router
+    from routers import redteam_proxy as redteam_proxy_router
     app.include_router(pattern_export_router.router, dependencies=_auth)
-    log.info("Pattern-Export-API aktiv (Lab-Modus, REDTEAM_ENABLED=true)")
+    app.include_router(redteam_proxy_router.router, dependencies=_auth)
+    log.info("Pattern-Export-API + RedTeam-Proxy aktiv (Lab-Modus, REDTEAM_ENABLED=true)")
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────

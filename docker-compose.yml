@@ -435,6 +435,11 @@ services:
       REDTEAM_ENABLED: "${REDTEAM_ENABLED:-false}"
       CYJAN_LAB_ID:    "${CYJAN_LAB_ID:-}"
       PATTERN_SIGNING_PASSPHRASE: "${PATTERN_SIGNING_PASSPHRASE:-}"
+      # RedTeam-Orchestrator läuft network_mode=host:8002 — via Host-Gateway
+      # erreichbar. extra_hosts unten mappt host.docker.internal explizit.
+      REDTEAM_ORCHESTRATOR_URL: "http://host.docker.internal:8002"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - snort-rules:/rules
       # signature-rules-Volume für Per-Regel Overrides + Custom-YAML.
