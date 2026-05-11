@@ -35,7 +35,7 @@ _executor = KaliExecutor()
 
 @mcp.tool()
 async def run_kali_tool_v1(
-    tool: Literal["nmap", "hydra", "ncat", "ping"],
+    tool: Literal["nmap", "hydra", "hping3", "ncat", "ping"],
     target_ip: str = Field(
         description=(
             "Ziel-IP. MUSS in RFC 5737 TEST-NET liegen: 192.0.2.0/24, "

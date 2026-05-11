@@ -3566,10 +3566,26 @@ function RedTeamSettings() {
   const [result, setResult]       = useState<import('../types').RedTeamRunResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  // Form state
-  const [tool, setTool]               = useState<import('../types').RedTeamRunRequest['tool']>('ping');
+  // Form state. Beim Tool-Wechsel werden die Args auf sinnvolle Defaults
+  // resetted — sonst sind ping-Args (-c 1 -W 2) für nmap nutzlos.
+  type ToolName = import('../types').RedTeamRunRequest['tool'];
+  const TOOL_DEFAULTS: Record<ToolName, string> = {
+    ping:   '-c 1 -W 2',
+    nmap:   '-sS -p 22,80,443 -Pn',
+    hping3: '-c 3 -S -p 80',
+    hydra:  '-l admin -P /dev/null -t 1 -f',
+    ncat:   '-z -w 2',
+  };
+  const [tool, setToolRaw] = useState<ToolName>('ping');
+  const [argsStr, setArgsStr] = useState(TOOL_DEFAULTS.ping);
+  const [argsManuallyEdited, setArgsManuallyEdited] = useState(false);
+  function setTool(t: ToolName) {
+    setToolRaw(t);
+    // Nur den Default überschreiben wenn der User die Args nicht selbst
+    // geändert hat — sonst frisst Tool-Wechsel die manuelle Anpassung.
+    if (!argsManuallyEdited) setArgsStr(TOOL_DEFAULTS[t]);
+  }
   const [targetIp, setTargetIp]       = useState('192.0.2.1');
-  const [argsStr, setArgsStr]         = useState('-c 1 -W 2');
   const [timeoutSec, setTimeoutSec]   = useState(30);
   const [attachIface, setAttachIface] = useState(false);
   const [expectedRuleId, setExpectedRuleId] = useState('');
@@ -3643,9 +3659,10 @@ function RedTeamSettings() {
           <div className="flex flex-col gap-1">
             <label className="text-slate-400">Tool</label>
             <select className="input" value={tool}
-              onChange={e => setTool(e.target.value as typeof tool)}>
+              onChange={e => setTool(e.target.value as ToolName)}>
               <option value="ping">ping</option>
               <option value="nmap">nmap</option>
+              <option value="hping3">hping3</option>
               <option value="hydra">hydra</option>
               <option value="ncat">ncat</option>
             </select>
@@ -3658,7 +3675,8 @@ function RedTeamSettings() {
           <div className="flex flex-col gap-1 sm:col-span-3">
             <label className="text-slate-400">Args (Space-separated, Tool-Whitelist serverseitig)</label>
             <input className="input font-mono" value={argsStr}
-              onChange={e => setArgsStr(e.target.value)} placeholder="-c 1 -W 2" />
+              onChange={e => { setArgsStr(e.target.value); setArgsManuallyEdited(true); }}
+              placeholder="-c 1 -W 2" />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-slate-400">Timeout (s)</label>

@@ -893,6 +893,10 @@ services:
     # auch volle Host-Net-Sichtbarkeit — der Container muss daher selbst
     # gehärtet sein und auf nicht-routbare Test-IPs limitiert sein.
     network_mode: host
+    # pid: host ist nötig damit `ip link set <veth> netns <kali-pid>` die
+    # Host-PID des kali-Containers tatsächlich auflösen kann. Ohne diese
+    # Zeile schlägt der veth-Handover mit "Invalid netns value" fehl.
+    pid: host
     depends_on:
       api:
         condition: service_started

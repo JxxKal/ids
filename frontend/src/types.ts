@@ -311,7 +311,7 @@ export interface RedTeamHealth {
 }
 
 export interface RedTeamRunRequest {
-  tool:        'nmap' | 'hydra' | 'ncat' | 'ping';
+  tool:        'nmap' | 'hydra' | 'hping3' | 'ncat' | 'ping';
   target_ip:   string;
   args:        string[];
   timeout_sec: number;

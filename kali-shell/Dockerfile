@@ -22,6 +22,7 @@ RUN apt-get update -qq \
       tcpdump \
       nmap \
       hydra \
+      hping3 \
       libcap2-bin \
       python3 \
       python3-yaml \
@@ -37,6 +38,7 @@ RUN apt-get update -qq \
 # manchmal in --no-install-recommends; setcap idempotent.
 RUN setcap cap_net_raw+ep /usr/bin/ping \
  && setcap cap_net_raw,cap_net_admin,cap_net_bind_service+ep /usr/bin/nmap.nmap \
+ && setcap cap_net_raw+ep /usr/sbin/hping3 \
  || true
 
 # Non-root user — UID 1000 matched Default-Host-User
