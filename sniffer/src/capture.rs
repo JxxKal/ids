@@ -20,24 +20,29 @@ pub struct CapturedPacket {
     pub pcap_record: PcapRecord,
 }
 
-/// Blockierende Capture-Schleife. Läuft in einem eigenen Thread.
-/// Bricht ab wenn `shutdown` auf true gesetzt wird oder ein fataler Fehler auftritt.
-/// Beim Beenden wird `tx` gedroppt → Publisher erkennt Channel-Ende und flusht Kafka.
+/// Blockierende Capture-Schleife für ein einzelnes Interface. Läuft in einem
+/// eigenen Thread. Bricht ab wenn `shutdown` auf true gesetzt wird oder ein
+/// fataler Fehler auftritt. Beim Beenden wird `tx` gedroppt → Publisher
+/// erkennt Channel-Ende und flusht Kafka.
+///
+/// `iface_name` bestimmt das pcap-Device. Mehrere Threads können in den
+/// gleichen `tx`-Channel schreiben — der Publisher serialisiert die Frames.
 pub fn run(
+    iface_name: &str,
     config: &Config,
     tx: Sender<CapturedPacket>,
     stats: Arc<Stats>,
     shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
     tracing::info!(
-        iface      = %config.mirror_iface,
+        iface      = %iface_name,
         snaplen    = config.snaplen,
         buffer_mb  = config.buffer_size / (1024 * 1024),
         test_mode  = config.test_mode,
         "Öffne Capture..."
     );
 
-    let mut cap = Capture::from_device(config.mirror_iface.as_str())?
+    let mut cap = Capture::from_device(iface_name)?
         .snaplen(config.snaplen)
         .promisc(true)
         // 1 Sekunde Timeout: erlaubt regelmäßige Shutdown-Checks
@@ -45,7 +50,7 @@ pub fn run(
         .buffer_size(config.buffer_size)
         .open()?;
 
-    tracing::info!(iface = %config.mirror_iface, "Capture aktiv");
+    tracing::info!(iface = %iface_name, "Capture aktiv");
 
     loop {
         // Shutdown-Check (atomar, kein Locking)
@@ -65,8 +70,8 @@ pub fn run(
                 let orig_len = packet.header.len;
                 let data     = packet.data;
 
-                // Paket parsen
-                let event = match parser::parse(data, orig_len, ts, &config.mirror_iface) {
+                // Paket parsen — iface-Name kommt aus dem aktuellen Capture
+                let event = match parser::parse(data, orig_len, ts, iface_name) {
                     Some(e) => e,
                     None => {
                         stats.parse_errors.fetch_add(1, Ordering::Relaxed);

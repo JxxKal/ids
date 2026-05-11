@@ -696,6 +696,9 @@ services:
     cap_add: [NET_RAW, NET_ADMIN]
     environment:
       MIRROR_IFACE: ${MIRROR_IFACE:?MIRROR_IFACE muss in .env gesetzt sein}
+      # Zusätzliche Interfaces für Capture — kommasepariert.
+      # Use-Case: cy-inj-peer für RedTeam-veth-Traffic (Lab-Mode).
+      EXTRA_CAPTURE_IFACES: ${EXTRA_CAPTURE_IFACES:-}
       KAFKA_BROKERS: localhost:9094                  # External Listener (network_mode: host)
       CAPTURE_SNAPLEN: ${CAPTURE_SNAPLEN:-128}
       CAPTURE_RING_BUFFER_MB: ${CAPTURE_RING_BUFFER_MB:-64}

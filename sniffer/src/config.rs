@@ -4,6 +4,11 @@ use anyhow::{Context, Result};
 pub struct Config {
     /// Interface auf dem der Mirror-Traffic anliegt (AF_PACKET bind)
     pub mirror_iface: String,
+    /// Zusätzliche Capture-Interfaces (optional, kommasepariert via env).
+    /// Use-Case: redteam-orchestrator veth-Pair (cy-inj-peer) als
+    /// zusätzliche Quelle für RedTeam-Detection-Tests, parallel zum
+    /// physischen Mirror.
+    pub extra_capture_ifaces: Vec<String>,
     /// Kafka Bootstrap-Server, kommasepariert
     pub kafka_brokers: String,
     /// Bytes pro Paket (nur Header, kein Payload). Min 64, empfohlen 128.
@@ -42,8 +47,19 @@ impl Config {
             .unwrap_or_else(|_| "false".into())
             .eq_ignore_ascii_case("true");
 
+        // EXTRA_CAPTURE_IFACES: kommasepariert, leer = nur mirror_iface.
+        // Beispiel: "cy-inj-peer,docker0" — bekommt eigene Capture-Threads
+        // die in den gleichen Kafka-Producer schreiben.
+        let extra_capture_ifaces = std::env::var("EXTRA_CAPTURE_IFACES")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s != &mirror_iface)
+            .collect::<Vec<_>>();
+
         Ok(Self {
             mirror_iface,
+            extra_capture_ifaces,
             kafka_brokers,
             snaplen,
             buffer_size: buffer_mb * 1024 * 1024,

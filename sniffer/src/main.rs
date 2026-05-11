@@ -35,6 +35,7 @@ fn main() -> Result<()> {
 
     tracing::info!(
         iface     = %config.mirror_iface,
+        extra_ifaces = ?config.extra_capture_ifaces,
         brokers   = %config.kafka_brokers,
         snaplen   = config.snaplen,
         test_mode = config.test_mode,
@@ -70,26 +71,55 @@ fn main() -> Result<()> {
     // ── Stats-Reporter (Background-Thread) ───────────────────────────────────
     stats::spawn_reporter(Arc::clone(&stats), Duration::from_secs(10));
 
-    // ── Capture-Thread ───────────────────────────────────────────────────────
-    let stats_cap   = Arc::clone(&stats);
-    let shutdown_cap = Arc::clone(&shutdown);
-    let config_cap  = config.clone();
+    // ── Capture-Threads (einer pro Interface) ────────────────────────────────
+    // Mirror-Iface + optionale Extra-Ifaces (z.B. cy-inj-peer für RedTeam-
+    // veth-Traffic). Alle teilen sich denselben tx-Channel zum Publisher.
+    let mut capture_handles = Vec::new();
 
-    let capture_handle = std::thread::Builder::new()
-        .name("capture".into())
-        .spawn(move || {
-            if let Err(e) = capture::run(&config_cap, tx, stats_cap, shutdown_cap) {
-                tracing::error!(error = %e, "Capture-Thread beendet sich mit Fehler");
-            }
-        })?;
+    // Mirror-Interface (Pflicht)
+    {
+        let stats_cap = Arc::clone(&stats);
+        let shutdown_cap = Arc::clone(&shutdown);
+        let config_cap = config.clone();
+        let tx_cap = tx.clone();
+        let iface = config.mirror_iface.clone();
+        capture_handles.push(std::thread::Builder::new()
+            .name(format!("capture-{}", iface))
+            .spawn(move || {
+                if let Err(e) = capture::run(&iface, &config_cap, tx_cap, stats_cap, shutdown_cap) {
+                    tracing::error!(iface=%iface, error = %e, "Capture-Thread beendet sich mit Fehler");
+                }
+            })?);
+    }
+
+    // Extra-Ifaces (optional)
+    for iface in &config.extra_capture_ifaces {
+        let stats_cap = Arc::clone(&stats);
+        let shutdown_cap = Arc::clone(&shutdown);
+        let config_cap = config.clone();
+        let tx_cap = tx.clone();
+        let iface = iface.clone();
+        capture_handles.push(std::thread::Builder::new()
+            .name(format!("capture-{}", iface))
+            .spawn(move || {
+                if let Err(e) = capture::run(&iface, &config_cap, tx_cap, stats_cap, shutdown_cap) {
+                    tracing::error!(iface=%iface, error = %e, "Capture-Thread beendet sich mit Fehler");
+                }
+            })?);
+    }
+
+    // Original tx droppen — die Threads halten ihre Klone, sobald alle
+    // Capture-Threads den Channel droppen erkennt der Publisher EOF.
+    drop(tx);
 
     // ── Publisher (Main-Thread, blockiert bis Channel geschlossen) ───────────
     publisher::run(rx, producer, Arc::clone(&stats))?;
 
     // ── Cleanup ──────────────────────────────────────────────────────────────
-    // Sicherstellen dass Capture-Thread sauber beendet ist
-    if let Err(e) = capture_handle.join() {
-        tracing::error!("Capture-Thread Panic: {:?}", e);
+    for h in capture_handles {
+        if let Err(e) = h.join() {
+            tracing::error!("Capture-Thread Panic: {:?}", e);
+        }
     }
 
     let captured = stats.pkts_captured.load(Ordering::Relaxed);
