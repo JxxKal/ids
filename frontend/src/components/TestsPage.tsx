@@ -8,6 +8,7 @@ import { MobileDesktopHint } from './MobileDesktopHint';
 import { ScenarioRunner } from './ScenarioRunner';
 import { ManualToolRun } from './ManualToolRun';
 import { UnifiedRunLog } from './UnifiedRunLog';
+import { CollapsibleSection } from './CollapsibleSection';
 
 // Synthetische Tests — Traffic-Generator injiziert Flows direkt in Kafka.
 // Hardcoded weil die Generator-Logik pro Scenario unterschiedlich ist
@@ -63,16 +64,11 @@ export function TestsPage() {
       {/* ───── 🧪 Synthetische Tests ─────
          Traffic-Generator injiziert Flows direkt in Kafka — kein echter
          Netzwerk-Traffic. Smoketest der Cyjan-Signature-Engine. */}
-      <div className="card p-4">
-        <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-          <h2 className="text-sm font-semibold text-blue-300">
-            🧪 Synthetische Tests
-          </h2>
-          <p className="text-[11px] text-slate-500">
-            Traffic-Generator → Kafka-Flows (kein Netzwerk-Verkehr).
-            Smoketest der Cyjan-Signature-Engine.
-          </p>
-        </div>
+      <CollapsibleSection
+        storageKey="cyjan-scenarios-section-synthetic"
+        title={<span className="text-blue-300">🧪 Synthetische Tests</span>}
+        subtitle="Traffic-Generator → Kafka-Flows (kein Netzwerk-Verkehr)"
+      >
         {error && <p className="text-red-400 text-xs mb-3 break-words">{error}</p>}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {SCENARIO_IDS.map(id => (
@@ -92,22 +88,15 @@ export function TestsPage() {
             </div>
           ))}
         </div>
-      </div>
+      </CollapsibleSection>
 
-      {/* ───── 🎯 Payload-Szenarios (RedTeam) ─────
-         Nur sichtbar wenn redteam_enabled. Spielt YAML-basierte Byte-
-         Payloads via kali-shell → veth → listener → echter Pipeline-Test. */}
+      {/* ───── 🎯 Payload-Szenarios (RedTeam) ───── */}
       {flags?.redteam_enabled && (
-        <div className="card p-4">
-          <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-            <h2 className="text-sm font-semibold text-violet-300">
-              🎯 Payload-Szenarios (RedTeam)
-            </h2>
-            <p className="text-[11px] text-slate-500">
-              kali-shell → veth → Listener. Voller Pipeline-Test (Sniffer + Suricata + AI-Rules).
-              Lab-only.
-            </p>
-          </div>
+        <CollapsibleSection
+          storageKey="cyjan-scenarios-section-payload"
+          title={<span className="text-violet-300">🎯 Payload-Szenarios (RedTeam)</span>}
+          subtitle={`${payloadScenarios.length} YAMLs · kali→veth→Listener · Lab-only`}
+        >
           {/* Orchestrator-Health-Indikator */}
           {health && !health.reachable && (
             <div className="bg-amber-500/10 border border-amber-500/40 rounded p-2 text-[11px] text-amber-300 mb-3">
@@ -116,24 +105,19 @@ export function TestsPage() {
             </div>
           )}
           <ScenarioRunner scenarios={payloadScenarios} onAuditChange={bumpLog} />
-        </div>
+        </CollapsibleSection>
       )}
 
-      {/* ───── 🔧 Manueller Tool-Run ─────
-         Direkter kali-Tool-Aufruf (nmap/hping3/etc.) — Lab-only, nur wenn
-         redteam_enabled. Audit-Eintrag landet im Run-Log unten. */}
+      {/* ───── 🔧 Manueller Tool-Run ───── */}
       {flags?.redteam_enabled && (
-        <div className="card p-4">
-          <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-            <h2 className="text-sm font-semibold text-cyan-300">
-              🔧 Manueller Tool-Run
-            </h2>
-            <p className="text-[11px] text-slate-500">
-              Direkter kali-shell-Aufruf (nmap/hping3/hydra/ncat/ping) — One-Shot ohne YAML.
-            </p>
-          </div>
+        <CollapsibleSection
+          storageKey="cyjan-scenarios-section-manual"
+          title={<span className="text-cyan-300">🔧 Manueller Tool-Run</span>}
+          subtitle="Direkter kali-Aufruf (nmap/hping3/hydra/ncat/ping)"
+          defaultOpen={false}
+        >
           <ManualToolRun onRunComplete={bumpLog} />
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* ───── Unified Run Log ─────

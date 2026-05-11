@@ -141,11 +141,24 @@ const TYPE_META: Record<EntryType, { label: string; classes: string; bgFor: stri
 };
 
 
+const COLLAPSE_KEY = 'cyjan-scenarios-section-run-log';
+
+
 export function UnifiedRunLog({ redteamEnabled }: { redteamEnabled: boolean }) {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<UnifiedEntry[]>([]);
   const [filter, setFilter]   = useState<EntryType | 'all'>('all');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [open, setOpen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = localStorage.getItem(COLLAPSE_KEY);
+    return stored === null ? true : stored === 'true';
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(COLLAPSE_KEY, String(open)); }
+    catch { /* ignore */ }
+  }, [open]);
 
   const reload = async () => {
     const [synth, audit] = await Promise.all([
@@ -191,26 +204,36 @@ export function UnifiedRunLog({ redteamEnabled }: { redteamEnabled: boolean }) {
   return (
     <div className="card overflow-hidden">
       <div className="px-4 py-2 border-b border-slate-800 flex justify-between items-center flex-wrap gap-2">
-        <h2 className="text-sm font-semibold text-slate-300">
-          Run Log <span className="text-slate-600 normal-case">({entries.length})</span>
-        </h2>
+        <button
+          type="button"
+          onClick={() => setOpen(o => !o)}
+          className="flex items-baseline gap-2 hover:opacity-80 transition-opacity"
+          aria-expanded={open}
+        >
+          <span className="text-slate-500 text-xs select-none w-3 text-center" aria-hidden="true">
+            {open ? '▼' : '▶'}
+          </span>
+          <h2 className="text-sm font-semibold text-slate-300">
+            Run Log <span className="text-slate-600 normal-case">({entries.length})</span>
+          </h2>
+        </button>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Filter-Chips pro Typ */}
+          {/* Filter-Chips pro Typ — sichtbar auch im collapsed-Zustand als Aktivitäts-Indikator */}
           <div className="flex gap-1 flex-wrap">
             <FilterChip active={filter === 'all'} count={counts.all || 0}
-              onClick={() => setFilter('all')}
+              onClick={() => { setFilter('all'); setOpen(true); }}
               label="Alle" classes="text-slate-300" />
             {(['synthetic', 'tool', 'scenario', 'scenario_create', 'rule_create'] as EntryType[]).map(t => {
               const c = counts[t] || 0;
               if (c === 0) return null;
               return (
                 <FilterChip key={t} active={filter === t} count={c}
-                  onClick={() => setFilter(t)}
+                  onClick={() => { setFilter(t); setOpen(true); }}
                   label={TYPE_META[t].label} classes={TYPE_META[t].classes} />
               );
             })}
           </div>
-          {counts.synthetic > 0 && (
+          {open && counts.synthetic > 0 && (
             <button onClick={handleDeleteAllSynth}
               className="text-xs text-slate-500 hover:text-red-400 transition-colors"
               title="Alle synth-Runs löschen">
@@ -220,7 +243,7 @@ export function UnifiedRunLog({ redteamEnabled }: { redteamEnabled: boolean }) {
         </div>
       </div>
 
-      <div className="p-3 space-y-1.5">
+      <div className={open ? 'p-3 space-y-1.5' : 'hidden'}>
         {filtered.length === 0 && (
           <p className="text-[11px] text-slate-600 text-center py-6 italic">
             {filter === 'all'
