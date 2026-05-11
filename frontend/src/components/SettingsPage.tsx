@@ -4063,48 +4063,67 @@ function AuditLogTable({ entries }: { entries: import('../types').RedTeamAuditEn
       <h3 className="text-[11px] uppercase tracking-wider text-slate-500 mb-2">
         Audit-Log (letzte {entries.length})
       </h3>
-      <table className="w-full text-[11px]">
-        <thead>
-          <tr className="text-slate-500">
-            <th className="text-left font-normal py-1 w-36">Zeit</th>
-            <th className="text-left font-normal w-72">Aktion</th>
-            <th className="text-left font-normal">Details</th>
-            <th className="text-left font-normal w-24">Target</th>
-            <th className="text-left font-normal w-28">Entscheidung</th>
-            <th className="text-right font-normal w-16">Dauer</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map(e => {
-            const d = describe(e);
-            return (
-              <tr key={e.id} className="border-t border-slate-800/40 align-top">
-                <td className="py-1.5 text-slate-500 font-mono whitespace-nowrap">
+
+      {entries.length === 0 && (
+        <p className="py-2 text-slate-600 text-center text-[11px]">Noch keine Einträge.</p>
+      )}
+
+      {/* Card-Liste — responsive ohne fixed column widths. Lange Action-Labels
+          und Details brechen mit break-words um, statt die Seite zu sprengen.
+          Auf Mobile passt jede Card in den Viewport, auf Desktop ist die Card
+          breit genug für mehrere Felder horizontal. */}
+      <div className="space-y-1.5">
+        {entries.map(e => {
+          const d = describe(e);
+          return (
+            <div
+              key={e.id}
+              className="bg-slate-900/30 border border-slate-800/60 rounded p-2 text-[11px]"
+            >
+              {/* Header-Zeile: Zeit (links) — Entscheidung + Dauer (rechts).
+                  flex-wrap fängt mobile-tiefe Viewports ab. */}
+              <div className="flex items-baseline justify-between gap-2 mb-1 flex-wrap">
+                <span className="text-slate-500 font-mono text-[10px] whitespace-nowrap">
                   {new Date(e.ts).toLocaleString()}
-                </td>
-                <td className={`font-mono ${d.iconClass} truncate`}>{d.label}</td>
-                <td className="text-slate-400 truncate">{d.detail}</td>
-                <td className="font-mono text-slate-500">{e.target_ip ?? '—'}</td>
-                <td>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                    e.decision === 'allowed' ? 'bg-emerald-500/15 text-emerald-300' :
-                    'bg-red-500/15 text-red-300'
-                  }`}>{e.decision}</span>
-                  {e.reject_reason && (
-                    <div className="text-slate-500 text-[10px] mt-0.5">{e.reject_reason.slice(0, 60)}</div>
+                </span>
+                <div className="flex items-baseline gap-2 ml-auto">
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] whitespace-nowrap ${
+                      e.decision === 'allowed'
+                        ? 'bg-emerald-500/15 text-emerald-300'
+                        : 'bg-red-500/15 text-red-300'
+                    }`}
+                  >
+                    {e.decision}
+                  </span>
+                  <span className="text-slate-400 font-mono text-[10px] tabular-nums whitespace-nowrap">
+                    {e.duration_ms !== null ? `${e.duration_ms} ms` : '—'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Aktion — semantische Beschreibung, color-coded. */}
+              <div className={`font-mono ${d.iconClass} break-words`}>{d.label}</div>
+
+              {/* Details — secondary line, target inline am Ende. */}
+              {(d.detail || e.target_ip) && (
+                <div className="text-slate-400 mt-0.5 break-words">
+                  {d.detail}
+                  {e.target_ip && (
+                    <span className="text-slate-600 ml-2 font-mono">→ {e.target_ip}</span>
                   )}
-                </td>
-                <td className="text-right text-slate-400 font-mono whitespace-nowrap">
-                  {e.duration_ms !== null ? `${e.duration_ms} ms` : '—'}
-                </td>
-              </tr>
-            );
-          })}
-          {entries.length === 0 && (
-            <tr><td colSpan={6} className="py-2 text-slate-600 text-center">Noch keine Einträge.</td></tr>
-          )}
-        </tbody>
-      </table>
+                </div>
+              )}
+
+              {e.reject_reason && (
+                <div className="text-red-400 text-[10px] mt-0.5 break-words">
+                  {e.reject_reason}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
