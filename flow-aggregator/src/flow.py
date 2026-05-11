@@ -220,16 +220,28 @@ class FlowState:
         # ICMP-Direction. Ohne diesen Block fällt ICMP komplett in den
         # default first-packet=Client-Branch — bei Mid-Capture wo der
         # Sniffer den Echo Reply zuerst sieht (Mirror-Order, NIC-Buffering),
-        # bekommen wir Direction-Vertauschung. Echo Reply mit src=Sender-
-        # des-Reply muss gedreht werden, damit src=Original-Initiator
-        # bleibt, sonst kippt die DOS_ICMP_001-Source-Attribution.
+        # bekommen wir Direction-Vertauschung.
+        #
+        # Echo Request/Reply: src soll der Original-Pinger bleiben.
+        #   Type 8/128 (Request): client_first=True (src ist Pinger=Client)
+        #   Type 0/129 (Reply):   client_first=False (Sender ist Responder, drehen)
+        #
+        # Error-Messages (Dest Unreachable, TTL Exceeded, Redirect, ...):
+        #   NICHT drehen. Der src_ip des ICMP-Pakets IST der Verursacher
+        #   des Traffics aus IDS-Sicht (er produziert die ICMP-Pakete).
+        #   Bei DOS_ICMP_001 soll die Source-Attribution den ICMP-Sender
+        #   markieren, nicht den Original-Connection-Initiator.
+        #   Beispiel: Master macht DNS-Query → DNS antwortet → Master-Socket
+        #   bereits zu → Master-Kernel schickt Type-3-Port-Unreachable.
+        #   Korrekte Source = Master. Vor diesem Fix wurde gedreht, was den
+        #   DNS-Server als "ICMP-Flood-Quelle" zeigte — fachlich falsch.
+        #
         # Type-Codes: ICMPv4 8/0=Request/Reply, 13/14=Timestamp Req/Reply,
         # 17/18=Address Mask Req/Reply, 3=Dest Unreach, 11=TTL exceeded;
         # ICMPv6 128/129=Request/Reply, 1=Dest Unreach, 3=TTL exceeded.
         if not decided and pkt.transport and pkt.transport.icmp:
             t = pkt.transport.icmp.icmp_type
             if pkt.transport.proto == "ICMPv6":
-                # IPv6 Echo Request 128, Reply 129
                 if t == 129:
                     client_first = False         # Reply gesehen → src ist Responder
                     decided = True
@@ -237,9 +249,8 @@ class FlowState:
                     client_first = True
                     decided = True
                 elif t in (1, 2, 3, 4):
-                    # Error-Messages: src ist der Router/Responder, nicht
-                    # der Original-Sender. Drehen.
-                    client_first = False
+                    # Error-Messages: src bleibt — IST der Verursacher.
+                    client_first = True
                     decided = True
             else:
                 # ICMPv4
@@ -250,7 +261,9 @@ class FlowState:
                     client_first = True
                     decided = True
                 elif t in (3, 4, 5, 11, 12):     # Error / Redirect-Messages
-                    client_first = False
+                    # NICHT drehen — src des ICMP-Pakets IST der Verursacher,
+                    # auch wenn er nicht der Original-Connection-Initiator war.
+                    client_first = True
                     decided = True
 
         if not decided:
