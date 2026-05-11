@@ -23,6 +23,7 @@ from alert_match import poll_alerts_for_rule
 from config import settings
 from db import audit_log, close_pool, init_pool
 from kali_executor import KaliExecutionError, KaliExecutor
+from mcp_auth import MCPAuthMiddleware
 from mcp_server import mcp
 from run_logger import (
     log_scenario_run,
@@ -97,6 +98,11 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+# MCP-Auth-Middleware: prüft Bearer-JWT auf /mcp/* wenn MCP_AUTH_REQUIRED=true.
+# Default: aus (Lab-Modus). Customer-Deployments setzen das auf true und
+# generieren Tokens über das API-Settings-Frontend.
+app.add_middleware(MCPAuthMiddleware)
 
 
 # ─── Auth ────────────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ import {
   addPatternTrustKey, addSigningKey, applyPatternBundle, deletePatternTrustKey, deleteSigningKey,
   exportPatternBundle, fetchExportLog, fetchFeatureFlags, fetchIrmaConfig, fetchItopConfig,
   fetchMLConfig, fetchMLStatus, fetchMqttConfig, fetchPatternImports, fetchPatternTrustKeys,
-  fetchRedTeamHealth,
+  fetchRedTeamHealth, generateMcpToken,
   fetchRuleSources, fetchSigningKeys, previewPatternExport,
   updateFeatureFlags, uploadPatternBundle,
   fetchRuleUpdateStatus, fetchRules, fetchSamlConfig, fetchSslStatus, fetchSyslogConfig,
@@ -3677,12 +3677,170 @@ function RedTeamSettings() {
         </p>
         <p className="text-slate-500 text-[10px]">
           Auth via <code className="font-mono">CYJAN_API_TOKEN</code> env-var oder Service-JWT
-          aus <code className="font-mono">API_SECRET_KEY</code>.
+          aus <code className="font-mono">API_SECRET_KEY</code>. MCP-Auth aktivieren mit
+          {' '}<code className="font-mono">MCP_AUTH_REQUIRED=true</code> in .env (Orchestrator-Restart).
         </p>
       </div>
+
+      {/* MCP-Token-Generator — komfortable Token-Erzeugung für KI-Clients */}
+      <McpTokenGenerator />
     </div>
   );
 }
+
+
+// ── McpTokenGenerator — langlebige Bearer-Tokens für MCP-Clients ────────────
+//
+// User klickt "Token erzeugen", bekommt das JWT EINMAL angezeigt zum Kopieren
+// (kein persistenter Storage — wenn vergessen muss neu generiert werden).
+// Plus Beispiel-Configs für Claude Desktop + curl.
+
+function McpTokenGenerator() {
+  const [description, setDescription]   = useState('');
+  const [expiresDays, setExpiresDays]   = useState(365);
+  const [generating, setGenerating]     = useState(false);
+  const [result, setResult]             = useState<import('../api').McpTokenResponse | null>(null);
+  const [error, setError]               = useState<string | null>(null);
+  const [copied, setCopied]             = useState(false);
+
+  async function handleGenerate() {
+    setGenerating(true); setError(null);
+    try {
+      const r = await generateMcpToken({
+        description: description.trim() || undefined,
+        expires_days: expiresDays,
+      });
+      setResult(r);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Token-Erzeugung fehlgeschlagen');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function copyToken() {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result.token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard API might be unavailable in non-HTTPS contexts */ }
+  }
+
+  const masterUrl = `${window.location.protocol}//${window.location.hostname}:8002/mcp/`;
+
+  const claudeConfigExample = JSON.stringify({
+    mcpServers: {
+      'cyjan-redteam': {
+        url: masterUrl,
+        headers: {
+          Authorization: `Bearer ${result?.token ?? '<TOKEN_HIER>'}`,
+        },
+      },
+    },
+  }, null, 2);
+
+  return (
+    <div className="border border-slate-800 rounded p-3 space-y-3">
+      <div className="flex items-baseline justify-between flex-wrap gap-2">
+        <h3 className="text-[11px] uppercase tracking-wider text-slate-500">
+          🔑 MCP-Token für KI-Clients
+        </h3>
+        <p className="text-[10px] text-slate-600">
+          Langlebiges Bearer-JWT (default 365 Tage). Self-contained, keine
+          Server-Persistenz — wird nur einmal angezeigt.
+        </p>
+      </div>
+
+      {!result && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <label className="text-slate-400">Beschreibung (optional)</label>
+              <input className="input" maxLength={120}
+                value={description} onChange={e => setDescription(e.target.value)}
+                placeholder="z.B. 'Claude Desktop Jan' oder 'Pen-Test Skript v2'" />
+              <span className="text-[10px] text-slate-600">
+                Landet als <code>desc</code>-Claim im JWT und im orchestrator-Audit-Log —
+                hilft später nachzuvollziehen WELCHER Token welche MCP-Aktion ausgelöst hat.
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-slate-400">Gültigkeit (Tage)</label>
+              <input className="input" type="number" min={1} max={3650}
+                value={expiresDays}
+                onChange={e => setExpiresDays(parseInt(e.target.value) || 365)} />
+            </div>
+          </div>
+          <div className="flex justify-between items-center flex-wrap gap-2">
+            {error && <span className="text-xs text-red-400 break-words">{error}</span>}
+            <button className="btn-primary text-xs ml-auto"
+              disabled={generating}
+              onClick={handleGenerate}>
+              {generating ? 'Erzeuge…' : 'Token erzeugen'}
+            </button>
+          </div>
+        </>
+      )}
+
+      {result && (
+        <div className="space-y-3">
+          <div className="bg-amber-500/10 border border-amber-500/40 rounded p-2.5 text-[11px] text-amber-300">
+            ⚠ <strong>Token wird nur einmal angezeigt.</strong> Kopiere ihn jetzt sicher
+            ab — eine Wiederherstellung später ist nicht möglich (kein persistenter
+            Server-Storage). Bei Verlust einfach neuen Token erzeugen.
+          </div>
+
+          {/* Token-Box mit Copy-Button */}
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider">Token</label>
+            <div className="flex gap-2 items-stretch">
+              <pre className="flex-1 bg-slate-900/60 border border-slate-700 rounded p-2 text-[10px] font-mono text-emerald-300 overflow-x-auto break-all whitespace-pre-wrap">{result.token}</pre>
+              <button onClick={copyToken}
+                className={`btn-ghost text-xs px-3 whitespace-nowrap ${copied ? 'text-emerald-400' : ''}`}>
+                {copied ? '✓ kopiert' : '📋 Copy'}
+              </button>
+            </div>
+            <div className="flex gap-3 text-[10px] text-slate-500 flex-wrap">
+              <span>token_id: <code className="font-mono text-slate-400">{result.token_id}</code></span>
+              <span>desc: <code className="font-mono text-slate-400">{result.description}</code></span>
+              <span>gültig bis: <code className="font-mono text-slate-400">{new Date(result.expires_at).toLocaleString()}</code></span>
+            </div>
+          </div>
+
+          {/* Beispiel-Configs */}
+          <div className="space-y-2">
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider">Beispiel-Config Claude Desktop</label>
+            <p className="text-[10px] text-slate-600">
+              In <code className="font-mono">~/Library/Application Support/Claude/claude_desktop_config.json</code>
+              {' '}(macOS) bzw. <code className="font-mono">%APPDATA%\Claude\claude_desktop_config.json</code> (Windows):
+            </p>
+            <pre className="bg-slate-900/60 border border-slate-700 rounded p-2 text-[10px] font-mono text-slate-300 overflow-x-auto">
+{claudeConfigExample}
+            </pre>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider">curl / Bash-Beispiel</label>
+            <pre className="bg-slate-900/60 border border-slate-700 rounded p-2 text-[10px] font-mono text-slate-300 overflow-x-auto break-all whitespace-pre-wrap">
+{`curl -X POST ${masterUrl} \\
+  -H "Authorization: Bearer ${result.token.slice(0, 60)}…" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -H "Content-Type: application/json" \\
+  -d '{"jsonrpc":"2.0","id":"1","method":"tools/list"}'`}
+            </pre>
+          </div>
+
+          <button className="btn-ghost text-xs"
+            onClick={() => { setResult(null); setDescription(''); setCopied(false); }}>
+            Zurück / Neuen Token erzeugen
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ── FeaturesSettings ─────────────────────────────────────────────────────────
 // Zentrale Stelle für Cyjan-Feature-Toggles. Aktivierung von Lab-Features

@@ -2085,3 +2085,20 @@ export async function fetchRedTeamAuditLog(limit = 50): Promise<import("./types"
     return r.entries ?? [];
   } catch { return []; }
 }
+
+export interface McpTokenResponse {
+  token:           string;
+  token_id:        string;
+  description:     string;
+  expires_at:      string;
+  expires_in_days: number;
+}
+
+export async function generateMcpToken(
+  body: { description?: string; expires_days?: number },
+): Promise<McpTokenResponse> {
+  return await req<McpTokenResponse>("/api/redteam/mcp-token", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
