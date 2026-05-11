@@ -340,6 +340,38 @@ sudo docker compose --profile redteam build kali-shell redteam-orchestrator
 sudo docker compose --profile prod --profile redteam up -d --force-recreate
 ```
 
+### Einmaliges veth-Setup (für `attach_iface=true`-Tool-Runs)
+
+kali-shell läuft mit `network_mode: none` und bekommt sein Netz erst, wenn
+der Orchestrator per `ip link set ... netns <pid>` ein veth-Pair on-demand
+in den Container-namespace verschiebt. Das veth-Pair muss am Host
+**einmalig** angelegt werden, sonst wirft der Orchestrator beim ersten
+Run mit `attach_iface=true` einen Lab-Setup-Fehler:
+
+```bash
+# 1. Veth-Pair am Host anlegen (cyjan-inject + Peer)
+sudo ip link add cyjan-inject type veth peer name cyjan-inject-peer
+
+# 2. Peer-Seite mit RFC-5737-TEST-NET-IP versehen (Gegenstück zum
+#    target_ip, das die Tools dann anpingen können)
+sudo ip addr add 192.0.2.254/24 dev cyjan-inject-peer
+sudo ip link set cyjan-inject-peer up
+
+# 3. Persistent über reboots: systemd-network oder /etc/network/interfaces
+#    je nach Distribution — für Lab-Sandboxes meist nicht nötig
+```
+
+Nach diesem Setup kannst du z.B. `target_ip=192.0.2.1` testen — der
+Orchestrator schiebt `cyjan-inject` ins kali-namespace, kali-shell
+weist sich `192.0.2.1` zu (oder per DHCP-Setup, je nach Lab-Plan),
+Tools senden auf TEST-NET-Range. `attach_iface=false` als Alternative
+führt den Tool-Run ohne Netz-Konnektivität durch — sinnvoll für
+Smoketests der Validation-Pipeline, nicht für echte Detection-Tests.
+
+`ip link show cyjan-inject` zeigt jederzeit den aktuellen Namespace
+(default oder pid=<kali-host-pid>) — der Orchestrator setzt mit
+`finally`-Block beim Tool-Exit den veth zurück ins default-namespace.
+
 -----
 
 ## 11. V2-Backlog (nicht in v1.3.0)
