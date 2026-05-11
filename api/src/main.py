@@ -63,6 +63,8 @@ from routers import tests as tests_router
 from routers import users as users_router
 from routers import maintenance as maintenance_router
 from routers.alerts import make_pcap_endpoint, set_feedback_producer
+from routers import notifications as notifications_router
+from routers.notifications import set_producer as set_notifications_producer
 from routers.syslog_fwd import router as syslog_router
 from routers.syslog_fwd import syslog_forwarder_loop
 from routers.itop import router as itop_router
@@ -150,6 +152,7 @@ kafka_producer = Producer({
 # Routes beim include_router-Aufruf; später hinzugefügte Routen werden ignoriert.
 
 set_feedback_producer(kafka_producer)
+set_notifications_producer(kafka_producer)
 make_pcap_endpoint(minio_client, cfg.pcap_bucket)
 make_run_endpoint(kafka_producer)
 reports_router.configure_archive(minio_client, cfg.reports_bucket)
@@ -170,6 +173,7 @@ app.include_router(rules_router.router,    dependencies=_auth)
 app.include_router(sig_rules_router.router, dependencies=_auth)
 app.include_router(egress_whitelist_router.router, dependencies=_auth)
 app.include_router(geoip_router.router,    dependencies=_auth)
+app.include_router(notifications_router.router, dependencies=_auth)
 app.include_router(reports_router.router,  dependencies=_auth)
 # taps_router: GET/POST(token)/DELETE sind admin-only; POST /api/taps/pair ist
 # bewusst öffentlich (Token-authentisiert), darum hier ohne global JWT-Gate

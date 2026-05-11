@@ -372,6 +372,44 @@ services:
     volumes:
       - ./geoip:/geoip:ro
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # NOTIFICATION-DISPATCHER (Phase 1)
+  #
+  # Konsumiert alerts-enriched-push und dispatcht über Plugin-Handler an
+  # Webhooks / ntfy / Email — pro User mehrere notification_channels.
+  # Phase 2 (Cyjan-Cloud-Companion-App) wird hier nur einen neuen Handler-
+  # Type registrieren, alles andere bleibt identisch.
+  # SMTP-Settings sind System-Defaults; pro Channel kann der User aber
+  # type=email mit eigenem to-Field anlegen.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  notification-dispatcher:
+    build: ./notification-dispatcher
+    container_name: ids-notification-dispatcher
+    profiles: ["prod", "test"]
+    restart: unless-stopped
+    logging: *default-logging
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS:        kafka:9092
+      POSTGRES_DSN:         "postgres://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids"
+      NOTIFY_INPUT_TOPIC:   alerts-enriched-push
+      NOTIFY_GROUP_ID:      notification-dispatcher
+      NOTIFY_CACHE_TTL_S:   "30"
+      # System-SMTP-Defaults — pro Channel überschreibbar via config-JSON.
+      # Leer = Email-Channels disabled (handler antwortet mit 'SMTP not configured').
+      SMTP_HOST:            "${SMTP_HOST:-}"
+      SMTP_PORT:            "${SMTP_PORT:-587}"
+      SMTP_USER:            "${SMTP_USER:-}"
+      SMTP_PASSWORD:        "${SMTP_PASSWORD:-}"
+      SMTP_FROM:            "${SMTP_FROM:-cyjan-ids@localhost}"
+      SMTP_USE_TLS:         "${SMTP_USE_TLS:-true}"
+
   pcap-store:
     build: ./pcap-store
     container_name: ids-pcap-store
