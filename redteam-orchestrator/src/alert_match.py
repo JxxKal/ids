@@ -4,13 +4,41 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import httpx
+from jose import jwt as jose_jwt
 
 from config import settings
 
 log = logging.getLogger(__name__)
+
+ALGORITHM = "HS256"
+TOKEN_TTL_SECONDS = 365 * 24 * 3600
+_cached_token: str | None = None
+
+
+def _service_token() -> str | None:
+    """Liefert entweder den statischen CYJAN_API_TOKEN oder mintet ein
+    Service-JWT aus API_SECRET_KEY (gleiches Pattern wie rule-tuner).
+    None wenn beide nicht gesetzt sind — Aufrufer kennt dann die Konsequenz
+    (alert-poll wird 401 zurückbekommen)."""
+    global _cached_token
+    if settings.api_token:
+        return settings.api_token
+    if not settings.api_secret_key:
+        return None
+    if _cached_token is None:
+        payload = {
+            "sub":      "redteam-orchestrator",
+            "username": "redteam-orchestrator-service",
+            "role":     "admin",
+            "exp":      int(time.time()) + TOKEN_TTL_SECONDS,
+        }
+        _cached_token = jose_jwt.encode(payload, settings.api_secret_key, algorithm=ALGORITHM)
+        log.info("Service-Token aus API_SECRET_KEY gemintet (TTL 1 Jahr)")
+    return _cached_token
 
 
 async def poll_alerts_for_rule(
@@ -26,8 +54,9 @@ async def poll_alerts_for_rule(
     der Cyjan-API-Endpoint matched LIKE 'prefix%'.
     """
     headers = {}
-    if settings.api_token:
-        headers["Authorization"] = f"Bearer {settings.api_token}"
+    tok = _service_token()
+    if tok:
+        headers["Authorization"] = f"Bearer {tok}"
 
     poll_interval = 1.0
     iterations    = max(1, int(window_sec / poll_interval))

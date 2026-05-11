@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class Settings:
     api_base:    str
-    api_token:   str
+    api_token:   str            # statischer Token, falls gesetzt
+    api_secret_key: str         # shared JWT-Secret (für Service-Token-Minting)
     test_iface:  str
     allowed_src_cidrs: tuple[str, ...]
     max_timeout_sec:   int
@@ -25,9 +26,10 @@ class Settings:
         for c in cidrs:
             ipaddress.ip_network(c)
         return cls(
-            api_base   = os.environ.get("CYJAN_API_BASE", "http://localhost:8001"),
-            api_token  = os.environ.get("CYJAN_API_TOKEN", ""),
-            test_iface = os.environ.get("CYJAN_TEST_IFACE", "cyjan-inject"),
+            api_base       = os.environ.get("CYJAN_API_BASE", "http://localhost:8001"),
+            api_token      = os.environ.get("CYJAN_API_TOKEN", ""),
+            api_secret_key = os.environ.get("API_SECRET_KEY", ""),
+            test_iface     = os.environ.get("CYJAN_TEST_IFACE", "cyjan-inject"),
             allowed_src_cidrs = cidrs,
             max_timeout_sec   = int(os.environ.get("MAX_TIMEOUT_SEC", "120")),
             kali_container    = os.environ.get("KALI_CONTAINER", "ids-kali"),

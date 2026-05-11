@@ -913,6 +913,10 @@ services:
     environment:
       CYJAN_API_BASE:    "http://localhost:8001"
       CYJAN_API_TOKEN:   "${REDTEAM_API_TOKEN:-}"
+      # Shared JWT-Secret für Service-Token-Minting (analog rule-tuner) —
+      # nötig damit alert_match.poll_alerts_for_rule am /api/alerts-
+      # require_admin-Endpoint nicht 401 läuft.
+      API_SECRET_KEY:    "${API_SECRET_KEY:-change-me-in-production}"
       CYJAN_TEST_IFACE:  "cyjan-inject"
       ALLOWED_SRC_CIDRS: "192.0.2.0/24,198.51.100.0/24,203.0.113.0/24"
       MAX_TIMEOUT_SEC:   "120"
