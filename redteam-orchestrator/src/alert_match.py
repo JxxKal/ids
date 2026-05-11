@@ -46,17 +46,24 @@ async def poll_alerts_for_rule(
     window_sec:     int = 10,
     src_ip:         str | None = None,
 ) -> list[dict[str, Any]]:
-    """Pollt /api/alerts?rule_id=<prefix>&since=<ts> alle 1s für bis zu
-    `window_sec` Sekunden. Returns alle gefundenen Alerts mit
-    rule_id-Prefix-Match und optionalem src_ip-Filter.
+    """Pollt /api/alerts?rule_id_prefix=<prefix>&ts_from=<now> alle 1s
+    für bis zu `window_sec` Sekunden. Returns nur Alerts die NACH dem
+    Poll-Start auflaufen — wichtig wegen alert-manager-Dedup (300s):
+    sonst zählten alte Treffer fälschlich als "Detection-Success".
 
     `rule_id_prefix` kann z.B. "SCAN_001" oder "SURICATA:1:2018927" sein —
-    der Cyjan-API-Endpoint matched LIKE 'prefix%'.
+    matched LIKE 'prefix%' im API-Endpoint.
     """
+    import time
     headers = {}
     tok = _service_token()
     if tok:
         headers["Authorization"] = f"Bearer {tok}"
+
+    # Sub-Sekunden-Toleranz nach hinten — der Test-Run startet bevor
+    # poll_alerts gerufen wird; Suricata-detect → eve.json → snort-bridge
+    # → Kafka → alert-manager dauert typisch 100-500ms.
+    ts_from = time.time() - 2.0
 
     poll_interval = 1.0
     iterations    = max(1, int(window_sec / poll_interval))
@@ -66,7 +73,11 @@ async def poll_alerts_for_rule(
             try:
                 r = await cli.get(
                     f"{settings.api_base}/api/alerts",
-                    params={"rule_id_prefix": rule_id_prefix, "limit": 50},
+                    params={
+                        "rule_id_prefix": rule_id_prefix,
+                        "ts_from":        ts_from,
+                        "limit":          50,
+                    },
                 )
                 if r.status_code == 200:
                     alerts = (r.json() or {}).get("alerts", [])
@@ -82,6 +93,8 @@ async def poll_alerts_for_rule(
                 log.debug("alert-match poll %d: %s", i, exc)
             await asyncio.sleep(poll_interval)
 
-    log.info("alert-match: rule_prefix=%s keine alerts im %ds-Fenster",
+    log.info("alert-match: rule_prefix=%s keine NEUEN alerts im %ds-Fenster "
+             "(Dedup-Window könnte alte Treffer maskieren — Run mit anderem "
+             "src_port oder >5min Pause hilft)",
              rule_id_prefix, window_sec)
     return []
