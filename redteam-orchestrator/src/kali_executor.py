@@ -111,11 +111,19 @@ class KaliExecutor:
         except KaliExecutionError as exc:
             log.warning("kali-shell PID nicht ermittelbar (Container weg?): %s", exc)
             return
-        # Best-effort move-back. Wenn das veth schon weg ist, ignorieren.
-        await self._exec(
+        # WICHTIG: "netns 1" innerhalb von nsenter bezieht sich auf die
+        # PID 1 im KALI-Namespace (kali-internal init), nicht auf Host-init.
+        # Wir wollen das veth zurück in den HOST-Namespace, also den Pfad
+        # zum Host-init-net-ns als netns-Argument benutzen. Im orchestrator
+        # läuft mit pid:host, daher zeigt /proc/1/ns/net auf den Host-init-
+        # net-namespace — nsenter wechselt nur net-ns, mount-ns bleibt, also
+        # ist /proc weiterhin der Host-proc.
+        rc, _, err = await self._exec(
             "nsenter", "-t", str(pid), "-n",
-            "ip", "link", "set", settings.test_iface, "netns", "1",
+            "ip", "link", "set", settings.test_iface, "netns", "/proc/1/ns/net",
         )
+        if rc != 0:
+            log.warning("detach %s failed: %s", settings.test_iface, err.strip())
 
     async def run_with_iface(
         self, tool: str, target_ip: str, args: list[str], timeout_sec: int = 30,
