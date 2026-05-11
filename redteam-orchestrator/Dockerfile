@@ -26,6 +26,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ /app/
 
+# Builtin Payload-Scenario-Templates (Siemens S7/WinCC, GE iFix, Kerberos,
+# SMB, NTLM). Werden beim Orchestrator-Startup nach /scenarios/templates/
+# geseedet — Image = source of truth, jedes Container-Restart überschreibt
+# das Volume. KI kann via MCP eigene Scenarios mit gleicher ID in
+# generated/ anlegen, die gewinnen im load_scenario-Lookup.
+COPY templates/ /opt/cyjan/templates/
+
 USER root
 EXPOSE 8002
 

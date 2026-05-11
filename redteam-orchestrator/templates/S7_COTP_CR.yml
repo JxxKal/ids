@@ -1,0 +1,13 @@
+id: S7_COTP_CR
+description: >-
+  Siemens S7 COTP Connection Request (Rack 0 Slot 2). Klassische
+  PLC-Fingerprint-Probe — TPKT/ISO-on-TCP + COTP-CR mit src-TSAP=0x0100,
+  dst-TSAP=0x0102 (S7-300/400 CPU). Wird von plcscan/snap7/Metasploit
+  vorbereitend für S7Comm-Read-SZL geschickt.
+protocol: tcp
+target_port: 102
+payload_b64: AwAAFhHgAAAAAQDAAQrBAgEAwgIBAg==
+expected_alert_rule_id: SURICATA:1:2025643
+tags: [siemens, s7, ics, plc, recon, fingerprint]
+mitre: [T0846, T0888]
+created_by: cyjan-builtin-template

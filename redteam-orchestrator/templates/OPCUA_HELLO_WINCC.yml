@@ -1,0 +1,13 @@
+id: OPCUA_HELLO_WINCC
+description: >-
+  OPC UA Hello-Message an EndpointUrl opc.tcp://192.0.2.254:4840.
+  WinCC (Siemens), KEPServerEX und die meisten modernen SCADA-Server
+  exponieren ihren UA-Stack auf 4840. Erste Nachricht vor Handshake —
+  signaturmäßig durch 'HELF' + Version 0 + 'opc.tcp://...' eindeutig.
+protocol: tcp
+target_port: 4840
+payload_b64: SEVMRjoAAAAAAAAAAAABAAAAAQAAAAAAAAAAABoAAABvcGMudGNwOi8vMTkyLjAuMi4yNTQ6NDg0MA==
+expected_alert_rule_id: SURICATA:1:2027301
+tags: [opc-ua, wincc, siemens, scada, recon, hello]
+mitre: [T0846, T0842]
+created_by: cyjan-builtin-template

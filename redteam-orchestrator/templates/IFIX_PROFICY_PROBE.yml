@@ -1,0 +1,15 @@
+id: IFIX_PROFICY_PROBE
+description: >-
+  GE iFix / Proficy iClient probe — sendet einen ASCII-Handshake gegen
+  TCP/2010 (Proficy SCADA Node). iFix-Protokoll ist nicht öffentlich
+  dokumentiert; der hier gesendete String dient als HEURISTIK-Trigger
+  (Pattern auf 'PROFICY-' + ASCII-Headers im L7-Payload), keine ET-Open-
+  Signatur dafür. expected_alert_rule_id=null → Cyjan-Custom-Rule oder
+  Anomalie-Detection bewerten.
+protocol: tcp
+target_port: 2010
+payload_b64: UFJPRklDWS1DT05ORUNUIDEuMA0KTk9ERTogU0NBREEwMQ0KVVNFUjogYW5vbnltb3VzDQpHRVQgdmVyc2lvbg0KDQo=
+expected_alert_rule_id: null
+tags: [ge-ifix, proficy, scada, hmi, recon, anomaly]
+mitre: [T0846, T0888]
+created_by: cyjan-builtin-template

@@ -1,0 +1,15 @@
+id: NTLM_NEGOTIATE_TYPE1
+description: >-
+  NTLMSSP Type 1 Negotiate Message (raw, 40 bytes). Flags 0x07820207 =
+  Unicode+OEM+Sign+Seal+NTLM+AlwaysSign+Domain+Workstation, Versionsblock
+  "Windows 6.1 build 7600 NTLMSSP rev 15". Normalerweise SMB- oder
+  HTTP-Authorization-Header-gewrappt; raw an 445 gesendet trippt
+  signaturen, die nach 'NTLMSSP\\0\\x01\\x00\\x00\\x00' auf nicht-HTTP-
+  Ports suchen — Indikator für non-standard NTLM-Reuse.
+protocol: tcp
+target_port: 445
+payload_b64: TlRMTVNTUAABAAAAB4IIogAAAAAAAAAAAAAAAAAAAAAGAbAdAAAADw==
+expected_alert_rule_id: SURICATA:1:2027378
+tags: [ntlm, windows, auth, recon, smb]
+mitre: [T1187, T1557.001]
+created_by: cyjan-builtin-template

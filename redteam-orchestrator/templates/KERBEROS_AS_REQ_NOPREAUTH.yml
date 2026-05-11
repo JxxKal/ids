@@ -1,0 +1,15 @@
+id: KERBEROS_AS_REQ_NOPREAUTH
+description: >-
+  Kerberos AS-REQ ohne Pre-Auth — klassische AS-REP-Roasting-Probe gegen
+  KDC auf TCP/88. ASN.1-Sequence mit pvno=5, msg-type=10, KDC-Options
+  0x50800010 (forwardable+renewable+canonicalize), cname=pentest,
+  realm=ATTACKLABS, sname=krbtgt/ATTACKLABS, etype=[18,17,23,24,-135,3].
+  Wenn der User-Account "Do not require Kerberos preauth" gesetzt hat,
+  fällt ein crackbarer Hash zurück.
+protocol: tcp
+target_port: 88
+payload_b64: AAAAq2qBqDCBpaEDAgEFogMCAQqjGjAYMBChBAICAJaiCAQGMASgAgIBpIF/MIF8oAcDBQBQgAAQoRIwEKADAgEBoQkwBxsFcGVudGWiDBsKQVRUQUNLTEFCU6MfMB2gAwIBAqEWMBQbBmtyYnRndBsKQVRUQUNLTEFCU6URGA8yMDM3MDkxMzAyNDgwNVqmERgPMjAzNzA5MTMwMjQ4MDVapwYCBG8DqbmoGjAYAgESAgERAgEXAgEYAgL/eQIBAw==
+expected_alert_rule_id: SURICATA:1:2026398
+tags: [kerberos, windows, auth, asreproast, recon]
+mitre: [T1558.004, T1110.003]
+created_by: cyjan-builtin-template

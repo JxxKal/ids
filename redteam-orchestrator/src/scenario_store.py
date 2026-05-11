@@ -2,7 +2,14 @@
 
 Layout im cyjan-scenarios-Volume:
   /scenarios/generated/<scenario_id>.yml   ← von KI via MCP angelegt
+  /scenarios/templates/<scenario_id>.yml   ← orchestrator-builtin (im Image
+                                             shipped, beim Startup gesseedet,
+                                             immer overwrite — Image = truth)
   /scenarios/imported/...                  ← aus Pattern-Federation-Bundles
+
+Lookup-Reihenfolge (load_scenario): generated → templates → imported.
+KI- und Federation-Inputs gewinnen damit gegen Builtin-Templates wenn
+IDs kollidieren — Builtin ist Fallback/Library.
 
 Format der YAMLs (lab-curated oder KI-generiert):
   id: MODBUS_PROBE_FC_01
@@ -29,6 +36,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -38,6 +46,9 @@ import yaml
 log = logging.getLogger(__name__)
 
 GENERATED_DIR = Path("/scenarios/generated")
+TEMPLATES_DIR = Path("/scenarios/templates")
+IMPORTED_DIR  = Path("/scenarios/imported")
+BUILTIN_SOURCE = Path("/opt/cyjan/templates")  # Image-shipped, read-only
 MAX_PAYLOAD_BYTES = 4096
 ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{2,63}$")
 
@@ -117,11 +128,13 @@ def save_scenario(d: dict[str, Any]) -> Path:
 
 
 def load_scenario(scenario_id: str) -> dict[str, Any]:
-    """Lädt ein Scenario aus generated/ oder imported/. Wirft FileNotFoundError
-    wenn nicht da."""
+    """Lädt ein Scenario aus generated/, templates/ oder imported/. KI-
+    Generated gewinnt vor Builtin-Templates gewinnt vor Federation-Imports.
+    Wirft FileNotFoundError wenn nicht da."""
     candidates = [
         GENERATED_DIR / f"{scenario_id}.yml",
-        Path("/scenarios/imported") / f"{scenario_id}.yml",
+        TEMPLATES_DIR / f"{scenario_id}.yml",
+        IMPORTED_DIR  / f"{scenario_id}.yml",
     ]
     for p in candidates:
         if p.is_file():
@@ -135,8 +148,9 @@ def load_scenario(scenario_id: str) -> dict[str, Any]:
 
 
 def delete_scenario(scenario_id: str) -> bool:
-    """Löscht ein KI-generated Scenario. Imported-Scenarios bleiben unangetastet
-    (die kommen aus Pattern-Federation-Bundles und gehören nicht zur Orchestrator-
+    """Löscht ein KI-generated Scenario. Builtin-Templates + Imported-
+    Scenarios bleiben unangetastet (Templates kommen vom Image, Imports
+    aus Pattern-Federation-Bundles — beide gehören nicht zur MCP-
     Verwaltungs-Domäne). Returns True wenn gelöscht, False wenn nicht da."""
     target = GENERATED_DIR / f"{scenario_id}.yml"
     if target.is_file():
@@ -144,3 +158,34 @@ def delete_scenario(scenario_id: str) -> bool:
         log.info("Scenario %s deleted", scenario_id)
         return True
     return False
+
+
+def seed_builtin_templates() -> int:
+    """Kopiert alle YAMLs aus /opt/cyjan/templates/ in /scenarios/templates/.
+    Wird beim Orchestrator-Startup aufgerufen. Image = source of truth →
+    immer overwrite, damit Updates der Templates bei Container-Restart
+    ankommen. User-Edits an /scenarios/templates/ gehen dabei verloren
+    (Templates sind read-only-Library — wer ändern will, legt ein
+    generated-Scenario mit gleicher ID an, das gewinnt im load_scenario-
+    Lookup). Returns Anzahl geseedeter Files."""
+    if not BUILTIN_SOURCE.is_dir():
+        log.info("Builtin-Templates-Source %s nicht vorhanden, überspringe Seed",
+                 BUILTIN_SOURCE)
+        return 0
+    TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    seeded = 0
+    for src in sorted(BUILTIN_SOURCE.glob("*.yml")):
+        try:
+            doc = yaml.safe_load(src.read_text())
+            if not isinstance(doc, dict) or not doc.get("id"):
+                log.warning("Template %s: kein dict oder fehlende id, skip", src)
+                continue
+            validate_scenario_dict(doc)
+        except (yaml.YAMLError, ScenarioValidationError) as exc:
+            log.warning("Template %s invalid, skip: %s", src, exc)
+            continue
+        dst = TEMPLATES_DIR / src.name
+        shutil.copy2(src, dst)
+        seeded += 1
+    log.info("Builtin-Templates seeded: %d Files nach %s", seeded, TEMPLATES_DIR)
+    return seeded

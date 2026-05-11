@@ -1,0 +1,13 @@
+id: S7_READ_SZL_MODID
+description: >-
+  Siemens S7Comm UserData Read-SZL Request — SZL-ID 0x0011 (Module
+  Identification). Mit TPKT-Header + COTP-DT + S7Comm-Funktionscode 0x07.
+  Wird typisch DIREKT nach S7_COTP_CR geschickt, um Firmware/OB-Modell
+  des PLC zu enumerieren. plcscan-style PLC-Discovery.
+protocol: tcp
+target_port: 102
+payload_b64: AwAAIQLwgDIHAAAAAAAIAAgAARIEEUQBAP8JAAQAEQAB
+expected_alert_rule_id: SURICATA:1:2025643
+tags: [siemens, s7, ics, plc, recon, szl, fingerprint]
+mitre: [T0846, T0888]
+created_by: cyjan-builtin-template

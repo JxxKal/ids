@@ -936,3 +936,56 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # REDTEAM-LISTENER (Lab-only)
+  #
+  # TCP-Sink für Payload-Scenarios: bindet pro Industrie-/Windows-Port einen
+  # ncat-Listener AUSSCHLIESSLICH auf 192.0.2.254 (Host-Peer-Seite des veth-
+  # Pairs). Damit kommt der TCP-Handshake aus dem kali-Container zustande
+  # und der L7-Payload (Modbus, S7, OPC-UA, SMB, Kerberos, NTLM, HASP, iFix)
+  # geht wirklich auf die Leitung — Sniffer auf cy-inj-peer captured ihn,
+  # signature-engine + Suricata können das Pattern matchen.
+  #
+  # Sicherheit: --recv-only (silent sink), keine Service-Emulation, kein
+  # Protokoll-Stack. Andere Host-Services auf 0.0.0.0:<port> bleiben
+  # unberührt — wir teilen den Port-Namespace dank IP-qualifizierten Binds.
+  # ────────────────────────────────────────────────────────────────────────────
+
+  redteam-listener:
+    build: ./redteam-listener
+    container_name: ids-redteam-listener
+    profiles: ["redteam"]
+    restart: unless-stopped
+    logging: *default-logging
+    # network_mode: host: nötig damit der Listener das veth-Peer-IP
+    # 192.0.2.254 auf cy-inj-peer sehen kann — cy-inj-peer lebt im Host-
+    # Netzwerk-Namespace (NICHT in einem Container). Ohne host-mode würde
+    # bind() auf 192.0.2.254 mit EADDRNOTAVAIL fehlschlagen.
+    network_mode: host
+    cap_drop:
+      - ALL
+    # Privileged Ports (88, 102, 135, 139, 389, 445, 502, ...) brauchen
+    # NET_BIND_SERVICE. Listener läuft als root im Container — cap_drop ALL
+    # plus dieses einzige cap macht ihn faktisch nutzlos für alles andere.
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    pids_limit: 80
+    mem_limit: 64m
+    cpus: 0.2
+    depends_on:
+      redteam-orchestrator:
+        condition: service_started
+    environment:
+      PEER_IP: "192.0.2.254"
+      # Default-Port-Set: ICS + Windows + Standard-Service-Ports. Komma-
+      # oder space-separated, override per .env wenn weitere Ports gebraucht.
+      PORTS: "22 23 25 53 80 88 102 110 135 139 143 161 389 443 445 502 587 636 1433 1521 1947 2010 3268 3389 4840 5450"
+    healthcheck:
+      # ss zeigt Listening-Sockets; mindestens 5 davon erwartet wenn ok
+      test: ["CMD-SHELL", "ss -ltn | grep -c '192.0.2.254:' | awk '$1 >= 5 {exit 0} {exit 1}'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

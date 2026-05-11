@@ -1,0 +1,14 @@
+id: SMB1_NEGOTIATE
+description: >-
+  SMBv1 Negotiate Protocol Request — NMAP/EternalBlue-Stil. Sendet alle
+  SMB-Dialekte inkl. legacy PC NETWORK PROGRAM 1.0 + LANMAN1.0 + NT LM 0.12.
+  Server-Response verrät OS/Build (Pre-Auth-Info-Leak). SMBv1 ist seit
+  WannaCry/NotPetya verboten; jede ankommende SMB1-Negotiate ist ein
+  Detection-Trigger.
+protocol: tcp
+target_port: 445
+payload_b64: AAAAhf9TTUJyAAAAABhTyAAAAAAAAAAAAAAAAP///spAAAAAAGIAAlBDIE5FVFdPUksgUFJPR1JBTSAxLjAAAkxBTk1BTjEuMAACV2luZG93cyBmb3IgV29ya2dyb3VwcyAzLjFhAAJMTTEuMlgwMDIAAkxBTk1BTjIuMQACTlQgTE0gMC4xMgA=
+expected_alert_rule_id: SURICATA:1:2024297
+tags: [smb, smbv1, windows, recon, eternalblue, deprecated-protocol]
+mitre: [T1210, T1018]
+created_by: cyjan-builtin-template

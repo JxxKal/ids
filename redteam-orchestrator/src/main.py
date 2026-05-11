@@ -24,6 +24,7 @@ from config import settings
 from db import audit_log, close_pool, init_pool
 from kali_executor import KaliExecutionError, KaliExecutor
 from mcp_server import mcp
+from scenario_store import seed_builtin_templates
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +58,12 @@ async def lifespan(_app: "FastAPI"):  # noqa: F821
         await executor.setup_veth_pair_once()
     except Exception as exc:
         log.warning("setup_veth_pair_once failed (Lab-Setup-Check): %s", exc)
+    # Builtin-Templates (Siemens S7/WinCC, GE iFix, Kerberos, SMB, NTLM)
+    # aus dem Image ins Volume seeden — synchron, sehr billig.
+    try:
+        seed_builtin_templates()
+    except Exception as exc:
+        log.warning("seed_builtin_templates failed: %s", exc)
     # Verschachteln des MCP-Lifespan damit FastMCP intern initialisiert wird
     async with _mcp_app.lifespan(_app):
         yield

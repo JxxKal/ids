@@ -1,0 +1,13 @@
+id: HASP_PROBE_WINCC
+description: >-
+  Sentinel HASP/SafeNet License Manager Probe via HTTP-GET auf
+  /_int_/api_c.asp — Siemens WinCC + SIMATIC-Familie nutzen HASP-HL für
+  Lizenz-Enforcement, der LM serviert HTTP auf 1947. Probe wird von
+  bekannten Enumeration-Tools (z.B. hasp_scan, sentinel_finder) genutzt.
+protocol: tcp
+target_port: 1947
+payload_b64: R0VUIC9faW50Xy9hcGlfYy5hc3A/Z2V0PWluZm8gSFRUUC8xLjANCkhvc3Q6IDE5Mi4wLjIuMjU0DQpVc2VyLUFnZW50OiBoYXNwDQoNCg==
+expected_alert_rule_id: SURICATA:1:2017886
+tags: [hasp, sentinel, wincc, siemens, license, recon]
+mitre: [T0846]
+created_by: cyjan-builtin-template
