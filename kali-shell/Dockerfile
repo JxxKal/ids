@@ -21,6 +21,7 @@ RUN apt-get update -qq \
       iputils-ping \
       tcpdump \
       nmap \
+      ncat \
       hydra \
       hping3 \
       libcap2-bin \
@@ -38,9 +39,12 @@ RUN apt-get update -qq \
 # manchmal in --no-install-recommends; setcap idempotent.
 # setcap einzeln statt &&-verkettet — sonst bricht die erste fehlende
 # Binary die ganze Kette und || true swallowed nur den Combined-Exit.
+# WICHTIG bei nmap: /usr/bin/nmap ist ein Shell-Wrapper, das echte
+# Binary liegt unter /usr/lib/nmap/nmap. Caps gehören aufs Binary.
 RUN setcap cap_net_raw+ep /usr/bin/ping || true
-RUN setcap cap_net_raw,cap_net_admin,cap_net_bind_service+ep /usr/bin/nmap || true
+RUN setcap cap_net_raw,cap_net_admin,cap_net_bind_service+ep /usr/lib/nmap/nmap || true
 RUN setcap cap_net_raw+ep /usr/sbin/hping3 || true
+RUN setcap cap_net_bind_service,cap_net_raw+ep /usr/bin/ncat || true
 
 # Non-root user — UID 1000 matched Default-Host-User
 RUN groupadd -g 1000 redteam \
