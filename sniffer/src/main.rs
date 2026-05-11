@@ -76,7 +76,7 @@ fn main() -> Result<()> {
     // veth-Traffic). Alle teilen sich denselben tx-Channel zum Publisher.
     let mut capture_handles = Vec::new();
 
-    // Mirror-Interface (Pflicht)
+    // Mirror-Interface (Pflicht, tolerate_missing=false — Hard-Fail wenn weg)
     {
         let stats_cap = Arc::clone(&stats);
         let shutdown_cap = Arc::clone(&shutdown);
@@ -86,13 +86,14 @@ fn main() -> Result<()> {
         capture_handles.push(std::thread::Builder::new()
             .name(format!("capture-{}", iface))
             .spawn(move || {
-                if let Err(e) = capture::run(&iface, &config_cap, tx_cap, stats_cap, shutdown_cap) {
+                if let Err(e) = capture::run(&iface, &config_cap, tx_cap, stats_cap, shutdown_cap, false) {
                     tracing::error!(iface=%iface, error = %e, "Capture-Thread beendet sich mit Fehler");
                 }
             })?);
     }
 
-    // Extra-Ifaces (optional)
+    // Extra-Ifaces (optional, tolerate_missing=true — RedTeam-veth erscheint
+    // on-demand, soll Open-Failures + Mid-Run-Verschwinden überleben)
     for iface in &config.extra_capture_ifaces {
         let stats_cap = Arc::clone(&stats);
         let shutdown_cap = Arc::clone(&shutdown);
@@ -102,7 +103,7 @@ fn main() -> Result<()> {
         capture_handles.push(std::thread::Builder::new()
             .name(format!("capture-{}", iface))
             .spawn(move || {
-                if let Err(e) = capture::run(&iface, &config_cap, tx_cap, stats_cap, shutdown_cap) {
+                if let Err(e) = capture::run(&iface, &config_cap, tx_cap, stats_cap, shutdown_cap, true) {
                     tracing::error!(iface=%iface, error = %e, "Capture-Thread beendet sich mit Fehler");
                 }
             })?);

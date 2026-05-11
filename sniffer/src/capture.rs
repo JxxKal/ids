@@ -27,28 +27,49 @@ pub struct CapturedPacket {
 ///
 /// `iface_name` bestimmt das pcap-Device. Mehrere Threads können in den
 /// gleichen `tx`-Channel schreiben — der Publisher serialisiert die Frames.
+///
+/// Für Interfaces die on-demand erscheinen/verschwinden (RedTeam veth-Pair):
+/// wenn `tolerate_missing=true`, wird der Open-Fail nicht als fatal behandelt,
+/// sondern alle 5 s erneut versucht. Damit überlebt der Thread auch veth-
+/// Delete/Recreate-Zyklen zwischen Tool-Runs.
 pub fn run(
     iface_name: &str,
     config: &Config,
     tx: Sender<CapturedPacket>,
     stats: Arc<Stats>,
     shutdown: Arc<AtomicBool>,
+    tolerate_missing: bool,
 ) -> Result<()> {
     tracing::info!(
         iface      = %iface_name,
         snaplen    = config.snaplen,
         buffer_mb  = config.buffer_size / (1024 * 1024),
         test_mode  = config.test_mode,
+        tolerate_missing,
         "Öffne Capture..."
     );
 
-    let mut cap = Capture::from_device(iface_name)?
-        .snaplen(config.snaplen)
-        .promisc(true)
-        // 1 Sekunde Timeout: erlaubt regelmäßige Shutdown-Checks
-        .timeout(1000)
-        .buffer_size(config.buffer_size)
-        .open()?;
+    let mut cap = loop {
+        match Capture::from_device(iface_name)
+            .and_then(|c| c
+                .snaplen(config.snaplen)
+                .promisc(true)
+                .timeout(1000)
+                .buffer_size(config.buffer_size)
+                .open())
+        {
+            Ok(c) => break c,
+            Err(e) if tolerate_missing => {
+                tracing::debug!(iface=%iface_name, error=%e, "Interface (noch) nicht da, retry in 5s");
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                if shutdown.load(Ordering::Relaxed) {
+                    return Ok(());
+                }
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    };
 
     tracing::info!(iface = %iface_name, "Capture aktiv");
 
@@ -99,6 +120,28 @@ pub fn run(
             // Normaler Timeout (1s) – kein Fehler, nur keine Pakete
             Err(pcap::Error::TimeoutExpired) => continue,
 
+            Err(e) if tolerate_missing => {
+                // Bei tolerierten Interfaces (veth on-demand): Re-Open versuchen.
+                tracing::warn!(iface=%iface_name, error=%e, "Capture-Fehler — reopen in 5s");
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                loop {
+                    if shutdown.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
+                    match Capture::from_device(iface_name)
+                        .and_then(|c| c
+                            .snaplen(config.snaplen)
+                            .promisc(true)
+                            .timeout(1000)
+                            .buffer_size(config.buffer_size)
+                            .open())
+                    {
+                        Ok(c) => { cap = c; tracing::info!(iface=%iface_name, "Capture reopened"); break; }
+                        Err(_) => std::thread::sleep(std::time::Duration::from_secs(5)),
+                    }
+                }
+                continue;
+            }
             Err(e) => {
                 tracing::error!(error = %e, "Fataler Capture-Fehler");
                 return Err(e.into());
