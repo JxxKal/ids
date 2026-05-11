@@ -138,13 +138,35 @@ vars:
   address-groups:
     HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,127.0.0.0/8,192.0.2.0/24,198.51.100.0/24,203.0.113.0/24]"
     EXTERNAL_NET: "!\$HOME_NET"
+    # Server-Address-Groups — ET-Open-Rules referenzieren diese und failen
+    # silent wenn nicht definiert. Default-Behavior: alle Server liegen
+    # im HOME_NET (Lab-Setup). Bei Bedarf einzelne via .env-Override
+    # eingrenzen, z.B. nur 192.168.1.0/24 für SQL_SERVERS.
+    HTTP_SERVERS: "\$HOME_NET"
+    SMTP_SERVERS: "\$HOME_NET"
+    SQL_SERVERS: "\$HOME_NET"
+    DNS_SERVERS: "\$HOME_NET"
+    TELNET_SERVERS: "\$HOME_NET"
+    SSH_SERVERS: "\$HOME_NET"
+    DC_SERVERS: "\$HOME_NET"
+    DNP3_SERVER: "\$HOME_NET"
+    DNP3_CLIENT: "\$HOME_NET"
+    MODBUS_CLIENT: "\$HOME_NET"
+    MODBUS_SERVER: "\$HOME_NET"
+    ENIP_CLIENT: "\$HOME_NET"
+    ENIP_SERVER: "\$HOME_NET"
+    AIM_SERVERS: "\$EXTERNAL_NET"
   port-groups:
-    HTTP_PORTS: "80"
+    HTTP_PORTS: "[80,8080,8000,8008,8888,3128,8081,8181]"
     SHELLCODE_PORTS: "!80"
-    SSH_PORTS: 22
-    FTP_PORTS: 21
-    MODBUS_PORTS: 502
-    KERBEROS_PORTS: 88
+    SSH_PORTS: "22"
+    FTP_PORTS: "21"
+    SMTP_PORTS: "25"
+    DNS_PORTS: "53"
+    FILE_DATA_PORTS: "[\$HTTP_PORTS,110,143]"
+    MODBUS_PORTS: "502"
+    KERBEROS_PORTS: "88"
+    ORACLE_PORTS: "1521"
 
 default-log-dir: ${LOG_DIR}
 
