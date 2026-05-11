@@ -3585,7 +3585,11 @@ function RedTeamSettings() {
     // geändert hat — sonst frisst Tool-Wechsel die manuelle Anpassung.
     if (!argsManuallyEdited) setArgsStr(TOOL_DEFAULTS[t]);
   }
-  const [targetIp, setTargetIp]       = useState('192.0.2.1');
+  // Default 192.0.2.254 = Host-Peer (pingbar). 192.0.2.1 ist kali selbst und
+  // pingt sich nur selbst → 100% packet loss. Andere TEST-NET-IPs sind
+  // unbeantwortet (kein Backend), aber Pakete fließen über die veth-Bridge
+  // raus und werden vom Sniffer mitgelesen — gut für Detection-Tests.
+  const [targetIp, setTargetIp]       = useState('192.0.2.254');
   const [timeoutSec, setTimeoutSec]   = useState(30);
   const [attachIface, setAttachIface] = useState(false);
   const [expectedRuleId, setExpectedRuleId] = useState('');
@@ -3670,7 +3674,12 @@ function RedTeamSettings() {
           <div className="flex flex-col gap-1 sm:col-span-2">
             <label className="text-slate-400">Target-IP (TEST-NET)</label>
             <input className="input font-mono" value={targetIp}
-              onChange={e => setTargetIp(e.target.value)} placeholder="192.0.2.1" />
+              onChange={e => setTargetIp(e.target.value)} placeholder="192.0.2.254" />
+            <span className="text-[10px] text-slate-600">
+              <code>192.0.2.254</code> = Host-Peer (pingbar). <code>192.0.2.1</code> = kali selbst.
+              Andere TEST-NET-IPs (z.B. <code>192.0.2.10</code>) sind unbeantwortet,
+              werden aber vom Sniffer mitgelesen — gut für Detection-Tests.
+            </span>
           </div>
           <div className="flex flex-col gap-1 sm:col-span-3">
             <label className="text-slate-400">Args (Space-separated, Tool-Whitelist serverseitig)</label>
