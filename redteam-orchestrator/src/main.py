@@ -216,6 +216,7 @@ async def _shutdown() -> None:
 
 # ─── MCP-Server-Mount ────────────────────────────────────────────────────
 # FastMCP-App als Sub-Application unter /mcp. Claude/AI-Clients verbinden
-# über http://master:8002/mcp/sse (Server-Sent-Events Transport).
+# über http://master:8002/mcp (Streamable-HTTP-Transport seit FastMCP 3.x —
+# sse_app() ist veraltet, http_app() liefert das passende Starlette-App).
 # Auth läuft über CYJAN_API_TOKEN als URL-Query oder Header.
-app.mount("/mcp", mcp.sse_app())
+app.mount("/mcp", mcp.http_app())
