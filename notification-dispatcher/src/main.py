@@ -172,18 +172,14 @@ def make_consumer(brokers: str, group_id: str) -> Consumer:
 async def handle_alert(
     alert: dict, cache: ChannelCache, pool: asyncpg.Pool, ctx: DispatcherContext,
 ) -> None:
-    channels = cache.all()
-    if not channels:
-        return
-
     # Test-Alert (API test-endpoint setzt diese Flag): nur an den genannten
-    # Channel routen, ALLE Filter umgehen (severity, source, throttle).
+    # Channel routen, ALLE Filter umgehen (severity, source, throttle, even
+    # empty-cache). Check kommt VOR der channels-Liste, weil der Test oft
+    # direkt nach Channel-Create kommt und der Cache noch nicht refresht ist.
     test_for = alert.get("test_for_channel")
     if test_for:
-        target = next((c for c in channels if c.id == test_for), None)
+        target = next((c for c in cache.all() if c.id == test_for), None)
         if not target:
-            # Channel wurde inzwischen deaktiviert oder gelöscht — Cache lädt
-            # nur enabled=true. Refresh erzwingen + nochmal probieren.
             await cache.refresh(pool)
             target = next((c for c in cache.all() if c.id == test_for), None)
         if target:
@@ -191,6 +187,10 @@ async def handle_alert(
             await _send_and_log(target, alert, cache, pool, ctx)
         else:
             log.warning("Test-Push für unbekannten/disabled channel %s", test_for)
+        return
+
+    channels = cache.all()
+    if not channels:
         return
 
     tasks = []
