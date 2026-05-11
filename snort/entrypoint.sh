@@ -175,9 +175,40 @@ outputs:
       enabled: yes
       filetype: regular
       filename: eve.json
+      # Suricata-7-Parser-Outputs: jeder Eintrag emittiert Protokoll-Telemetrie
+      # auch ohne Alarm — wichtig damit das RedTeam-Tooling sehen kann was
+      # erkannt wurde (z.B. KRB5-cname, OPC-UA-EndpointUrl, SMB-Dialect).
       types:
         - alert
         - drop
+        - http:
+            extended: yes
+        - dns:
+            query: yes
+            answer: yes
+        - tls:
+            extended: yes
+        - smb
+        - krb5
+        - dcerpc
+        - dnp3
+        - modbus
+        - rdp
+        - mqtt
+        - quic
+        - smtp
+        - ssh
+        - ftp
+        - tftp
+        - ike
+        - sip
+        - flow
+        - anomaly:
+            enabled: yes
+            types:
+              decode: yes
+              stream: yes
+              applayer: yes
 
 af-packet:${AF_PACKET_BLOCK}
 
