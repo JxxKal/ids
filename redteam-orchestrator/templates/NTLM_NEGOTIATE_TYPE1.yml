@@ -9,7 +9,7 @@ description: >-
 protocol: tcp
 target_port: 445
 payload_b64: TlRMTVNTUAABAAAAB4IIogAAAAAAAAAAAAAAAAAAAAAGAbAdAAAADw==
-expected_alert_rule_id: SURICATA:1:2027378
+expected_alert_rule_id: SURICATA:1:2067085
 tags: [ntlm, windows, auth, recon, smb]
 mitre: [T1187, T1557.001]
 created_by: cyjan-builtin-template
