@@ -45,8 +45,13 @@ LAB_ID = os.environ.get("CYJAN_LAB_ID", "").strip() or "cyjan-lab-unset"
 RECALIBRATION_FILE = Path("/sig-rules/_defaults_recalibration.yml")
 
 CUSTOM_RULES_DIR   = Path("/sig-rules")
-SURICATA_RULES_DIR = Path("/sig-rules/suricata")
-SCENARIOS_DIR      = Path("/cyjan-scenarios")
+# Suricata-Rules: Lab-curated/Operator-uploaded liegen unter /rules (snort-
+# rules-Volume — Suricata reads these as /etc/suricata/rules). AI-authored
+# Rules aus dem MCP create_suricata_rule_v1 landen in /rules/cyjan-ai.rules.
+# Der ältere /sig-rules/suricata-Pfad bleibt als Legacy-Read-Fallback.
+SURICATA_RULES_DIR        = Path("/rules")
+SURICATA_RULES_DIR_LEGACY = Path("/sig-rules/suricata")
+SCENARIOS_DIR             = Path("/cyjan-scenarios")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -185,7 +190,15 @@ async def export_bundle(
         if "rules.suricata" in req.components:
             files = await _collect_suricata_rules(zf)
             if files:
-                component_manifest["rules.suricata"] = {"file_count": len(files), "files": files}
+                # AI-Rule-Aggregat fürs Manifest: Customer-Admin sieht im
+                # Bundle-Review wie viele Rules autonom geschrieben wurden
+                # (Vertrauens-/Audit-Signal).
+                ai_total = sum(f.get("ai_rule_count", 0) for f in files)
+                component_manifest["rules.suricata"] = {
+                    "file_count":     len(files),
+                    "ai_rule_count":  ai_total,
+                    "files":          files,
+                }
 
         if "defaults.recalibration" in req.components:
             recal = await _collect_recalibration()
@@ -200,7 +213,14 @@ async def export_bundle(
         if "tests.regression" in req.components:
             files = await _collect_regression_tests(zf)
             if files:
-                component_manifest["tests.regression"] = {"file_count": len(files), "files": files}
+                ai_scenarios = sum(1 for f in files if f.get("origin") == "ai-generated")
+                builtin_scen = sum(1 for f in files if f.get("origin") == "builtin-template")
+                component_manifest["tests.regression"] = {
+                    "file_count":          len(files),
+                    "ai_scenario_count":   ai_scenarios,
+                    "builtin_count":       builtin_scen,
+                    "files":               files,
+                }
 
         if "evidence.mitre" in req.components:
             mitre = await _collect_mitre_coverage(pool, lab_run_id)
@@ -320,14 +340,57 @@ async def _collect_custom_rules(zf: zipfile.ZipFile) -> list[dict]:
     return out
 
 
+_AI_AUTHOR_MARKER = b"metadata:author cyjan-ai"
+
+
+def _count_ai_rules(content: bytes) -> int:
+    """Zählt Rules in der Datei die `metadata:author cyjan-ai` tragen."""
+    return content.count(_AI_AUTHOR_MARKER)
+
+
+# ETOpen-Tarball-Dateien — wenn jemand ein 50-MB-emerging-malware.rules-File
+# ungewollt mit ins Bundle packt, bläst das den Export auf. Lab-curated +
+# AI-authored Rules sollen rein; den breit-bezogenen ET-Open-Stack sollte der
+# Customer eigenständig pullen.
+_SKIP_RULE_FILES = {
+    # Trivial-Skip wenn Filename mit "emerging-" startet ODER aus update-
+    # sources.txt kam (heuristisch über Filename: alles was nicht 'cyjan'/
+    # 'custom'/'local' enthält ist verdächtig).
+}
+
+
+def _is_lab_or_ai_rules_file(name: str) -> bool:
+    n = name.lower()
+    if "cyjan" in n or "custom" in n or "local" in n or "lab" in n:
+        return True
+    return False
+
+
 async def _collect_suricata_rules(zf: zipfile.ZipFile) -> list[dict]:
-    if not SURICATA_RULES_DIR.exists():
-        return []
-    out = []
-    for f in sorted(SURICATA_RULES_DIR.glob("*.rules")):
-        content = f.read_bytes()
-        zf.writestr(f"rules/suricata/{f.name}", content)
-        out.append({"name": f.name, "sha256": hashlib.sha256(content).hexdigest()})
+    """Sammelt Lab-curated + AI-authored Suricata-Rules aus /rules + Legacy
+    /sig-rules/suricata (dedup by Filename, /rules gewinnt). ETOpen-Tarball-
+    Files werden geskipped — die kommen beim Customer aus dessen update-
+    sources.txt + sind sonst >50 MB Bundle-Overhead."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for base in (SURICATA_RULES_DIR, SURICATA_RULES_DIR_LEGACY):
+        if not base.exists():
+            continue
+        for f in sorted(base.glob("*.rules")):
+            if f.name in seen:
+                continue
+            if not _is_lab_or_ai_rules_file(f.name):
+                continue
+            seen.add(f.name)
+            content = f.read_bytes()
+            zf.writestr(f"rules/suricata/{f.name}", content)
+            out.append({
+                "name":           f.name,
+                "sha256":         hashlib.sha256(content).hexdigest(),
+                "ai_rule_count":  _count_ai_rules(content),
+                "size_bytes":     len(content),
+                "source":         "active" if base == SURICATA_RULES_DIR else "legacy",
+            })
     return out
 
 
@@ -371,7 +434,16 @@ async def _collect_regression_tests(zf: zipfile.ZipFile) -> list[dict]:
         rel = f.relative_to(SCENARIOS_DIR)
         content = f.read_bytes()
         zf.writestr(f"tests/regression/{rel}", content)
-        out.append({"path": str(rel), "sha256": hashlib.sha256(content).hexdigest()})
+        # Origin-Tag fürs Manifest: templates/ = Builtin (Image-shipped),
+        # generated/ = KI-via-MCP. Customer-Admin sieht so im Bundle-
+        # Review wie viel autonom vs builtin reinkam.
+        origin = "ai-generated" if "generated" in f.parts else (
+                 "builtin-template" if "templates" in f.parts else "other")
+        out.append({
+            "path":   str(rel),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "origin": origin,
+        })
     return out
 
 

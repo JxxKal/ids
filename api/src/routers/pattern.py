@@ -51,6 +51,8 @@ SUPPORTED_SCHEMA_VERSION = 1
 STAGING_DIR = Path("/var/lib/cyjan/pattern-staging")
 SIG_RULES_DIR = Path("/sig-rules")                       # signature-rules volume mount
 SIG_RULES_SURICATA_DIR = Path("/sig-rules/suricata")
+SNORT_RULES_DIR        = Path("/rules")                  # snort-rules volume — Suricata reads /etc/suricata/rules
+SNORT_RELOAD_TRIGGER   = Path("/rules/update.trigger")
 SCENARIOS_DIR = Path("/cyjan-scenarios")                 # nur in Lab-Profile vorhanden
 
 KNOWN_COMPONENTS = {
@@ -443,7 +445,11 @@ async def _build_diff(
 
     incoming_suri = extracted / "rules" / "suricata"
     if incoming_suri.exists():
-        current = SIG_RULES_SURICATA_DIR if SIG_RULES_SURICATA_DIR.exists() else None
+        # /rules ist die wirksame Suricata-Rules-Location (snort-rules-Volume).
+        # Älter /sig-rules/suricata bleibt als Read-Fallback für Diffs gegen
+        # Customer-Installationen die noch im alten Layout liegen.
+        current = (SNORT_RULES_DIR if SNORT_RULES_DIR.exists()
+                   else (SIG_RULES_SURICATA_DIR if SIG_RULES_SURICATA_DIR.exists() else None))
         diff.rules_suricata = _diff_rules_files(incoming_suri, current)
 
     recal_path = extracted / "defaults" / "parameter_recalibration.yml"
@@ -581,17 +587,26 @@ async def _apply_custom_rules(extracted: Path) -> int:
 
 
 async def _apply_suricata_rules(extracted: Path) -> int:
+    """Schreibt Suricata-Rules nach /rules (= /etc/suricata/rules-Volume).
+    Triggert anschließend snort-Reload via /rules/update.trigger — Suricata-
+    entrypoint pollt das alle 30s und ruft `suricatasc -c ruleset-reload-
+    rules` über den unix-command-socket."""
     src = extracted / "rules" / "suricata"
     if not src.exists():
         return 0
-    SIG_RULES_SURICATA_DIR.mkdir(parents=True, exist_ok=True)
+    SNORT_RULES_DIR.mkdir(parents=True, exist_ok=True)
     count = 0
     for f in sorted(src.glob("*.rules")):
-        target = SIG_RULES_SURICATA_DIR / f.name
-        tmp = SIG_RULES_SURICATA_DIR / (f.name + ".tmp")
+        target = SNORT_RULES_DIR / f.name
+        tmp    = SNORT_RULES_DIR / (f.name + ".tmp")
         tmp.write_bytes(f.read_bytes())
         tmp.replace(target)
         count += 1
+    if count > 0:
+        try:
+            SNORT_RELOAD_TRIGGER.write_text("trigger\n")
+        except OSError:
+            log.warning("Konnte snort-reload-trigger nicht schreiben")
     return count
 
 
