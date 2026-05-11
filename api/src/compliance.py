@@ -110,10 +110,85 @@ COMPLIANCE_MAPPING: dict[str, list[tuple[str, str, str]]] = {
         ("ISO-27001", "A.8.7",         "Protection against malware (OT)"),
         ("BSI",       "IND.2.2.A11",   "Modbus-Befehlsfilterung"),
     ],
-    "T0888": [   # Remote System Information Discovery
-        ("NIS-2",     "Art-21(2)(c)",  "Vulnerability management"),
-        ("ISO-27001", "A.8.32",        "Change management"),
-        ("BSI",       "IND.2.2.A8",    "PLC-Fingerprinting erkennen"),
+    "T0814": [   # Denial of Service (ICS)
+        ("NIS-2",     "Art-21(2)(c)",  "Service availability"),
+        ("ISO-27001", "A.8.6",         "Capacity management"),
+        ("BSI",       "IND.2.2.A14",   "DoS-Schutz im ICS-Segment"),
+    ],
+    "T0859": [   # Valid Accounts (ICS, e.g. default Modbus auth bypass)
+        ("NIS-2",     "Art-21(2)(i)",  "Identity & access management"),
+        ("ISO-27001", "A.5.16",        "Identity management"),
+        ("BSI",       "IND.2.1.A7",    "Authentisierung im ICS"),
+    ],
+    "T0860": [   # Wireless Compromise (BACnet/MQTT etc.)
+        ("NIS-2",     "Art-21(2)(g)",  "OT communications security"),
+        ("ISO-27001", "A.8.20",        "Network security"),
+        ("BSI",       "IND.2.2.A4",    "Funkstrecken im IND-Bereich"),
+    ],
+
+    # ───── Discovery / Recon (Enterprise) ───────────────────────────────
+    "T1018":     [   # Remote System Discovery
+        ("NIS-2",     "Art-21(2)(e)",  "Network monitoring"),
+        ("ISO-27001", "A.8.16",        "Monitoring activities"),
+        ("BSI",       "DER.1.A4",      "Erkennung von Angriffen — Discovery"),
+    ],
+    "T1087":     [   # Account Discovery
+        ("NIS-2",     "Art-21(2)(i)",  "Account enumeration prevention"),
+        ("ISO-27001", "A.5.18",        "Access rights"),
+        ("BSI",       "ORP.4.A20",     "Schutz vor unerlaubter Konten-Enumeration"),
+    ],
+
+    # ───── Crypto / Confidentiality (NIS-2 h) ────────────────────────────
+    "T1040":     [   # Network Sniffing — adversary capturing plaintext
+        ("NIS-2",     "Art-21(2)(h)",  "Cryptography & encryption"),
+        ("ISO-27001", "A.8.24",        "Use of cryptography"),
+        ("BSI",       "CON.1.A1",      "Auswahl kryptografischer Verfahren"),
+    ],
+    "T1573":     [   # Encrypted Channel (Cryptography baseline)
+        ("NIS-2",     "Art-21(2)(h)",  "Cryptography & encryption"),
+        ("ISO-27001", "A.8.24",        "Use of cryptography"),
+        ("BSI",       "CON.1.A2",      "Sichere Konfiguration der Verfahren"),
+    ],
+    "T1573.002": [   # Asymmetric Cryptography (weak TLS/SSH)
+        ("NIS-2",     "Art-21(2)(h)",  "Strong cryptography enforcement"),
+        ("ISO-27001", "A.8.24",        "Use of cryptography"),
+        ("BSI",       "NET.3.3.A4",    "Sichere TLS-Konfiguration"),
+    ],
+    "T1078":     [   # Valid Accounts (incl. default/anonymous bind)
+        ("NIS-2",     "Art-21(2)(i)",  "Identity & access management"),
+        ("ISO-27001", "A.5.16",        "Identity management"),
+        ("BSI",       "ORP.4.A7",      "Vermeidung anonymer/ungeschützter Konten"),
+    ],
+
+    # ───── Lateral Movement / Remote Services ────────────────────────────
+    "T1021":     [   # Remote Services baseline
+        ("NIS-2",     "Art-21(2)(j)",  "Secure remote access"),
+        ("ISO-27001", "A.8.21",        "Security of network services"),
+        ("BSI",       "OPS.1.2.5.A8",  "Sichere Fernzugriffe"),
+    ],
+    "T1021.001": [   # Remote Desktop Protocol
+        ("NIS-2",     "Art-21(2)(j)",  "RDP with MFA / NLA required"),
+        ("ISO-27001", "A.8.21",        "Security of network services"),
+        ("BSI",       "OPS.1.2.5.A8",  "RDP-Härtung (NLA, MFA)"),
+    ],
+    "T1021.006": [   # WinRM
+        ("NIS-2",     "Art-21(2)(h)",  "Encrypted management channels"),
+        ("ISO-27001", "A.8.24",        "Use of cryptography"),
+        ("BSI",       "SYS.1.2.3.A8",  "WinRM nur über HTTPS"),
+    ],
+
+    # ───── Command & Control / Exfil ─────────────────────────────────────
+    "T1071.004": [   # DNS C2 / DNS tunneling
+        ("NIS-2",     "Art-21(2)(g)",  "Network security monitoring"),
+        ("ISO-27001", "A.8.16",        "Monitoring activities"),
+        ("BSI",       "DER.2.1.A7",    "DNS-Tunneling-Erkennung"),
+    ],
+
+    # ───── Brute Force / Spraying  ───────────────────────────────────────
+    "T1110.001": [   # Password Guessing
+        ("NIS-2",     "Art-21(2)(i)",  "Authentication strength"),
+        ("ISO-27001", "A.8.5",         "Secure authentication"),
+        ("BSI",       "ORP.4.A22",     "Schutz vor Brute-Force-Angriffen"),
     ],
 }
 
