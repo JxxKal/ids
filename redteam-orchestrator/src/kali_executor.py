@@ -67,73 +67,77 @@ class KaliExecutor:
         except ValueError as exc:
             raise KaliExecutionError(f"unable to parse PID: {out!r}") from exc
 
+    # Peer-Name muss <16 Zeichen sein (Linux IFNAMSIZ). cy-inj-peer = 11.
+    _PEER_IFACE     = "cy-inj-peer"
+    _HOST_IP_CIDR   = "192.0.2.254/24"
+    _KALI_IP_CIDR   = "192.0.2.1/24"
+
     async def _attach_iface_unlocked(self) -> None:
-        # Pre-Check: existiert das veth überhaupt? Wenn nicht, sauberer
-        # Fehler statt kryptisches "netns value invalid" weiter unten.
-        rc, _, _ = await self._exec("ip", "link", "show", settings.test_iface)
+        """Veth-Pair frisch anlegen, peer-Seite am Host konfigurieren,
+        kali-Seite ins kali-Net-Namespace + IP zuweisen. Stateless —
+        ein Pair pro Tool-Run, beim Detach komplett gelöscht.
+
+        Vorteil ggü. persistentem veth: kein Detach-Permission-Problem
+        (mount-ns-Operationen via `ip -n` brauchen CAP_SYS_ADMIN+
+        Mount-Manipulation, was im Container kompliziert ist). `ip link
+        del cy-inj-peer` löscht das ganze Pair atomar — egal in welchem
+        Namespace die andere Seite steckt."""
+        # Vorab cleanup falls vorheriger Run nicht sauber detached hat
+        await self._exec("ip", "link", "del", self._PEER_IFACE)  # ignore rc
+
+        rc, _, err = await self._exec(
+            "ip", "link", "add", settings.test_iface,
+            "type", "veth", "peer", "name", self._PEER_IFACE,
+        )
         if rc != 0:
-            raise KaliExecutionError(
-                f"veth '{settings.test_iface}' nicht gefunden. "
-                f"Lab-Setup-Schritt fehlt: veth-Pair muss am Host vor dem "
-                f"ersten attach_iface=true-Aufruf eingerichtet sein "
-                f"(z.B. `ip link add {settings.test_iface} type veth peer name "
-                f"{settings.test_iface}-peer`). Alternativ attach_iface=false "
-                f"verwenden — Tool läuft dann ohne Netz-Konnektivität."
-            )
+            raise KaliExecutionError(f"veth-Pair-Creation failed: {err.strip()}")
+
+        # Host-Peer-Seite konfigurieren
+        rc, _, err = await self._exec(
+            "ip", "addr", "add", self._HOST_IP_CIDR, "dev", self._PEER_IFACE,
+        )
+        if rc != 0 and "exists" not in err.lower():
+            raise KaliExecutionError(f"host-peer addr add failed: {err.strip()}")
+        rc, _, err = await self._exec("ip", "link", "set", self._PEER_IFACE, "up")
+        if rc != 0:
+            raise KaliExecutionError(f"host-peer link up failed: {err.strip()}")
+
+        # Container-Seite ins kali-Net-Namespace verschieben
         pid = await self._get_container_pid()
         rc, _, err = await self._exec(
             "ip", "link", "set", settings.test_iface, "netns", str(pid),
         )
         if rc != 0:
             raise KaliExecutionError(f"ip link set netns failed: {err.strip()}")
-        # IP auf der Container-Seite zuweisen — Convention: kali bekommt .1
-        # in 192.0.2.0/24, Host-Peer ist .254 (in cy-inj-peer eingerichtet).
-        # User-Tools können beliebige TEST-NET-Targets ansprechen, /24
-        # macht alle 192.0.2.x lokal routbar.
+
+        # IP + up im kali-Namespace
         rc, _, err = await self._exec(
             "nsenter", "-t", str(pid), "-n",
-            "ip", "addr", "add", "192.0.2.1/24", "dev", settings.test_iface,
+            "ip", "addr", "add", self._KALI_IP_CIDR, "dev", settings.test_iface,
         )
         if rc != 0 and "exists" not in err.lower():
-            raise KaliExecutionError(f"ip addr add failed: {err.strip()}")
+            raise KaliExecutionError(f"kali addr add failed: {err.strip()}")
         rc, _, err = await self._exec(
             "nsenter", "-t", str(pid), "-n",
             "ip", "link", "set", settings.test_iface, "up",
         )
         if rc != 0:
-            raise KaliExecutionError(f"ip link up failed: {err.strip()}")
-        log.info("Veth %s moved to kali-shell pid=%d (ip 192.0.2.1/24)",
-                 settings.test_iface, pid)
+            raise KaliExecutionError(f"kali link up failed: {err.strip()}")
+
+        log.info("Veth-Pair %s↔%s up (kali pid=%d, %s ↔ %s)",
+                 settings.test_iface, self._PEER_IFACE, pid,
+                 self._KALI_IP_CIDR, self._HOST_IP_CIDR)
 
     async def _detach_iface_unlocked(self) -> None:
-        """Holt das veth aus dem kali-namespace zurück in den Host-namespace.
-
-        Trick: kali's net-ns als named-netns am Host registrieren (Symlink in
-        /var/run/netns/), dann mit `ip -n <name>` vom orchestrator aus
-        operieren. "netns 1" wird dann im orchestrator-PID-Kontext (= Host
-        wegen pid:host) aufgelöst und trifft Host-init.
-
-        iproute2's `set netns <path>`-Form akzeptiert nur Name/PID/FD,
-        keinen absoluten Pfad — daher der Symlink-Umweg."""
-        try:
-            pid = await self._get_container_pid()
-        except KaliExecutionError as exc:
-            log.warning("kali-shell PID nicht ermittelbar (Container weg?): %s", exc)
-            return
-
-        ns_link = f"/var/run/netns/cy-detach-{pid}"
-        await self._exec("mkdir", "-p", "/var/run/netns")
-        # Atomic-symlink: ln -sfn überschreibt sauber wenn schon existiert
-        await self._exec("ln", "-sfn", f"/proc/{pid}/ns/net", ns_link)
-        try:
-            rc, _, err = await self._exec(
-                "ip", "-n", f"cy-detach-{pid}",
-                "link", "set", settings.test_iface, "netns", "1",
-            )
-            if rc != 0:
-                log.warning("detach %s failed: %s", settings.test_iface, err.strip())
-        finally:
-            await self._exec("rm", "-f", ns_link)
+        """`ip link del <peer>` löscht das ganze Pair atomar — egal in
+        welchem Namespace die andere Seite steckt. Keine Permission-
+        oder Mount-NS-Probleme wie beim `ip link set ... netns`-Pfad."""
+        rc, _, err = await self._exec("ip", "link", "del", self._PEER_IFACE)
+        if rc != 0:
+            log.warning("veth-pair delete failed: %s", err.strip())
+        else:
+            log.info("Veth-Pair %s↔%s removed",
+                     settings.test_iface, self._PEER_IFACE)
 
     async def run_with_iface(
         self, tool: str, target_ip: str, args: list[str], timeout_sec: int = 30,
