@@ -86,13 +86,24 @@ class KaliExecutor:
         )
         if rc != 0:
             raise KaliExecutionError(f"ip link set netns failed: {err.strip()}")
+        # IP auf der Container-Seite zuweisen — Convention: kali bekommt .1
+        # in 192.0.2.0/24, Host-Peer ist .254 (in cy-inj-peer eingerichtet).
+        # User-Tools können beliebige TEST-NET-Targets ansprechen, /24
+        # macht alle 192.0.2.x lokal routbar.
+        rc, _, err = await self._exec(
+            "nsenter", "-t", str(pid), "-n",
+            "ip", "addr", "add", "192.0.2.1/24", "dev", settings.test_iface,
+        )
+        if rc != 0 and "exists" not in err.lower():
+            raise KaliExecutionError(f"ip addr add failed: {err.strip()}")
         rc, _, err = await self._exec(
             "nsenter", "-t", str(pid), "-n",
             "ip", "link", "set", settings.test_iface, "up",
         )
         if rc != 0:
             raise KaliExecutionError(f"ip link up failed: {err.strip()}")
-        log.info("Veth %s moved to kali-shell pid=%d", settings.test_iface, pid)
+        log.info("Veth %s moved to kali-shell pid=%d (ip 192.0.2.1/24)",
+                 settings.test_iface, pid)
 
     async def _detach_iface_unlocked(self) -> None:
         try:
