@@ -661,11 +661,221 @@ export function WeeklyReportPage() {
             </div>
           </section>
 
+          {/* ── Block 6: Compliance — MITRE-Coverage + Framework-Mapping ──── */}
+          {report.compliance && <ComplianceSection compliance={report.compliance} />}
+
           <p className="text-[10px] text-slate-600 print:text-gray-500 italic text-center">
             Cyjan IDS · {weekStr} · {new Date(report.week.generated).toLocaleString()}
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── ComplianceSection — MITRE-Coverage + NIS-2/ISO27001/BSI Framework-Map ──
+
+function ComplianceSection({
+  compliance,
+}: {
+  compliance: import('../api').WeeklyReportCompliance;
+}) {
+  const mc = compliance.mitre_coverage;
+  const fc = compliance.framework_coverage;
+  const tpr = mc.true_positive_rate;
+  const tprPct = tpr === null ? '—' : `${(tpr * 100).toFixed(1)}%`;
+
+  // Coverage-Gap: Techniques getestet aber 0% detected → für Compliance-
+  // Owner als "Handlungsbedarf" hervorgehoben.
+  const gaps = mc.by_technique.filter(
+    t => t.run_count > 0 && (t.detection_count === 0)
+  );
+
+  return (
+    <section className="cyjan-card rounded-lg p-4 print:shadow-none print:border-gray-300 print:border print:bg-white">
+      <h2 className="text-sm font-semibold text-violet-300 print:text-black mb-3 uppercase tracking-wider">
+        🛡 Compliance &amp; MITRE-Coverage
+      </h2>
+
+      {compliance.note && (
+        <p className="text-xs text-amber-300 print:text-amber-700 italic mb-3">
+          ⚠ {compliance.note}
+        </p>
+      )}
+
+      {/* KPI-Reihe */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <KpiBox label="Techniques getestet"     value={mc.techniques_tested} />
+        <KpiBox label="mit Detection"            value={mc.techniques_with_detection}
+                tone={mc.techniques_with_detection > 0 ? 'good' : 'warn'} />
+        <KpiBox label="Lab-Runs gesamt"          value={mc.total_runs} />
+        <KpiBox label="True-Positive-Rate"       value={tprPct}
+                tone={tpr === null ? 'neutral' : tpr >= 0.8 ? 'good' : tpr >= 0.5 ? 'warn' : 'bad'} />
+      </div>
+
+      {/* MITRE-Technique-Tabelle */}
+      <div className="mb-4">
+        <p className="text-xs text-slate-500 print:text-gray-700 mb-1.5 uppercase tracking-wider">
+          Getestete MITRE-Techniques
+        </p>
+        {mc.by_technique.length === 0 ? (
+          <p className="text-xs text-slate-600 italic py-2">
+            Keine Scenarios in dieser Woche gelaufen. RedTeam-Tooling unter Settings starten.
+          </p>
+        ) : (
+          <table className="w-full text-xs font-mono">
+            <thead>
+              <tr className="text-slate-500 print:text-gray-700">
+                <th className="text-left py-1 w-24">Technique</th>
+                <th className="text-left">Scenarios</th>
+                <th className="text-right w-20">Runs</th>
+                <th className="text-right w-24">Detected</th>
+                <th className="text-right w-16">TPR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mc.by_technique.map(t => {
+                const tprT = t.true_positive_rate;
+                const tprColor = tprT === null ? 'text-slate-500' :
+                                  tprT >= 0.8 ? 'text-emerald-300' :
+                                  tprT >= 0.5 ? 'text-amber-300' :
+                                                'text-red-300';
+                return (
+                  <tr key={t.technique_id} className="border-t border-slate-800/50 print:border-gray-200 align-top">
+                    <td className="py-1 text-violet-300 print:text-black font-mono">
+                      <a href={`https://attack.mitre.org/techniques/${t.technique_id.replace('.', '/')}/`}
+                         target="_blank" rel="noreferrer"
+                         className="hover:underline" title="Auf MITRE ATT&CK öffnen">
+                        {t.technique_id}
+                      </a>
+                    </td>
+                    <td className="py-1 text-slate-300 print:text-black truncate">
+                      {t.scenarios.join(', ')}
+                    </td>
+                    <td className="py-1 text-right text-slate-300 print:text-black tabular-nums">{t.run_count}</td>
+                    <td className="py-1 text-right text-slate-300 print:text-black tabular-nums">{t.detection_count}</td>
+                    <td className={`py-1 text-right tabular-nums ${tprColor}`}>
+                      {tprT === null ? '—' : `${(tprT * 100).toFixed(0)}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Coverage-Gap-Warnung */}
+      {gaps.length > 0 && (
+        <div className="mb-4 bg-amber-500/10 border border-amber-500/40 rounded p-2.5 print:bg-amber-50 print:border-amber-300">
+          <p className="text-[11px] font-semibold text-amber-300 print:text-amber-700 mb-1">
+            ⚠ {gaps.length} Detection-Gap{gaps.length === 1 ? '' : 's'} — Techniques getestet, aber 0 Detection:
+          </p>
+          <p className="text-[11px] text-amber-200 print:text-amber-700 font-mono">
+            {gaps.map(g => g.technique_id).join(', ')}
+          </p>
+          <p className="text-[10px] text-amber-400/80 print:text-amber-600 italic mt-1">
+            Handlungsbedarf: Custom-Rule schreiben (via MCP create_suricata_rule_v1) oder Suricata-Rule-Source aktualisieren.
+          </p>
+        </div>
+      )}
+
+      {/* Framework-Coverage */}
+      <div>
+        <p className="text-xs text-slate-500 print:text-gray-700 mb-1.5 uppercase tracking-wider">
+          Compliance-Framework-Coverage
+        </p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          {Object.entries(fc).map(([fwName, fwData]) => (
+            <FrameworkCard key={fwName} name={fwName} data={fwData} />
+          ))}
+          {Object.keys(fc).length === 0 && (
+            <p className="text-xs text-slate-600 italic">
+              Keine Framework-Mappings — entweder noch keine Techniques getestet, oder die getesteten haben keinen Eintrag in Cyjan-Compliance-Mapping.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Evidence-Artefakte */}
+      {compliance.evidence_artifacts.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-slate-800/40 print:border-gray-300">
+          <p className="text-[11px] text-slate-500 print:text-gray-600 mb-1.5">
+            <span className="uppercase tracking-wider">Evidence-Artefakte für Auditor</span>
+          </p>
+          <ul className="space-y-0.5 text-[11px] text-slate-400 print:text-gray-700">
+            {compliance.evidence_artifacts.map((a, i) => (
+              <li key={i} className="font-mono">
+                <span className="text-emerald-300 print:text-emerald-700">▸</span>{' '}
+                <span className="text-slate-200 print:text-black">{a.name}</span>
+                <span className="text-slate-600 print:text-gray-500"> — {a.format}</span>
+                <span className="text-slate-500 print:text-gray-600 italic ml-2">({a.section})</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+
+function KpiBox({
+  label, value, tone = 'neutral',
+}: {
+  label: string;
+  value: number | string;
+  tone?: 'good' | 'warn' | 'bad' | 'neutral';
+}) {
+  const colors = {
+    good:    'border-emerald-500/40 text-emerald-300',
+    warn:    'border-amber-500/40   text-amber-300',
+    bad:     'border-red-500/40     text-red-300',
+    neutral: 'border-slate-700/60   text-slate-200',
+  };
+  return (
+    <div className={`border rounded p-2 ${colors[tone]} print:border-gray-300 print:text-black`}>
+      <div className="text-2xl font-mono tabular-nums">{value}</div>
+      <div className="text-[10px] text-slate-500 print:text-gray-600 uppercase tracking-wider">{label}</div>
+    </div>
+  );
+}
+
+
+function FrameworkCard({
+  name, data,
+}: {
+  name: string;
+  data: import('../api').FrameworkCoverage;
+}) {
+  return (
+    <div className="border border-slate-800 rounded p-2.5 print:border-gray-300">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-cyan-300 print:text-black uppercase">{name}</span>
+        <span className="text-[10px] text-slate-500 print:text-gray-600 font-mono">
+          {data.controls_detected}/{data.controls_tested} controls
+        </span>
+      </div>
+      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+        {data.controls.map(c => (
+          <div key={c.control_id} className="text-[10px] font-mono py-0.5 border-b border-slate-800/30 print:border-gray-200">
+            <div className="flex items-baseline gap-1">
+              <span className="text-slate-200 print:text-black">{c.control_id}</span>
+              <span className={c.detection_count > 0 ? 'text-emerald-300' : 'text-amber-300'}>
+                {c.detection_count > 0 ? '✓' : '○'}
+              </span>
+            </div>
+            <div className="text-slate-500 print:text-gray-600 truncate">{c.control_name}</div>
+            <div className="text-slate-600 print:text-gray-500 text-[9px]">
+              {c.technique_ids.join(', ')} — {c.detection_count}/{c.run_count} runs
+            </div>
+          </div>
+        ))}
+        {data.controls.length === 0 && (
+          <p className="text-[10px] text-slate-600 italic">Keine Controls</p>
+        )}
+      </div>
     </div>
   );
 }

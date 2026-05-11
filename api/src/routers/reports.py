@@ -640,6 +640,125 @@ def _trend(cur: int, prev: int) -> dict:
     return {"prev": prev, "delta_pct": pct, "direction": direction}
 
 
+# ── Compliance ──────────────────────────────────────────────────────────────
+#
+# MITRE-Coverage + Mapping auf NIS-2 / ISO 27001 / BSI IT-Grundschutz. Quelle
+# sind die orchestrator-geschriebenen Tabellen redteam_scenarios + redteam_
+# results (siehe migration 021). Die Compliance-Tabelle in `compliance.py`
+# übersetzt MITRE-IDs in Controls — pro Technique mehrere Frameworks.
+
+
+async def _compliance_summary(conn: asyncpg.Connection, t0: datetime, t1: datetime) -> dict:
+    """Sammelt für die Woche [t0, t1]:
+      - welche MITRE-Techniques wurden getestet (mind. 1 Run)
+      - True-Positive-Rate pro Technique
+      - Coverage-Gaps (Techniques getestet aber 0% detected)
+      - Aggregierte Framework-Coverage (NIS-2 / ISO-27001 / BSI)
+
+    Tolerant: wenn redteam_scenarios/redteam_results nicht migriert sind
+    (Phase-1-only-Stand), gibt's ein leeres Aggregat zurück."""
+    import yaml as _yaml
+    from compliance import framework_coverage, map_technique
+
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT s.scenario_id, s.rule_id AS expected_rule_id, s.yaml_source,
+                   COUNT(r.*)::int AS run_count,
+                   SUM(CASE WHEN r.detected THEN 1 ELSE 0 END)::int AS detected_count
+            FROM redteam_scenarios s
+            LEFT JOIN redteam_results r
+              ON r.scenario_id = s.scenario_id
+             AND r.ts >= $1 AND r.ts < $2
+            WHERE s.enabled = true
+            GROUP BY s.scenario_id, s.rule_id, s.yaml_source
+            HAVING COUNT(r.*) > 0
+            ORDER BY s.scenario_id
+            """,
+            t0, t1,
+        )
+    except asyncpg.UndefinedTableError:
+        return {
+            "schema_version":      1,
+            "evaluated_window":    {"from": t0.isoformat(), "to": t1.isoformat()},
+            "mitre_coverage":      {"techniques_tested": 0, "techniques_with_detection": 0,
+                                     "true_positive_rate": 0.0, "by_technique": []},
+            "framework_coverage":  {},
+            "evidence_artifacts":  [],
+            "note":                "redteam_scenarios-Tabelle nicht migriert oder leer",
+        }
+
+    techniques: dict[str, dict] = {}
+    for row in rows:
+        try:
+            doc = _yaml.safe_load(row["yaml_source"]) or {}
+            mitre = list(doc.get("mitre") or [])
+            tags  = list(doc.get("tags")  or [])
+            all_candidates = mitre + tags
+        except Exception:
+            all_candidates = []
+        mitre_tags = sorted({
+            t for t in all_candidates
+            if isinstance(t, str) and t.startswith("T")
+            and t[1:].split(".")[0].isdigit()
+        })
+        for tt in mitre_tags:
+            tech = techniques.setdefault(tt, {
+                "technique_id":     tt,
+                "scenarios":        [],
+                "run_count":        0,
+                "detection_count":  0,
+            })
+            tech["scenarios"].append(row["scenario_id"])
+            tech["run_count"]       += row["run_count"]      or 0
+            tech["detection_count"] += row["detected_count"] or 0
+
+    by_tech = []
+    for tech in sorted(techniques.values(), key=lambda x: x["technique_id"]):
+        run_count = tech["run_count"]
+        det_count = tech["detection_count"]
+        by_tech.append({
+            "technique_id":     tech["technique_id"],
+            "scenarios":        sorted(set(tech["scenarios"])),
+            "run_count":        run_count,
+            "detection_count":  det_count,
+            "true_positive_rate": (det_count / run_count) if run_count else None,
+            "compliance":       map_technique(tech["technique_id"]),
+        })
+
+    total_runs = sum(t["run_count"] for t in by_tech)
+    total_dets = sum(t["detection_count"] for t in by_tech)
+    with_det   = sum(1 for t in by_tech if t["detection_count"] > 0)
+
+    return {
+        "schema_version":     1,
+        "evaluated_window":   {"from": t0.isoformat(), "to": t1.isoformat()},
+        "mitre_coverage": {
+            "techniques_tested":         len(by_tech),
+            "techniques_with_detection": with_det,
+            "true_positive_rate":        (total_dets / total_runs) if total_runs else None,
+            "total_runs":                total_runs,
+            "total_detections":          total_dets,
+            "by_technique":              by_tech,
+        },
+        "framework_coverage": framework_coverage(by_tech),
+        "evidence_artifacts": [
+            {"name":    "MITRE-Coverage-Matrix",
+             "format":  "JSON",
+             "section": "compliance.mitre_coverage.by_technique",
+             "purpose": "Auditor sieht pro MITRE-Technique die Test-Anzahl + TPR"},
+            {"name":    "Framework-Coverage NIS-2/ISO27001/BSI",
+             "format":  "JSON",
+             "section": "compliance.framework_coverage",
+             "purpose": "Compliance-Owner sieht pro Standard die gedeckten Controls"},
+            {"name":    "Lab-Run-Audit-Trail",
+             "format":  "DB",
+             "section": "redteam_results",
+             "purpose": "Forensische Run-Historie pro Scenario (revisionsfest, append-only)"},
+        ],
+    }
+
+
 # ── JSON-Endpunkt ────────────────────────────────────────────────────────────
 
 
@@ -663,6 +782,7 @@ async def _build_weekly_payload(year: int, wk: int) -> dict:
         boundary_talkers      = await _boundary_top_talkers(conn, t0, t1)
         boundary_pairs        = await _boundary_top_pairs(conn, t0, t1)
         boundary_zones        = await _boundary_zone_breakdown(conn, t0, t1)
+        compliance            = await _compliance_summary(conn, t0, t1)
 
     # _rank-Hilfsspalte aus top_sources entfernen (war nur internes Sort)
     top_sources = [{k: v for k, v in r.items() if not k.startswith("_")} for r in top_sources_raw]
@@ -703,7 +823,8 @@ async def _build_weekly_payload(year: int, wk: int) -> dict:
             "by_zone":     boundary_zones["by_pair"],
             "unzoned":     boundary_zones["unzoned"],
         },
-        "audit": audit,
+        "audit":      audit,
+        "compliance": compliance,
     }
 
 

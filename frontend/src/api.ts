@@ -1679,6 +1679,60 @@ export interface WeeklyReport {
     active_users:    Array<{ username: string; last_login: string }>;
     whitelist_adds:  number;
   };
+  // Compliance: MITRE-Coverage + Mapping auf NIS-2/ISO27001/BSI.
+  // Optional weil ältere Snapshots ohne RedTeam-Pipeline-Plumbing das Feld
+  // nicht haben.
+  compliance?: WeeklyReportCompliance;
+}
+
+export interface ComplianceControl {
+  framework:    string;     // "NIS-2" | "ISO-27001" | "BSI"
+  control_id:   string;     // "Art-21(2)(i)" / "A.8.5" / "ORP.4.A22"
+  control_name: string;
+}
+
+export interface ComplianceTechnique {
+  technique_id:        string;     // "T1558.004" etc.
+  scenarios:           string[];
+  run_count:           number;
+  detection_count:     number;
+  true_positive_rate:  number | null;
+  compliance:          ComplianceControl[];
+}
+
+export interface FrameworkCoverageControl {
+  control_id:        string;
+  control_name:      string;
+  technique_ids:     string[];
+  run_count:         number;
+  detection_count:   number;
+}
+
+export interface FrameworkCoverage {
+  controls_tested:   number;
+  controls_detected: number;
+  controls:          FrameworkCoverageControl[];
+}
+
+export interface WeeklyReportCompliance {
+  schema_version:    number;
+  evaluated_window:  { from: string; to: string };
+  mitre_coverage: {
+    techniques_tested:         number;
+    techniques_with_detection: number;
+    true_positive_rate:        number | null;
+    total_runs:                number;
+    total_detections:          number;
+    by_technique:              ComplianceTechnique[];
+  };
+  framework_coverage: Record<string, FrameworkCoverage>;
+  evidence_artifacts: Array<{
+    name:    string;
+    format:  string;
+    section: string;
+    purpose: string;
+  }>;
+  note?: string;
 }
 
 export interface WeeklyReportHistoryEntry {
