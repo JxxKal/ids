@@ -571,6 +571,8 @@ jobs:
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-mirror-tune.service  "$PKG/scripts/cyjan-mirror-tune.service"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-update.path      "$PKG/scripts/cyjan-tap-update.path"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-update.service   "$PKG/scripts/cyjan-tap-update.service"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-disk-watch.service "$PKG/scripts/cyjan-tap-disk-watch.service"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-disk-watch.timer   "$PKG/scripts/cyjan-tap-disk-watch.timer"
           cp distro/config/includes.chroot/etc/tmpfiles.d/cyjan-update.conf              "$PKG/scripts/cyjan-update.tmpfiles"
           # cyjan-tap CLI selbst — wird vom CLI-Update-Pfad nicht selbst
           # ersetzt (Self-Replace eines laufenden Skripts ist heikel).
@@ -602,6 +604,8 @@ jobs:
           cp "$PKG/scripts/cyjan-mirror-tune.service"  "$PKG/tap-update/scripts/cyjan-mirror-tune.service"
           cp "$PKG/scripts/cyjan-tap-update.path"      "$PKG/tap-update/scripts/cyjan-tap-update.path"
           cp "$PKG/scripts/cyjan-tap-update.service"   "$PKG/tap-update/scripts/cyjan-tap-update.service"
+          cp "$PKG/scripts/cyjan-tap-disk-watch.service" "$PKG/tap-update/scripts/cyjan-tap-disk-watch.service"
+          cp "$PKG/scripts/cyjan-tap-disk-watch.timer"   "$PKG/tap-update/scripts/cyjan-tap-disk-watch.timer"
           cp "$PKG/scripts/cyjan-update.tmpfiles"      "$PKG/tap-update/scripts/cyjan-update.tmpfiles"
           cp "$PKG/scripts/cyjan-tap"                  "$PKG/tap-update/scripts/cyjan-tap"
 

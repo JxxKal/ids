@@ -138,6 +138,24 @@ if [ -f /etc/systemd/system/cyjan-tap-update.path ]; then
   echo "[post-update] cyjan-tap-update.path aktiviert (lauscht auf /run/cyjan-update/trigger)."
 fi
 
+# ── 5) Tap-Disk-Watch (Auto-Prune bei >85% Disk) ─────────────────────────
+# Greift nur auf Tap-Hosts (Master-Hosts hat das cyjan-tap-CLI nicht;
+# der Service wird also dort installiert aber nie effektiv).
+WATCH_SVC_SRC="$(locate_src cyjan-tap-disk-watch.service etc/systemd/system)"
+WATCH_TMR_SRC="$(locate_src cyjan-tap-disk-watch.timer   etc/systemd/system)"
+if [ -n "$WATCH_SVC_SRC" ] && [ -n "$WATCH_TMR_SRC" ]; then
+  install -m 0644 "$WATCH_SVC_SRC" /etc/systemd/system/cyjan-tap-disk-watch.service
+  install -m 0644 "$WATCH_TMR_SRC" /etc/systemd/system/cyjan-tap-disk-watch.timer
+  echo "[post-update] cyjan-tap-disk-watch installiert."
+  if command -v cyjan-tap >/dev/null 2>&1; then
+    systemctl daemon-reload
+    systemctl enable --now cyjan-tap-disk-watch.timer
+    echo "[post-update] cyjan-tap-disk-watch.timer aktiviert (15-Min-Check + Auto-Prune >85%)."
+  else
+    echo "[post-update] cyjan-tap-CLI nicht vorhanden — Timer-Aktivierung übersprungen (Master-Host?)."
+  fi
+fi
+
 # ── 3) Docker-Daemon neu laden, falls daemon.json sich geändert hat ──────
 # `systemctl reload docker` greift NUR den daemon.json-Wechsel ohne
 # Container-Restart — das wir wollen, weil Container-Logs sonst kurz

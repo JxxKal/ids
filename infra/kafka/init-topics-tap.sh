@@ -42,14 +42,18 @@ ensure_topic() {
   local TOPIC=$1
   local PARTITIONS=$2
   local RETENTION_MS=$3
-  local EXTRA_CONFIG=${4:-""}
+  local RETENTION_BYTES=$4         # NEU: byte-Cap als Safety-Net (-1 = disabled)
+  local EXTRA_CONFIG=${5:-""}
+
+  # segment.bytes klein halten (128 MB) damit Cleanup-Thread häufiger
+  # einzelne Segmente droppen kann. Default 1 GB → 1 GB Segment muss
+  # voll werden BEVOR Kafka es droppen kann.
+  local SEGMENT_BYTES="134217728"
 
   if "$TOPICS_BIN" --bootstrap-server "$KAFKA" --list 2>/dev/null | grep -qx "$TOPIC"; then
-    # Existing topic — alter retention/segment configs
-    local ALTER_ARGS="retention.ms=${RETENTION_MS},segment.ms=600000"
-    # Extra-Configs (z.B. max.message.bytes) extrahieren und ans alter anhängen
+    # Existing topic — alter retention/segment + neu auch retention.bytes
+    local ALTER_ARGS="retention.ms=${RETENTION_MS},segment.ms=600000,retention.bytes=${RETENTION_BYTES},segment.bytes=${SEGMENT_BYTES}"
     if [ -n "$EXTRA_CONFIG" ]; then
-      # EXTRA_CONFIG hat Format "--config k=v --config k=v" — wir parsen die k=v
       local EXTRAS
       EXTRAS=$(echo "$EXTRA_CONFIG" | sed 's/--config //g' | tr ' ' ',' | sed 's/^,//;s/,$//')
       [ -n "$EXTRAS" ] && ALTER_ARGS="${ALTER_ARGS},${EXTRAS}"
@@ -57,7 +61,7 @@ ensure_topic() {
     "$CONFIGS_BIN" --bootstrap-server "$KAFKA" --alter \
       --entity-type topics --entity-name "$TOPIC" \
       --add-config "$ALTER_ARGS" >/dev/null
-    echo "[init-topics-tap] Topic '$TOPIC' aktualisiert: retention=${RETENTION_MS}ms"
+    echo "[init-topics-tap] Topic '$TOPIC' aktualisiert: retention=${RETENTION_MS}ms, retention.bytes=${RETENTION_BYTES}"
     return
   fi
   "$TOPICS_BIN" --bootstrap-server "$KAFKA" --create \
@@ -65,9 +69,11 @@ ensure_topic() {
     --partitions "$PARTITIONS" \
     --replication-factor 1 \
     --config retention.ms="$RETENTION_MS" \
+    --config retention.bytes="$RETENTION_BYTES" \
     --config segment.ms=600000 \
+    --config segment.bytes="$SEGMENT_BYTES" \
     $EXTRA_CONFIG
-  echo "[init-topics-tap] Topic erstellt: $TOPIC (${PARTITIONS}P, retention=${RETENTION_MS}ms)"
+  echo "[init-topics-tap] Topic erstellt: $TOPIC (${PARTITIONS}P, retention=${RETENTION_MS}ms, bytes=${RETENTION_BYTES})"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -100,10 +106,16 @@ ensure_topic() {
 #                im Worst-Case — der Default-1d-Wert würde 432 GB werden.
 # ──────────────────────────────────────────────────────────────────────────────
 
-ensure_topic "raw-packets"   2   600000     "--config max.message.bytes=1048576"
-ensure_topic "flows"         2   3600000
-ensure_topic "alerts-raw"    1   86400000
-ensure_topic "rule-metrics"  1   86400000
+# raw-packets: höchste Schreibrate. 2 GB byte-cap pro Partition (4 GB total)
+# fängt Spike ab wenn time-retention nicht greift.
+ensure_topic "raw-packets"   2   600000     "2147483648"  "--config max.message.bytes=1048576"
+# flows: 1h time-cap, 1 GB byte-cap (Flows sind klein — 1 GB hält viele Stunden)
+ensure_topic "flows"         2   3600000    "1073741824"
+# alerts-raw + rule-metrics: 24h time, aber 256 MB byte-cap pro Partition.
+# Bei normalem Alert-Volumen wird das time-basiert geleert; im Outage-Fall
+# (Master tot, niemand konsumiert) capt bytes auf reasonable Größe.
+ensure_topic "alerts-raw"    1   86400000   "268435456"
+ensure_topic "rule-metrics"  1   86400000   "268435456"
 
 # pcap-headers: kürzere segment.ms (2 min) damit retention.ms auch effektiv
 # greift. Bei segment.ms = retention.ms (gleicher Wert) würde Kafka erst
@@ -111,11 +123,14 @@ ensure_topic "rule-metrics"  1   86400000
 # können — d.h. der Disk-Peak könnte 20 min dauern statt 10. Eigene
 # Logic statt ensure_topic, weil dieser Topic einen abweichenden
 # segment.ms braucht.
+# pcap-headers: gleicher hoher Schreib-Druck wie raw-packets (jedes Paket
+# → 1 Header-Eintrag). 3 GB byte-cap pro Partition damit Mini-PCAP-Store
+# am Tap auch bei 20 kpps stable bleibt.
 if "$TOPICS_BIN" --bootstrap-server "$KAFKA" --list 2>/dev/null | grep -qx pcap-headers; then
   "$CONFIGS_BIN" --bootstrap-server "$KAFKA" --alter \
     --entity-type topics --entity-name pcap-headers \
-    --add-config "retention.ms=600000,segment.ms=120000,max.message.bytes=10485760" >/dev/null
-  echo "[init-topics-tap] Topic 'pcap-headers' aktualisiert: retention=600000ms, segment=120000ms"
+    --add-config "retention.ms=600000,segment.ms=120000,retention.bytes=3221225472,segment.bytes=134217728,max.message.bytes=10485760" >/dev/null
+  echo "[init-topics-tap] Topic 'pcap-headers' aktualisiert (mit retention.bytes=3GB)"
 else
   "$TOPICS_BIN" --bootstrap-server "$KAFKA" --create \
     --topic pcap-headers \
@@ -123,8 +138,10 @@ else
     --replication-factor 1 \
     --config retention.ms=600000 \
     --config segment.ms=120000 \
+    --config retention.bytes=3221225472 \
+    --config segment.bytes=134217728 \
     --config max.message.bytes=10485760
-  echo "[init-topics-tap] Topic erstellt: pcap-headers (2P, retention=600000ms, segment=120000ms)"
+  echo "[init-topics-tap] Topic erstellt: pcap-headers (mit retention.bytes=3GB)"
 fi
 
 echo ""

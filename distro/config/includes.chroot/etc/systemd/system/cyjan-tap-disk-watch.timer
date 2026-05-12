@@ -1,0 +1,13 @@
+[Unit]
+Description=15-Min-Check für Tap-Disk-Usage (Auto-Prune ab 85%)
+Documentation=https://github.com/JxxKal/ids
+
+[Timer]
+# Alle 15 min. Sehr leichtgewichtig — df + Vergleich, prune nur wenn nötig.
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=2min
+Unit=cyjan-tap-disk-watch.service
+
+[Install]
+WantedBy=timers.target

@@ -694,6 +694,83 @@ cmd_update() {
   echo "      ausgeliefert wird."
 }
 
+cmd_prune() {
+  # Notfall: laufenden Kafka-Topics aggressivere Retention erzwingen + auf
+  # Cleanup warten. Greift wenn die Disk voll läuft trotz init-script-
+  # Retention — z.B. weil Topics aus pre-v2.5.1-Zeit ohne bytes-cap leben.
+  #
+  # Nutzt sudo+docker — daher MUSS der Aufrufer entweder in der docker-Gruppe
+  # sein oder mit sudo cyjan-tap prune laufen.
+  echo "Cyjan-Tap Disk-Notfall-Prune"
+  echo "──────────────────────────────────"
+  local KAFKA_CT="cyjan-tap-kafka"
+
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$KAFKA_CT"; then
+    echo "FEHLER: Kafka-Container $KAFKA_CT nicht gefunden / nicht laufend." >&2
+    echo "Sind wir auf einem Tap-Host? 'docker ps' zeigt:" >&2
+    docker ps --format 'table {{.Names}}\t{{.Status}}' 2>&1 | head -5 >&2
+    exit 1
+  fi
+
+  echo "Disk VORHER:"
+  df -h / | tail -1
+  echo ""
+
+  # Pro Topic: aggressive retention SETZEN, dann Kafka triggert nächsten
+  # cleanup-cycle (alle 30s wegen LOG_RETENTION_CHECK_INTERVAL_MS).
+  declare -A AGGRESSIVE
+  AGGRESSIVE["raw-packets"]="retention.ms=120000,retention.bytes=536870912,segment.bytes=67108864,segment.ms=30000"
+  AGGRESSIVE["pcap-headers"]="retention.ms=120000,retention.bytes=536870912,segment.bytes=67108864,segment.ms=30000"
+  AGGRESSIVE["flows"]="retention.ms=300000,retention.bytes=268435456,segment.bytes=67108864,segment.ms=60000"
+  AGGRESSIVE["alerts-raw"]="retention.ms=3600000,retention.bytes=134217728,segment.bytes=67108864"
+  AGGRESSIVE["rule-metrics"]="retention.ms=3600000,retention.bytes=134217728,segment.bytes=67108864"
+
+  for TOPIC in "${!AGGRESSIVE[@]}"; do
+    echo "→ $TOPIC: ${AGGRESSIVE[$TOPIC]}"
+    docker exec "$KAFKA_CT" /opt/kafka/bin/kafka-configs.sh \
+        --bootstrap-server localhost:9092 --alter \
+        --entity-type topics --entity-name "$TOPIC" \
+        --add-config "${AGGRESSIVE[$TOPIC]}" 2>/dev/null \
+      || echo "  (Topic existiert nicht oder Kafka nicht ready, skip)"
+  done
+
+  echo ""
+  echo "Warte 90s auf Kafka-Cleanup-Cycle (Check-Interval ist 30s)..."
+  sleep 90
+
+  echo ""
+  echo "Disk NACHHER:"
+  df -h / | tail -1
+  echo ""
+
+  echo "Topic-Sizes:"
+  docker exec "$KAFKA_CT" /opt/kafka/bin/kafka-log-dirs.sh \
+      --bootstrap-server localhost:9092 --describe 2>/dev/null \
+    | python3 -c "
+import json, sys
+try:
+    data = json.loads(sys.stdin.read().splitlines()[-1])
+except Exception as exc:
+    print(f'  (parse error: {exc})')
+    sys.exit(0)
+total = 0
+for d in data.get('brokers', []):
+    for ld in d.get('logDirs', []):
+        for p in sorted(ld.get('partitions', []), key=lambda x: x.get('partition','')):
+            sz = p.get('size', 0)
+            total += sz
+            print(f'  {p[\"partition\"]:<32s}  {sz/1024/1024:>8.1f} MB')
+print(f'  {\"TOTAL\":<32s}  {total/1024/1024:>8.1f} MB')
+" 2>/dev/null || echo "  (parse failed)"
+
+  echo ""
+  echo "Permanent-Fix: cyjan-tap update --from-master einspielen (ab v2.5.6"
+  echo "haben docker-compose.tap.yml + init-topics-tap.sh broker- + topic-"
+  echo "level byte-caps gesetzt damit das Problem strukturell nicht wieder-"
+  echo "kommt). Dieser prune-Befehl bleibt für Notfälle nutzbar."
+}
+
+
 cmd_maintenance() {
   # Wrapper auf das generische /usr/local/bin/cyjan-maintenance —
   # auf einem frisch installierten Tap-ISO liegt das Skript dort. Auf
@@ -723,6 +800,8 @@ cyjan-tap – Remote-Tap-CLI
   cyjan-tap config get                   aktuelle Konfiguration
   cyjan-tap config set master_url <url>  Master-WSS-URL ändern (wss:// erzwungen)
   cyjan-tap update --from-master [-y]    Tap-Bundle vom gepairten Master ziehen + applien
+  cyjan-tap prune                        Notfall: Kafka-Topic-Retention aggressiv trimmen
+                                          (für volle Disk — wartet auf Cleanup-Cycle)
   cyjan-tap maintenance [--aggressive]   Docker aufräumen (dangling Images, Build-Cache)
 
 ENV:
@@ -743,6 +822,7 @@ case "${1:-status}" in
   logs)       shift; cmd_logs "$@" ;;
   config)     shift; cmd_config "$@" ;;
   update)     shift; cmd_update "$@" ;;
+  prune)      shift; cmd_prune "$@" ;;
   maintenance) shift; cmd_maintenance "$@" ;;
   -h|--help|help) usage ;;
   *) usage; exit 2 ;;
