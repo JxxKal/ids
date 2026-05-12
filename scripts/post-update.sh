@@ -54,13 +54,14 @@ if [ ! -f "$DAEMON_JSON" ]; then
   cp "$DAEMON_SRC" "$DAEMON_JSON"
   echo "[post-update] $DAEMON_JSON neu angelegt."
   NEEDS_DOCKER_RESTART=1
-elif diff -q "$DAEMON_JSON" "$DAEMON_SRC" >/dev/null 2>&1; then
-  echo "[post-update] $DAEMON_JSON bereits aktuell."
 else
   # Targeted-Migration: log-driver=journald → json-file + live-restore,
   # ohne andere User-Settings (z.B. eigene "hosts": [...]) anzufassen.
-  # Wirkt sich nur auf Hosts aus, die noch den alten ISO-Default
-  # "journald" tragen — sonst no-op.
+  # Idempotent — wenn alles schon korrekt ist, kein Schreibvorgang.
+  # Wir verlassen uns NICHT auf diff -q gegen DAEMON_SRC, weil ältere
+  # ZIPs ein veraltetes scripts/daemon.json mitlieferten (ohne
+  # live-restore=true); ein bitidentischer Match wäre dann ein
+  # "alles ok"-Trugschluss.
   MIGRATED=$(python3 - "$DAEMON_JSON" <<'PY' 2>/dev/null || true
 import json, sys
 p = sys.argv[1]
@@ -90,7 +91,7 @@ PY
     echo "[post-update] $DAEMON_JSON migriert (log-driver→json-file, live-restore=true, andere Felder unverändert)."
     NEEDS_DOCKER_RESTART=1
   else
-    echo "[post-update] $DAEMON_JSON unverändert (Custom-log-driver oder schon json-file mit live-restore)."
+    echo "[post-update] $DAEMON_JSON bereits aktuell (json-file + live-restore)."
   fi
 fi
 
