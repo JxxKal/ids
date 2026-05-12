@@ -554,7 +554,11 @@ jobs:
 
           cp docker-compose.yml     "$PKG/"
           cp docker-compose.tap.yml "$PKG/"
-          cp VERSION                "$PKG/"
+          # WICHTIG: VERSION-File mit dem aktuellen Tag-Namen überschreiben,
+          # NICHT die im Repo committed Version verwenden (sonst zeigt das
+          # Master-UI nach dem Update weiter die alte Version). Repo-File
+          # kann veraltet sein zwischen Tags.
+          echo "${VERSION}" > "$PKG/VERSION"
           cp .env.example           "$PKG/"
           cp -r infra/              "$PKG/infra/"
 
@@ -595,6 +599,10 @@ jobs:
           mkdir -p "$PKG/tap-update/scripts"
           mv tap-artifacts/images-tap.tar.zst "$PKG/tap-update/images-tap.tar.zst"
           cp docker-compose.tap.yml            "$PKG/tap-update/docker-compose.tap.yml"
+          # Tap-VERSION für tap-update auch frisch schreiben — cyjan-tap-update
+          # extrahiert dies, schreibt nach /opt/ids/VERSION, master sieht
+          # version_reported_at danach korrekt.
+          echo "${VERSION}" > "$PKG/tap-update/VERSION"
           cp "$PKG/scripts/post-update.sh"             "$PKG/tap-update/scripts/post-update.sh"
           cp "$PKG/scripts/daemon.json"                "$PKG/tap-update/scripts/daemon.json"
           cp "$PKG/scripts/cyjan-maintenance"          "$PKG/tap-update/scripts/cyjan-maintenance"
