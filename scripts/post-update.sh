@@ -95,10 +95,17 @@ PY
 fi
 
 # ── 2) cyjan-maintenance Skript + systemd-Units ──────────────────────────
-install -m 0755 "${SRC_DIR}/cyjan-maintenance"          /usr/local/bin/cyjan-maintenance
-install -m 0644 "${SRC_DIR}/cyjan-maintenance.service"  /etc/systemd/system/cyjan-maintenance.service
-install -m 0644 "${SRC_DIR}/cyjan-maintenance.timer"    /etc/systemd/system/cyjan-maintenance.timer
-echo "[post-update] cyjan-maintenance Script + systemd-Units installiert."
+MAINT_BIN_SRC="$(locate_src cyjan-maintenance         usr/local/bin)"
+MAINT_SVC_SRC="$(locate_src cyjan-maintenance.service etc/systemd/system)"
+MAINT_TMR_SRC="$(locate_src cyjan-maintenance.timer   etc/systemd/system)"
+if [ -n "$MAINT_BIN_SRC" ] && [ -n "$MAINT_SVC_SRC" ] && [ -n "$MAINT_TMR_SRC" ]; then
+  install -m 0755 "$MAINT_BIN_SRC" /usr/local/bin/cyjan-maintenance
+  install -m 0644 "$MAINT_SVC_SRC" /etc/systemd/system/cyjan-maintenance.service
+  install -m 0644 "$MAINT_TMR_SRC" /etc/systemd/system/cyjan-maintenance.timer
+  echo "[post-update] cyjan-maintenance Script + systemd-Units installiert."
+else
+  echo "[post-update] WARNUNG: cyjan-maintenance-Quellen nicht gefunden — übersprungen."
+fi
 
 # ── 3) cyjan-mirror-tune Skript + systemd-Service ────────────────────────
 # Optional — Skript-Files sind nur dabei wenn das Update-ZIP sie liefert.
