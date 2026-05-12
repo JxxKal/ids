@@ -116,6 +116,18 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+# Auto-escalate: bei >85% Disk-Auslastung implizit --aggressive nutzen,
+# auch wenn der User die Standard-Variante aufgerufen hat. Verhindert
+# das wiederkehrende Disk-Full-Problem auf Hosts mit Docker-29+ und
+# containerd-Snapshotter (sammelt tagged-aber-unused Layer schneller an
+# als prune -f wegräumen kann). Auf Offline-Hosts trotzdem nicht ideal;
+# darum erst ab Schwellwert.
+DISK_PCT=$(df --output=pcent / 2>/dev/null | tail -1 | tr -dc '0-9')
+if [ "$AGGRESSIVE" -eq 0 ] && [ -n "$DISK_PCT" ] && [ "$DISK_PCT" -ge 85 ]; then
+  log "Disk-Auslastung ${DISK_PCT}% ≥ 85% — eskaliere auf --aggressive."
+  AGGRESSIVE=1
+fi
+
 if [ "$AGGRESSIVE" -eq 1 ]; then
   log "Aggressiv: prune -af + builder prune -af"
   docker system prune  -af

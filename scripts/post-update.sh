@@ -56,17 +56,42 @@ if [ ! -f "$DAEMON_JSON" ]; then
   NEEDS_DOCKER_RESTART=1
 elif diff -q "$DAEMON_JSON" "$DAEMON_SRC" >/dev/null 2>&1; then
   echo "[post-update] $DAEMON_JSON bereits aktuell."
-elif grep -q '"log-driver"\|"log-opts"' "$DAEMON_JSON" 2>/dev/null; then
-  ts="$(date +%Y%m%d-%H%M%S)"
-  cp "$DAEMON_JSON" "${DAEMON_JSON}.bak-${ts}"
-  echo "[post-update] WARNUNG: vorhandene log-Konfig in $DAEMON_JSON gefunden — nicht überschrieben."
-  echo "[post-update]            Vergleiche manuell: diff $DAEMON_JSON $DAEMON_SRC"
 else
-  ts="$(date +%Y%m%d-%H%M%S)"
-  cp "$DAEMON_JSON" "${DAEMON_JSON}.bak-${ts}"
-  cp "$DAEMON_SRC" "$DAEMON_JSON"
-  echo "[post-update] $DAEMON_JSON ersetzt (Backup: ${DAEMON_JSON}.bak-${ts})."
-  NEEDS_DOCKER_RESTART=1
+  # Targeted-Migration: log-driver=journald → json-file + live-restore,
+  # ohne andere User-Settings (z.B. eigene "hosts": [...]) anzufassen.
+  # Wirkt sich nur auf Hosts aus, die noch den alten ISO-Default
+  # "journald" tragen — sonst no-op.
+  MIGRATED=$(python3 - "$DAEMON_JSON" <<'PY' 2>/dev/null || true
+import json, sys
+p = sys.argv[1]
+try:
+    d = json.load(open(p))
+except Exception:
+    sys.exit(0)
+changed = False
+if d.get("log-driver") == "journald":
+    d["log-driver"] = "json-file"
+    d.setdefault("log-opts", {"max-size": "50m", "max-file": "5"})
+    changed = True
+if "log-driver" not in d:
+    d["log-driver"] = "json-file"
+    d.setdefault("log-opts", {"max-size": "50m", "max-file": "5"})
+    changed = True
+if d.get("live-restore") is not True:
+    d["live-restore"] = True
+    changed = True
+if changed:
+    json.dump(d, open(p, "w"), indent=2)
+    open(p, "a").write("\n")
+    print("migrated")
+PY
+)
+  if [ "$MIGRATED" = "migrated" ]; then
+    echo "[post-update] $DAEMON_JSON migriert (log-driver→json-file, live-restore=true, andere Felder unverändert)."
+    NEEDS_DOCKER_RESTART=1
+  else
+    echo "[post-update] $DAEMON_JSON unverändert (Custom-log-driver oder schon json-file mit live-restore)."
+  fi
 fi
 
 # ── 2) cyjan-maintenance Skript + systemd-Units ──────────────────────────
