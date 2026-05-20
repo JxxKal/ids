@@ -62,6 +62,7 @@ from routers import update as update_router
 from routers import tests as tests_router
 from routers import users as users_router
 from routers import maintenance as maintenance_router
+from routers import migration as migration_router
 from routers.alerts import make_pcap_endpoint, set_feedback_producer
 from routers import notifications as notifications_router
 from routers.notifications import set_producer as set_notifications_producer
@@ -187,6 +188,7 @@ app.include_router(syslog_router,          dependencies=_auth)
 app.include_router(update_router.router,   dependencies=_auth)
 app.include_router(itop_router,            dependencies=_auth)
 app.include_router(maintenance_router.router, dependencies=_auth)
+app.include_router(migration_router.router,   dependencies=_auth)
 app.include_router(tap_update_router.router,   dependencies=_auth)
 app.include_router(mqtt_router.router,          dependencies=_auth)
 app.include_router(pattern_router.router,       dependencies=_auth)

@@ -37,6 +37,9 @@ import {
   type PendingTap, type TapAuditEntry,
   fetchGeoIpStatus, uploadGeoIp,
   type GeoIpStatus, type GeoIpFileMeta,
+  migrationExport, migrationPreview, migrationApply, clearToken,
+  type MigrationPreview as MigrationPreviewType,
+  restartStack as restartStackApi, rebootHost as rebootHostApi,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
@@ -1905,6 +1908,453 @@ function BackupRestoreSection({ onDone }: { onDone: () => void }) {
       </div>
       {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
     </ActionCard>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// MigrationSettings — Settings-Export/-Import zwischen Hosts
+// ─────────────────────────────────────────────────────────────────────────
+
+const MIGRATION_CATEGORIES = [
+  { key: 'db',         label: 'Datenbank-Settings (users, networks, config, …)' },
+  { key: 'sig_rules',  label: 'Signature-Rules (custom YAMLs + Overrides)' },
+  { key: 'master_ca',  label: 'Master-CA (Tap-Pairings bleiben gültig)' },
+  { key: 'ml_config',  label: 'ML-Config (Threshold, Filter-Defaults)' },
+] as const;
+
+function MigrationSettings() {
+  // Export-Card
+  const [exportPw, setExportPw]       = useState('');
+  const [exportBusy, setExportBusy]   = useState(false);
+  const [exportMsg, setExportMsg]     = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  // Import-Card
+  const [importFile, setImportFile]   = useState<File | null>(null);
+  const [preview, setPreview]         = useState<MigrationPreviewType | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [mapping, setMapping]         = useState<Record<string, string>>({});
+  const [takeIp, setTakeIp]           = useState(true);
+  const [categories, setCategories]   = useState<Set<string>>(new Set(MIGRATION_CATEGORIES.map(c => c.key)));
+  const [applyPw, setApplyPw]         = useState('');
+  const [applyBusy, setApplyBusy]     = useState(false);
+  const [applyResult, setApplyResult] = useState<{ kind: 'ok' | 'err'; text: string; details?: unknown } | null>(null);
+
+  // IP-Übernahme: was steht in source vs. target?
+  const sourceIp     = preview?.manifest.env_snapshot.MANAGEMENT_IP || null;
+  const targetIps    = preview?.target.all_addresses || [];
+  const sourceIpOnTarget = !!(sourceIp && targetIps.includes(sourceIp));
+
+  async function doExport() {
+    if (!exportPw) {
+      setExportMsg({ kind: 'err', text: 'Passwort erforderlich (Re-Auth).' });
+      return;
+    }
+    setExportBusy(true);
+    setExportMsg(null);
+    try {
+      await migrationExport(exportPw);
+      setExportMsg({ kind: 'ok', text: 'Bundle heruntergeladen.' });
+      setExportPw('');
+    } catch (e) {
+      setExportMsg({ kind: 'err', text: String((e as Error).message || e) });
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
+  async function doPreview() {
+    if (!importFile) return;
+    setPreviewBusy(true);
+    setApplyResult(null);
+    try {
+      const p = await migrationPreview(importFile);
+      setPreview(p);
+      setMapping(p.mapping_suggestion);
+    } catch (e) {
+      setApplyResult({ kind: 'err', text: 'Preview fehlgeschlagen: ' + String((e as Error).message || e) });
+      setPreview(null);
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function doApply() {
+    if (!preview || !importFile || !applyPw) return;
+    setApplyBusy(true);
+    setApplyResult(null);
+    try {
+      // IP-Übernahme nur dann signalisieren, wenn die Source-IP überhaupt
+      // auf einem Ziel-Iface gebunden werden kann — sonst bleibt der
+      // API-Container nach dem .env-Update auf einer nicht-existenten IP
+      // unerreichbar.
+      const fullMapping: Record<string, string> = { ...mapping };
+      if (takeIp && sourceIpOnTarget) {
+        fullMapping.MANAGEMENT_IP_TAKE = 'yes';
+      }
+      const res = await migrationApply(importFile, applyPw, fullMapping, Array.from(categories));
+      setApplyResult({
+        kind: 'ok',
+        text: `Import erfolgreich (${res.duration_ms} ms).`,
+        details: res,
+      });
+      setApplyPw('');
+      // Auto-Logout: User-Tabelle wurde ersetzt → aktueller JWT verweist
+      // ggf. auf einen User, der jetzt nicht mehr existiert. Erst 5s zeigen
+      // wir die Erfolgsmeldung, dann reload → Login-Screen.
+      if (res.require_relogin) {
+        setTimeout(() => {
+          clearToken();
+          window.location.href = '/';
+        }, 5000);
+      }
+    } catch (e) {
+      setApplyResult({ kind: 'err', text: String((e as Error).message || e) });
+    } finally {
+      setApplyBusy(false);
+    }
+  }
+
+  function toggleCategory(key: string) {
+    setCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-100 mb-1">Host-Migration</h2>
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Überträgt alle Settings (User, Netze, Heuristik-Overrides, Tap-Pairings) von einem Master-Host
+          auf einen anderen. Operative Daten (Alerts, Flows, ML-Modell) bleiben außen vor — dafür ist
+          <span className="font-mono text-slate-300"> Backup/Restore </span>
+          in der Datenbank-Sektion zuständig. Nach dem Import muss der Quell-Host abgeschaltet werden,
+          sonst sehen die Taps zwei Master gleichzeitig.
+        </p>
+      </div>
+
+      {/* ── Export ─────────────────────────────────────────────────────── */}
+      <ActionCard title="Settings-Bundle exportieren">
+        <p className="text-xs text-slate-400">
+          Lädt ein <span className="font-mono">.cysb</span>-File (tar.gz). Enthält DB-Tabellen,
+          Heuristik-Rules, Master-CA + privaten CA-Key, ML-Konfig. Passwort-Re-Auth weil der CA-Key
+          mitgeht.
+        </p>
+        <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-center">
+          <PasswordInput value={exportPw} onChange={setExportPw} placeholder="Admin-Passwort (Re-Auth)" />
+          <button
+            onClick={doExport}
+            disabled={exportBusy || !exportPw}
+            className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40"
+          >
+            {exportBusy ? '…' : 'Bundle exportieren'}
+          </button>
+        </div>
+        {exportMsg && (
+          <p className={`text-xs ${exportMsg.kind === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{exportMsg.text}</p>
+        )}
+      </ActionCard>
+
+      {/* ── Import ─────────────────────────────────────────────────────── */}
+      <ActionCard title="Settings-Bundle einspielen">
+        <p className="text-xs text-slate-400">
+          1) Bundle auswählen → Preview lädt Manifest. 2) Interface-Mapping setzen, Kategorien wählen,
+          Passwort eingeben. 3) Anwenden — Stack-Restart wird im Anschluss empfohlen.
+        </p>
+
+        <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-center">
+          <input
+            type="file"
+            accept=".cysb,.tar.gz,application/gzip"
+            onChange={e => { setImportFile(e.target.files?.[0] ?? null); setPreview(null); }}
+            className="text-xs text-slate-400 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-slate-700 file:text-slate-200"
+          />
+          <button
+            disabled={!importFile || previewBusy}
+            onClick={doPreview}
+            className="px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-40"
+          >
+            {previewBusy ? '…' : 'Bundle prüfen'}
+          </button>
+        </div>
+
+        {/* Preview-Anzeige */}
+        {preview && (
+          <div className="mt-3 space-y-3 border-t border-slate-800 pt-3">
+            {/* Manifest-Header */}
+            <div className="text-xs text-slate-400 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-0.5">
+              <div>Quell-Host: <span className="text-slate-200 font-mono">{preview.manifest.source_hostname}</span></div>
+              <div>Quell-Version: <span className="text-slate-200 font-mono">{preview.manifest.source_version}</span></div>
+              <div>Erzeugt: <span className="text-slate-200">{new Date(preview.manifest.created_at * 1000).toLocaleString('de-DE')}</span></div>
+              <div>Ziel-Host: <span className="text-slate-200 font-mono">{preview.target.hostname}</span></div>
+            </div>
+
+            {/* Warnings — tri-level (info/warn/critical) */}
+            {preview.warnings.length > 0 && (
+              <div className="space-y-1.5">
+                {preview.warnings.map((w, i) => {
+                  const cls = w.level === 'critical'
+                    ? 'bg-red-900/30 border-red-700/60 text-red-200'
+                    : w.level === 'warn'
+                      ? 'bg-amber-900/30 border-amber-700/50 text-amber-200'
+                      : 'bg-sky-900/20 border-sky-700/40 text-sky-200';
+                  const icon = w.level === 'critical' ? '⛔' : w.level === 'warn' ? '⚠' : 'ℹ';
+                  return (
+                    <p key={i} className={`text-xs border rounded px-2 py-1 ${cls}`}>
+                      {icon} {w.text}
+                    </p>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Interface-Mapping */}
+            <div>
+              <div className="text-xs uppercase text-slate-500 mb-1">Interface-Mapping</div>
+              <p className="text-[11px] text-slate-500 mb-1.5">
+                Quell-Iface → Ziel-Iface. Nur physische Interfaces des Ziel-Hosts werden als Option angeboten.
+              </p>
+              <div className="space-y-2">
+                {(['MIRROR_INTERFACE', 'MANAGEMENT_INTERFACE'] as const).map(role => {
+                  const sourceName = preview.manifest.env_snapshot[role] || '(nicht gesetzt)';
+                  return (
+                    <div key={role} className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-2 items-center">
+                      <div className="text-xs text-slate-300">
+                        <span className="text-slate-500 text-[10px]">{role}</span><br />
+                        Quelle: <span className="font-mono">{sourceName}</span>
+                      </div>
+                      <span className="text-slate-500 text-xs">→</span>
+                      <select
+                        value={mapping[role] || ''}
+                        onChange={e => setMapping(m => ({ ...m, [role]: e.target.value }))}
+                        className="cyjan-input text-xs"
+                      >
+                        <option value="">— nicht setzen —</option>
+                        {preview.target.interfaces
+                          .filter(i => !i.is_virtual)
+                          .map(i => (
+                            <option key={i.name} value={i.name}>
+                              {i.name} ({i.operstate}, {i.mac || 'no-mac'})
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* MANAGEMENT_IP-Übernahme */}
+            <div>
+              <div className="text-xs uppercase text-slate-500 mb-1">Management-IP</div>
+              {sourceIp ? (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-slate-500">
+                    Quelle: <span className="font-mono text-slate-300">{sourceIp}</span> ·
+                    Ziel-IPs: <span className="font-mono text-slate-400">{targetIps.join(', ') || '–'}</span>
+                  </p>
+                  {sourceIpOnTarget ? (
+                    <label className="flex items-center gap-2 text-xs text-slate-300">
+                      <input type="checkbox" checked={takeIp} onChange={() => setTakeIp(v => !v)} />
+                      MANAGEMENT_IP übernehmen (<span className="font-mono">{sourceIp}</span> ist auf dem Ziel-Host konfiguriert — Taps bleiben ohne Eingriff online)
+                    </label>
+                  ) : (
+                    <p className="text-[11px] text-red-300">
+                      ⛔ Source-IP <span className="font-mono">{sourceIp}</span> ist auf dem Ziel-Host nicht gebunden.
+                      Übernahme deaktiviert — sonst wäre das API-Frontend auf einer nicht existenten IP gebunden.
+                      Erst die Hardware-IP über netplan/NetworkManager auf <span className="font-mono">{sourceIp}</span> setzen
+                      und Preview neu laden, dann erscheint die Checkbox.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-500">Quelle hatte keine explizite MANAGEMENT_IP (vermutlich 0.0.0.0-Bind) — nichts zu übernehmen.</p>
+              )}
+            </div>
+
+            {/* Kategorie-Auswahl */}
+            <div>
+              <div className="text-xs uppercase text-slate-500 mb-1">Was übernehmen</div>
+              <div className="space-y-1.5">
+                {MIGRATION_CATEGORIES.map(c => (
+                  <label key={c.key} className="flex items-center gap-2 text-xs text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={categories.has(c.key)}
+                      onChange={() => toggleCategory(c.key)}
+                    />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* DB-Diff */}
+            <div>
+              <div className="text-xs uppercase text-slate-500 mb-1">Datenbank-Diff</div>
+              <table className="w-full text-xs">
+                <thead className="cyjan-table-head">
+                  <tr>
+                    <th className="px-2 py-1 text-left">Tabelle</th>
+                    <th className="px-2 py-1 text-right">Ziel jetzt</th>
+                    <th className="px-2 py-1 text-right">Quelle</th>
+                    <th className="px-2 py-1 text-right">Nach Import</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.db_diff.map(d => (
+                    <tr key={d.table} className="border-b border-slate-800/50">
+                      <td className="px-2 py-1 text-slate-300 font-mono">{d.table}</td>
+                      <td className="px-2 py-1 text-right tabular-nums text-slate-500">{d.target_rows < 0 ? '—' : d.target_rows.toLocaleString('de-DE')}</td>
+                      <td className="px-2 py-1 text-right tabular-nums text-slate-400">{d.source_rows.toLocaleString('de-DE')}</td>
+                      <td className="px-2 py-1 text-right tabular-nums text-cyan-300">{d.after_import.toLocaleString('de-DE')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-slate-500 mt-1">Strategie: TRUNCATE + INSERT — die Quelle gewinnt.</p>
+            </div>
+
+            {/* Apply */}
+            <div className="border-t border-slate-800 pt-3">
+              <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-center">
+                <PasswordInput value={applyPw} onChange={setApplyPw} placeholder="Admin-Passwort (Re-Auth)" />
+                <button
+                  disabled={!applyPw || applyBusy || categories.size === 0}
+                  onClick={doApply}
+                  className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40"
+                >
+                  {applyBusy ? '…' : 'Anwenden (irreversibel)'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Apply-Result + Post-Apply-Aktionen */}
+        {applyResult && (
+          <div className={`mt-3 rounded p-3 text-xs ${applyResult.kind === 'ok' ? 'bg-green-900/30 border border-green-700/50 text-green-200' : 'bg-red-900/30 border border-red-700/50 text-red-200'}`}>
+            <p className="font-medium">{applyResult.text}</p>
+            {applyResult.kind === 'ok' && applyResult.details ? (
+              <>
+                <div className="mt-2 space-y-1">
+                  {((applyResult.details as { next_steps?: string[] }).next_steps ?? []).map((step, i) => (
+                    <p key={i} className="text-[11px] text-green-300/90">→ {step}</p>
+                  ))}
+                </div>
+                <PostApplyActions
+                  applyPassword={applyPw}
+                  requireRelogin={(applyResult.details as { require_relogin?: boolean }).require_relogin === true}
+                />
+              </>
+            ) : null}
+          </div>
+        )}
+      </ActionCard>
+    </div>
+  );
+}
+
+// Restart-/Reboot-Buttons + Countdown nach erfolgreichem Apply.
+function PostApplyActions({ applyPassword, requireRelogin }: { applyPassword: string; requireRelogin: boolean }) {
+  const [busy,  setBusy]  = useState<'restart' | 'reboot' | null>(null);
+  const [done,  setDone]  = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmReboot, setConfirmReboot] = useState(false);
+  const [rebootPw, setRebootPw] = useState(applyPassword);
+  // applyPassword wird beim doApply zurückgesetzt — wir cachen ihn lokal
+  // im Mount, damit der Reboot-Button nicht erneut nach dem PW fragt
+  // (Re-Auth innerhalb 60s nach Apply ist UX-mäßig vertretbar).
+
+  async function doRestart() {
+    setBusy('restart');
+    setError(null);
+    try {
+      await restartStackApi();
+      setDone('Stack-Restart gestartet — die Web-UI ist gleich für ~30 s nicht erreichbar.');
+      if (requireRelogin) {
+        setTimeout(() => { clearToken(); window.location.href = '/'; }, 5000);
+      }
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doReboot() {
+    if (!rebootPw) { setError('Passwort erforderlich'); return; }
+    setBusy('reboot');
+    setError(null);
+    try {
+      const res = await rebootHostApi(rebootPw);
+      setDone(`Host-Reboot in ${res.delay_seconds}s — der Host fährt jetzt runter und kommt frisch hoch.`);
+      // Nach 60s ist das System ohnehin weg. Wir leiten den User nach 5s schon
+      // auf die Login-Seite, damit er nicht in einer toten Session hängt.
+      setTimeout(() => { clearToken(); window.location.href = '/'; }, 5000);
+    } catch (e) {
+      setError(String((e as Error).message || e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (done) {
+    return (
+      <div className="mt-3 border-t border-green-700/40 pt-2">
+        <p className="text-[11px] text-green-300">{done}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 border-t border-green-700/40 pt-2 space-y-2">
+      <div className="text-[11px] text-slate-300">Jetzt aktiv abschließen:</div>
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={doRestart}
+          disabled={!!busy}
+          className="px-3 py-1.5 rounded text-xs font-medium bg-amber-700 hover:bg-amber-600 text-white disabled:opacity-40"
+        >
+          {busy === 'restart' ? '…' : 'Stack neu starten'}
+        </button>
+        {!confirmReboot ? (
+          <button
+            onClick={() => setConfirmReboot(true)}
+            disabled={!!busy}
+            className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40"
+          >
+            Host rebooten
+          </button>
+        ) : (
+          <div className="flex gap-2 items-center">
+            <PasswordInput value={rebootPw} onChange={setRebootPw} placeholder="Admin-Passwort" />
+            <button
+              onClick={doReboot}
+              disabled={!!busy || !rebootPw}
+              className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40"
+            >
+              {busy === 'reboot' ? '…' : 'Bestätigen (Reboot in 60s)'}
+            </button>
+            <button
+              onClick={() => { setConfirmReboot(false); setRebootPw(''); }}
+              className="text-[11px] text-slate-400 hover:text-slate-200 underline"
+            >
+              Abbrechen
+            </button>
+          </div>
+        )}
+      </div>
+      <p className="text-[11px] text-slate-500 leading-relaxed">
+        Stack-Restart reicht meist (Compose-Restart aller Services, ~30s Downtime). Host-Reboot ist
+        gründlicher (volle Kernel-Reset, Netzwerk-Bind sauber re-applied) und empfohlen, wenn .env-
+        Werte wie MANAGEMENT_IP oder MIRROR_INTERFACE geändert wurden.
+      </p>
+      {error && <p className="text-[11px] text-red-300">⛔ {error}</p>}
+    </div>
   );
 }
 
@@ -7669,7 +8119,7 @@ function DnsResolverSettings() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'notifications' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'notifications' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'migration' | 'egress-priorities' | 'remote-taps' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -7724,6 +8174,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'update',         icon: <Upload    {...ICON_PROPS} /> },
       { id: 'geoip',          icon: <Globe     {...ICON_PROPS} /> },
       { id: 'db-maintenance', icon: <HardDrive {...ICON_PROPS} /> },
+      { id: 'migration',      icon: <Server    {...ICON_PROPS} /> },
     ],
   },
   {
@@ -7905,6 +8356,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
             {active === 'rules-overrides' && <RuleOverridesSettings />}
             {active === 'system-health'  && <SystemHealth />}
             {active === 'db-maintenance' && <DatabaseMaintenance />}
+            {active === 'migration'      && <MigrationSettings />}
             {active === 'interfaces'    && <NetworkInterfaces />}
             {active === 'dns-resolvers' && <DnsResolverSettings />}
             {active === 'egress-priorities' && <EgressPrioritySettings />}

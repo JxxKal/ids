@@ -1,0 +1,14 @@
+[Unit]
+Description=Cyjan IDS – Schreibt aktuelle Host-NIC-Liste nach /etc/cyjan/host-interfaces.json
+Documentation=https://github.com/JxxKal/ids
+ConditionPathExists=/usr/local/bin/cyjan-host-interfaces
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cyjan-host-interfaces
+StandardOutput=journal
+StandardError=journal
+# Read-only filesystem mit nur /etc/cyjan + /tmp + /opt/ids writeable würde
+# noisier Apparmor-Setups erzeugen. Skript ist kurz und gut auditierbar,
+# wir geben default-Privilegien.
+TimeoutStartSec=15

@@ -1,0 +1,14 @@
+[Unit]
+Description=Cyjan IDS – Minütlicher Refresh der Host-NIC-Liste
+Documentation=https://github.com/JxxKal/ids
+
+[Timer]
+# 60 s ist Lag-Fenster für GUI-Iface-Mapping. Schneller bringt nichts:
+# Migration ist ein seltener Vorgang, und nur die Iface-Liste muss
+# aktuell sein — IP-Adressen ändern sich selten.
+OnBootSec=10s
+OnUnitActiveSec=60s
+Unit=cyjan-host-interfaces.service
+
+[Install]
+WantedBy=timers.target

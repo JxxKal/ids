@@ -578,6 +578,10 @@ jobs:
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-disk-watch.service "$PKG/scripts/cyjan-tap-disk-watch.service"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-disk-watch.timer   "$PKG/scripts/cyjan-tap-disk-watch.timer"
           cp distro/config/includes.chroot/etc/tmpfiles.d/cyjan-update.conf              "$PKG/scripts/cyjan-update.tmpfiles"
+          # Host-Interface-Snapshot für Settings-Migration (v2.5.9+)
+          cp distro/config/includes.chroot/usr/local/bin/cyjan-host-interfaces             "$PKG/scripts/cyjan-host-interfaces"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-host-interfaces.service "$PKG/scripts/cyjan-host-interfaces.service"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-host-interfaces.timer   "$PKG/scripts/cyjan-host-interfaces.timer"
           # cyjan-tap CLI selbst — wird vom CLI-Update-Pfad nicht selbst
           # ersetzt (Self-Replace eines laufenden Skripts ist heikel).
           # User kann sie nach einem Update manuell mit
@@ -586,7 +590,7 @@ jobs:
           # Bundles parat.
           cp distro/config/includes.chroot/usr/local/bin/cyjan-tap                      "$PKG/scripts/cyjan-tap"
           cp scripts/post-update.sh "$PKG/scripts/post-update.sh"
-          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap"
+          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces"
 
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.
@@ -616,6 +620,9 @@ jobs:
           cp "$PKG/scripts/cyjan-tap-disk-watch.timer"   "$PKG/tap-update/scripts/cyjan-tap-disk-watch.timer"
           cp "$PKG/scripts/cyjan-update.tmpfiles"      "$PKG/tap-update/scripts/cyjan-update.tmpfiles"
           cp "$PKG/scripts/cyjan-tap"                  "$PKG/tap-update/scripts/cyjan-tap"
+          cp "$PKG/scripts/cyjan-host-interfaces"         "$PKG/tap-update/scripts/cyjan-host-interfaces"
+          cp "$PKG/scripts/cyjan-host-interfaces.service" "$PKG/tap-update/scripts/cyjan-host-interfaces.service"
+          cp "$PKG/scripts/cyjan-host-interfaces.timer"   "$PKG/tap-update/scripts/cyjan-host-interfaces.timer"
 
           BUNDLE_SHA=$(sha256sum "$PKG/tap-update/images-tap.tar.zst" | awk '{print $1}')
           BUNDLE_SIZE=$(stat -c%s "$PKG/tap-update/images-tap.tar.zst")

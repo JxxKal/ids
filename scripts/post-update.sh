@@ -171,6 +171,30 @@ if [ -f /etc/systemd/system/cyjan-tap-update.path ]; then
   echo "[post-update] cyjan-tap-update.path aktiviert (lauscht auf /run/cyjan-update/trigger)."
 fi
 
+# ── 4.5) cyjan-host-interfaces (NIC-Liste für Settings-Migration) ────────
+# Schreibt /etc/cyjan/host-interfaces.json minütlich. Der api-Container
+# mountet /etc/cyjan readonly und liest dort die echten Host-NICs für den
+# Migration-Preview. Greift auf Master + Tap symmetrisch — am Tap ist es
+# vorerst no-op, aber harmlos.
+HIF_BIN_SRC="$(locate_src cyjan-host-interfaces           usr/local/bin)"
+HIF_SVC_SRC="$(locate_src cyjan-host-interfaces.service   etc/systemd/system)"
+HIF_TMR_SRC="$(locate_src cyjan-host-interfaces.timer     etc/systemd/system)"
+if [ -n "$HIF_BIN_SRC" ] && [ -n "$HIF_SVC_SRC" ] && [ -n "$HIF_TMR_SRC" ]; then
+  install -m 0755 "$HIF_BIN_SRC" /usr/local/bin/cyjan-host-interfaces
+  install -m 0644 "$HIF_SVC_SRC" /etc/systemd/system/cyjan-host-interfaces.service
+  install -m 0644 "$HIF_TMR_SRC" /etc/systemd/system/cyjan-host-interfaces.timer
+  mkdir -p /etc/cyjan
+  # Initial-Run einmalig, damit das File schon da ist wenn die api-
+  # Container das erste Mal startet (sonst zeigt das Frontend "Iface-Liste
+  # nicht verfügbar" bis der erste Timer-Tick durch ist).
+  /usr/local/bin/cyjan-host-interfaces || true
+  systemctl daemon-reload
+  systemctl enable --now cyjan-host-interfaces.timer
+  echo "[post-update] cyjan-host-interfaces installiert + Timer aktiviert (minütlicher NIC-Snapshot)."
+else
+  echo "[post-update] WARNUNG: cyjan-host-interfaces-Quellen nicht gefunden — Settings-Migration-Preview ohne Iface-Liste."
+fi
+
 # ── 5) Tap-Disk-Watch (Auto-Prune bei >85% Disk) ─────────────────────────
 # Greift nur auf Tap-Hosts (Master-Hosts hat das cyjan-tap-CLI nicht;
 # der Service wird also dort installiert aber nie effektiv).

@@ -162,7 +162,7 @@ async def syslog_forwarder_loop(pool_getter) -> None:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     """
-                    SELECT id, rule_id, severity, src_ip, dst_ip, description, ts
+                    SELECT alert_id, rule_id, severity, src_ip, dst_ip, description, ts
                     FROM alerts
                     WHERE ts > $1 AND is_test = false
                     ORDER BY ts ASC
@@ -176,7 +176,11 @@ async def syslog_forwarder_loop(pool_getter) -> None:
                 if _SEV_IDX.get(r["severity"], 0) < min_idx:
                     continue
                 alert = dict(r)
-                alert["id"] = str(alert["id"])
+                # _format() erwartet den UI-Key "id" — die DB-Spalte heißt
+                # alert_id. asyncpg liefert INET-Spalten als ip_address-
+                # Objekte, die in f-Strings als String konvertiert werden;
+                # für UUID erzwingen wir str() weil _format() das nicht tut.
+                alert["id"] = str(alert.pop("alert_id"))
                 try:
                     data = _format(alert, cfg.format)
                     _send(cfg.host, cfg.port, cfg.protocol, data)
@@ -191,4 +195,7 @@ async def syslog_forwarder_loop(pool_getter) -> None:
                 log.info("Syslog: %d Alerts weitergeleitet an %s:%d", sent, cfg.host, cfg.port)
 
         except Exception as e:
-            log.debug("Syslog forwarder loop error: %s", e)
+            # Vorher log.debug — bei Pfad-Bugs (z.B. defekte SQL-Query) war
+            # damit nicht sichtbar warum keine Alerts ankamen. Bug 2026-05-20
+            # mit SELECT id FROM alerts hat 30s lang silent gefailt.
+            log.exception("Syslog forwarder loop error: %s", e)

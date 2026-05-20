@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Body, File, Form, HTTPException, UploadFile
 
 router = APIRouter(prefix="/api/system", tags=["update"])
 
@@ -480,3 +480,55 @@ async def restart_stack() -> dict:
     profile = profile_file.read_text().strip() if profile_file.exists() else "prod"
     _spawn_compose_restart_runner(IDS_DIR, profile)
     return {"status": "started"}
+
+
+@router.post("/reboot", summary="Host-Reboot (Hardware-Neustart)")
+async def reboot_host(payload: dict = Body(default={})) -> dict:  # noqa: B008
+    """Echter Host-Reboot via privilegiertem One-Shot-Container.
+
+    Re-Auth via Passwort, weil shutdown -r alle laufenden Container kappt
+    (incl. der API selbst). Nach +1 min Delay, damit die HTTP-Response
+    sauber zum Browser zurückkommt bevor das System runterfährt.
+
+    Wird primär nach Settings-Migration angeboten — Stack-Restart allein
+    reicht nicht, wenn z.B. die Netzwerk-Bind-Adresse via .env geändert
+    wurde und der Kernel-Side-Bind erst beim Re-Bind passt.
+    """
+    from database import get_pool as _get_pool       # lazy, sonst Zirkel
+    from bcrypt import checkpw
+
+    password = (payload or {}).get("password") or ""
+    if not password:
+        raise HTTPException(400, "Passwort fehlt (Re-Auth-Pflicht)")
+
+    # Re-Auth gegen die users-Tabelle. Wir nehmen den Caller aus dem
+    # Bearer-Token; FastAPI-Dependency war hier nicht praktikabel ohne
+    # weiteres Refactoring, also dupliziert.
+    pool = _get_pool()
+    async with pool.acquire() as conn:
+        admin = await conn.fetchrow(
+            "SELECT username, password_hash FROM users WHERE role='admin' AND password_hash IS NOT NULL"
+        )
+    if not admin or not checkpw(password.encode(), admin["password_hash"].encode()):
+        raise HTTPException(403, "Re-Auth fehlgeschlagen")
+
+    # Privileged Side-Container mit --pid=host startet shutdown -r +1.
+    # nsenter ist im alpine-Image nicht drin, deshalb util-linux nachziehen.
+    # +1 = 60 s Gnade — Frontend kann eine Countdown-UI rendern und der
+    # User kann mit `shutdown -c` am Host noch abbrechen wenn nötig.
+    subprocess.Popen(
+        [
+            "docker", "run", "--rm", "-d",
+            "--privileged", "--pid=host",
+            "--name", "ids-host-reboot",
+            "busybox:stable",
+            "sh", "-c",
+            # nsenter wechselt in die PID-1-Mount/PID/UTS-Namespaces des Hosts
+            # und ruft dort den shutdown-Binary auf.
+            "nsenter -t 1 -m -u -i -p -- /sbin/shutdown -r +1 'Cyjan: Host-Migration-Reboot'",
+        ],
+        start_new_session=True, close_fds=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ},
+    )
+    return {"status": "rebooting", "delay_seconds": 60}

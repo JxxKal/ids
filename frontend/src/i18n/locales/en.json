@@ -574,6 +574,7 @@
       "syslog": "Syslog / SIEM",
       "update": "System update",
       "db-maintenance": "Database",
+      "migration": "Host migration",
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "mqtt": "MQTT bridge",

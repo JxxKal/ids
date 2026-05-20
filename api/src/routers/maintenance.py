@@ -47,6 +47,11 @@ TABLES_WITH_TS = {
 }
 TABLES_NO_TS = ["host_info", "known_networks", "users", "system_config"]
 
+# Hypertables: COUNT(*) ist ein Full-Scan und kann bei Millionen Rows minutenlang
+# laufen → 504-Timeout im nginx-Proxy. Für die Übersicht reicht der TimescaleDB-
+# Approximator (basiert auf reltuples/Chunk-Statistik, ±1 % genau).
+HYPERTABLES = {"alerts", "flows", "test_runs"}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -119,7 +124,19 @@ async def db_stats(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
         tables = []
         for name in list(TABLES_WITH_TS.keys()) + TABLES_NO_TS:
             try:
-                cnt = await conn.fetchval(f"SELECT COUNT(*) FROM {name}")
+                if name in HYPERTABLES:
+                    cnt = await conn.fetchval(
+                        "SELECT approximate_row_count($1::regclass)", name,
+                    )
+                    # Fallback wenn approximate_row_count fehlt (alte TS-Version)
+                    # oder die Tabelle (noch) keine Statistik hat
+                    if cnt is None:
+                        cnt = await conn.fetchval(
+                            "SELECT reltuples::bigint FROM pg_class WHERE oid = $1::regclass",
+                            name,
+                        )
+                else:
+                    cnt = await conn.fetchval(f"SELECT COUNT(*) FROM {name}")
             except Exception:
                 continue
             try:

@@ -501,6 +501,13 @@ services:
       # (operstate=unknown, mac="", addresses=[]).
       - /sys:/host/sys:ro
       - /proc:/host/proc:ro
+      # Settings-Migration: cyjan-host-interfaces.timer schreibt die echten
+      # Host-NICs alle 60s in /etc/cyjan/host-interfaces.json. Im
+      # api-Container nur readonly, weil die Container-netns die Host-NICs
+      # nicht selbst sehen kann. Bind-Mount auf das Verzeichnis (nicht das
+      # File) — sonst legt Docker einen leeren Ordner an, wenn das File
+      # beim ersten Boot noch nicht existiert.
+      - /etc/cyjan:/etc/cyjan:ro
     ports:
       - "${MANAGEMENT_IP:-0.0.0.0}:${API_PORT:-8001}:8000"
     # Healthcheck deckt das gesamte FastAPI-startup() ab — inkl. CA-Init,

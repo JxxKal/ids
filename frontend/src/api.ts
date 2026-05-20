@@ -1194,6 +1194,14 @@ export async function restartStack(): Promise<{ status: string }> {
   return req('/api/system/restart', { method: 'POST' });
 }
 
+export async function rebootHost(password: string): Promise<{ status: string; delay_seconds: number }> {
+  if (isDemoMode()) return { status: 'rebooting', delay_seconds: 60 };
+  return req('/api/system/reboot', {
+    method: 'POST',
+    body:   JSON.stringify({ password }),
+  });
+}
+
 export async function getInterfaces(): Promise<import('./types').InterfaceInfo[]> {
   if (isDemoMode()) return [
     { name: 'eth0', role: 'management', operstate: 'up', addresses: ['192.168.1.100/24'], mac: '00:11:22:33:44:55' },
@@ -2148,4 +2156,138 @@ export async function fetchNotificationDeliveries(
   const qs = new URLSearchParams({ limit: String(limit) });
   if (channelId) qs.set('channel_id', channelId);
   return await req<import("./types").NotificationDelivery[]>(`/api/notifications/deliveries?${qs}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Settings-Migration (Export/Import zwischen Hosts)
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface MigrationInterfaceInfo {
+  name:       string;
+  mac:        string;
+  operstate:  string;
+  is_up:      boolean;
+  mtu:        number;
+  addresses:  string[];
+  kind:       string;
+  is_virtual: boolean;
+}
+
+export interface MigrationWarning {
+  level: 'info' | 'warn' | 'critical';
+  text:  string;
+}
+
+export interface MigrationPreview {
+  manifest: {
+    schema_version:  number;
+    source_hostname: string;
+    source_version:  string;
+    created_at:      number;
+    created_by:      string;
+    tables:          Array<{ name: string; rows: number }>;
+    includes:        Record<string, boolean>;
+    env_snapshot: {
+      MIRROR_INTERFACE?:     string | null;
+      MANAGEMENT_INTERFACE?: string | null;
+      MANAGEMENT_IP?:        string | null;
+    };
+    host_interfaces?: {
+      hostname:   string;
+      interfaces: MigrationInterfaceInfo[];
+    } | null;
+  };
+  target: {
+    hostname:           string;
+    interfaces:         MigrationInterfaceInfo[];
+    mirror_interface:   string | null;
+    mgmt_interface:     string | null;
+    all_addresses:      string[];
+  };
+  mapping_suggestion:  Record<string, string>;
+  bundle_local_admins: string[];
+  db_diff: Array<{
+    table:        string;
+    source_rows:  number;
+    target_rows:  number;
+    after_import: number;
+  }>;
+  warnings: MigrationWarning[];
+}
+
+export interface MigrationApplyResult {
+  success:         boolean;
+  duration_ms:     number;
+  details:         Record<string, unknown>;
+  next_steps:      string[];
+  require_relogin: boolean;
+}
+
+export async function migrationExport(password: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/migration/export`, {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`${res.status}: ${txt}`);
+  }
+  // Filename aus Content-Disposition pflücken — sonst fallback
+  const cd = res.headers.get('Content-Disposition') || '';
+  const match = /filename="([^"]+)"/.exec(cd);
+  const filename = match ? match[1] : `cyjan-settings-${Date.now()}.cysb`;
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function migrationPreview(file: File): Promise<MigrationPreview> {
+  const fd = new FormData();
+  fd.append('bundle', file);
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/migration/preview`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`${res.status}: ${txt}`);
+  }
+  return res.json();
+}
+
+export async function migrationApply(
+  file:       File,
+  password:   string,
+  mapping:    Record<string, string>,
+  categories: string[],
+): Promise<MigrationApplyResult> {
+  const fd = new FormData();
+  fd.append('bundle',     file);
+  fd.append('password',   password);
+  fd.append('mapping',    JSON.stringify(mapping));
+  fd.append('categories', categories.join(','));
+  const token = getToken();
+  const res = await fetch(`${BASE}/api/migration/apply`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`${res.status}: ${txt}`);
+  }
+  return res.json();
 }
