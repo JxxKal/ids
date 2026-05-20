@@ -584,6 +584,8 @@ jobs:
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-host-interfaces.timer   "$PKG/scripts/cyjan-host-interfaces.timer"
           # Console-Updater (v2.5.10+)
           cp distro/config/includes.chroot/usr/local/bin/cyjan-update                       "$PKG/scripts/cyjan-update"
+          # MOTD-Banner (v2.5.14+ — Banner-Updates für Bestands-Hosts via post-update.sh)
+          cp distro/config/includes.chroot/etc/profile.d/ids-banner.sh                      "$PKG/scripts/ids-banner.sh"
           # cyjan-tap CLI selbst — wird vom CLI-Update-Pfad nicht selbst
           # ersetzt (Self-Replace eines laufenden Skripts ist heikel).
           # User kann sie nach einem Update manuell mit

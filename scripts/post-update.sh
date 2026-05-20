@@ -171,6 +171,17 @@ if [ -f /etc/systemd/system/cyjan-tap-update.path ]; then
   echo "[post-update] cyjan-tap-update.path aktiviert (lauscht auf /run/cyjan-update/trigger)."
 fi
 
+# ── 4.3) ids-banner.sh (Login-MOTD) ─────────────────────────────────────
+# Bislang nur im frischen ISO eingebacken. Wenn neue Subkommandos
+# (cyjan-update, neue Tap-Commands etc.) im Banner stehen, soll das auch
+# auf Bestands-Hosts ankommen — sonst sieht der User beim SSH-Login
+# weiter den Stand seiner Erst-Installation.
+BANNER_SRC="$(locate_src ids-banner.sh etc/profile.d)"
+if [ -n "$BANNER_SRC" ]; then
+  install -m 0644 "$BANNER_SRC" /etc/profile.d/ids-banner.sh
+  echo "[post-update] /etc/profile.d/ids-banner.sh aktualisiert."
+fi
+
 # ── 4.4) cyjan-update (Console-Updater für den Master) ──────────────────
 # Bringt v2.5.10+ am Master einen klickfreien Update-Pfad: SSH rein →
 # cyjan-update apply → fertig. Funktioniert symmetrisch zu cyjan-tap.
