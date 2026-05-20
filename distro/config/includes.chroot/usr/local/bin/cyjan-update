@@ -137,9 +137,12 @@ cmd_apply() {
   fi
 
   # ── ZIP entpacken (Sources + images.tar.zst nach /tmp) ────────────────────
-  local stage
+  # stage bewusst NICHT local — der EXIT-Trap läuft im globalen Scope und
+  # würde sonst nach Funktionsende auf eine unset-Variable greifen (set -u
+  # → "stage ist nicht gesetzt"). ${stage:-} im Trap ist die zweite Bremse,
+  # falls jemand das später doch auf local umstellt.
   stage=$(mktemp -d --suffix=.cyjan-update)
-  trap 'rm -rf "$stage"' EXIT
+  trap 'rm -rf "${stage:-}"' EXIT
   echo "$TAG Entpacke nach $stage …"
   unzip -q "$zip_path" -d "$stage"
   # CI-Build legt einen Wrapper-Subdir cyjan-ids-update-<tag>/ an. Wenn
