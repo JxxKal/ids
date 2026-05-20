@@ -142,7 +142,20 @@ cmd_apply() {
   trap 'rm -rf "$stage"' EXIT
   echo "$TAG Entpacke nach $stage …"
   unzip -q "$zip_path" -d "$stage"
-  [ -r "$stage/images.tar.zst" ] || { echo "$TAG images.tar.zst fehlt im ZIP"; exit 1; }
+  # CI-Build legt einen Wrapper-Subdir cyjan-ids-update-<tag>/ an. Wenn
+  # images.tar.zst nicht im Stage-Root liegt, suchen wir den einzigen
+  # Subdir und schalten den Stage-Pfad darauf um.
+  if [ ! -r "$stage/images.tar.zst" ]; then
+    local inner
+    inner=$(find "$stage" -mindepth 1 -maxdepth 1 -type d | head -1)
+    if [ -n "$inner" ] && [ -r "$inner/images.tar.zst" ]; then
+      echo "$TAG ZIP hat Wrapper-Subdir, nutze $inner"
+      stage="$inner"
+    else
+      echo "$TAG images.tar.zst fehlt im ZIP" >&2
+      exit 1
+    fi
+  fi
 
   # ── Sources nach /opt/ids syncen ──────────────────────────────────────────
   # Wenn /opt/ids ein git-Repo ist UND clean ist: bevorzugt git pull (sauberere
