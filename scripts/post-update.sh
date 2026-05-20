@@ -171,6 +171,15 @@ if [ -f /etc/systemd/system/cyjan-tap-update.path ]; then
   echo "[post-update] cyjan-tap-update.path aktiviert (lauscht auf /run/cyjan-update/trigger)."
 fi
 
+# ── 4.4) cyjan-update (Console-Updater für den Master) ──────────────────
+# Bringt v2.5.10+ am Master einen klickfreien Update-Pfad: SSH rein →
+# cyjan-update apply → fertig. Funktioniert symmetrisch zu cyjan-tap.
+CYJUP_SRC="$(locate_src cyjan-update usr/local/bin)"
+if [ -n "$CYJUP_SRC" ]; then
+  install -m 0755 "$CYJUP_SRC" /usr/local/bin/cyjan-update
+  echo "[post-update] cyjan-update installiert (Console-Updater)."
+fi
+
 # ── 4.5) cyjan-host-interfaces (NIC-Liste für Settings-Migration) ────────
 # Schreibt /etc/cyjan/host-interfaces.json minütlich. Der api-Container
 # mountet /etc/cyjan readonly und liest dort die echten Host-NICs für den

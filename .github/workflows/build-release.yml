@@ -582,6 +582,8 @@ jobs:
           cp distro/config/includes.chroot/usr/local/bin/cyjan-host-interfaces             "$PKG/scripts/cyjan-host-interfaces"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-host-interfaces.service "$PKG/scripts/cyjan-host-interfaces.service"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-host-interfaces.timer   "$PKG/scripts/cyjan-host-interfaces.timer"
+          # Console-Updater (v2.5.10+)
+          cp distro/config/includes.chroot/usr/local/bin/cyjan-update                       "$PKG/scripts/cyjan-update"
           # cyjan-tap CLI selbst — wird vom CLI-Update-Pfad nicht selbst
           # ersetzt (Self-Replace eines laufenden Skripts ist heikel).
           # User kann sie nach einem Update manuell mit
@@ -590,7 +592,7 @@ jobs:
           # Bundles parat.
           cp distro/config/includes.chroot/usr/local/bin/cyjan-tap                      "$PKG/scripts/cyjan-tap"
           cp scripts/post-update.sh "$PKG/scripts/post-update.sh"
-          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces"
+          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces" "$PKG/scripts/cyjan-update"
 
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.
