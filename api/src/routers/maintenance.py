@@ -59,8 +59,13 @@ HYPERTABLES = {"alerts", "flows", "test_runs"}
 
 async def _verify_password(pool: asyncpg.Pool, user_payload: dict, password: str) -> None:
     """Re-Auth: überprüft das Passwort des eingeloggten Users. Raised 403
-    bei Nicht-Übereinstimmung."""
-    username = user_payload.get("sub") or user_payload.get("username")
+    bei Nicht-Übereinstimmung.
+
+    JWT-Payload trägt "sub"=user_id(UUID) und "username"=<name> separat.
+    Früher las dieser Code zuerst "sub", was die UUID als Username gegen die
+    Datenbank prüfte und immer 403 'Re-Auth fehlgeschlagen' lieferte.
+    """
+    username = user_payload.get("username") or user_payload.get("sub")
     if not username:
         raise HTTPException(401, "Ungültiger Token")
     async with pool.acquire() as conn:

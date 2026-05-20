@@ -92,8 +92,13 @@ CATEGORIES = ("db", "sig_rules", "master_ca", "ml_config")
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def _verify_password(pool: asyncpg.Pool, user_payload: dict, password: str) -> None:
-    """Re-Auth (analog maintenance.py)."""
-    username = user_payload.get("sub") or user_payload.get("username")
+    """Re-Auth (analog maintenance.py).
+
+    JWT-Payload enthält "sub"=user_id(UUID) und "username"="<name>" — separat!
+    Frühere Versionen lookupten gegen "sub" was zu 403 'Re-Auth fehlgeschlagen'
+    führte, weil 'WHERE username=<UUID>' immer leer war.
+    """
+    username = user_payload.get("username") or user_payload.get("sub")
     if not username:
         raise HTTPException(401, "Ungültiger Token")
     async with pool.acquire() as conn:
