@@ -19,17 +19,30 @@ Dieses Repository (VS Code, macOS) ist die **Source of Truth** und wird auf GitH
 1. **Lokal editieren** in VS Code.
 2. **Committen & pushen** (GitHub MCP oder `git push`) — der Push ist gleichzeitig das Deployment-Signal.
 3. **Hosts aktualisieren** via SSH (`ssh-manager` MCP oder direktes SSH; Master/Tap brauchen `sudo` vor jedem `docker`-Befehl):
+
+   **Master (Dev/192.168.1.230, lokaler Build möglich):**
    ```bash
    cd /opt/ids && git pull
    docker compose --profile prod build <geänderter-service>   # nur die betroffenen Services
    docker compose --profile prod up -d
    ```
-   Auf dem Tap stattdessen:
+
+   **Master (Produktiv/192.168.1.81, kein lokaler Build wegen Offline-Konfig):**
    ```bash
+   sudo cyjan-update apply              # latest GitHub-Release pullen + applien
+   sudo cyjan-update apply v2.5.12      # spezifische Version
+   ```
+   Pull-basiert über System-Proxy aus `/etc/environment`, `docker load` aus dem `images.tar.zst` im Release-ZIP. Kein lokaler Build. Bei erst-Bootstrap (ohne `cyjan-update` installiert): siehe README-Section "System-Update → manueller Pfad C".
+
+   **Tap (192.168.1.95):**
+   ```bash
+   sudo cyjan-tap update --from-master  # bevorzugt: Reverse-Pull vom gepairten Master
+   # oder manuell wenn nicht gepairt:
    cd /opt/ids && git pull
    docker compose -f docker-compose.tap.yml build <service>
    docker compose -f docker-compose.tap.yml up -d
    ```
+
    - Bei Frontend-Änderungen: nur `frontend` neu bauen.
    - Bei API-Änderungen: nur `api` neu bauen.
    - Bei Heuristik-Rule-Änderungen: nur `signature-engine` neu bauen — Custom-YAMLs + `_overrides.json` werden zur Laufzeit hot-reloaded und gehen automatisch per Reverse-Channel auch auf alle gepairten Taps.

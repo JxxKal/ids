@@ -155,11 +155,20 @@ Der **First-Boot-Wizard** (`ids-setup`) führt durch:
 Nach dem Setup:
 
 ```bash
-# System aktualisieren (git pull + docker compose build + up)
-sudo ids-update
+# System aktualisieren — pull-basiert aus GitHub-Releases (kein lokaler Build)
+cyjan-update              # zeigt Ist-Version + Latest-Release
+sudo cyjan-update apply   # latest aus GitHub ziehen + applien
+# Spezifische Version:
+sudo cyjan-update apply v2.5.12
+# Air-Gap (ZIP vom Laptop kopiert):
+sudo cyjan-update apply --from-zip /pfad/cyjan-ids-update-vX.Y.Z.zip
 
 # Konfiguration erneut aufrufen
 sudo ids-setup
+
+# Alt: git-pull + lokaler Docker-Build (nur sinnvoll auf Dev-Hosts mit
+# vollem GitHub-Zugriff, nicht auf Customer-Offline-Boxen)
+sudo ids-update
 ```
 
 ### Option B – Manuell (Docker Compose)
@@ -532,18 +541,33 @@ Synchronisation mit iTop IP-Management (TeemIP-Extension):
 
 #### System-Update
 
-Offline-Update via ZIP-Upload direkt aus dem Dashboard:
+Drei Wege, gleicher Bundle-Inhalt:
+
+**A) `cyjan-update` (Console, empfohlen für SSH-Workflow, seit v2.5.10):**
+
+```bash
+cyjan-update                    # Status (Ist-Version + Latest aus GitHub)
+sudo cyjan-update apply         # Latest-Release pullen + applien
+sudo cyjan-update apply v2.5.12 # Spezifische Version
+sudo cyjan-update apply --from-zip /pfad/cyjan-ids-update-vX.Y.Z.zip   # Air-Gap
+```
+
+Pulled das Release-ZIP über den System-Proxy (`/etc/environment`), `zstd | docker load`, Source-Sync per `git pull` (wenn clean) oder rsync, ruft `post-update.sh`, `docker compose up -d --force-recreate`.
+
+**B) GUI: Settings → System-Update (für Customer ohne Console-Zugriff):**
 
 1. Release-ZIP von GitHub herunterladen (enthält `images.tar.zst` + aktuelle DB-IP-Lite-GeoIP-Files + `tap-update/`-Bundle für gepairte Taps)
 2. In Settings → System-Update hochladen
 3. Fortschrittsbalken (0–100%) und Live-Log verfolgen
 4. Nach ~20 Sekunden Seite neu laden
 
-**Ablauf:**
+**C) `sudo ids-update` (nur Dev-Hosts mit Internet + Build-Kapazität): `git pull` + lokaler `docker compose build`.**
+
+**Ablauf hinter A/B:**
 - ZIP wird entpackt (`.env` und `.git` bleiben erhalten); GeoIP-`.mmdb`-Files landen in `/opt/ids/geoip/`, `tap-update/`-Inhalt für Pro-Tap-Push wird gestaged
 - `docker load` lädt vorgebaute Images
 - Unabhängiger Runner-Container startet `docker compose up -d --force-recreate` (überlebt api-Neustart, enrichment-service zieht die frischen GeoIP-DBs automatisch)
-- `scripts/post-update.sh` läuft idempotent durch: `daemon.json`, `cyjan-maintenance.{service,timer}`, `cyjan-mirror-tune.service`, `cyjan-tap-update.{path,service}` werden installiert/aktualisiert. Auf Bestandsystemen: `sudo bash /opt/ids/scripts/post-update.sh` einmalig nachziehen.
+- `scripts/post-update.sh` läuft idempotent durch: `daemon.json`, `cyjan-maintenance.{service,timer}`, `cyjan-mirror-tune.service`, `cyjan-tap-update.{path,service}`, `cyjan-host-interfaces.{service,timer}` und `cyjan-update` selbst werden installiert/aktualisiert. Auf Bestandsystemen: `sudo bash /opt/ids/scripts/post-update.sh` einmalig nachziehen.
 
 #### PCAP-Retention
 

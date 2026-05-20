@@ -137,8 +137,9 @@ else
   printf "  ║  API / Swagger: http://%-22s║\n" "${IP}:8001/api/docs"
   printf "  ║  Dienste:       %-3s / %-3s laufen           ║\n" "$RUNNING" "$TOTAL"
   echo "  ╠══════════════════════════════════════════════╣"
-  echo "  ║  ids-update   – System aktualisieren         ║"
-  echo "  ║  ids-setup    – Konfiguration ändern         ║"
+  echo "  ║  cyjan-update         – Status: Ist/Latest   ║"
+  echo "  ║  sudo cyjan-update apply – Update einspielen ║"
+  echo "  ║  sudo ids-setup       – Konfiguration ändern ║"
   echo "  ╚══════════════════════════════════════════════╝"
 fi
 echo ""
