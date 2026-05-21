@@ -699,7 +699,21 @@ async def apply_bundle(
 # ─── Apply-Helpers ─────────────────────────────────────────────────────────
 
 async def _apply_db(pool: asyncpg.Pool, tar: tarfile.TarFile) -> dict:
-    """TRUNCATE + INSERT für alle Tabellen, die im Bundle vorhanden sind."""
+    """TRUNCATE + INSERT für alle Tabellen, die im Bundle vorhanden sind.
+
+    WICHTIG (v2.5.21-Hotfix): jeder TRUNCATE und jeder Row-INSERT läuft in
+    einem Savepoint (`async with conn.transaction()` innerhalb der äußeren
+    Transaction). Sonst genügt ein einziger Fehler (Spalte unbekannt, FK-
+    Violation, CHECK-Constraint), und Postgres versetzt die Outer-Transaction
+    in 'aborted'-State — alle nachfolgenden Statements werden silent
+    rejected, am Ende COMMIT degeneriert zu ROLLBACK. Resultat: TRUNCATE
+    war ausgeführt, INSERTs wurden komplett rückgängig gemacht → users-
+    Tabelle leer, Login unmöglich, trotz Apply-Response 'imported'.
+
+    Mit Savepoints isoliert jeder einzelne Statement-Fehler, die übergeordnete
+    Transaction bleibt intakt. Failed-Counter wird im details-Dict mitgeführt
+    damit der Caller die echte Erfolgsquote sieht.
+    """
     details: dict[str, Any] = {}
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -708,12 +722,14 @@ async def _apply_db(pool: asyncpg.Pool, tar: tarfile.TarFile) -> dict:
             # erst die Kinder truncaten, sonst meckert CASCADE-Restrict.
             for tbl in reversed(SETTINGS_TABLES):
                 try:
-                    await conn.execute(f"TRUNCATE TABLE {tbl} CASCADE")
+                    async with conn.transaction():
+                        await conn.execute(f"TRUNCATE TABLE {tbl} CASCADE")
                 except Exception as exc:
                     # Tabelle existiert ggf. nicht (z.B. redteam_scenarios
                     # in einer Lite-Install) — überspringen.
                     log.warning("truncate skip %s: %s", tbl, exc)
 
+            critical_failures: list[str] = []
             for tbl in SETTINGS_TABLES:
                 try:
                     fd = tar.extractfile(f"db/{tbl}.json")
@@ -723,16 +739,50 @@ async def _apply_db(pool: asyncpg.Pool, tar: tarfile.TarFile) -> dict:
                     details[tbl] = {"status": "no_data_in_bundle"}
                     continue
                 rows = json.loads(fd.read())
-                inserted = await _insert_rows(conn, tbl, rows)
-                details[tbl] = {"status": "imported", "rows": inserted}
+                inserted, failed, first_err = await _insert_rows(conn, tbl, rows)
+                d = {"status": "imported", "rows": inserted, "expected": len(rows)}
+                if failed:
+                    d["failed"]      = failed
+                    d["first_error"] = first_err
+                details[tbl] = d
+                # Sanity-Check: wenn users/system_config aus dem Bundle Rows
+                # haben aber NICHTS importiert wurde → DB ist effektiv leer.
+                # Wir lassen das nicht durch, sonst landet der User beim Reboot
+                # ohne Login-Option.
+                if tbl in ("users", "system_config") and len(rows) > 0 and inserted == 0:
+                    critical_failures.append(
+                        f"Tabelle {tbl}: {len(rows)} Rows im Bundle, "
+                        f"keine importiert. Erster Fehler: {first_err or 'unbekannt'}"
+                    )
+
+            if critical_failures:
+                # Outer-Transaction rollbacken — wir wollen keine halben Zustände.
+                raise HTTPException(
+                    500,
+                    "Kritischer Import-Fehler — DB-Schema-Inkompatibilität wahrscheinlich. "
+                    "Die ganze Transaktion wurde zurückgerollt (Ziel-Zustand bleibt erhalten). "
+                    "Details: " + " | ".join(critical_failures),
+                )
     return details
 
 
-async def _insert_rows(conn: asyncpg.Connection, table: str, rows: list[dict]) -> int:
+async def _insert_rows(
+    conn: asyncpg.Connection, table: str, rows: list[dict],
+) -> tuple[int, int, str | None]:
     """Insert beliebige Rows in beliebige Tabelle. JSON-Spalten werden als
-    String erkannt und mit ::jsonb gecastet."""
+    String erkannt und mit ::jsonb gecastet.
+
+    Returns (inserted, failed, first_error_msg).
+
+    WICHTIG (v2.5.21-Hotfix): jeder Row-Insert läuft in einem Savepoint
+    (`async with conn.transaction()` innerhalb der äußeren Transaktion).
+    Ohne das setzt ein einziger gescheiterter INSERT die ganze Transaktion
+    in 'aborted'-State → asyncpg-state korrupt, alle nachfolgenden
+    Statements werden rejected, COMMIT wird zu ROLLBACK. Symptom: Tabelle
+    leer trotz 'imported'-Response.
+    """
     if not rows:
-        return 0
+        return (0, 0, None)
 
     # Spalten-Typen aus der Ziel-DB lesen (statt aus den Rows zu raten — sicherer)
     col_rows = await conn.fetch(
@@ -745,7 +795,7 @@ async def _insert_rows(conn: asyncpg.Connection, table: str, rows: list[dict]) -
     )
     if not col_rows:
         log.warning("insert skip %s: keine Spalten gefunden", table)
-        return 0
+        return (0, len(rows), "Tabelle nicht im Schema")
     col_types = {r["column_name"]: r["data_type"] for r in col_rows}
     valid_cols = set(col_types)
 
@@ -754,7 +804,7 @@ async def _insert_rows(conn: asyncpg.Connection, table: str, rows: list[dict]) -
     sample_cols = list(rows[0].keys())
     cols = [c for c in sample_cols if c in valid_cols]
     if not cols:
-        return 0
+        return (0, len(rows), "keine matchenden Spalten zwischen Bundle und Ziel-Schema")
 
     placeholders = []
     for i, col in enumerate(cols, start=1):
@@ -768,6 +818,8 @@ async def _insert_rows(conn: asyncpg.Connection, table: str, rows: list[dict]) -
     sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
 
     inserted = 0
+    failed   = 0
+    first_err: str | None = None
     for r in rows:
         vals = []
         for col in cols:
@@ -781,11 +833,20 @@ async def _insert_rows(conn: asyncpg.Connection, table: str, rows: list[dict]) -
                 v = json.dumps(v)
             vals.append(v)
         try:
-            await conn.execute(sql, *vals)
+            # Savepoint pro Row — ein Fehler kippt nicht die Outer-Transaction.
+            async with conn.transaction():
+                await conn.execute(sql, *vals)
             inserted += 1
         except Exception as exc:
+            failed += 1
+            if first_err is None:
+                first_err = f"{type(exc).__name__}: {exc}"
             log.warning("insert row failed (%s): %s", table, exc)
-    return inserted
+
+    if failed:
+        log.warning("insert %s: %d/%d rows failed — first: %s",
+                    table, failed, len(rows), first_err)
+    return (inserted, failed, first_err)
 
 
 def _apply_volume(
