@@ -1876,15 +1876,52 @@ function BackupRestoreSection({ onDone, canReauth, reauthHint }: { onDone: () =>
   const [busy,        setBusy]        = useState(false);
   const [msg,         setMsg]         = useState('');
   const [msgType,     setMsgType]     = useState<'ok' | 'err'>('ok');
+  // Backup-Download eigenes Busy-State + Byte-Counter. Backend streamt
+  // pg_dump | gzip on-the-fly ohne Content-Length-Header — wir können nur
+  // die übertragene Größe live anzeigen, keinen Prozent-Balken.
+  const [backupBusy,  setBackupBusy]  = useState(false);
+  const [backupBytes, setBackupBytes] = useState(0);
+  const [backupStart, setBackupStart] = useState<number>(0);
+
+  function fmtMB(b: number): string {
+    return (b / 1024 / 1024).toFixed(1) + ' MB';
+  }
 
   async function downloadBackup() {
+    if (backupBusy) return;  // Click-Re-Entry-Schutz
     const token = localStorage.getItem('ids_token');
     const url   = backupDbUrl();
-    // fetch mit Auth und als Blob speichern
+    setBackupBusy(true);
+    setBackupBytes(0);
+    setBackupStart(Date.now());
+    setMsg('');
     try {
       const r = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const blob = await r.blob();
+
+      // Stream-Pattern: pro Chunk Counter inkrementieren — gibt dem User
+      // Live-Feedback wie viel schon übertragen wurde. Ohne den Stream-Loop
+      // wäre der ganze pg_dump-Output erst nach Abschluss im Speicher,
+      // dann der Click — User würde 5 min einfrieren ohne Rückmeldung.
+      const reader = r.body?.getReader();
+      const chunks: BlobPart[] = [];
+      let received = 0;
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            // value ist Uint8Array — Blob-Konstruktor akzeptiert das via
+            // BlobPart, aber TS jongliert SharedArrayBuffer-vs-ArrayBuffer-
+            // Typen. Direkt in einen frischen ArrayBuffer kopieren räumt
+            // das Type-Mismatch auf und kostet nur einen memcpy.
+            chunks.push(new Uint8Array(value).buffer);
+            received += value.length;
+            setBackupBytes(received);
+          }
+        }
+      }
+      const blob = new Blob(chunks, { type: 'application/gzip' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
       const cd = r.headers.get('content-disposition') || '';
@@ -1892,9 +1929,14 @@ function BackupRestoreSection({ onDone, canReauth, reauthHint }: { onDone: () =>
       link.download = fn;
       link.click();
       URL.revokeObjectURL(link.href);
-      setMsgType('ok'); setMsg(t('settings.dbMaint.backupDownloaded', { filename: fn }));
+      const secs = ((Date.now() - backupStart) / 1000).toFixed(1);
+      setMsgType('ok');
+      setMsg(t('settings.dbMaint.backupDownloaded', { filename: fn })
+             + ` — ${fmtMB(received)} in ${secs}s`);
     } catch (e) {
       setMsgType('err'); setMsg(String((e as Error).message));
+    } finally {
+      setBackupBusy(false);
     }
   }
 
@@ -1920,9 +1962,18 @@ function BackupRestoreSection({ onDone, canReauth, reauthHint }: { onDone: () =>
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <button onClick={downloadBackup}
-                className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white">
-          {t('settings.dbMaint.downloadBackup')}
+                disabled={backupBusy}
+                title={backupBusy ? 'Backup läuft am Server (pg_dump | gzip) — bitte warten und Browser-Tab geöffnet lassen' : ''}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-50 disabled:cursor-wait">
+          {backupBusy
+            ? `… läuft (${fmtMB(backupBytes)})`
+            : t('settings.dbMaint.downloadBackup')}
         </button>
+        {backupBusy && (
+          <span className="text-xs text-slate-400">
+            pg_dump läuft am Server — kann bei großer DB mehrere Minuten dauern, Browser-Tab geöffnet lassen.
+          </span>
+        )}
       </div>
       <div className="border-t border-slate-800 pt-3 space-y-2">
         <p className="text-xs text-slate-400">{t('settings.dbMaint.restoreLabel')}</p>
