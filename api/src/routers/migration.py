@@ -806,13 +806,31 @@ async def _insert_rows(
     if not cols:
         return (0, len(rows), "keine matchenden Spalten zwischen Bundle und Ziel-Schema")
 
+    # Cast-Tabelle: JSON serialisiert datetime/uuid/inet etc. als String.
+    # Ohne expliziten Postgres-Cast erwartet asyncpg den nativen Python-Typ
+    # (datetime, uuid.UUID …) und schmeißt DataError beim Insert. Die Casts
+    # lassen Postgres die ISO-Strings selbst parsen.
+    _CAST_MAP = {
+        "jsonb":                       "jsonb",
+        "json":                        "json",
+        "inet":                        "inet",
+        "cidr":                        "cidr",
+        "uuid":                        "uuid",
+        "timestamp with time zone":    "timestamptz",
+        "timestamp without time zone": "timestamp",
+        "date":                        "date",
+        "time with time zone":         "timetz",
+        "time without time zone":      "time",
+        "interval":                    "interval",
+        "numeric":                     "numeric",
+    }
+
     placeholders = []
     for i, col in enumerate(cols, start=1):
         dtype = col_types[col]
-        if dtype in ("jsonb", "json"):
-            placeholders.append(f"${i}::{dtype}")
-        elif dtype in ("inet", "cidr"):
-            placeholders.append(f"${i}::{dtype}")
+        cast = _CAST_MAP.get(dtype)
+        if cast:
+            placeholders.append(f"${i}::{cast}")
         else:
             placeholders.append(f"${i}")
     sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(placeholders)})"
