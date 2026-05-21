@@ -40,6 +40,7 @@ import {
   migrationExport, migrationPreview, migrationApply, clearToken,
   type MigrationPreview as MigrationPreviewType,
   restartStack as restartStackApi, rebootHost as rebootHostApi,
+  fetchMe,
 } from '../api';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
@@ -1923,6 +1924,25 @@ const MIGRATION_CATEGORIES = [
 ] as const;
 
 function MigrationSettings() {
+  // Aktuellen User für die Re-Auth-Eignung prüfen. Re-Auth verlangt einen
+  // lokalen Admin (password_hash != NULL). SAML-User können nicht
+  // re-authentifizieren — der Server würde mit 403 'Re-Auth fehlgeschlagen'
+  // antworten, weil kein bcrypt-Hash hinterlegt ist. Wir disablen die
+  // destruktiven Buttons + zeigen einen klaren Hinweis statt den User
+  // ins 403-Loch laufen zu lassen.
+  const [me, setMe] = useState<User | null>(null);
+  useEffect(() => {
+    fetchMe().then(setMe).catch(() => setMe(null));
+  }, []);
+  const canReauth = me?.role === 'admin' && me?.source === 'local';
+  const reauthHint = !me
+    ? 'User-Info wird geladen …'
+    : me.role !== 'admin'
+      ? 'Migration ist Admin-only. Aktueller User hat Rolle "' + me.role + '".'
+      : me.source !== 'local'
+        ? `Aktueller User "${me.username}" kommt aus SSO/SAML — Passwort-Re-Auth nicht möglich. Bitte als lokaler Admin einloggen (Standard-Account ist "admin" mit lokalem Passwort) und Migration von dort starten.`
+        : '';
+
   // Export-Card
   const [exportPw, setExportPw]       = useState('');
   const [exportBusy, setExportBusy]   = useState(false);
@@ -2036,6 +2056,13 @@ function MigrationSettings() {
         </p>
       </div>
 
+      {/* ── Re-Auth-Eignung global anzeigen ────────────────────────────── */}
+      {reauthHint && (
+        <div className="rounded border border-amber-700/50 bg-amber-900/30 p-3 text-xs text-amber-200">
+          ⚠ {reauthHint}
+        </div>
+      )}
+
       {/* ── Export ─────────────────────────────────────────────────────── */}
       <ActionCard title="Settings-Bundle exportieren">
         <p className="text-xs text-slate-400">
@@ -2047,8 +2074,9 @@ function MigrationSettings() {
           <PasswordInput value={exportPw} onChange={setExportPw} placeholder="Admin-Passwort (Re-Auth)" />
           <button
             onClick={doExport}
-            disabled={exportBusy || !exportPw}
-            className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40"
+            disabled={exportBusy || !exportPw || !canReauth}
+            title={canReauth ? '' : reauthHint}
+            className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {exportBusy ? '…' : 'Bundle exportieren'}
           </button>
@@ -2223,9 +2251,10 @@ function MigrationSettings() {
               <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-center">
                 <PasswordInput value={applyPw} onChange={setApplyPw} placeholder="Admin-Passwort (Re-Auth)" />
                 <button
-                  disabled={!applyPw || applyBusy || categories.size === 0}
+                  disabled={!applyPw || applyBusy || categories.size === 0 || !canReauth}
                   onClick={doApply}
-                  className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40"
+                  title={canReauth ? '' : reauthHint}
+                  className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {applyBusy ? '…' : 'Anwenden (irreversibel)'}
                 </button>
