@@ -766,6 +766,64 @@ async def _apply_db(pool: asyncpg.Pool, tar: tarfile.TarFile) -> dict:
     return details
 
 
+def _coerce_for_pg(v: Any, dtype: str) -> Any:
+    """JSON-Werte in die nativen Python-Typen wandeln die asyncpg pro
+    PG-data_type erwartet. asyncpg type-checked client-seitig, deshalb
+    geht der Weg über SQL-`::cast` für datetime/uuid/numeric nicht —
+    der Cast greift erst nach der Validierung.
+
+    Idempotent: wenn `v` bereits der richtige Typ ist, durchreichen.
+    """
+    if v is None:
+        return None
+    if dtype in ("jsonb", "json"):
+        # ::jsonb-Cast verlangt einen JSON-String. dict/list aus dem
+        # Bundle-JSON wieder serialisieren.
+        if isinstance(v, (dict, list)):
+            return json.dumps(v)
+        return v
+    if dtype == "timestamp with time zone":
+        if isinstance(v, str):
+            import datetime as _dt
+            return _dt.datetime.fromisoformat(v)
+        return v
+    if dtype == "timestamp without time zone":
+        if isinstance(v, str):
+            import datetime as _dt
+            d = _dt.datetime.fromisoformat(v)
+            return d.replace(tzinfo=None)
+        return v
+    if dtype == "date":
+        if isinstance(v, str):
+            import datetime as _dt
+            return _dt.date.fromisoformat(v[:10])
+        return v
+    if dtype in ("time with time zone", "time without time zone"):
+        if isinstance(v, str):
+            import datetime as _dt
+            return _dt.time.fromisoformat(v)
+        return v
+    if dtype == "uuid":
+        if isinstance(v, str):
+            import uuid as _uuid
+            return _uuid.UUID(v)
+        return v
+    if dtype == "numeric":
+        if isinstance(v, str):
+            from decimal import Decimal as _Dec
+            return _Dec(v)
+        return v
+    if dtype == "bytea":
+        if isinstance(v, str):
+            # _json_default hatte bytes als utf-8 dekoded. Wir können
+            # nicht alle bytes über JSON sauber zurückgewinnen — bestcase
+            # encode. Falls je ein binary-bytea-Migration nötig wird,
+            # base64 als Transport-Layer einbauen.
+            return v.encode("utf-8")
+        return v
+    return v
+
+
 async def _insert_rows(
     conn: asyncpg.Connection, table: str, rows: list[dict],
 ) -> tuple[int, int, str | None]:
@@ -806,23 +864,17 @@ async def _insert_rows(
     if not cols:
         return (0, len(rows), "keine matchenden Spalten zwischen Bundle und Ziel-Schema")
 
-    # Cast-Tabelle: JSON serialisiert datetime/uuid/inet etc. als String.
-    # Ohne expliziten Postgres-Cast erwartet asyncpg den nativen Python-Typ
-    # (datetime, uuid.UUID …) und schmeißt DataError beim Insert. Die Casts
-    # lassen Postgres die ISO-Strings selbst parsen.
+    # Cast-Map: NUR für die Typen, wo Postgres serverseitig den Cast machen
+    # muss (jsonb/inet/cidr — asyncpg akzeptiert hier String + Cast). Für
+    # datetime/uuid/numeric machen wir die Konvertierung in Python, weil
+    # asyncpg client-seitig type-checked und einen String für eine
+    # timestamptz-Spalte mit DataError ablehnt — der SQL-Cast greift erst
+    # NACH der client-Validierung.
     _CAST_MAP = {
-        "jsonb":                       "jsonb",
-        "json":                        "json",
-        "inet":                        "inet",
-        "cidr":                        "cidr",
-        "uuid":                        "uuid",
-        "timestamp with time zone":    "timestamptz",
-        "timestamp without time zone": "timestamp",
-        "date":                        "date",
-        "time with time zone":         "timetz",
-        "time without time zone":      "time",
-        "interval":                    "interval",
-        "numeric":                     "numeric",
+        "jsonb": "jsonb",
+        "json":  "json",
+        "inet":  "inet",
+        "cidr":  "cidr",
     }
 
     placeholders = []
@@ -843,12 +895,7 @@ async def _insert_rows(
         for col in cols:
             v = r.get(col)
             dtype = col_types[col]
-            if dtype in ("jsonb", "json") and v is not None and not isinstance(v, str):
-                # asyncpg-jsonb-Codec ist auf dem api-Pool aktiv (siehe
-                # database._init_conn), aber ::jsonb-Cast braucht einen
-                # String. Wir gehen den String-Pfad, damit Cast-Operator
-                # funktioniert.
-                v = json.dumps(v)
+            v = _coerce_for_pg(v, dtype)
             vals.append(v)
         try:
             # Savepoint pro Row — ein Fehler kippt nicht die Outer-Transaction.
