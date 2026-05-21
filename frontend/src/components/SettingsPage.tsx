@@ -1345,12 +1345,32 @@ function PasswordInput({ value, onChange, placeholder }: {
   );
 }
 
+// useReauthEligibility — prüft ob der eingeloggte User per Passwort
+// re-authentifizieren kann (lokaler Admin mit bcrypt-Hash). SAML/SSO-User
+// haben keinen Hash → Server würde 403 'Re-Auth fehlgeschlagen' werfen.
+// Gibt {canReauth, reauthHint} zurück; UI rendert Banner + disabled-State
+// auf Basis dessen, statt den User ins 403-Loch laufen zu lassen.
+function useReauthEligibility(): { canReauth: boolean; reauthHint: string } {
+  const [me, setMe] = useState<User | null>(null);
+  useEffect(() => { fetchMe().then(setMe).catch(() => setMe(null)); }, []);
+  const canReauth = me?.role === 'admin' && me?.source === 'local';
+  const reauthHint = !me
+    ? 'User-Info wird geladen …'
+    : me.role !== 'admin'
+      ? `Aktion ist Admin-only. Aktueller User "${me.username}" hat Rolle "${me.role}".`
+      : me.source !== 'local'
+        ? `Aktueller User "${me.username}" kommt aus SSO/SAML — Passwort-Re-Auth nicht möglich. Bitte als lokaler Admin einloggen (Standard-Account "admin") und Aktion von dort starten.`
+        : '';
+  return { canReauth, reauthHint };
+}
+
 function DatabaseMaintenance() {
   const { t } = useTranslation();
   const [stats,       setStats]       = useState<DbStatsResponse | null>(null);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState('');
   const [audit,       setAudit]       = useState<MaintenanceAuditEntry[] | null>(null);
+  const { canReauth, reauthHint } = useReauthEligibility();
 
   const reload = () => {
     fetchDbStats().then(setStats).catch(e => setError(String(e.message || e))).finally(() => setLoading(false));
@@ -1375,6 +1395,12 @@ function DatabaseMaintenance() {
           {t('settings.dbMaint.intro')}
         </p>
       </div>
+
+      {reauthHint && (
+        <div className="rounded border border-amber-700/50 bg-amber-900/30 p-3 text-xs text-amber-200">
+          ⚠ {reauthHint} Cleanup, Vacuum, Retention und Restore brauchen ein lokales Admin-Passwort.
+        </div>
+      )}
 
       {/* ── 1. Übersicht ─────────────────────────────────────────────────── */}
       <ActionCard title={t('settings.dbMaint.dbSizeTotal', { size: fmtSize(stats.db_size_bytes) })}>
@@ -1410,19 +1436,19 @@ function DatabaseMaintenance() {
       </ActionCard>
 
       {/* ── 2. Cleanup ───────────────────────────────────────────────────── */}
-      <CleanupSection onDone={reload} />
+      <CleanupSection onDone={reload} canReauth={canReauth} reauthHint={reauthHint} />
 
       {/* ── 3. Vacuum ────────────────────────────────────────────────────── */}
-      <VacuumSection onDone={reload} />
+      <VacuumSection onDone={reload} canReauth={canReauth} reauthHint={reauthHint} />
 
       {/* ── 4. Retention ─────────────────────────────────────────────────── */}
-      <RetentionSection stats={stats} onDone={reload} />
+      <RetentionSection stats={stats} onDone={reload} canReauth={canReauth} reauthHint={reauthHint} />
 
       {/* ── 4b. PCAP-Retention (MinIO) ───────────────────────────────────── */}
       <PcapRetentionSection />
 
       {/* ── 5. Backup / Restore ──────────────────────────────────────────── */}
-      <BackupRestoreSection onDone={reload} />
+      <BackupRestoreSection onDone={reload} canReauth={canReauth} reauthHint={reauthHint} />
 
       {/* ── 6. Audit-Log ─────────────────────────────────────────────────── */}
       <ActionCard title={t('settings.dbMaint.auditTitle')}>
@@ -1467,7 +1493,7 @@ function DatabaseMaintenance() {
 
 // ── Cleanup-Sektion ───────────────────────────────────────────────────────────
 
-function CleanupSection({ onDone }: { onDone: () => void }) {
+function CleanupSection({ onDone, canReauth, reauthHint }: { onDone: () => void; canReauth: boolean; reauthHint: string }) {
   const { t } = useTranslation();
   const [target,   setTarget]   = useState<'alerts' | 'flows' | 'training_samples' | 'test_runs' | 'all'>('alerts');
   const [days,     setDays]     = useState('30');
@@ -1499,7 +1525,7 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
     }
   }
 
-  const canRun = password.length > 0 && !busy && (!needsConfirm || confirmText === 'DELETE CYJAN');
+  const canRun = canReauth && password.length > 0 && !busy && (!needsConfirm || confirmText === 'DELETE CYJAN');
 
   return (
     <ActionCard title={t('settings.dbMaint.cleanupTitle')}>
@@ -1550,6 +1576,7 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
       <div className="flex items-center gap-2">
         <PasswordInput value={password} onChange={setPassword} />
         <button disabled={!canRun} onClick={run}
+                title={canReauth ? '' : reauthHint}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap">
           {busy ? '…' : t('common.delete')}
         </button>
@@ -1564,7 +1591,7 @@ function CleanupSection({ onDone }: { onDone: () => void }) {
 
 // ── Vacuum-Sektion ────────────────────────────────────────────────────────────
 
-function VacuumSection({ onDone }: { onDone: () => void }) {
+function VacuumSection({ onDone, canReauth, reauthHint }: { onDone: () => void; canReauth: boolean; reauthHint: string }) {
   const { t } = useTranslation();
   const [full,     setFull]     = useState(false);
   const [password, setPassword] = useState('');
@@ -1597,7 +1624,8 @@ function VacuumSection({ onDone }: { onDone: () => void }) {
       </label>
       <div className="flex items-center gap-2">
         <PasswordInput value={password} onChange={setPassword} />
-        <button disabled={!password || busy} onClick={run}
+        <button disabled={!password || busy || !canReauth} onClick={run}
+                title={canReauth ? '' : reauthHint}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">
           {busy ? '…' : t('settings.dbMaint.run')}
         </button>
@@ -1609,7 +1637,7 @@ function VacuumSection({ onDone }: { onDone: () => void }) {
 
 // ── Retention-Sektion ─────────────────────────────────────────────────────────
 
-function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: () => void }) {
+function RetentionSection({ stats, onDone, canReauth, reauthHint }: { stats: DbStatsResponse; onDone: () => void; canReauth: boolean; reauthHint: string }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState(stats.hypertables[0]?.name ?? '');
   const [days,     setDays]     = useState('90');
@@ -1659,12 +1687,14 @@ function RetentionSection({ stats, onDone }: { stats: DbStatsResponse; onDone: (
       </div>
       <div className="flex items-center gap-2">
         <PasswordInput value={password} onChange={setPassword} />
-        <button disabled={!password || !selected || busy} onClick={() => apply(false)}
-                className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40">
+        <button disabled={!password || !selected || busy || !canReauth} onClick={() => apply(false)}
+                title={canReauth ? '' : reauthHint}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">
           {t('settings.dbMaint.setPolicy')}
         </button>
-        <button disabled={!password || !selected || busy} onClick={() => apply(true)}
-                className="px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-40">
+        <button disabled={!password || !selected || busy || !canReauth} onClick={() => apply(true)}
+                title={canReauth ? '' : reauthHint}
+                className="px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">
           {t('settings.dbMaint.remove')}
         </button>
       </div>
@@ -1839,7 +1869,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 // ── Backup / Restore-Sektion ──────────────────────────────────────────────────
 
-function BackupRestoreSection({ onDone }: { onDone: () => void }) {
+function BackupRestoreSection({ onDone, canReauth, reauthHint }: { onDone: () => void; canReauth: boolean; reauthHint: string }) {
   const { t } = useTranslation();
   const [restorePw,   setRestorePw]   = useState('');
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
@@ -1901,8 +1931,9 @@ function BackupRestoreSection({ onDone }: { onDone: () => void }) {
                  onChange={e => setRestoreFile(e.target.files?.[0] ?? null)}
                  className="text-xs text-slate-400 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-slate-700 file:text-slate-200" />
           <PasswordInput value={restorePw} onChange={setRestorePw} />
-          <button disabled={!restoreFile || !restorePw || busy} onClick={doRestore}
-                  className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40">
+          <button disabled={!restoreFile || !restorePw || busy || !canReauth} onClick={doRestore}
+                  title={canReauth ? '' : reauthHint}
+                  className="px-3 py-1.5 rounded text-xs font-medium bg-red-700 hover:bg-red-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">
             {busy ? '…' : t('settings.dbMaint.import')}
           </button>
         </div>
@@ -1924,24 +1955,10 @@ const MIGRATION_CATEGORIES = [
 ] as const;
 
 function MigrationSettings() {
-  // Aktuellen User für die Re-Auth-Eignung prüfen. Re-Auth verlangt einen
-  // lokalen Admin (password_hash != NULL). SAML-User können nicht
-  // re-authentifizieren — der Server würde mit 403 'Re-Auth fehlgeschlagen'
-  // antworten, weil kein bcrypt-Hash hinterlegt ist. Wir disablen die
-  // destruktiven Buttons + zeigen einen klaren Hinweis statt den User
-  // ins 403-Loch laufen zu lassen.
-  const [me, setMe] = useState<User | null>(null);
-  useEffect(() => {
-    fetchMe().then(setMe).catch(() => setMe(null));
-  }, []);
-  const canReauth = me?.role === 'admin' && me?.source === 'local';
-  const reauthHint = !me
-    ? 'User-Info wird geladen …'
-    : me.role !== 'admin'
-      ? 'Migration ist Admin-only. Aktueller User hat Rolle "' + me.role + '".'
-      : me.source !== 'local'
-        ? `Aktueller User "${me.username}" kommt aus SSO/SAML — Passwort-Re-Auth nicht möglich. Bitte als lokaler Admin einloggen (Standard-Account ist "admin" mit lokalem Passwort) und Migration von dort starten.`
-        : '';
+  // Re-Auth-Eignung (lokaler Admin mit Passwort-Hash). SAML/SSO-User
+  // bekommen sonst erst nach Klick einen 403 — Hook disabled die Buttons
+  // und liefert den Erklärtext via Tooltip + Banner.
+  const { canReauth, reauthHint } = useReauthEligibility();
 
   // Export-Card
   const [exportPw, setExportPw]       = useState('');
