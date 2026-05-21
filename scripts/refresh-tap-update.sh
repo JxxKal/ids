@@ -44,16 +44,40 @@ chmod +x tap-update/scripts/post-update.sh tap-update/scripts/cyjan-maintenance 
 
 echo "=== Tap-Bundle (docker save + zstd) ==="
 # Sniffer/flow-aggregator/signature-engine sind master + tap geteilt — am
-# Master ohnehin gebaut. tap-uplink + tap-api müssen extra gebaut werden,
-# falls sie noch fehlen (Master baut sie nicht im normalen prod-Profil).
+# Master ohnehin gebaut. tap-uplink + tap-api müssen extra beschafft werden,
+# falls sie nicht im Daemon sind (Master baut sie nicht im normalen
+# prod-Profil).
+#
+# Reihenfolge:
+#   1. Falls beide schon im Daemon → nichts tun.
+#   2. Sonst aus existierendem tap-update/images-tap.tar.zst nachladen
+#      — der wurde via Update-ZIP/CI mitgeliefert und enthält genau diese
+#      Images. Offline-safe, kein Internet nötig.
+#   3. Falls auch das fehlt (Dev-Master ohne ZIP-Apply, oder corrupted) →
+#      docker compose build (braucht Internet wegen python:3.12-slim Base).
+need_tap_images=0
 for img in ids-tap-uplink:latest ids-tap-api:latest; do
   if ! docker image inspect "$img" >/dev/null 2>&1; then
-    echo "  $img fehlt — baue tap-uplink + tap-api einmalig:"
-    MIRROR_INTERFACE=eth0 MASTER_URL=wss://placeholder.example/uplink POSTGRES_PASSWORD=placeholder \
-      docker compose -f docker-compose.tap.yml build tap-uplink tap-api
+    need_tap_images=1
     break
   fi
 done
+
+if [ "$need_tap_images" -eq 1 ] && [ -r tap-update/images-tap.tar.zst ]; then
+  echo "  Tap-Images fehlen im Daemon — lade aus tap-update/images-tap.tar.zst (offline-safe) …"
+  zstd -dc tap-update/images-tap.tar.zst | docker load
+  # Re-check
+  need_tap_images=0
+  for img in ids-tap-uplink:latest ids-tap-api:latest; do
+    if ! docker image inspect "$img" >/dev/null 2>&1; then need_tap_images=1; break; fi
+  done
+fi
+
+if [ "$need_tap_images" -eq 1 ]; then
+  echo "  Tap-Images noch immer nicht da — versuche docker compose build (braucht Internet wegen Base-Images):"
+  MIRROR_INTERFACE=eth0 MASTER_URL=wss://placeholder.example/uplink POSTGRES_PASSWORD=placeholder \
+    docker compose -f docker-compose.tap.yml build tap-uplink tap-api
+fi
 
 # --force: überschreibt eine bestehende images-tap.tar.zst stillschweigend.
 docker save \

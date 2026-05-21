@@ -593,8 +593,14 @@ jobs:
           # einspielen. Liegt dann immer in der Fassung des aktuellen
           # Bundles parat.
           cp distro/config/includes.chroot/usr/local/bin/cyjan-tap                      "$PKG/scripts/cyjan-tap"
-          cp scripts/post-update.sh "$PKG/scripts/post-update.sh"
-          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces" "$PKG/scripts/cyjan-update"
+          cp scripts/post-update.sh        "$PKG/scripts/post-update.sh"
+          # refresh-tap-update.sh — vom API-Endpoint /api/tap-update/refresh
+          # (Settings → Remote Taps → "Bundle neu bauen") aufgerufen. War
+          # bis v2.5.15 nur via git pull aktuell — Customer-Hosts ohne
+          # Repo-Pull haben weiter mit der Original-Version vom letzten
+          # ISO-Install gelebt, was den offline-build-bug nicht gefixt hat.
+          cp scripts/refresh-tap-update.sh "$PKG/scripts/refresh-tap-update.sh"
+          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces" "$PKG/scripts/cyjan-update" "$PKG/scripts/refresh-tap-update.sh"
 
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.
