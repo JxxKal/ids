@@ -167,8 +167,18 @@ if [ -f /etc/systemd/system/cyjan-mirror-tune.service ]; then
 fi
 
 if [ -f /etc/systemd/system/cyjan-tap-update.path ]; then
-  systemctl enable --now cyjan-tap-update.path
-  echo "[post-update] cyjan-tap-update.path aktiviert (lauscht auf /run/cyjan-update/trigger)."
+  # enable --now ist no-op wenn die Unit schon enabled ist — wenn sie
+  # zwischenzeitlich auf "inactive (dead)" gekippt ist (z.B. nach dockerd-
+  # Restart wegen daemon.json-Migration), kommt sie damit NICHT wieder
+  # hoch. Daher explizit `restart` — idempotent, zwingt einen sauberen
+  # Reset auch auf einem "dead"-State.
+  systemctl enable cyjan-tap-update.path 2>/dev/null || true
+  systemctl restart cyjan-tap-update.path
+  STATE=$(systemctl is-active cyjan-tap-update.path 2>/dev/null || echo "?")
+  echo "[post-update] cyjan-tap-update.path → $STATE (lauscht auf /run/cyjan-update/trigger)."
+  if [ "$STATE" != "active" ]; then
+    echo "[post-update] WARNUNG: Path-Watcher ist '$STATE' — Diagnose: sudo journalctl -u cyjan-tap-update.path -n 50"
+  fi
 fi
 
 # ── 4.3) ids-banner.sh (Login-MOTD) ─────────────────────────────────────

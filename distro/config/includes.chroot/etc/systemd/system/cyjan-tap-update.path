@@ -1,8 +1,15 @@
 [Unit]
 Description=Cyjan Tap — Watch /run/cyjan-update/trigger
 Documentation=https://github.com/JxxKal/ids
+# After= reicht — Requires= würde den Watcher mitkippen wenn dockerd neu
+# startet (Daemon-Reload, daemon.json-Migration, manueller Restart). Der
+# Path-Watcher selbst braucht Docker NICHT; nur der .service braucht es,
+# und der hat den Requires-Block bereits.
 After=docker.service
-Requires=docker.service
+# /run ist tmpfs — wird beim Boot leer angelegt. Wir warten bis systemd-
+# tmpfiles unsere /run/cyjan-update/-Dir geschaffen hat, sonst startet
+# der Watcher auf ein nicht-existierendes Verzeichnis und bleibt dead.
+After=systemd-tmpfiles-setup.service
 
 [Path]
 # Wenn tap-uplink einen "update_now"-Frame vom Master empfängt, schreibt

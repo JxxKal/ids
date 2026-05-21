@@ -193,6 +193,28 @@ cmd_status() {
   require_curl
   print_state
   print_load || true
+  print_update_path || true
+}
+
+# Path-Watcher-Status anzeigen. Stiller Fail-Mode war:
+# `cyjan-tap-update.path` enabled aber inactive → Master-Push-Updates
+# verschwinden silent. Bei jedem `cyjan-tap status` zeigen damit der
+# Operator es nach kurzer Zeit selbst sieht.
+print_update_path() {
+  if ! command -v systemctl >/dev/null 2>&1; then return 0; fi
+  if ! systemctl cat cyjan-tap-update.path >/dev/null 2>&1; then return 0; fi
+  local state
+  state=$(systemctl is-active cyjan-tap-update.path 2>/dev/null || echo "?")
+  echo
+  echo "Update-Push:"
+  if [ "$state" = "active" ]; then
+    echo "  Path-Watcher:    active (Master kann Updates pushen)"
+  else
+    echo "  Path-Watcher:    $state  ⚠"
+    echo "    Master-Push-Updates kommen aktuell NICHT durch."
+    echo "    Reparieren:    sudo systemctl restart cyjan-tap-update.path"
+    echo "    Diagnose:      sudo journalctl -u cyjan-tap-update.path -n 50"
+  fi
 }
 
 cmd_version() {
