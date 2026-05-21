@@ -420,21 +420,61 @@ if yesno "Das Interface '$MGMT_IFACE' hat aktuell die IP: ${MGMT_IP}\n\nMöchten
     "$(ip route show default 2>/dev/null | awk '/default/{print $3; exit}')") || STATIC_GW=""
 
   if [ -n "$STATIC_IP" ]; then
-    # /etc/network/interfaces schreiben
-    cat >> /etc/network/interfaces <<EOF
+    # Bisher hatte hier ein `cat >> /etc/network/interfaces` gestanden — ein
+    # blindes Append. Wenn der DHCP-Default-Block aus dem Live-ISO-Build
+    # (typisch `iface eno1 inet dhcp`) noch in der Datei stand, hatte das
+    # Iface danach ZWEI iface-Blöcke. ifup beim nächsten Boot panicked
+    # ("network service failed") und kippte zurück auf DHCP.
+    #
+    # Sauber: alten Block aus der main-Datei rauspatchen + neuen als drop-in
+    # in /etc/network/interfaces.d/ ablegen. Idempotent — wiederholte
+    # ids-setup-Läufe erzeugen keine Duplikate.
+    cp /etc/network/interfaces "/etc/network/interfaces.cyjan-bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
 
+    python3 - "$MGMT_IFACE" <<'PY' 2>/dev/null || true
+import re, sys
+ifc = sys.argv[1]
+p = "/etc/network/interfaces"
+try:
+    with open(p) as f:
+        src = f.read()
+except FileNotFoundError:
+    sys.exit(0)
+# Pattern: optional "auto <ifc>" + "iface <ifc> inet ..." + alle eingerückten Folgezeilen
+pat = re.compile(
+    r"(?:^[ \t]*auto[ \t]+" + re.escape(ifc) + r"[ \t]*\n)?"
+    r"^[ \t]*iface[ \t]+" + re.escape(ifc) + r"[ \t]+inet\b.*\n"
+    r"(?:^[ \t]+\S.*\n)*",
+    re.MULTILINE,
+)
+new = pat.sub("", src)
+if new != src:
+    with open(p, "w") as f:
+        f.write(new)
+PY
+
+    # Source-Statement im main file sicherstellen (auf alten ISOs fehlte das)
+    if ! grep -q '^source[[:space:]].*interfaces\.d' /etc/network/interfaces 2>/dev/null; then
+      printf '\nsource /etc/network/interfaces.d/*\n' >> /etc/network/interfaces
+    fi
+
+    # Drop-in schreiben — bei wiederholtem Lauf wird die Datei einfach
+    # überschrieben, kein Append.
+    mkdir -p /etc/network/interfaces.d
+    cat > "/etc/network/interfaces.d/cyjan-mgmt-${MGMT_IFACE}" <<EOF
 auto ${MGMT_IFACE}
 iface ${MGMT_IFACE} inet static
   address ${STATIC_IP}
   gateway ${STATIC_GW}
 EOF
+
     # Sofort anwenden
     ip addr flush dev "$MGMT_IFACE" 2>/dev/null || true
     ip addr add "$STATIC_IP" dev "$MGMT_IFACE" 2>/dev/null || true
     [ -n "$STATIC_GW" ] && ip route replace default via "$STATIC_GW" 2>/dev/null || true
 
     MGMT_IP=$(echo "$STATIC_IP" | cut -d/ -f1)
-    msg "Statische IP ${MGMT_IP} auf ${MGMT_IFACE} konfiguriert."
+    msg "Statische IP ${MGMT_IP} auf ${MGMT_IFACE} konfiguriert.\n\nKonfiguration liegt unter:\n/etc/network/interfaces.d/cyjan-mgmt-${MGMT_IFACE}\n\nBackup der vorherigen Datei: /etc/network/interfaces.cyjan-bak-*"
   fi
 fi
 
