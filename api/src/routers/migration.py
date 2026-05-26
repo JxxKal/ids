@@ -797,10 +797,16 @@ def _coerce_for_pg(v: Any, dtype: str) -> Any:
     if v is None:
         return None
     if dtype in ("jsonb", "json"):
-        # ::jsonb-Cast verlangt einen JSON-String. dict/list aus dem
-        # Bundle-JSON wieder serialisieren.
-        if isinstance(v, (dict, list)):
-            return json.dumps(v)
+        # asyncpg jsonb-Codec (in database._init_conn aktiv) macht
+        # encoder=json.dumps automatisch. Wir übergeben das native
+        # Python-Objekt (dict/list) direkt. Wenn das Bundle einen
+        # String hatte (rare edge-case aus früheren defekten Migrations),
+        # zurückparsen damit der Codec nicht doppelt encoded.
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return v
         return v
     if dtype == "timestamp with time zone":
         if isinstance(v, str):
@@ -884,17 +890,15 @@ async def _insert_rows(
     if not cols:
         return (0, len(rows), "keine matchenden Spalten zwischen Bundle und Ziel-Schema")
 
-    # Cast-Map: NUR für die Typen, wo Postgres serverseitig den Cast machen
-    # muss (jsonb/inet/cidr — asyncpg akzeptiert hier String + Cast). Für
-    # datetime/uuid/numeric machen wir die Konvertierung in Python, weil
-    # asyncpg client-seitig type-checked und einen String für eine
-    # timestamptz-Spalte mit DataError ablehnt — der SQL-Cast greift erst
-    # NACH der client-Validierung.
+    # Cast-Map: NUR für inet/cidr (Postgres macht den Cast wenn wir den
+    # String übergeben). JSONB NICHT in der Map — die asyncpg-Pool hat
+    # einen jsonb-Codec der dict→json.dumps macht. Wenn wir hier auch
+    # noch json.dumps + ::jsonb-Cast machen, encoded asyncpg DOPPELT und
+    # Postgres speichert einen JSON-String-Wert statt das Object.
+    # → dict direkt durchreichen, kein Cast.
     _CAST_MAP = {
-        "jsonb": "jsonb",
-        "json":  "json",
-        "inet":  "inet",
-        "cidr":  "cidr",
+        "inet": "inet",
+        "cidr": "cidr",
     }
 
     placeholders = []
