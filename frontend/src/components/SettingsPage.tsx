@@ -2002,6 +2002,7 @@ const MIGRATION_CATEGORIES = [
   { key: 'db',         label: 'Datenbank-Settings (users, networks, config, …)' },
   { key: 'sig_rules',  label: 'Signature-Rules (custom YAMLs + Overrides)' },
   { key: 'master_ca',  label: 'Master-CA (Tap-Pairings bleiben gültig)' },
+  { key: 'web_certs',  label: 'Web-SSL-Zertifikat (server.crt + server.key)' },
   { key: 'ml_config',  label: 'ML-Config (Threshold, Filter-Defaults)' },
 ] as const;
 
@@ -2337,6 +2338,55 @@ function MigrationSettings() {
             <p className="font-medium">{applyResult.text}</p>
             {applyResult.kind === 'ok' && applyResult.details ? (
               <>
+                {/* Pro-Tabellen-Counter: imported/expected/failed transparent
+                    machen. Vorher hat das Frontend partial-fails geschluckt
+                    weil nur next_steps angezeigt wurde. */}
+                {(() => {
+                  const det = applyResult.details as {
+                    details?: { db?: Record<string, { status: string; rows?: number; expected?: number; failed?: number; first_error?: string }> };
+                    next_steps?: string[];
+                  };
+                  const db = det.details?.db ?? {};
+                  const tableEntries = Object.entries(db);
+                  if (tableEntries.length === 0) return null;
+                  return (
+                    <div className="mt-3 border-t border-green-700/40 pt-2">
+                      <div className="text-[11px] uppercase text-green-300/80 mb-1">Migrierte Tabellen</div>
+                      <table className="w-full text-[11px]">
+                        <thead>
+                          <tr className="text-left text-green-300/70">
+                            <th className="px-1 py-0.5">Tabelle</th>
+                            <th className="px-1 py-0.5 text-right">Importiert</th>
+                            <th className="px-1 py-0.5 text-right">Erwartet</th>
+                            <th className="px-1 py-0.5 text-right">Fehler</th>
+                            <th className="px-1 py-0.5">1. Fehler</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tableEntries.map(([name, info]) => {
+                            const failed = info.failed ?? 0;
+                            const cls = failed > 0
+                              ? 'text-amber-200'
+                              : info.status === 'no_data_in_bundle'
+                                ? 'text-slate-400'
+                                : 'text-green-200';
+                            return (
+                              <tr key={name} className={cls}>
+                                <td className="px-1 py-0.5 font-mono">{name}</td>
+                                <td className="px-1 py-0.5 text-right tabular-nums">{info.rows ?? '–'}</td>
+                                <td className="px-1 py-0.5 text-right tabular-nums">{info.expected ?? '–'}</td>
+                                <td className="px-1 py-0.5 text-right tabular-nums">{failed || '–'}</td>
+                                <td className="px-1 py-0.5 text-[10px] opacity-75 truncate max-w-[16rem]" title={info.first_error || ''}>
+                                  {info.first_error?.slice(0, 60) ?? ''}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
                 <div className="mt-2 space-y-1">
                   {((applyResult.details as { next_steps?: string[] }).next_steps ?? []).map((step, i) => (
                     <p key={i} className="text-[11px] text-green-300/90">→ {step}</p>

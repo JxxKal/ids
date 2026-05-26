@@ -81,10 +81,11 @@ SETTINGS_TABLES = [
 SIG_RULES_DIR = Path("/sig-rules")          # api-Mount des signature-rules-Volumes
 MASTER_CA_DIR = Path(os.environ.get("MASTER_CA_DIR", "/var/lib/cyjan/master-ca"))
 ML_CONFIG     = Path("/models/ml_config.json")
+WEB_CERTS_DIR = Path(os.environ.get("CERT_DIR", "/certs"))   # Web-SSL (server.crt + .key)
 HOST_ENV_FILE = Path("/opt/ids/.env")
 HOST_IFACES   = Path("/etc/cyjan/host-interfaces.json")
 
-CATEGORIES = ("db", "sig_rules", "master_ca", "ml_config")
+CATEGORIES = ("db", "sig_rules", "master_ca", "web_certs", "ml_config")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -228,6 +229,7 @@ async def export_bundle(
             "db":         True,
             "sig_rules":  SIG_RULES_DIR.is_dir(),
             "master_ca":  MASTER_CA_DIR.is_dir(),
+            "web_certs":  WEB_CERTS_DIR.is_dir() and any(WEB_CERTS_DIR.iterdir()),
             "ml_config":  ML_CONFIG.is_file(),
         },
         "env_snapshot": {
@@ -278,11 +280,23 @@ async def export_bundle(
                     arc = f"master-ca/{rel.as_posix()}"
                     tar.add(str(src), arcname=arc, recursive=False)
 
-        # ── 4) ML-Config ────────────────────────────────────────────────
+        # ── 4) Web-SSL-Zertifikate (ids-certs Volume) ───────────────────
+        # Nginx-Frontend liest server.crt + server.key aus /certs. Ohne
+        # diese Files startet nginx zwar mit Self-Signed-Default, aber
+        # die Migrations-Identität (CN, Wildcard, LE-Cert) ist weg.
+        if WEB_CERTS_DIR.is_dir():
+            for root, _dirs, files in os.walk(WEB_CERTS_DIR):
+                for f in files:
+                    src = Path(root) / f
+                    rel = src.relative_to(WEB_CERTS_DIR)
+                    arc = f"web-certs/{rel.as_posix()}"
+                    tar.add(str(src), arcname=arc, recursive=False)
+
+        # ── 5) ML-Config ────────────────────────────────────────────────
         if ML_CONFIG.is_file():
             tar.add(str(ML_CONFIG), arcname="ml/ml_config.json", recursive=False)
 
-        # ── 5) Manifest ─────────────────────────────────────────────────
+        # ── 6) Manifest ─────────────────────────────────────────────────
         mpayload = orjson.dumps(manifest, default=_json_default,
                                 option=orjson.OPT_INDENT_2)
         info = tarfile.TarInfo("manifest.json")
@@ -627,6 +641,12 @@ async def apply_bundle(
             details = _apply_volume(tar, prefix="master-ca/", dest=MASTER_CA_DIR,
                                     preserve_mode=True)
             result_details["master_ca"] = details
+
+        # ── 3b) web-certs (Frontend-SSL) ────────────────────────────────
+        if "web_certs" in selected:
+            details = _apply_volume(tar, prefix="web-certs/", dest=WEB_CERTS_DIR,
+                                    preserve_mode=True)
+            result_details["web_certs"] = details
 
         # ── 4) ml-config ────────────────────────────────────────────────
         if "ml_config" in selected:
