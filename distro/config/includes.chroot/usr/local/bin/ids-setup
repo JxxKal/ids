@@ -358,7 +358,17 @@ EOF
   # daemon-reload (kein dbus, restricted env) oder ein hängender
   # docker-restart (laufende Container, Timeout) hat den Wizard sonst
   # mit set -e still abgewürgt, ohne msg/log.
+  #
+  # WICHTIG: systemctl restart docker kann auf einem produktiven Master
+  # mit 20+ Containern 30-60s blocken. Ohne whiptail-Infobox sieht der
+  # User in der Zeit nur einen schwarzen Bildschirm und denkt der Wizard
+  # ist abgeschmiert. Die `whiptail --infobox` ist non-blocking — sie
+  # zeigt die Meldung an und kehrt sofort zurück, der Bildschirm bleibt
+  # dann mit dem Text stehen während docker neu startet.
   systemctl daemon-reload 2>>"$LOG" || log "WARN: systemctl daemon-reload fehlgeschlagen"
+  whiptail --title "$TITLE" --infobox \
+    "Docker-Daemon wird neu gestartet (Proxy-Settings aktivieren).\n\nDas kann bei laufenden Containern 30-60 Sekunden dauern.\nBitte nicht abbrechen." \
+    8 70 || true
   systemctl restart docker 2>>"$LOG" || log "WARN: systemctl restart docker fehlgeschlagen"
 
   # Git-Proxy – ebenfalls absichern, git config kann auf restricted HOMEs
@@ -366,7 +376,17 @@ EOF
   git config --global http.proxy  "${PROXY_HTTP}"     2>>"$LOG" || true
   git config --global https.proxy "${PROXY_HTTPS:-$PROXY_HTTP}" 2>>"$LOG" || true
 
-  msg "Proxy-Einstellungen gespeichert."
+  # Sanity-Check: kann der Host GitHub via Proxy erreichen? Wenn nicht,
+  # warnen — sonst landen User später bei cyjan-update apply im
+  # 'connect: timeout' ohne zu wissen dass schon hier was schief lief.
+  if curl -fsS --max-time 10 \
+       --proxy "${PROXY_HTTPS:-$PROXY_HTTP}" \
+       https://api.github.com/zen >/dev/null 2>>"$LOG"; then
+    PROXY_TEST_RESULT="✓ GitHub via Proxy erreichbar"
+  else
+    PROXY_TEST_RESULT="⚠ GitHub via Proxy NICHT erreichbar — Proxy-URL/Firewall prüfen.\nWird in /var/log/cyjan/setup.log geloggt."
+  fi
+  msg "Proxy-Einstellungen gespeichert.\n\n${PROXY_TEST_RESULT}"
 fi
 
 # ── Schritt 3: Management-Interface ──────────────────────────────────────────
