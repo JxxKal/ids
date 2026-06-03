@@ -152,8 +152,63 @@ else
   echo "[post-update] WARNUNG: cyjan-tap-update.path/service nicht gefunden — Tap-Push-Update bleibt deaktiviert."
 fi
 
+# ── 5) cyjan-stack Boot-Unit (v2.5.28+) ──────────────────────────────────
+# Bringt nach einem Reboot den VOLLEN Soll-Stack hoch (`docker compose
+# --profile <prod|…> up -d`) statt sich auf die per-Container restart-Policy
+# zu verlassen. Letztere startet nach einem Reboot NUR die Container, die
+# vorher liefen — war ein Service (oder das halbe Stack) vorher gestoppt
+# (z.B. nach einem `docker stop`, einem abgebrochenen Update oder einem
+# `compose stop`), blieb er nach dem Reboot weg. Genau das hat auf
+# Bestands-Hosts ohne diese Unit zum kompletten Web-Ausfall geführt.
+#
+# Diese Unit kam erst nach dem ersten ISO-Release dazu; Hosts die aus einem
+# älteren ISO installiert und nur per `cyjan-update` aktuell gehalten wurden,
+# haben sie nie bekommen (cyjan-update fasst die systemd-Layer nicht an).
+# Hier wird sie idempotent nachgezogen.
+STACK_BIN_SRC="$(locate_src cyjan-stack-up      usr/local/bin)"
+STACK_SVC_SRC="$(locate_src cyjan-stack.service etc/systemd/system)"
+if [ -n "$STACK_BIN_SRC" ] && [ -n "$STACK_SVC_SRC" ]; then
+  install -m 0755 "$STACK_BIN_SRC" /usr/local/bin/cyjan-stack-up
+  install -m 0644 "$STACK_SVC_SRC" /etc/systemd/system/cyjan-stack.service
+  echo "[post-update] cyjan-stack-up + cyjan-stack.service installiert."
+else
+  echo "[post-update] WARNUNG: cyjan-stack-Quellen nicht gefunden — Boot-Stack-Unit übersprungen."
+fi
+
 systemctl daemon-reload
 systemctl enable --now cyjan-maintenance.timer
+
+# cyjan-stack.service nur ARMIEREN (enable), NICHT --now starten: auf einem
+# gesunden, laufenden Host würde `start` zwar nur ein idempotentes up -d
+# auslösen, aber wir wollen während eines Routine-Updates bewusst nicht in
+# den laufenden Stack greifen. Die Unit wird beim nächsten Reboot aktiv und
+# erzwingt dann den vollen Soll-Zustand. Wer den vollen Stack sofort hochziehen
+# will: `sudo systemctl start cyjan-stack.service` (== docker compose up -d).
+if [ -f /etc/systemd/system/cyjan-stack.service ]; then
+  if systemctl enable cyjan-stack.service 2>/dev/null; then
+    echo "[post-update] cyjan-stack.service aktiviert (greift beim nächsten Reboot → voller Soll-Stack)."
+  else
+    echo "[post-update] WARNUNG: cyjan-stack.service konnte nicht enabled werden."
+  fi
+fi
+
+# ── 6) Ctrl-Alt-Del-Hardening (v2.5.28+) ─────────────────────────────────
+# Linux verlinkt ctrl-alt-del.target standardmäßig auf reboot.target. Auf
+# einem Master-Host ist das brandgefährlich: ein angestöpselter IP-KVM
+# (z.B. Raritan D2CIM-DVUSB) meldet sich als USB-Tastatur an und sendet beim
+# Anstecken ein Ctrl-Alt-Del → die Box rebootet mitten im Produktivbetrieb.
+# Genau das hat einen Komplett-Ausfall ausgelöst. Wir maskieren das Target,
+# damit Strg-Alt-Entf an der Konsole nichts mehr auslöst (reversibel via
+# `systemctl unmask ctrl-alt-del.target`). Idempotent — `mask` ist no-op,
+# wenn der Symlink nach /dev/null schon steht.
+if [ "$(readlink -f /etc/systemd/system/ctrl-alt-del.target 2>/dev/null)" = "/dev/null" ]; then
+  echo "[post-update] ctrl-alt-del.target bereits maskiert."
+else
+  systemctl mask ctrl-alt-del.target >/dev/null 2>&1 \
+    && echo "[post-update] ctrl-alt-del.target maskiert (KVM/Versehen kann nicht mehr rebooten)." \
+    || echo "[post-update] WARNUNG: ctrl-alt-del.target konnte nicht maskiert werden."
+fi
+
 echo "[post-update] cyjan-maintenance.timer aktiviert (nächster Lauf: $(systemctl show cyjan-maintenance.timer --property=NextElapseUSecRealtime --value 2>/dev/null || echo unbekannt))."
 
 if [ -f /etc/systemd/system/cyjan-mirror-tune.service ]; then
