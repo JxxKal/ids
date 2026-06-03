@@ -107,7 +107,8 @@ jobs:
           CUSTOM_MASTER=(api frontend flow-aggregator signature-engine ml-engine \
                          alert-manager enrichment-service pcap-store training-loop \
                          sniffer irma-bridge snort snort-bridge master-uplink \
-                         rule-tuner mqtt-bridge notification-dispatcher)
+                         rule-tuner mqtt-bridge notification-dispatcher \
+                         traffic-generator)
 
           IMAGES_MASTER=()
           for svc in "${CUSTOM_MASTER[@]}"; do

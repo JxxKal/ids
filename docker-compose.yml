@@ -788,7 +788,11 @@ services:
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
-    profiles: [test]
+    # prod + test: der Generator konsumiert nur `test-commands` und idlet
+    # ansonsten — auf Prod schadet er nicht, macht aber das Test-Feature der
+    # UI (EICAR & Co.) erst nutzbar und übersteht Reboots (cyjan-stack-up
+    # --profile prod startet ihn mit). sniffer-test bleibt bewusst test-only.
+    profiles: [prod, test]
     depends_on:
       kafka:
         condition: service_healthy
