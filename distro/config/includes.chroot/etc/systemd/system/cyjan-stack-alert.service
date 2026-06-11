@@ -1,0 +1,9 @@
+[Unit]
+Description=Cyjan IDS Stack-Alarm (Boot-Health-Check fehlgeschlagen)
+Documentation=https://github.com/JxxKal/ids
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cyjan-stack-alert
+StandardOutput=journal
+StandardError=journal

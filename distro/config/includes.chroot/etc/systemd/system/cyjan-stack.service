@@ -2,7 +2,10 @@
 Description=Cyjan IDS Compose-Stack auf Soll-Zustand bringen
 Documentation=https://github.com/JxxKal/ids
 After=docker.service network-online.target
-Wants=network-online.target
+# Health-Check als eigene Unit mitziehen (statt im up-Skript zu prüfen):
+# failt der Check, bleibt DIESE Unit trotzdem aktiv — ihr ExecStop=compose stop
+# greift beim Shutdown also auch nach einem halb gestarteten Boot noch.
+Wants=network-online.target cyjan-stack-health.service
 Requires=docker.service
 ConditionPathExists=/opt/ids/docker-compose.yml
 

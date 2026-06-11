@@ -1,0 +1,55 @@
+#!/bin/sh
+# Cyjan IDS – Eskalation bei fehlgeschlagenem Post-Boot-Health-Check.
+# Wird via OnFailure= von cyjan-stack-health.service gefeuert.
+#
+# Drei Kanäle, bewusst redundant — auf der Offline-OT-Box gibt es kein Mail/
+# Webhook nach draußen, wer nicht ins Web-UI schaut, muss es an der Konsole
+# sehen:
+#   1) journal/syslog
+#   2) wall an alle eingeloggten Konsolen + Banner-Block in /etc/motd
+#      (Banner räumt cyjan-stack-health beim nächsten erfolgreichen Lauf weg)
+#   3) Best effort: kritischer BOOT_HEALTH_001-Alert direkt in die alerts-
+#      Tabelle, falls timescaledb läuft → erscheint im Web-UI-Feed, auch wenn
+#      Kafka/Pipeline down sind (gleiches Muster wie UNKNOWN_HOST_001 im
+#      enrichment-service). Auf Taps gibt es keine lokale DB → Kanal 3 entfällt.
+set -u
+
+MARKER="/run/cyjan-stack-health.failed"
+FAILED="$(tr '\n' ' ' < "$MARKER" 2>/dev/null | sed 's/ *$//')"
+[ -z "$FAILED" ] && FAILED="(Service-Liste unbekannt)"
+
+MSG="Cyjan IDS: Stack nach Boot UNVOLLSTAENDIG — nicht gestartet/unhealthy: $FAILED"
+
+# 1) Journal/Syslog
+logger -t cyjan-stack-alert -p daemon.err "$MSG" 2>/dev/null || echo "$MSG" >&2
+
+# 2) Konsole: wall + motd-Banner (idempotent — alter Block wird ersetzt)
+if command -v wall >/dev/null 2>&1; then
+  echo "$MSG" | wall 2>/dev/null || true
+fi
+sed -i '/>>> cyjan-stack-alert >>>/,/<<< cyjan-stack-alert <<</d' /etc/motd 2>/dev/null || true
+{
+  echo '# >>> cyjan-stack-alert >>>'
+  echo "!!! $MSG"
+  echo "!!! Diagnose:  systemctl status cyjan-stack-health   /   docker compose ps -a"
+  echo "!!! Banner verschwindet nach erfolgreichem: systemctl restart cyjan-stack.service"
+  echo '# <<< cyjan-stack-alert <<<'
+} >> /etc/motd 2>/dev/null || true
+
+# 3) Best effort: Alert in die DB (nur Master, nur wenn timescaledb läuft).
+#    Service-Namen kommen aus der Compose-Datei (alphanumerisch + Bindestrich),
+#    daher ist die String-Interpolation hier unkritisch.
+DB_STATE="$(docker container inspect ids-timescaledb --format '{{.State.Status}}' 2>/dev/null || echo missing)"
+if [ "$DB_STATE" = "running" ]; then
+  DESC="Boot-Health-Check fehlgeschlagen — Services nicht gestartet/unhealthy: $FAILED"
+  if docker exec ids-timescaledb psql -U ids -d ids -v ON_ERROR_STOP=1 -q -c \
+    "INSERT INTO alerts (ts, source, rule_id, severity, score, description, is_test)
+     VALUES (now(), 'correlation', 'BOOT_HEALTH_001', 'critical', 0.9, '$DESC', false);" \
+    >/dev/null 2>&1; then
+    logger -t cyjan-stack-alert "BOOT_HEALTH_001-Alert in DB geschrieben (sichtbar im Web-UI)." 2>/dev/null || true
+  else
+    logger -t cyjan-stack-alert "DB-Insert für BOOT_HEALTH_001 fehlgeschlagen." 2>/dev/null || true
+  fi
+fi
+
+exit 0

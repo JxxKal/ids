@@ -1,0 +1,128 @@
+#!/bin/sh
+# Cyjan IDS – Post-Boot-Health-Check für den Compose-Stack.
+#
+# Hintergrund (OT-Vorfall 2026-06): cyjan-stack.service gilt als "erfolgreich",
+# sobald `docker compose up -d` exitet — ob die Container danach wirklich
+# laufen bzw. healthy werden, prüfte bis v2.5.31 niemand. Ein halb gestarteter
+# Stack blieb so 22 h unbemerkt. Diese Unit wird von cyjan-stack.service per
+# Wants= mitgezogen (eigene Unit statt Check in cyjan-stack-up selbst, damit
+# deren ExecStop=compose stop beim Shutdown auch nach einem Fehlschlag noch
+# greift), pollt den Soll-Zustand und failt hart, wenn nach Ablauf des
+# Zeitfensters Services fehlen → OnFailure= feuert cyjan-stack-alert.
+#
+# Auch manuell nutzbar: `cyjan-stack-health` (Exit 0 = Stack vollständig).
+# Zeitfenster überschreibbar via CYJAN_HEALTH_TIMEOUT (Sekunden, Default 180).
+set -u
+
+IDS_DIR="/opt/ids"
+MODE_FILE="/etc/cyjan/mode"
+PROFILE_FILE="/etc/cyjan/profile"
+MARKER="/run/cyjan-stack-health.failed"
+TIMEOUT="${CYJAN_HEALTH_TIMEOUT:-180}"
+INTERVAL=5
+
+MODE="$(cat "$MODE_FILE" 2>/dev/null | tr -d '[:space:]')"
+[ -z "$MODE" ] && MODE="master"
+
+if [ ! -d "$IDS_DIR" ]; then
+  echo "cyjan-stack-health: $IDS_DIR existiert nicht — Check übersprungen."
+  exit 0
+fi
+cd "$IDS_DIR"
+
+# Compose-Argumente identisch zu cyjan-stack-up aufbauen.
+case "$MODE" in
+  tap)
+    CONTAINER_PREFIX="cyjan-tap-"
+    set -- -f docker-compose.tap.yml
+    ;;
+  master|*)
+    CONTAINER_PREFIX="ids-"
+    PROFILE_RAW="$(cat "$PROFILE_FILE" 2>/dev/null || echo prod)"
+    set --
+    old_ifs="${IFS-}"
+    IFS=','
+    for p in $PROFILE_RAW; do
+      [ -n "$p" ] && set -- "$@" --profile "$p"
+    done
+    IFS="$old_ifs"
+    ;;
+esac
+
+# Soll-Set: alle für das Profil deklarierten Services. `config --services`
+# braucht eine valide .env — falls das scheitert, Fallback auf das Ist-Set.
+SERVICES="$(docker compose "$@" config --services 2>/dev/null)"
+[ -z "$SERVICES" ] && SERVICES="$(docker compose "$@" ps --services 2>/dev/null)"
+if [ -z "$SERVICES" ]; then
+  echo "cyjan-stack-health: keine Compose-Services ermittelbar — Check übersprungen." >&2
+  exit 0
+fi
+
+# check_service <svc> → 0 ok, 1 (noch) nicht ok.
+#
+# Zwei Service-Klassen (Konvention: One-Shots heißen *-init — kafka-init,
+# minio-init):
+#   *-init       → ok wenn exited 0 ODER Container fehlt (das wöchentliche
+#                  `docker system prune` der cyjan-maintenance räumt exited
+#                  One-Shots weg — fehlend heißt hier "längst erledigt").
+#   alle anderen → MÜSSEN running sein (+healthy falls Healthcheck deklariert).
+#                  exited 0 ist hier ausdrücklich NICHT ok: ein manuell
+#                  gestoppter Container exitet mit 0 — genau der Zustand, der
+#                  beim OT-Vorfall den halben Stack unbemerkt down hielt.
+check_service() {
+  svc="$1"
+  cname="${CONTAINER_PREFIX}${svc}"
+  state="$(docker container inspect "$cname" \
+    --format '{{.State.Status}}|{{.State.ExitCode}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+    2>/dev/null)"
+  if [ -z "$state" ]; then
+    case "$svc" in
+      *-init) return 0 ;;   # One-Shot weggeräumt → ok
+      *)      return 1 ;;   # Long-Running fehlt → nicht ok
+    esac
+  fi
+  status="${state%%|*}"
+  rest="${state#*|}"
+  exitcode="${rest%%|*}"
+  health="${rest#*|}"
+  case "$status" in
+    running)
+      [ -z "$health" ] || [ "$health" = "healthy" ]
+      ;;
+    exited)
+      case "$svc" in
+        *-init) [ "$exitcode" = "0" ] ;;
+        *)      return 1 ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+deadline=$(( $(date +%s) + TIMEOUT ))
+while :; do
+  FAILED=""
+  for svc in $SERVICES; do
+    check_service "$svc" || FAILED="$FAILED $svc"
+  done
+  FAILED="${FAILED# }"
+  [ -z "$FAILED" ] && break
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    echo "cyjan-stack-health: FEHLER — nach ${TIMEOUT}s nicht ok: $FAILED" >&2
+    # Liste für cyjan-stack-alert hinterlegen (ein Service pro Zeile).
+    printf '%s\n' $FAILED > "$MARKER" 2>/dev/null || true
+    exit 1
+  fi
+  echo "cyjan-stack-health: warte auf: $FAILED"
+  sleep "$INTERVAL"
+done
+
+# Erfolg: Marker + motd-Banner eines früheren Fehlschlags aufräumen.
+rm -f "$MARKER"
+if [ -f /etc/motd ] && grep -q '>>> cyjan-stack-alert >>>' /etc/motd 2>/dev/null; then
+  sed -i '/>>> cyjan-stack-alert >>>/,/<<< cyjan-stack-alert <<</d' /etc/motd 2>/dev/null || true
+fi
+echo "cyjan-stack-health: alle $(echo "$SERVICES" | wc -w | tr -d ' ') Services ok (mode=$MODE)."
+exit 0

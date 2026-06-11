@@ -594,6 +594,14 @@ jobs:
           # nie — post-update.sh zieht sie jetzt nach.)
           cp distro/config/includes.chroot/usr/local/bin/cyjan-stack-up                     "$PKG/scripts/cyjan-stack-up"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-stack.service           "$PKG/scripts/cyjan-stack.service"
+          # Boot-Health-Check + Alarm (v2.5.32+ — cyjan-stack-health wird per
+          # Wants= von cyjan-stack.service gezogen, pollt nach dem Boot den
+          # Soll-Zustand und eskaliert via cyjan-stack-alert: journal + wall +
+          # motd + Best-Effort-BOOT_HEALTH_001-Alert in der DB.)
+          cp distro/config/includes.chroot/usr/local/bin/cyjan-stack-health                 "$PKG/scripts/cyjan-stack-health"
+          cp distro/config/includes.chroot/usr/local/bin/cyjan-stack-alert                  "$PKG/scripts/cyjan-stack-alert"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-stack-health.service    "$PKG/scripts/cyjan-stack-health.service"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-stack-alert.service     "$PKG/scripts/cyjan-stack-alert.service"
           # cyjan-tap CLI selbst — wird vom CLI-Update-Pfad nicht selbst
           # ersetzt (Self-Replace eines laufenden Skripts ist heikel).
           # User kann sie nach einem Update manuell mit
@@ -612,7 +620,7 @@ jobs:
           # vor v2.5.22 mit ids-setup einen Doppel-Block in /etc/network/
           # interfaces angelegt haben.
           cp scripts/fix-network-interfaces.sh  "$PKG/scripts/fix-network-interfaces.sh"
-          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces" "$PKG/scripts/cyjan-update" "$PKG/scripts/cyjan-stack-up" "$PKG/scripts/cyjan-tap-disk-watch" "$PKG/scripts/refresh-tap-update.sh" "$PKG/scripts/fix-network-interfaces.sh"
+          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces" "$PKG/scripts/cyjan-update" "$PKG/scripts/cyjan-stack-up" "$PKG/scripts/cyjan-stack-health" "$PKG/scripts/cyjan-stack-alert" "$PKG/scripts/cyjan-tap-disk-watch" "$PKG/scripts/refresh-tap-update.sh" "$PKG/scripts/fix-network-interfaces.sh"
 
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.

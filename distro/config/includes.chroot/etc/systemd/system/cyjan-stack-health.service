@@ -1,0 +1,18 @@
+[Unit]
+Description=Cyjan IDS Post-Boot Health-Check (Stack vollstaendig?)
+Documentation=https://github.com/JxxKal/ids
+# Läuft nach cyjan-stack.service (wird von dort per Wants= mitgezogen, daher
+# kein eigenes [Install]). Failt die Prüfung, eskaliert cyjan-stack-alert
+# (journal + wall + motd + Best-Effort-Alert in der DB).
+After=cyjan-stack.service
+OnFailure=cyjan-stack-alert.service
+ConditionPathExists=/opt/ids
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cyjan-stack-health
+# Health-Fenster (Default 180s im Skript) + Puffer. Override z.B. via
+# Drop-In mit Environment=CYJAN_HEALTH_TIMEOUT=300.
+TimeoutStartSec=400
+StandardOutput=journal
+StandardError=journal

@@ -175,6 +175,27 @@ else
   echo "[post-update] WARNUNG: cyjan-stack-Quellen nicht gefunden — Boot-Stack-Unit übersprungen."
 fi
 
+# ── 5b) Boot-Health-Check + Alarm (v2.5.32+) ─────────────────────────────
+# cyjan-stack.service galt bisher als "erfolgreich", sobald compose up -d
+# exitete — ob die Container wirklich hochkamen, prüfte niemand (so blieb der
+# halbe Stack nach dem OT-Reboot 22 h unbemerkt down). cyjan-stack-health wird
+# per Wants= von cyjan-stack.service mitgezogen, pollt den Soll-Zustand und
+# eskaliert bei Fehlschlag über cyjan-stack-alert (journal + wall + motd +
+# Best-Effort-Alert in der DB). Keine [Install]-Section → kein enable nötig.
+HEALTH_BIN_SRC="$(locate_src cyjan-stack-health         usr/local/bin)"
+ALERT_BIN_SRC="$(locate_src cyjan-stack-alert           usr/local/bin)"
+HEALTH_SVC_SRC="$(locate_src cyjan-stack-health.service etc/systemd/system)"
+ALERT_SVC_SRC="$(locate_src cyjan-stack-alert.service   etc/systemd/system)"
+if [ -n "$HEALTH_BIN_SRC" ] && [ -n "$ALERT_BIN_SRC" ] && [ -n "$HEALTH_SVC_SRC" ] && [ -n "$ALERT_SVC_SRC" ]; then
+  install -m 0755 "$HEALTH_BIN_SRC" /usr/local/bin/cyjan-stack-health
+  install -m 0755 "$ALERT_BIN_SRC"  /usr/local/bin/cyjan-stack-alert
+  install -m 0644 "$HEALTH_SVC_SRC" /etc/systemd/system/cyjan-stack-health.service
+  install -m 0644 "$ALERT_SVC_SRC"  /etc/systemd/system/cyjan-stack-alert.service
+  echo "[post-update] cyjan-stack-health + cyjan-stack-alert installiert (greift beim nächsten Reboot)."
+else
+  echo "[post-update] WARNUNG: cyjan-stack-health/alert-Quellen nicht gefunden — Boot-Health-Check übersprungen."
+fi
+
 systemctl daemon-reload
 systemctl enable --now cyjan-maintenance.timer
 
