@@ -281,20 +281,29 @@ else
 fi
 
 # ── 5) Tap-Disk-Watch (Auto-Prune bei >85% Disk) ─────────────────────────
-# Greift nur auf Tap-Hosts (Master-Hosts hat das cyjan-tap-CLI nicht;
-# der Service wird also dort installiert aber nie effektiv).
+# Tap-only. Der Timer wird AUSSCHLIESSLICH auf Hosts mit /etc/cyjan/mode==tap
+# aktiviert. Früherer Bug: das Gate war `command -v cyjan-tap` — auf Master-
+# Hosts, die die cyjan-tap-CLI mitgebracht haben (aber kein mode-File), wurde
+# der Timer fälschlich aktiv und failte alle 15 min (kaputtes inline-awk).
+# Jetzt: auf Nicht-Tap-Hosts wird er aktiv DEAKTIVIERT (Cleanup für bestehende
+# Fehl-Aktivierungen). Die Logik liegt im Skript cyjan-tap-disk-watch, das
+# zusätzlich selbst auf mode==tap prüft (Defense in Depth).
+WATCH_BIN_SRC="$(locate_src cyjan-tap-disk-watch         usr/local/bin)"
 WATCH_SVC_SRC="$(locate_src cyjan-tap-disk-watch.service etc/systemd/system)"
 WATCH_TMR_SRC="$(locate_src cyjan-tap-disk-watch.timer   etc/systemd/system)"
 if [ -n "$WATCH_SVC_SRC" ] && [ -n "$WATCH_TMR_SRC" ]; then
+  [ -n "$WATCH_BIN_SRC" ] && install -m 0755 "$WATCH_BIN_SRC" /usr/local/bin/cyjan-tap-disk-watch
   install -m 0644 "$WATCH_SVC_SRC" /etc/systemd/system/cyjan-tap-disk-watch.service
   install -m 0644 "$WATCH_TMR_SRC" /etc/systemd/system/cyjan-tap-disk-watch.timer
   echo "[post-update] cyjan-tap-disk-watch installiert."
-  if command -v cyjan-tap >/dev/null 2>&1; then
-    systemctl daemon-reload
+  systemctl daemon-reload
+  HOST_MODE="$(cat /etc/cyjan/mode 2>/dev/null | tr -d '[:space:]')"
+  if [ "$HOST_MODE" = "tap" ]; then
     systemctl enable --now cyjan-tap-disk-watch.timer
     echo "[post-update] cyjan-tap-disk-watch.timer aktiviert (15-Min-Check + Auto-Prune >85%)."
   else
-    echo "[post-update] cyjan-tap-CLI nicht vorhanden — Timer-Aktivierung übersprungen (Master-Host?)."
+    systemctl disable --now cyjan-tap-disk-watch.timer 2>/dev/null || true
+    echo "[post-update] cyjan-tap-disk-watch.timer deaktiviert (kein Tap-Host)."
   fi
 fi
 

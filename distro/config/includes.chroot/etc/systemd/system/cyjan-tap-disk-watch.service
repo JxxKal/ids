@@ -6,13 +6,8 @@ Wants=docker.service
 
 [Service]
 Type=oneshot
-# Check disk usage and trigger cyjan-tap prune if /-Mount > 85%.
-# Idempotent: bei <85% no-op.
-ExecStart=/bin/bash -c '\
-  USAGE=$(df / | awk "NR==2 {gsub(\"%\",\"\"); print $5}"); \
-  if [ "$USAGE" -ge 85 ]; then \
-    echo "[disk-watch] / at ${USAGE}% — Triggering cyjan-tap prune"; \
-    /usr/local/bin/cyjan-tap prune; \
-  else \
-    echo "[disk-watch] / at ${USAGE}% — OK"; \
-  fi'
+# Logik liegt im Skript /usr/local/bin/cyjan-tap-disk-watch (Tap-only,
+# self-guarding über /etc/cyjan/mode). Standalone statt inline-ExecStart, weil
+# die awk-in-bash-in-systemd-Quoting-Verschachtelung `$5` verschluckte und
+# `awk: syntax error at or near %` warf. Idempotent: <85% = no-op.
+ExecStart=/usr/local/bin/cyjan-tap-disk-watch

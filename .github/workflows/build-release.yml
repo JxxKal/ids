@@ -576,6 +576,7 @@ jobs:
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-mirror-tune.service  "$PKG/scripts/cyjan-mirror-tune.service"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-update.path      "$PKG/scripts/cyjan-tap-update.path"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-update.service   "$PKG/scripts/cyjan-tap-update.service"
+          cp distro/config/includes.chroot/usr/local/bin/cyjan-tap-disk-watch              "$PKG/scripts/cyjan-tap-disk-watch"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-disk-watch.service "$PKG/scripts/cyjan-tap-disk-watch.service"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-disk-watch.timer   "$PKG/scripts/cyjan-tap-disk-watch.timer"
           cp distro/config/includes.chroot/etc/tmpfiles.d/cyjan-update.conf              "$PKG/scripts/cyjan-update.tmpfiles"
@@ -611,7 +612,7 @@ jobs:
           # vor v2.5.22 mit ids-setup einen Doppel-Block in /etc/network/
           # interfaces angelegt haben.
           cp scripts/fix-network-interfaces.sh  "$PKG/scripts/fix-network-interfaces.sh"
-          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces" "$PKG/scripts/cyjan-update" "$PKG/scripts/cyjan-stack-up" "$PKG/scripts/refresh-tap-update.sh" "$PKG/scripts/fix-network-interfaces.sh"
+          chmod +x "$PKG/scripts/post-update.sh" "$PKG/scripts/cyjan-maintenance" "$PKG/scripts/cyjan-mirror-tune" "$PKG/scripts/cyjan-tap" "$PKG/scripts/cyjan-host-interfaces" "$PKG/scripts/cyjan-update" "$PKG/scripts/cyjan-stack-up" "$PKG/scripts/cyjan-tap-disk-watch" "$PKG/scripts/refresh-tap-update.sh" "$PKG/scripts/fix-network-interfaces.sh"
 
           # Bundle bewusst als 'images.tar.zst' ablegen – die System-Update-
           # Pipeline der API erwartet genau diesen Dateinamen.
@@ -637,6 +638,7 @@ jobs:
           cp "$PKG/scripts/cyjan-mirror-tune.service"  "$PKG/tap-update/scripts/cyjan-mirror-tune.service"
           cp "$PKG/scripts/cyjan-tap-update.path"      "$PKG/tap-update/scripts/cyjan-tap-update.path"
           cp "$PKG/scripts/cyjan-tap-update.service"   "$PKG/tap-update/scripts/cyjan-tap-update.service"
+          cp "$PKG/scripts/cyjan-tap-disk-watch"         "$PKG/tap-update/scripts/cyjan-tap-disk-watch"
           cp "$PKG/scripts/cyjan-tap-disk-watch.service" "$PKG/tap-update/scripts/cyjan-tap-disk-watch.service"
           cp "$PKG/scripts/cyjan-tap-disk-watch.timer"   "$PKG/tap-update/scripts/cyjan-tap-disk-watch.timer"
           cp "$PKG/scripts/cyjan-update.tmpfiles"      "$PKG/tap-update/scripts/cyjan-update.tmpfiles"

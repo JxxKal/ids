@@ -1,0 +1,34 @@
+#!/bin/bash
+# Cyjan IDS – Tap-Disk-Watch: prune'd Kafka-Topics, wenn / über Schwellwert läuft.
+#
+# Tap-only. Auf Master-/Dev-Hosts ist das irrelevant (keine lokale Kafka-Retention
+# zum Aufräumen) — der Service no-op't dort sauber statt Fehler zu werfen.
+#
+# Hintergrund: früher steckte diese Logik inline im ExecStart der .service-Unit,
+# mit awk in doppelten Anführungszeichen innerhalb eines bash -c innerhalb eines
+# systemd-Quotings. Dabei wurde `$5` verschluckt → USAGE leer → `awk: syntax error
+# at or near %` + `[: : integer expression expected`. Als eigenes Skript ohne
+# Quoting-Verschachtelung ist das robust; df --output=pcent braucht kein awk.
+set -u
+
+THRESHOLD=85
+MODE="$(cat /etc/cyjan/mode 2>/dev/null | tr -d '[:space:]')"
+
+# Nur auf Tap-Hosts aktiv. Master/Dev (mode fehlt oder != tap) → no-op.
+if [ "$MODE" != "tap" ]; then
+  exit 0
+fi
+
+# df --output=pcent / liefert "Use%\n 46%" → letzte Zeile, nur Ziffern.
+USAGE="$(df --output=pcent / 2>/dev/null | tail -n1 | tr -dc '0-9')"
+if [ -z "$USAGE" ]; then
+  echo "[disk-watch] konnte Disk-Usage nicht ermitteln — übersprungen" >&2
+  exit 0
+fi
+
+if [ "$USAGE" -ge "$THRESHOLD" ]; then
+  echo "[disk-watch] / bei ${USAGE}% — triggere cyjan-tap prune"
+  /usr/local/bin/cyjan-tap prune
+else
+  echo "[disk-watch] / bei ${USAGE}% — OK"
+fi
