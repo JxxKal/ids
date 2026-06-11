@@ -509,3 +509,160 @@ async def update_feature_flags(
             current,
         )
     return await get_feature_flags(pool)
+
+
+# ── Docker-Container-Status (profilbewusst) ──────────────────────────────────
+# Zeigt im „System Details"-Tab auf einen Blick, welche Container des aktiven
+# Compose-Profils laufen — und welche fehlen/abgestürzt sind. Soll-Set =
+# Services des Profils aus /etc/cyjan/profile (z.B. "prod,snort"); Lab/RedTeam
+# als separate Gruppe, wenn redteam_enabled ODER RedTeam-Container existieren.
+# Der api-Container hat dafür /var/run/docker.sock + /opt/ids gemountet.
+_PROFILE_FILE = Path("/etc/cyjan/profile")
+_LAB_PROFILES = ["redteam"]
+
+# Kleiner TTL-Cache, damit das 5-s-Polling des Frontends nicht pro Tick mehrere
+# (langsame) `docker compose`-Aufrufe auslöst.
+_containers_cache: tuple[float, dict] | None = None
+_CONTAINERS_TTL = 3.0
+
+
+def _profiles_from_file() -> list[str]:
+    raw = _PROFILE_FILE.read_text().strip() if _PROFILE_FILE.exists() else "prod"
+    return [p.strip() for p in raw.split(",") if p.strip()] or ["prod"]
+
+
+def _profile_flags(profiles: list[str]) -> list[str]:
+    # compose interpretiert `--profile "a,b"` als EINEN Namen → pro Eintrag ein Flag.
+    flags: list[str] = []
+    for p in profiles:
+        flags += ["--profile", p]
+    return flags
+
+
+def _compose(args: list[str], timeout: int = 15) -> subprocess.CompletedProcess | None:
+    """docker compose im Projektverzeichnis; None bei Fehler/Timeout (failsoft)."""
+    try:
+        return subprocess.run(
+            ["docker", "compose", "--project-directory", str(_IDS_DIR), *args],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except Exception:
+        return None
+
+
+def _compose_services(profiles: list[str]) -> list[str]:
+    """Soll-Services eines Profil-Sets (`config --services`). Failsoft []."""
+    r = _compose([*_profile_flags(profiles), "config", "--services"])
+    if not r or r.returncode != 0 or not r.stdout:
+        return []
+    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def _compose_ps(profiles: list[str]) -> dict[str, dict]:
+    """Ist-Zustand (`ps -a --format json`), gemappt Service→info. Parst JSON-Array
+    UND ein-Objekt-pro-Zeile (compose-Versions-Drift)."""
+    r = _compose([*_profile_flags(profiles), "ps", "-a", "--format", "json"])
+    if not r or r.returncode != 0 or not r.stdout:
+        return {}
+    raw = r.stdout.strip()
+    records: list[dict] = []
+    try:
+        parsed = json.loads(raw)
+        records = parsed if isinstance(parsed, list) else [parsed]
+    except json.JSONDecodeError:
+        for ln in raw.splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                records.append(json.loads(ln))
+            except json.JSONDecodeError:
+                continue
+    out: dict[str, dict] = {}
+    for rec in records:
+        svc = rec.get("Service") or ""
+        if not svc:
+            continue
+        out[svc] = {
+            "name":      rec.get("Name") or None,
+            "state":     (rec.get("State") or "unknown").lower(),
+            "status":    rec.get("Status") or None,
+            "health":    (rec.get("Health") or "").lower() or None,
+            "exit_code": rec.get("ExitCode"),
+        }
+    return out
+
+
+class ContainerInfo(BaseModel):
+    service:   str
+    name:      str | None = None
+    state:     str                 # running|exited|restarting|created|paused|missing
+    status:    str | None = None
+    health:    str | None = None
+    exit_code: int | None = None
+
+
+class ContainerGroup(BaseModel):
+    key:        str                # "active" | "lab"
+    profiles:   list[str]
+    running:    int
+    total:      int
+    containers: list[ContainerInfo]
+
+
+class ContainerStatusResponse(BaseModel):
+    deployment:      str           # "prod" | "lab"
+    active_profiles: list[str]
+    groups:          list[ContainerGroup]
+
+
+def _build_group(key: str, profiles: list[str], services: list[str],
+                 ps: dict[str, dict]) -> ContainerGroup:
+    containers: list[ContainerInfo] = []
+    running = 0
+    for svc in sorted(services):
+        info = ps.get(svc)
+        if info is None:
+            containers.append(ContainerInfo(service=svc, state="missing"))
+            continue
+        if info["state"] == "running":
+            running += 1
+        containers.append(ContainerInfo(service=svc, **info))
+    return ContainerGroup(key=key, profiles=profiles,
+                          running=running, total=len(services),
+                          containers=containers)
+
+
+@router.get("/system/containers", response_model=ContainerStatusResponse,
+            summary="Docker-Container-Status (profilbewusst)")
+async def get_container_status(
+    pool: asyncpg.Pool = Depends(get_pool),
+) -> ContainerStatusResponse:
+    global _containers_cache
+    now = time.time()
+    if _containers_cache and now - _containers_cache[0] < _CONTAINERS_TTL:
+        return ContainerStatusResponse(**_containers_cache[1])
+
+    active = _profiles_from_file()
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT value FROM system_config WHERE key = 'features'")
+    feats  = dict(row["value"]) if row and row["value"] else {}
+    lab_on = bool(feats.get("redteam_enabled", False))
+
+    active_services = _compose_services(active)
+    lab_services    = _compose_services(_LAB_PROFILES)
+    ps              = _compose_ps(active + _LAB_PROFILES)
+    lab_present     = any(svc in ps for svc in lab_services)
+
+    groups = [_build_group("active", active, active_services, ps)]
+    if lab_on or lab_present:
+        groups.append(_build_group("lab", _LAB_PROFILES, lab_services, ps))
+
+    resp = ContainerStatusResponse(
+        deployment="lab" if len(groups) > 1 else "prod",
+        active_profiles=active,
+        groups=groups,
+    )
+    _containers_cache = (now, resp.model_dump())
+    return resp

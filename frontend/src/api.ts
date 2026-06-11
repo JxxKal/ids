@@ -1244,6 +1244,52 @@ export async function fetchSystemStats(): Promise<SystemStats> {
   return req('/api/system/stats');
 }
 
+export interface ContainerInfo {
+  service:    string;
+  name:       string | null;
+  state:      string;            // running|exited|restarting|created|paused|missing
+  status:     string | null;
+  health:     string | null;     // healthy|unhealthy|starting|null
+  exit_code:  number | null;
+}
+
+export interface ContainerGroup {
+  key:        string;            // "active" | "lab"
+  profiles:   string[];
+  running:    number;
+  total:      number;
+  containers: ContainerInfo[];
+}
+
+export interface ContainerStatus {
+  deployment:      string;       // "prod" | "lab"
+  active_profiles: string[];
+  groups:          ContainerGroup[];
+}
+
+export async function fetchContainerStatus(): Promise<ContainerStatus> {
+  if (isDemoMode()) return {
+    deployment: 'lab',
+    active_profiles: ['prod', 'snort'],
+    groups: [
+      { key: 'active', profiles: ['prod', 'snort'], running: 6, total: 7, containers: [
+        { service: 'api',          name: 'ids-api',          state: 'running', status: 'Up 2 hours (healthy)', health: 'healthy', exit_code: null },
+        { service: 'frontend',     name: 'ids-frontend',     state: 'running', status: 'Up 2 hours',           health: null,      exit_code: null },
+        { service: 'timescaledb',  name: 'ids-timescaledb',  state: 'running', status: 'Up 2 hours (healthy)', health: 'healthy', exit_code: null },
+        { service: 'kafka',        name: 'ids-kafka',        state: 'running', status: 'Up 2 hours (healthy)', health: 'healthy', exit_code: null },
+        { service: 'signature-engine', name: 'ids-signature-engine', state: 'running', status: 'Up 2 hours', health: null, exit_code: null },
+        { service: 'sniffer',      name: 'ids-sniffer',      state: 'running', status: 'Up 2 hours',           health: null,      exit_code: null },
+        { service: 'mqtt-bridge',  name: 'ids-mqtt-bridge',  state: 'exited',  status: 'Exited (1) 3 min ago', health: null,      exit_code: 1 },
+      ]},
+      { key: 'lab', profiles: ['redteam'], running: 2, total: 2, containers: [
+        { service: 'redteam-orchestrator', name: 'ids-redteam-orchestrator', state: 'running', status: 'Up 2 hours (healthy)', health: 'healthy', exit_code: null },
+        { service: 'kali-shell',           name: 'ids-kali-shell',           state: 'running', status: 'Up 2 hours (healthy)', health: 'healthy', exit_code: null },
+      ]},
+    ],
+  };
+  return req('/api/system/containers');
+}
+
 export interface LearnedPattern {
   rule_id:         string;
   src_ip:          string;

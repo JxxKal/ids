@@ -403,7 +403,7 @@
     },
     "snifferDrops": {
       "label": "⚠ Drops {{pct}} %",
-      "title": "Paketverlust am Sniffer: {{pct}} % — Details unter Einstellungen → Systemauslastung"
+      "title": "Paketverlust am Sniffer: {{pct}} % — Details unter Einstellungen → System Details"
     },
     "filters": {
       "mlOnly": "Nur KI/ML-Alarme",
@@ -565,7 +565,7 @@
       "rules-list": "Aktive Regeln",
       "rules-editor": "Eigene Signaturen",
       "rules-overrides": "Regel-Anpassungen",
-      "system-health": "Systemauslastung",
+      "system-health": "System Details",
       "interfaces": "Interfaces",
       "dns-resolvers": "DNS-Resolver",
       "egress-priorities": "OT-Boundary",
@@ -1266,7 +1266,7 @@
       "phaseDone": "Abgeschlossen"
     },
     "systemHealth": {
-      "title": "Systemauslastung",
+      "title": "System Details",
       "unavailable": "Systemdaten nicht verfügbar",
       "calculating": "Berechne…",
       "dropCritBanner": "⚠ Kritischer Paketverlust am Sniffer-Interface",
@@ -1284,7 +1284,16 @@
       "totalCaptured": "Gesamt erfasst",
       "totalDropped": "Gesamt verworfen",
       "kafkaErrors": "Kafka-Fehler",
-      "refreshFooter": "Aktualisierung alle 5 s"
+      "refreshFooter": "Aktualisierung alle 5 s",
+      "containers": {
+        "title": "Container-Status",
+        "running": "{{running}}/{{total}} laufen",
+        "missing": "nicht vorhanden",
+        "group": {
+          "active": "Aktives Deployment",
+          "lab": "Lab / RedTeam"
+        }
+      }
     }
   }
 }

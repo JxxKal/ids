@@ -403,7 +403,7 @@
     },
     "snifferDrops": {
       "label": "⚠ drops {{pct}} %",
-      "title": "Sniffer packet loss: {{pct}} % — details under Settings → System load"
+      "title": "Sniffer packet loss: {{pct}} % — details under Settings → System Details"
     },
     "filters": {
       "mlOnly": "AI/ML alerts only",
@@ -565,7 +565,7 @@
       "rules-list": "Active rules",
       "rules-editor": "Custom signatures",
       "rules-overrides": "Rule adjustments",
-      "system-health": "System load",
+      "system-health": "System Details",
       "interfaces": "Interfaces",
       "dns-resolvers": "DNS resolvers",
       "egress-priorities": "OT-Boundary",
@@ -1266,7 +1266,7 @@
       "phaseDone": "Completed"
     },
     "systemHealth": {
-      "title": "System load",
+      "title": "System Details",
       "unavailable": "System data unavailable",
       "calculating": "Calculating…",
       "dropCritBanner": "⚠ Critical packet loss on the sniffer interface",
@@ -1284,7 +1284,16 @@
       "totalCaptured": "Total captured",
       "totalDropped": "Total dropped",
       "kafkaErrors": "Kafka errors",
-      "refreshFooter": "Refresh every 5 s"
+      "refreshFooter": "Refresh every 5 s",
+      "containers": {
+        "title": "Container status",
+        "running": "{{running}}/{{total}} running",
+        "missing": "not present",
+        "group": {
+          "active": "Active deployment",
+          "lab": "Lab / RedTeam"
+        }
+      }
     }
   }
 }

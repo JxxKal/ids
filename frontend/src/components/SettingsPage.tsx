@@ -17,7 +17,7 @@ import {
   saveIrmaConfig, saveItopConfig, saveMLConfig, saveMqttConfig, saveSamlConfig, saveSyslogConfig,
   testMqttConnection,
   restartStack, startSystemUpdate, testItopConnection, testSyslog, triggerItopSync, triggerMLRetrain,
-  triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname, fetchSystemStats,
+  triggerRuleUpdate, updateUser, uploadSslCert, uploadSslPfx, setSslHostname, fetchSystemStats, fetchContainerStatus,
   importSuricataRules,
   fetchRuleFiles, fetchRuleFile, saveRuleFile, deleteRuleFile,
   fetchLearnedPatterns,
@@ -43,7 +43,7 @@ import {
   fetchMe,
 } from '../api';
 import type {
-  SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, LearnedPattern,
+  SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, ContainerStatus, ContainerInfo, LearnedPattern,
   DbStatsResponse, MaintenanceAuditEntry,
   RuleFileMeta,
 } from '../api';
@@ -6531,6 +6531,80 @@ function StatRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+// Status-Punkt-Farbe je Container-Zustand: grün = läuft (healthy/ohne Check),
+// amber = restarting/starting/unhealthy/created/paused, rot = exited/missing.
+function containerDotClass(c: ContainerInfo): string {
+  if (c.state === 'running') {
+    if (c.health === 'unhealthy') return 'bg-red-500';
+    if (c.health === 'starting')  return 'bg-amber-500';
+    return 'bg-green-500';
+  }
+  if (c.state === 'restarting' || c.state === 'created' || c.state === 'paused') return 'bg-amber-500';
+  return 'bg-red-500';   // exited | missing | unknown
+}
+
+// Profilbewusste Container-Status-Übersicht. Eigenständig (eigenes Polling),
+// damit sie unabhängig von den Sniffer-/Host-Stats lädt. Fail-soft: zeigt nichts,
+// wenn der Endpoint fehlt (ältere API).
+function ContainerStatusSection() {
+  const { t } = useTranslation();
+  const [data, setData] = useState<ContainerStatus | null>(null);
+  const [err,  setErr]  = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetchContainerStatus()
+      .then(d => { if (alive) { setData(d); setErr(false); } })
+      .catch(() => { if (alive) setErr(true); });
+    load();
+    const ti = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(ti); };
+  }, []);
+
+  if (err && !data) return null;
+  if (!data) return <p className="text-slate-600 text-xs">{t('common.loading')}</p>;
+
+  return (
+    <section>
+      <p className="text-[11px] text-slate-500 uppercase tracking-wider font-mono mb-3">
+        {t('settings.systemHealth.containers.title')}
+      </p>
+      <div className="space-y-4">
+        {data.groups.map(g => (
+          <div key={g.key}>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[11px] text-slate-400 uppercase tracking-wider font-mono">
+                {t(`settings.systemHealth.containers.group.${g.key}`)}
+                <span className="text-slate-600 normal-case"> ({g.profiles.join(', ')})</span>
+              </span>
+              <span className={`text-xs font-mono tabular-nums ${g.running < g.total ? 'text-amber-300' : 'text-green-400'}`}>
+                {t('settings.systemHealth.containers.running', { running: g.running, total: g.total })}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-0.5">
+              {g.containers.map(c => (
+                <div key={c.service}
+                     title={c.name || c.service}
+                     className="flex items-center gap-2 py-1 border-b border-slate-800/40 last:border-0 min-w-0">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${containerDotClass(c)}`} />
+                  <span className="text-xs font-mono text-slate-200 truncate">{c.service}</span>
+                  <span className={`text-[11px] font-mono ml-auto shrink-0 text-right max-w-[55%] truncate ${
+                    c.state === 'running' ? 'text-slate-500' : 'text-red-400/80'
+                  }`}>
+                    {c.state === 'missing'
+                      ? t('settings.systemHealth.containers.missing')
+                      : (c.status || c.state)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function SystemHealth() {
   const { t } = useTranslation();
   const [stats,   setStats]   = useState<SystemStats | null>(null);
@@ -6649,6 +6723,9 @@ function SystemHealth() {
           </StatRow>
         </div>
       </section>
+
+      {/* Docker-Container-Status (profilbewusst) */}
+      <ContainerStatusSection />
 
       <p className="text-[10px] text-slate-700 font-mono">{t('settings.systemHealth.refreshFooter')}</p>
     </div>
