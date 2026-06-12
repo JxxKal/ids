@@ -50,10 +50,12 @@ logging.basicConfig(
 log = logging.getLogger("mqtt-bridge")
 
 # ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
-# Prozess-Liveness: eigener asyncio-Task statt Kopplung an die Publish-
-# Pipeline — die blockiert legitim (Inflight-Window/connected.wait), wenn der
-# EXTERNE MQTT-Broker down ist. Das soll kein unhealthy auslösen, sonst failt
-# cyjan-stack-health den Boot wegen eines fremden Brokers.
+# Prozess-Liveness: eigener asyncio-Task im SUPERVISOR (amain), nicht in der
+# Session — die Bridge ist auch dann gesund, wenn der EXTERNE MQTT-Broker
+# down ist (Connect-Retry-Schleife) oder MQTT disabled ist (Idle-Loop). In
+# beiden Zuständen läuft _run_session gar nicht; ein Session-gekoppelter
+# Beat würde dann fälschlich unhealthy melden und cyjan-stack-health den
+# Boot wegen eines fremden Brokers failen lassen.
 async def _heartbeat_loop() -> None:
     while True:
         try:
@@ -527,7 +529,6 @@ async def _run_session(cfg: Config, pool: asyncpg.Pool, env: dict) -> None:
 
     try:
         await asyncio.gather(
-            _heartbeat_loop(),
             event_consumer_loop(cfg, bridge, taps),
             threat_publish_loop(cfg, bridge, pool),
             tap_status_loop(cfg, bridge, pool),
@@ -555,6 +556,9 @@ async def amain() -> None:
             await asyncio.sleep(10)
 
     log.info("DB-Pool initialisiert — starte Config-Supervisor")
+
+    # Referenz halten, damit der Task nicht vom GC eingesammelt wird.
+    _hb_task = asyncio.create_task(_heartbeat_loop(), name="heartbeat")  # noqa: F841
 
     while True:
         cfg = await _build_effective_config(env, pool)
