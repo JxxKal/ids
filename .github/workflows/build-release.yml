@@ -99,6 +99,32 @@ jobs:
             docker pull "$img"
           done
 
+          # ── Drift-Guard ─────────────────────────────────────────────────
+          # Jeder Compose-Service mit `build:` MUSS im Bundle-Array stehen —
+          # oder bewusst in der Ausnahmeliste. Genau diese Drift hat v2.5.29
+          # erzwungen: traffic-generator war im Compose, aber nicht im Bundle
+          # → auf dem Offline-Host versuchte compose zu bauen und scheiterte
+          # an fehlendem Netz. Der Guard failt den Build VOR dem teuren
+          # docker save, mit Klartext-Fehlermeldung.
+          python3 -c "import yaml" 2>/dev/null || pip3 install --quiet pyyaml
+          check_bundle_drift() {
+            python3 - "$@" <<'PY'
+          import sys, yaml
+          compose_file, exempt_csv, *bundled = sys.argv[1:]
+          services = (yaml.safe_load(open(compose_file)) or {}).get("services") or {}
+          buildable = {n for n, s in services.items()
+                       if isinstance(s, dict) and "build" in s}
+          exempt = set(filter(None, exempt_csv.split(",")))
+          missing = sorted(buildable - set(bundled) - exempt)
+          stale   = sorted(set(bundled) - buildable)
+          if missing:
+              print(f"::error::Bundle-Drift ({compose_file}): build-Services fehlen im Bundle-Array: {' '.join(missing)} — Array im Workflow ergänzen oder bewusst in die Ausnahmeliste aufnehmen.")
+          if stale:
+              print(f"::error::Bundle-Drift ({compose_file}): im Bundle-Array, aber ohne build: im Compose: {' '.join(stale)} — Array bereinigen.")
+          sys.exit(1 if (missing or stale) else 0)
+          PY
+          }
+
           # Master-Bundle (Custom + Externe Master).
           # rule-tuner: Phase-4-Service (ML-Threshold-Anpassung), seit v1.5.0
           # Master-only. Vorher fehlte er hier — Update-ZIPs ohne rule-tuner
@@ -109,6 +135,15 @@ jobs:
                          sniffer irma-bridge snort snort-bridge master-uplink \
                          rule-tuner mqtt-bridge notification-dispatcher \
                          traffic-generator)
+
+          # Ausnahmen (bewusst NICHT im Update-Bundle):
+          #   sniffer-test/snort-test — Test-Profil-Varianten, nutzen dieselben
+          #     Quellen, brauchen auf Offline-Hosts kein eigenes Image.
+          #   kali-shell/redteam-*   — Lab-only (REDTEAM_ENABLED), zu groß fürs
+          #     Bundle; werden auf Lab-Hosts lokal gebaut.
+          check_bundle_drift docker-compose.yml \
+            "sniffer-test,snort-test,kali-shell,redteam-orchestrator,redteam-listener" \
+            "${CUSTOM_MASTER[@]}"
 
           IMAGES_MASTER=()
           for svc in "${CUSTOM_MASTER[@]}"; do
@@ -132,6 +167,10 @@ jobs:
           # die Detection-Pipeline-Services + das einzige nötige externe Image
           # (Kafka).
           CUSTOM_TAP=(sniffer flow-aggregator signature-engine tap-uplink tap-api)
+
+          # Drift-Guard auch fürs Tap-Bundle (keine Ausnahmen — am Tap muss
+          # jeder build-Service offline verfügbar sein).
+          check_bundle_drift docker-compose.tap.yml "" "${CUSTOM_TAP[@]}"
 
           IMAGES_TAP=()
           for svc in "${CUSTOM_TAP[@]}"; do

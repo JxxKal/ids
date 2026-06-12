@@ -616,20 +616,38 @@ class ContainerStatusResponse(BaseModel):
     groups:          list[ContainerGroup]
 
 
+def _is_oneshot(svc: str) -> bool:
+    """One-Shot-Init-Jobs per Namenskonvention (kafka-init, minio-init).
+
+    Gleiche Klassifikation wie cyjan-stack-health am Host: exited 0 heißt
+    "erledigt", nicht "down" — und ein fehlender Init-Container ist normal,
+    weil das wöchentliche `docker system prune` exited Container wegräumt.
+    """
+    return svc.endswith("-init")
+
+
 def _build_group(key: str, profiles: list[str], services: list[str],
                  ps: dict[str, dict]) -> ContainerGroup:
     containers: list[ContainerInfo] = []
     running = 0
+    total = 0
     for svc in sorted(services):
         info = ps.get(svc)
         if info is None:
+            if _is_oneshot(svc):
+                continue  # weggeprunter Init-Job — nicht listen, nicht zählen
+            total += 1
             containers.append(ContainerInfo(service=svc, state="missing"))
             continue
+        total += 1
         if info["state"] == "running":
             running += 1
+        elif (_is_oneshot(svc) and info["state"] == "exited"
+              and info.get("exit_code") == 0):
+            running += 1  # sauber durchgelaufener One-Shot zählt als gesund
         containers.append(ContainerInfo(service=svc, **info))
     return ContainerGroup(key=key, profiles=profiles,
-                          running=running, total=len(services),
+                          running=running, total=total,
                           containers=containers)
 
 
@@ -651,7 +669,12 @@ async def get_container_status(
     lab_on = bool(feats.get("redteam_enabled", False))
 
     active_services = _compose_services(active)
-    lab_services    = _compose_services(_LAB_PROFILES)
+    # `config --services --profile redteam` liefert profillose Services
+    # (kafka, api, …) IMMER mit — Compose-Semantik. Ohne Differenz zur
+    # Active-Gruppe würde die Lab-Gruppe den kompletten Basis-Stack doppelt
+    # listen; übrig bleiben sollen nur die redteam-exklusiven Services.
+    lab_services    = [s for s in _compose_services(_LAB_PROFILES)
+                       if s not in set(active_services)]
     ps              = _compose_ps(active + _LAB_PROFILES)
     lab_present     = any(svc in ps for svc in lab_services)
 

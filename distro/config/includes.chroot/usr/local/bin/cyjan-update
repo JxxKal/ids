@@ -20,8 +20,19 @@ REPO="JxxKal/ids"
 IDS_DIR="/opt/ids"
 VERSION_FILE="$IDS_DIR/VERSION"
 COMPOSE_FILE="$IDS_DIR/docker-compose.yml"
-PROFILE="prod"
 TAG="[cyjan-update]"
+
+# Compose-Profile aus /etc/cyjan/profile (kommasepariert, z.B. "prod,snort").
+# War bis v2.5.32 hartkodiert "prod" — auf prod,snort-Hosts blieben snort/
+# snort-bridge dadurch nach jedem Update auf dem alten Container stehen,
+# obwohl docker load die neuen Images längst eingespielt hatte.
+PROFILE="$(cat /etc/cyjan/profile 2>/dev/null | tr -d '[:space:]')"
+[ -z "$PROFILE" ] && PROFILE="prod"
+PROFILE_ARGS=()
+IFS=',' read -ra _profiles <<< "$PROFILE"
+for _p in "${_profiles[@]}"; do
+  [ -n "$_p" ] && PROFILE_ARGS+=(--profile "$_p")
+done
 
 # Falls /etc/environment einen Proxy hat, importieren — sonst geht curl auf
 # Offline-Hosts ins Leere.
@@ -194,10 +205,10 @@ cmd_apply() {
 
   # ── Compose recreate ─────────────────────────────────────────────────────
   if [ "$skip_compose" -eq 1 ]; then
-    echo "$TAG --skip-compose gesetzt — bitte später manuell: docker compose --profile $PROFILE up -d --force-recreate"
+    echo "$TAG --skip-compose gesetzt — bitte später manuell: docker compose ${PROFILE_ARGS[*]} up -d --force-recreate"
   else
-    echo "$TAG docker compose --profile $PROFILE up -d --force-recreate …"
-    (cd "$IDS_DIR" && docker compose --profile "$PROFILE" up -d --force-recreate)
+    echo "$TAG docker compose ${PROFILE_ARGS[*]} up -d --force-recreate …"
+    (cd "$IDS_DIR" && docker compose "${PROFILE_ARGS[@]}" up -d --force-recreate)
   fi
 
   local new_ver

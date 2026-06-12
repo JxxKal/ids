@@ -196,6 +196,28 @@ else
   echo "[post-update] WARNUNG: cyjan-stack-health/alert-Quellen nicht gefunden — Boot-Health-Check übersprungen."
 fi
 
+# ── 5c) cyjan-update Self-Update (v2.5.33+) ──────────────────────────────
+# post-update.sh läuft typischerweise AUS cyjan-update heraus — ein direktes
+# install/cp auf /usr/local/bin/cyjan-update würde in das gerade laufende
+# Skript schreiben (bash liest inkrementell vom File → korrupte Reads).
+# Deshalb atomar: in eine Temp-Datei daneben kopieren und per mv(1) drüber-
+# renamen. Die laufende bash hält den ALTEN Inode und liest sauber zu Ende;
+# ab dem nächsten Aufruf gilt die neue Fassung. (cyjan-tap bleibt bewusst
+# manuell — siehe Kommentar im Release-Workflow.)
+UPDATE_BIN_SRC="$(locate_src cyjan-update usr/local/bin)"
+if [ -n "$UPDATE_BIN_SRC" ]; then
+  if ! cmp -s "$UPDATE_BIN_SRC" /usr/local/bin/cyjan-update 2>/dev/null; then
+    cp "$UPDATE_BIN_SRC" /usr/local/bin/.cyjan-update.new
+    chmod 0755 /usr/local/bin/.cyjan-update.new
+    mv -f /usr/local/bin/.cyjan-update.new /usr/local/bin/cyjan-update
+    echo "[post-update] cyjan-update atomar aktualisiert (gilt ab dem nächsten Aufruf)."
+  else
+    echo "[post-update] cyjan-update bereits aktuell."
+  fi
+else
+  echo "[post-update] WARNUNG: cyjan-update-Quelle nicht gefunden — Self-Update übersprungen."
+fi
+
 systemctl daemon-reload
 systemctl enable --now cyjan-maintenance.timer
 

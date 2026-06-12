@@ -6531,14 +6531,23 @@ function StatRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-// Status-Punkt-Farbe je Container-Zustand: grün = läuft (healthy/ohne Check),
-// amber = restarting/starting/unhealthy/created/paused, rot = exited/missing.
+// Sauber durchgelaufener One-Shot-Init-Job (kafka-init, minio-init):
+// Exited (0) ist hier der SOLL-Zustand, kein Ausfall. Gleiche Konvention
+// wie cyjan-stack-health am Host und _is_oneshot() im API-Endpoint.
+function isCleanOneshot(c: ContainerInfo): boolean {
+  return c.service.endsWith('-init') && c.state === 'exited' && c.exit_code === 0;
+}
+
+// Status-Punkt-Farbe je Container-Zustand: grün = läuft (healthy/ohne Check)
+// oder erledigter Init-Job, amber = restarting/starting/unhealthy/created/
+// paused, rot = exited/missing.
 function containerDotClass(c: ContainerInfo): string {
   if (c.state === 'running') {
     if (c.health === 'unhealthy') return 'bg-red-500';
     if (c.health === 'starting')  return 'bg-amber-500';
     return 'bg-green-500';
   }
+  if (isCleanOneshot(c)) return 'bg-green-500';
   if (c.state === 'restarting' || c.state === 'created' || c.state === 'paused') return 'bg-amber-500';
   return 'bg-red-500';   // exited | missing | unknown
 }
@@ -6589,7 +6598,7 @@ function ContainerStatusSection() {
                   <span className={`w-2 h-2 rounded-full shrink-0 ${containerDotClass(c)}`} />
                   <span className="text-xs font-mono text-slate-200 truncate">{c.service}</span>
                   <span className={`text-[11px] font-mono ml-auto shrink-0 text-right max-w-[55%] truncate ${
-                    c.state === 'running' ? 'text-slate-500' : 'text-red-400/80'
+                    c.state === 'running' || isCleanOneshot(c) ? 'text-slate-500' : 'text-red-400/80'
                   }`}>
                     {c.state === 'missing'
                       ? t('settings.systemHealth.containers.missing')

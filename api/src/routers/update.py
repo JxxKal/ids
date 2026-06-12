@@ -133,6 +133,28 @@ async def _run_subprocess(
         raise RuntimeError(f"'{' '.join(cmd[:3])} …' beendet mit Code {rc}")
 
 
+def _profile_flags(profile: str) -> str:
+    """'prod,snort' → '--profile prod --profile snort'.
+
+    /etc/cyjan/profile ist kommasepariert; ein einzelnes
+    `--profile prod,snort` würde Compose als EIN (nicht existentes) Profil
+    lesen — Services unter dem snort-Profil blieben dann beim Update auf dem
+    alten Container stehen. Profilnamen sind alphanumerisch (+Bindestrich),
+    daher ist die String-Interpolation in die sh-c-Runner unkritisch.
+    """
+    parts = [p.strip() for p in profile.split(",") if p.strip()] or ["prod"]
+    return " ".join(f"--profile {p}" for p in parts)
+
+
+def _profile_args(profile: str) -> list[str]:
+    """Wie _profile_flags, aber als argv-Liste für subprocess-Aufrufe."""
+    parts = [p.strip() for p in profile.split(",") if p.strip()] or ["prod"]
+    args: list[str] = []
+    for p in parts:
+        args += ["--profile", p]
+    return args
+
+
 def _spawn_compose_up_runner(ids_dir: Path, profile: str) -> None:
     """Startet docker compose up -d in einem UNABHÄNGIGEN Einweg-Container.
 
@@ -164,7 +186,7 @@ def _spawn_compose_up_runner(ids_dir: Path, profile: str) -> None:
     nachvollziehen kann warum Compose ggf. abgebrochen ist.
     """
     compose_cmd = (
-        f"docker compose --project-directory {ids_dir} --profile {profile} "
+        f"docker compose --project-directory {ids_dir} {_profile_flags(profile)} "
         f"up -d --force-recreate"
     )
     log_path = str(ids_dir / ".update-runner.log")
@@ -210,7 +232,7 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
         base_args = [
             "docker", "compose",
             "--project-directory", str(IDS_DIR),
-            "--profile", profile,
+            *_profile_args(profile),
         ]
 
         if images_entry:
@@ -453,7 +475,7 @@ async def get_version() -> dict:
 
 def _spawn_compose_restart_runner(ids_dir: Path, profile: str) -> None:
     compose_cmd = (
-        f"docker compose --project-directory {ids_dir} --profile {profile} restart"
+        f"docker compose --project-directory {ids_dir} {_profile_flags(profile)} restart"
     )
     subprocess.Popen(
         [
