@@ -130,6 +130,26 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+# ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
+# Die Hauptschleife touch't /tmp/heartbeat (rate-limited auf 5 s); der
+# Compose-Healthcheck meldet unhealthy, wenn das File älter als 120 s ist.
+# Bewusst an die Schleife gekoppelt statt an den Prozess: ein hängender
+# Consumer fällt so auf, ein bloß lebender Interpreter reicht nicht.
+_HB_LAST = 0.0
+
+
+def _beat() -> None:
+    global _HB_LAST
+    now = time.monotonic()
+    if now - _HB_LAST < 5.0:
+        return
+    _HB_LAST = now
+    try:
+        Path("/tmp/heartbeat").touch()
+    except OSError:
+        pass
+
+
 
 def _has_pairing() -> bool:
     return Path(TAP_CERT).exists() and Path(TAP_KEY).exists() and Path(MASTER_CA).exists()
@@ -406,6 +426,7 @@ def _kafka_consumer_thread(diskq: DiskQueue, stop: threading.Event) -> None:
 
     try:
         while not stop.is_set():
+            _beat()
             msg = consumer.poll(1.0)
             if msg is None:
                 continue

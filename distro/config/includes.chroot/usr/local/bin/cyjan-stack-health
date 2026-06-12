@@ -18,7 +18,11 @@ IDS_DIR="/opt/ids"
 MODE_FILE="/etc/cyjan/mode"
 PROFILE_FILE="/etc/cyjan/profile"
 MARKER="/run/cyjan-stack-health.failed"
-TIMEOUT="${CYJAN_HEALTH_TIMEOUT:-180}"
+# 300 s statt 180 s seit den Heartbeat-Healthchecks (v2.5.35): die Pipeline-
+# Services werden erst healthy, nachdem Kafka healthy ist UND ihr erster
+# 30-s-Check-Intervall durch ist — die Kette braucht auf langsamer OT-Hardware
+# realistisch 2-4 min. TimeoutStartSec der Unit (400 s) deckt das weiter ab.
+TIMEOUT="${CYJAN_HEALTH_TIMEOUT:-300}"
 INTERVAL=5
 
 MODE="$(cat "$MODE_FILE" 2>/dev/null | tr -d '[:space:]')"

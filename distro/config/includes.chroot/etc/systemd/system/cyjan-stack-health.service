@@ -11,8 +11,8 @@ ConditionPathExists=/opt/ids
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/cyjan-stack-health
-# Health-Fenster (Default 180s im Skript) + Puffer. Override z.B. via
-# Drop-In mit Environment=CYJAN_HEALTH_TIMEOUT=300.
+# Health-Fenster (Default 300s im Skript) + Puffer. Override z.B. via
+# Drop-In mit Environment=CYJAN_HEALTH_TIMEOUT=600.
 TimeoutStartSec=400
 StandardOutput=journal
 StandardError=journal

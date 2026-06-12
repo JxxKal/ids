@@ -40,6 +40,20 @@ logging.basicConfig(
 )
 log = logging.getLogger("training-loop")
 
+# ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
+# Prozess-Liveness: ein Daemon-Thread touch't /tmp/heartbeat alle 30 s; der
+# Compose-Healthcheck meldet unhealthy, wenn das File älter als 120 s ist.
+# Bewusst NICHT an die Hauptschleife gekoppelt — die blockiert hier legitim
+# minutenlang (Training-Lauf bzw. laufendes Test-Szenario).
+def _heartbeat_thread() -> None:
+    while True:
+        try:
+            Path("/tmp/heartbeat").touch()
+        except OSError:
+            pass
+        time.sleep(30)
+
+
 FEEDBACK_TOPIC = "feedback"
 GROUP_ID       = "training-loop"
 POLL_TIMEOUT   = 2.0
@@ -222,6 +236,7 @@ def run(cfg: Config) -> None:
         retrain_interval_s=interval, next_scheduled_at=None,
     )
 
+    threading.Thread(target=_heartbeat_thread, daemon=True, name="heartbeat").start()
     try:
         while running:
             time.sleep(60)  # Prüfintervall: jede Minute

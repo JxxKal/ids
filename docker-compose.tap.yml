@@ -27,6 +27,18 @@ x-default-logging: &default-logging
     max-size: "50m"
     max-file: "5"
 
+# Heartbeat-Healthcheck für die Python-Pipeline-Services: jeder Service
+# touch't /tmp/heartbeat in seiner Hauptschleife (bzw. über einen Liveness-
+# Thread/-Task, wo die Schleife legitim lange blockiert — training-loop,
+# traffic-generator, mqtt-bridge). File älter als 120 s ⇒ unhealthy.
+# start_period großzügig: die Consumer legen erst los, wenn Kafka healthy ist.
+x-heartbeat-healthcheck: &heartbeat-check
+  test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(0 if time.time()-os.stat('/tmp/heartbeat').st_mtime < 120 else 1)"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 120s
+
 networks:
   tap-net:
     driver: bridge
@@ -141,6 +153,7 @@ services:
   flow-aggregator:
     build: ./flow-aggregator
     container_name: cyjan-tap-flow-aggregator
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [tap-net]
@@ -153,6 +166,7 @@ services:
   signature-engine:
     build: ./signature-engine
     container_name: cyjan-tap-signature-engine
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [tap-net]
@@ -184,6 +198,7 @@ services:
   tap-uplink:
     build: ./tap-uplink
     container_name: cyjan-tap-uplink
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [tap-net]
@@ -240,6 +255,12 @@ services:
   tap-api:
     build: ./tap-api
     container_name: cyjan-tap-api
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1',8000),5).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
     logging: *default-logging
     networks: [tap-net]

@@ -21,6 +21,7 @@ import random
 import signal
 import sys
 import time
+from pathlib import Path
 
 import orjson
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer
@@ -34,6 +35,26 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 log = logging.getLogger("signature-engine")
+
+# ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
+# Die Hauptschleife touch't /tmp/heartbeat (rate-limited auf 5 s); der
+# Compose-Healthcheck meldet unhealthy, wenn das File älter als 120 s ist.
+# Bewusst an die Schleife gekoppelt statt an den Prozess: ein hängender
+# Consumer fällt so auf, ein bloß lebender Interpreter reicht nicht.
+_HB_LAST = 0.0
+
+
+def _beat() -> None:
+    global _HB_LAST
+    now = time.monotonic()
+    if now - _HB_LAST < 5.0:
+        return
+    _HB_LAST = now
+    try:
+        Path("/tmp/heartbeat").touch()
+    except OSError:
+        pass
+
 
 FLOWS_TOPIC  = "flows"
 ALERTS_TOPIC = "alerts-raw"
@@ -110,6 +131,7 @@ def run(cfg: Config) -> None:
 
     try:
         while running:
+            _beat()
             msg = consumer.poll(timeout=POLL_TIMEOUT)
 
             # Periodischer Hot-Reload

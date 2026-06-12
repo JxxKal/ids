@@ -28,6 +28,19 @@ logging.basicConfig(
 )
 log = logging.getLogger("rule-tuner")
 
+# ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
+# Touch't /tmp/heartbeat solange die Worker-Tasks leben — stirbt persist- oder
+# state-loop, bleibt das File stehen und der Compose-Healthcheck meldet
+# unhealthy (Prozess + Eventloop allein reichen nicht als Lebenszeichen).
+async def _heartbeat_loop(watched: tuple) -> None:
+    while not any(t.done() for t in watched):
+        try:
+            Path("/tmp/heartbeat").touch()
+        except OSError:
+            pass
+        await asyncio.sleep(30)
+
+
 
 async def amain() -> None:
     cfg = Config.from_env()
@@ -68,6 +81,7 @@ async def amain() -> None:
 
         persist = asyncio.create_task(tuner.persist_loop(), name="persist-loop")
         state   = asyncio.create_task(tuner.state_loop(api), name="state-loop")
+        beat    = asyncio.create_task(_heartbeat_loop((persist, state)), name="heartbeat")
 
         try:
             await stop_event.wait()

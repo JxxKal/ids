@@ -27,6 +27,18 @@ x-default-logging: &default-logging
     max-size: "50m"
     max-file: "5"
 
+# Heartbeat-Healthcheck für die Python-Pipeline-Services: jeder Service
+# touch't /tmp/heartbeat in seiner Hauptschleife (bzw. über einen Liveness-
+# Thread/-Task, wo die Schleife legitim lange blockiert — training-loop,
+# traffic-generator, mqtt-bridge). File älter als 120 s ⇒ unhealthy.
+# start_period großzügig: die Consumer legen erst los, wenn Kafka healthy ist.
+x-heartbeat-healthcheck: &heartbeat-check
+  test: ["CMD", "python3", "-c", "import os,sys,time; sys.exit(0 if time.time()-os.stat('/tmp/heartbeat').st_mtime < 120 else 1)"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 120s
+
 volumes:
   kafka-data:
   timescaledb-data:
@@ -224,6 +236,7 @@ services:
   flow-aggregator:
     build: ./flow-aggregator
     container_name: ids-flow-aggregator
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -242,6 +255,7 @@ services:
   signature-engine:
     build: ./signature-engine
     container_name: ids-signature-engine
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -280,6 +294,7 @@ services:
   ml-engine:
     build: ./ml-engine
     container_name: ids-ml-engine
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -301,6 +316,7 @@ services:
   alert-manager:
     build: ./alert-manager
     container_name: ids-alert-manager
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -346,6 +362,7 @@ services:
   enrichment-service:
     build: ./enrichment-service
     container_name: ids-enrichment-service
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -386,6 +403,7 @@ services:
   notification-dispatcher:
     build: ./notification-dispatcher
     container_name: ids-notification-dispatcher
+    healthcheck: *heartbeat-check
     profiles: ["prod", "test"]
     restart: unless-stopped
     logging: *default-logging
@@ -413,6 +431,7 @@ services:
   pcap-store:
     build: ./pcap-store
     container_name: ids-pcap-store
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -531,6 +550,7 @@ services:
   rule-tuner:
     build: ./rule-tuner
     container_name: ids-rule-tuner
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     profiles: [prod]
@@ -568,6 +588,12 @@ services:
   master-uplink:
     build: ./master-uplink
     container_name: ids-master-uplink
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1',8443),5).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -631,6 +657,7 @@ services:
   training-loop:
     build: ./training-loop
     container_name: ids-training-loop
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -658,6 +685,7 @@ services:
   irma-bridge:
     build: ./irma-bridge
     container_name: ids-irma-bridge
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -689,6 +717,7 @@ services:
   mqtt-bridge:
     build: ./mqtt-bridge
     container_name: ids-mqtt-bridge
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -785,6 +814,7 @@ services:
   traffic-generator:
     build: ./traffic-generator
     container_name: ids-traffic-generator
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
@@ -863,6 +893,7 @@ services:
   snort-bridge:
     build: ./snort-bridge
     container_name: ids-snort-bridge
+    healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]

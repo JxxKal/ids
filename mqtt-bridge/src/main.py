@@ -31,6 +31,7 @@ import signal
 import ssl
 import sys
 import time
+from pathlib import Path
 from typing import Optional
 
 import asyncpg
@@ -47,6 +48,20 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 log = logging.getLogger("mqtt-bridge")
+
+# ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
+# Prozess-Liveness: eigener asyncio-Task statt Kopplung an die Publish-
+# Pipeline — die blockiert legitim (Inflight-Window/connected.wait), wenn der
+# EXTERNE MQTT-Broker down ist. Das soll kein unhealthy auslösen, sonst failt
+# cyjan-stack-health den Boot wegen eines fremden Brokers.
+async def _heartbeat_loop() -> None:
+    while True:
+        try:
+            Path("/tmp/heartbeat").touch()
+        except OSError:
+            pass
+        await asyncio.sleep(30)
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -512,6 +527,7 @@ async def _run_session(cfg: Config, pool: asyncpg.Pool, env: dict) -> None:
 
     try:
         await asyncio.gather(
+            _heartbeat_loop(),
             event_consumer_loop(cfg, bridge, taps),
             threat_publish_loop(cfg, bridge, pool),
             tap_status_loop(cfg, bridge, pool),

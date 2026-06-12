@@ -54,6 +54,38 @@ logging.basicConfig(
 )
 log = logging.getLogger("irma-bridge")
 
+# ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
+# Die Hauptschleife touch't /tmp/heartbeat (rate-limited auf 5 s); der
+# Compose-Healthcheck meldet unhealthy, wenn das File älter als 120 s ist.
+# Bewusst an die Schleife gekoppelt statt an den Prozess: ein hängender
+# Consumer fällt so auf, ein bloß lebender Interpreter reicht nicht.
+_HB_LAST = 0.0
+
+
+def _beat() -> None:
+    global _HB_LAST
+    now = time.monotonic()
+    if now - _HB_LAST < 5.0:
+        return
+    _HB_LAST = now
+    try:
+        Path("/tmp/heartbeat").touch()
+    except OSError:
+        pass
+
+
+def _sleep_with_beat(seconds: float) -> None:
+    """Schläft in ≤30-s-Häppchen und touch't dabei den Heartbeat — das
+    IRMA-Poll-Intervall kann größer sein als das 120-s-Healthcheck-Fenster."""
+    deadline = time.monotonic() + seconds
+    while True:
+        _beat()
+        rest = deadline - time.monotonic()
+        if rest <= 0:
+            return
+        time.sleep(min(30.0, rest))
+
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Config-Loader (system_config.irma aus DB, Fallback auf env) ───────────────
@@ -234,7 +266,7 @@ def run() -> None:
                 client = None
 
         if client is None:
-            time.sleep(max(10, cfg["poll_interval"]))
+            _sleep_with_beat(max(10, cfg["poll_interval"]))
             continue
 
         try:
@@ -275,7 +307,7 @@ def run() -> None:
         except Exception as exc:
             log.exception("Unerwarteter Fehler: %s", exc)
 
-        time.sleep(cfg["poll_interval"])
+        _sleep_with_beat(cfg["poll_interval"])
 
 
 if __name__ == "__main__":

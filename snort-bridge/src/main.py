@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 import uuid
 from datetime import datetime, timezone
 
@@ -55,6 +56,26 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+# ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
+# Die Hauptschleife touch't /tmp/heartbeat (rate-limited auf 5 s); der
+# Compose-Healthcheck meldet unhealthy, wenn das File älter als 120 s ist.
+# Bewusst an die Schleife gekoppelt statt an den Prozess: ein hängender
+# Consumer fällt so auf, ein bloß lebender Interpreter reicht nicht.
+_HB_LAST = 0.0
+
+
+def _beat() -> None:
+    global _HB_LAST
+    now = time.monotonic()
+    if now - _HB_LAST < 5.0:
+        return
+    _HB_LAST = now
+    try:
+        Path("/tmp/heartbeat").touch()
+    except OSError:
+        pass
+
 
 # ── Suricata Severity (1–4) → IDS Severity + Score ───────────────────────────
 
@@ -125,6 +146,7 @@ def _tail(path: str):
     """Liefert neue Zeilen aus einer wachsenden Datei.
     Erkennt Datei-Truncation (Suricata-Neustart / Log-Rotation)."""
     while not os.path.exists(path):
+        _beat()
         log.info("Warte auf EVE-Log %s …", path)
         time.sleep(2)
 
@@ -132,6 +154,7 @@ def _tail(path: str):
         fh.seek(0, 2)   # bestehenden Inhalt überspringen
         log.info("Lese Events aus %s", path)
         while True:
+            _beat()
             line = fh.readline()
             if line:
                 yield line.strip()

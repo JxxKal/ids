@@ -24,6 +24,8 @@ import logging
 import signal
 import sys
 import time
+import threading
+from pathlib import Path
 
 import orjson
 import psycopg2
@@ -39,6 +41,20 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 log = logging.getLogger("traffic-generator")
+
+# ── Heartbeat für den Docker-Healthcheck ─────────────────────────────────────
+# Prozess-Liveness: ein Daemon-Thread touch't /tmp/heartbeat alle 30 s; der
+# Compose-Healthcheck meldet unhealthy, wenn das File älter als 120 s ist.
+# Bewusst NICHT an die Hauptschleife gekoppelt — die blockiert hier legitim
+# minutenlang (Training-Lauf bzw. laufendes Test-Szenario).
+def _heartbeat_thread() -> None:
+    while True:
+        try:
+            Path("/tmp/heartbeat").touch()
+        except OSError:
+            pass
+        time.sleep(30)
+
 
 COMMANDS_TOPIC = "test-commands"
 GROUP_ID       = "traffic-generator"
@@ -160,6 +176,8 @@ def run(cfg: Config) -> None:
 
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT,  _stop)
+
+    threading.Thread(target=_heartbeat_thread, daemon=True, name="heartbeat").start()
 
     try:
         while running:
