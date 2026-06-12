@@ -206,9 +206,47 @@ if os.environ.get("REDTEAM_ENABLED", "false").lower() == "true":
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+# Öffentlich bekannte Default-Werte für den JWT-Signing-Key. Wer einen davon
+# fährt, dem kann jeder mit Repo-Zugang beliebige Admin-Tokens signieren.
+_KNOWN_DEFAULT_SECRETS = {
+    "",
+    "change-me-in-production",                          # compose-Fallback + config.py-Default
+    "change-me-in-production-use-openssl-rand-hex-32",  # .env.example
+}
+
+
+def _enforce_secret_key() -> None:
+    """Hart failen, wenn der JWT-Signing-Key auf einem bekannten Default steht.
+
+    Der ISO-Wizard (ids-setup) generiert API_SECRET_KEY immer zufällig —
+    ein Default hier heißt also Hand-Installation ohne gepflegte .env.
+    Lieber sichtbar sterben (Container-Restart-Loop mit Klartext-Log) als
+    still mit forgebaren Tokens laufen. Not-Ausstieg für Lab-Umgebungen:
+    ALLOW_INSECURE_SECRET_KEY=true.
+    """
+    if os.environ.get("ALLOW_INSECURE_SECRET_KEY", "").lower() in ("1", "true", "yes"):
+        log.warning("ALLOW_INSECURE_SECRET_KEY gesetzt — Secret-Key-Prüfung "
+                    "übersprungen. NICHT für Produktion gedacht.")
+        return
+    if cfg.secret_key in _KNOWN_DEFAULT_SECRETS:
+        raise RuntimeError(
+            "API_SECRET_KEY steht auf dem öffentlich bekannten Default — damit "
+            "kann sich jeder beliebige Admin-Tokens signieren. Abhilfe: "
+            "`openssl rand -hex 32` als API_SECRET_KEY in /opt/ids/.env "
+            "eintragen, dann `docker compose up -d --force-recreate api "
+            "rule-tuner` (aktive Logins werden dabei einmalig ungültig). "
+            "Nur für Lab/Demo: ALLOW_INSECURE_SECRET_KEY=true überspringt "
+            "diesen Check."
+        )
+    if len(cfg.secret_key) < 16:
+        log.warning("API_SECRET_KEY ist kürzer als 16 Zeichen — empfohlen: "
+                    "openssl rand -hex 32 (64 Zeichen).")
+
+
 @app.on_event("startup")
 async def startup() -> None:
     global streamer
+    _enforce_secret_key()
     await init_pool(cfg.postgres_dsn)
     log.info("DB pool initialised")
     await migrate.run(get_pool())
