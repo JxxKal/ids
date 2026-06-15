@@ -344,6 +344,7 @@
       "snifferDrops": "Sniffer packet drops over the last seconds. >1 % = yellow, >5 % = red. Typical causes: high pps or undersized ring buffer.",
       "mlOnly": "Filter: show only ML engine alerts (IsolationForest anomalies). Signature engine and Suricata alerts are hidden.",
       "showTest": "Include test alerts. Hidden by default because the test scenarios page can produce hundreds.",
+      "showSuppressed": "Include suppressed alerts (tags 'ml-suppressed'/'auto-suppressed'). These were auto- or ML-tuner-downgraded to 'low' and are hidden by default to de-noise the list.",
       "snapshotHint": "Note: a snapshot is shown right now. New alerts appear only after reloading or switching back to 'Live'.",
       "alertSearch": "Full-text search across rule ID, description, tags, IPs, hostnames, and CMDB names. Comma-separated terms are AND-combined.",
       "alertEgress": "OT-Boundary filter. 'Off' = all alerts, 'On' = traffic crossing the OT boundary with boundary classification only, 'On+WL' = also include already whitelisted connections.",
@@ -407,7 +408,8 @@
     },
     "filters": {
       "mlOnly": "AI/ML alerts only",
-      "showTest": "Show test traffic"
+      "showTest": "Show test traffic",
+      "showSuppressed": "Show suppressed"
     },
     "snapshotHint": "Snapshot · click the time button again to refresh"
   },

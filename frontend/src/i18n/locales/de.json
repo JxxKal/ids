@@ -344,6 +344,7 @@
       "snifferDrops": "Sniffer-Paket-Drops in den letzten Sekunden. >1 % = gelb, >5 % = rot. Häufige Ursache: zu viele Pakete pro Sekunde oder zu kleine Ringbuffer.",
       "mlOnly": "Filter: nur Alerts der ML-Engine anzeigen (Anomalien aus IsolationForest), Signature-Engine und Suricata werden ausgeblendet.",
       "showTest": "Test-Alerts mit anzeigen. Standardmäßig versteckt, weil die Test-Szenarien-Seite hunderte produzieren kann.",
+      "showSuppressed": "Unterdrückte Alerts mit anzeigen (Tags 'ml-suppressed'/'auto-suppressed'). Diese wurden automatisch bzw. vom ML-Tuner auf 'low' heruntergestuft und sind standardmäßig versteckt, um die Liste zu entrauschen.",
       "snapshotHint": "Hinweis: aktuell wird ein Schnappschuss angezeigt, neue Alerts erscheinen erst nach erneutem Laden oder Wechsel auf 'Live'.",
       "alertSearch": "Volltextsuche über Regel-ID, Beschreibung, Tags, IPs, Hostnamen und CMDB-Namen. Komma-getrennte Begriffe werden alle UND-verknüpft.",
       "alertEgress": "OT-Boundary-Filter. 'Off' = alles, 'On' = nur Verkehr über die OT-Grenze mit Boundary-Klassifikation, 'On+WL' = inklusive bereits whitelisteter Verbindungen.",
@@ -407,7 +408,8 @@
     },
     "filters": {
       "mlOnly": "Nur KI/ML-Alarme",
-      "showTest": "Testverkehr anzeigen"
+      "showTest": "Testverkehr anzeigen",
+      "showSuppressed": "Unterdrückte anzeigen"
     },
     "snapshotHint": "Snapshot · Schaltfläche erneut klicken zum Aktualisieren"
   },

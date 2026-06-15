@@ -84,6 +84,15 @@ export interface Alert {
   tap_id?: string | null;
 }
 
+// Tags, die der alert-manager bei Auto-/ML-Suppression setzt (mit Severity-
+// Downgrade auf "low"). Werden im Dashboard per "Show suppressed"-Schalter
+// ein-/ausgeblendet.
+export const SUPPRESSED_TAGS = ['ml-suppressed', 'auto-suppressed'] as const;
+
+export function isSuppressed(a: Pick<Alert, 'tags'>): boolean {
+  return !!a.tags?.some(t => t === 'ml-suppressed' || t === 'auto-suppressed');
+}
+
 export interface RemoteTap {
   id: string;
   name: string;

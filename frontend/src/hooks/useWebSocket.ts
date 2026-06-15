@@ -8,23 +8,62 @@ const WS_BASE = import.meta.env.VITE_WS_URL
   ?? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
 
 const RECONNECT_DELAY_MS = 3000;
+// Wie lange ein Socket in CONNECTING verharren darf, bevor wir ihn als tot
+// betrachten und neu aufbauen. Beim Fresh-Login direkt nach dem Login-POST
+// kam es auf langsameren Prod-Hosts vor, dass der WS-Upgrade hinter nginx
+// hängenblieb — weder `open` noch `close`/`error` feuerte je. Ohne dieses
+// Timeout gab es dann keinen Reconnect und der Stream blieb bis zum manuellen
+// Browser-Reload offline. (Reload baute eine frische Verbindung auf → ging.)
+const CONNECT_TIMEOUT_MS = 8000;
+// Watchdog: gleicht den connected-State periodisch mit der echten
+// readyState ab und reconnectet eine tote/fehlende Verbindung. Fängt sowohl
+// verschluckte close-Events als auch in CONNECTING hängende Sockets ab.
+const WATCHDOG_INTERVAL_MS = 4000;
 const MAX_ALERTS = 500;
 
 export function useWebSocket() {
   const [alerts, setAlerts]       = useState<Alert[]>([]);
   const [connected, setConnected] = useState(false);
-  const wsRef  = useRef<WebSocket | null>(null);
-  const timer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsRef       = useRef<WebSocket | null>(null);
+  const reconnectAt = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    const cur = wsRef.current;
+    // Schon offen oder gerade im Aufbau → nichts tun (verhindert doppelte
+    // Sockets, wenn der Watchdog und ein onclose-Reconnect kollidieren).
+    if (cur && (cur.readyState === WebSocket.OPEN || cur.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
 
     const token = getToken();
-    const url   = `${WS_BASE}/ws/alerts${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-    const ws    = new WebSocket(url);
+    if (!token) {
+      // Noch nicht authentifiziert — kein tokenloser WS, den das Backend eh
+      // mit 4001 schließt. Der Watchdog versucht es erneut, sobald ein Token da ist.
+      return;
+    }
+
+    const url = `${WS_BASE}/ws/alerts?token=${encodeURIComponent(token)}`;
+    const ws  = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
+    // Establishment-Timeout: hängt der Handshake, erzwingen wir ein close →
+    // löst onclose → Reconnect aus.
+    const estTimer = setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) ws.close();
+    }, CONNECT_TIMEOUT_MS);
+
+    const scheduleReconnect = () => {
+      if (reconnectAt.current) return;
+      reconnectAt.current = setTimeout(() => {
+        reconnectAt.current = null;
+        connect();
+      }, RECONNECT_DELAY_MS);
+    };
+
+    ws.onopen = () => {
+      clearTimeout(estTimer);
+      if (ws === wsRef.current) setConnected(true);
+    };
 
     ws.onmessage = (ev: MessageEvent<string>) => {
       try {
@@ -119,8 +158,12 @@ export function useWebSocket() {
     };
 
     ws.onclose = () => {
+      clearTimeout(estTimer);
+      // Nur der aktuelle Socket darf den State umschalten — ein verspätetes
+      // close eines alten Sockets darf einen frisch offenen nicht überstimmen.
+      if (ws !== wsRef.current) return;
       setConnected(false);
-      timer.current = setTimeout(connect, RECONNECT_DELAY_MS);
+      scheduleReconnect();
     };
 
     ws.onerror = () => ws.close();
@@ -135,10 +178,29 @@ export function useWebSocket() {
       });
       return () => { unsub(); setConnected(false); };
     }
+
     connect();
+
+    // Watchdog: hält connected synchron mit der echten Verbindung und baut
+    // tote/fehlende Sockets neu auf. Selbstheilend gegen verschluckte Events
+    // und in CONNECTING hängende Handshakes.
+    const watchdog = setInterval(() => {
+      if (isDemoMode()) return;
+      const ws   = wsRef.current;
+      const open = ws?.readyState === WebSocket.OPEN;
+      setConnected(prev => (prev === !!open ? prev : !!open));
+      // Weder offen noch im Aufbau → connect() (no-op wenn bereits CONNECTING).
+      if (!ws || (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING)) {
+        connect();
+      }
+    }, WATCHDOG_INTERVAL_MS);
+
     return () => {
-      if (timer.current) clearTimeout(timer.current);
-      wsRef.current?.close();
+      clearInterval(watchdog);
+      if (reconnectAt.current) { clearTimeout(reconnectAt.current); reconnectAt.current = null; }
+      const ws = wsRef.current;
+      wsRef.current = null;
+      ws?.close();
     };
   }, [connect]);
 

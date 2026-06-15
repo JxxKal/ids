@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Alert, Enrichment, RemoteTap } from '../types';
+import { isSuppressed } from '../types';
 import { alertsExportUrl, createEgressWhitelist, fetchTaps } from '../api';
 import { countryFlag, geoTooltip } from '../lib/country';
 import { effectiveSeverity } from '../lib/severity';
@@ -95,6 +96,7 @@ interface Props {
   alerts: Alert[];
   onUpdate: (a: Alert) => void;
   showTest: boolean;
+  showSuppressed: boolean;
   mlOnly: boolean;
   // Tap-Filter wird in App.tsx hochgehalten, damit der historic-Fetch
   // ihn als Server-Param mitgeben kann (sonst Limit-Cutoff-Problem).
@@ -428,7 +430,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
 
 // ── Komponente ─────────────────────────────────────────────────────────────────
 
-export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTapFilterChange }: Props) {
+export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, tapFilter, onTapFilterChange }: Props) {
   const { t } = useTranslation();
   const [selected,          setSelected]          = useState<Alert | null>(null);
   const [severityFilters,   setSeverityFilters]   = useState<string[]>([]);
@@ -563,6 +565,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
     const PRIORITY_ORDER: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
     const filteredArr = alerts.filter(a => {
       if (!showTest && a.is_test) return false;
+      if (!showSuppressed && isSuppressed(a)) return false;
       if (mlOnly && a.source !== 'ml') return false;
       if (suppressIrmaAsset && a.source === 'external' && a.rule_id?.startsWith('ASSET::')) return false;
       // Severity-Filter matcht effective Severity (P0→critical, FP→low),
@@ -619,7 +622,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, mlOnly, tapFilter, onTap
       });
     }
     return filteredArr;
-  }, [alerts, showTest, mlOnly, suppressIrmaAsset, severityFilters, sourceF, feedbackF, search, egressMode, sortByPriority, tapFilter]);
+  }, [alerts, showTest, showSuppressed, mlOnly, suppressIrmaAsset, severityFilters, sourceF, feedbackF, search, egressMode, sortByPriority, tapFilter]);
 
   // Export-URL passend zu aktiven Filtern aufbauen
   const exportUrl = alertsExportUrl({

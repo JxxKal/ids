@@ -23,6 +23,7 @@ import { TopBar } from './components/TopBar';
 import { TopProtocolsCard } from './components/TopProtocolsCard';
 import { useWebSocket } from './hooks/useWebSocket';
 import type { Alert, RemoteTap, User } from './types';
+import { isSuppressed } from './types';
 
 type TimeWindow = 'live' | '1m' | '15m' | '1h' | '4h' | '1d' | '2d' | '7d' | 'custom';
 
@@ -117,6 +118,12 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
   );
   const [mlOnly, setMlOnly] = useState(
     () => localStorage.getItem('mlOnly') === 'true'
+  );
+  // Auto-/ML-suppresste Alerts standardmäßig ausblenden (sie wurden bewusst
+  // auf low heruntergestuft — Rauschen). Schalter zum Wiedereinblenden,
+  // persistent wie showTest. Default = versteckt (Key nicht 'true').
+  const [showSuppressed, setShowSuppressed] = useState(
+    () => localStorage.getItem('showSuppressed') === 'true'
   );
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('live');
   // Custom-Range: nur ausgewertet wenn timeWindow === 'custom'. Default ist
@@ -222,20 +229,20 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   const displayAlerts = timeWindow === 'live' ? alerts : historicAlerts;
   const alertCount    = displayAlerts.filter(a =>
-    (showTest || !a.is_test) && (!mlOnly || a.source === 'ml')
+    (showTest || !a.is_test) && (!mlOnly || a.source === 'ml') && (showSuppressed || !isSuppressed(a))
   ).length;
 
   const kpis = useMemo(() => {
     const cutoff = Date.now() - 3600 * 1000;
     const lastHour = alerts.filter(a => {
       const ms = Date.parse(a.ts);
-      return ms >= cutoff && (showTest || !a.is_test);
+      return ms >= cutoff && (showTest || !a.is_test) && (showSuppressed || !isSuppressed(a));
     }).length;
     return [
       { label: t('dashboard.kpi.alertsPerHour'), value: String(lastHour),   color: '#fdba74' },
       { label: t('dashboard.kpi.visible'),       value: String(alertCount), color: '#7dd3fc' },
     ];
-  }, [alerts, alertCount, showTest, t]);
+  }, [alerts, alertCount, showTest, showSuppressed, t]);
 
   return (
     <div className="min-h-screen flex">
@@ -257,8 +264,8 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
             {/* KPI Row */}
             <div className="flex items-stretch gap-4 flex-wrap cyjan-stagger">
               <HelpTip helpKey="threatGauge"><ThreatGauge /></HelpTip>
-              <HelpTip helpKey="severityCard"><SeverityBarsCard alerts={displayAlerts} showTest={showTest} /></HelpTip>
-              <HelpTip helpKey="protocolsCard"><TopProtocolsCard alerts={displayAlerts} showTest={showTest} /></HelpTip>
+              <HelpTip helpKey="severityCard"><SeverityBarsCard alerts={displayAlerts} showTest={showTest} showSuppressed={showSuppressed} /></HelpTip>
+              <HelpTip helpKey="protocolsCard"><TopProtocolsCard alerts={displayAlerts} showTest={showTest} showSuppressed={showSuppressed} /></HelpTip>
             </div>
 
             {/* Toolbar */}
@@ -404,6 +411,25 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                   </HelpTip>
                 )}
 
+                {/* Suppression-Toggle: in allen Zeitfenstern relevant (Filter
+                    greift clientseitig auf live + historic). Default versteckt. */}
+                <HelpTip helpKey="showSuppressed">
+                <label htmlFor="show-suppressed-toggle" className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                  <input
+                    id="show-suppressed-toggle"
+                    name="show-suppressed-toggle"
+                    type="checkbox"
+                    className="accent-cyan-500"
+                    checked={showSuppressed}
+                    onChange={e => {
+                      setShowSuppressed(e.target.checked);
+                      localStorage.setItem('showSuppressed', String(e.target.checked));
+                    }}
+                  />
+                  {t('dashboard.filters.showSuppressed')}
+                </label>
+                </HelpTip>
+
                 {timeWindow !== 'live' && !isLoading && (
                   <HelpTip helpKey="snapshotHint">
                     <span className="text-xs text-slate-600 italic">
@@ -419,6 +445,7 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
                   alerts={displayAlerts}
                   onUpdate={handleUpdate}
                   showTest={showTest}
+                  showSuppressed={showSuppressed}
                   mlOnly={mlOnly}
                   tapFilter={tapFilter}
                   onTapFilterChange={setTapFilter}

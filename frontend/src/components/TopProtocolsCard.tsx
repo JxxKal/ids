@@ -1,16 +1,20 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Alert } from '../types';
+import { isSuppressed } from '../types';
 
 interface Props {
   alerts: Alert[];
   showTest: boolean;
+  showSuppressed: boolean;
 }
 
-export function TopProtocolsCard({ alerts, showTest }: Props) {
+export function TopProtocolsCard({ alerts, showTest, showSuppressed }: Props) {
   const { t } = useTranslation();
   const rows = useMemo(() => {
-    const visible = showTest ? alerts : alerts.filter(a => !a.is_test);
+    const visible = alerts.filter(a =>
+      (showTest || !a.is_test) && (showSuppressed || !isSuppressed(a))
+    );
     const total = visible.length || 1;
     const map = new Map<string, number>();
     for (const a of visible) {
@@ -21,7 +25,7 @@ export function TopProtocolsCard({ alerts, showTest }: Props) {
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([proto, count]) => ({ proto, pct: Math.round((count / total) * 100) }));
-  }, [alerts, showTest]);
+  }, [alerts, showTest, showSuppressed]);
 
   return (
     <div className="cyjan-kpi-card">

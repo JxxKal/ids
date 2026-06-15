@@ -1,10 +1,12 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Alert } from '../types';
+import { isSuppressed } from '../types';
 
 interface Props {
   alerts: Alert[];
   showTest: boolean;
+  showSuppressed: boolean;
 }
 
 // Severity-Labels bleiben sprachneutral – die Begriffe critical/high/medium/low
@@ -17,16 +19,18 @@ const ROWS: { key: Alert['severity']; label: string; color: string }[] = [
   { key: 'low',      label: 'low',      color: '#22c55e' },
 ];
 
-export function SeverityBarsCard({ alerts, showTest }: Props) {
+export function SeverityBarsCard({ alerts, showTest, showSuppressed }: Props) {
   const { t } = useTranslation();
   const counts = useMemo(() => {
-    const visible = showTest ? alerts : alerts.filter(a => !a.is_test);
+    const visible = alerts.filter(a =>
+      (showTest || !a.is_test) && (showSuppressed || !isSuppressed(a))
+    );
     const c: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
     for (const a of visible) {
       if (c[a.severity] !== undefined) c[a.severity]++;
     }
     return c;
-  }, [alerts, showTest]);
+  }, [alerts, showTest, showSuppressed]);
 
   const max = Math.max(1, ...Object.values(counts));
 
