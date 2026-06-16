@@ -40,7 +40,17 @@ server {
     index index.html;
     resolver 127.0.0.11 valid=10s ipv6=off;
 
-    location / { try_files \$uri \$uri/ /index.html; }
+    # index.html NIE cachen (sonst wirkt ein Update erst nach manuellem
+    # Hard-Reload — der Browser liefert die alte index.html mit altem
+    # Bundle-Hash). Content-gehashte /assets/ dagegen unveraenderlich cachen.
+    location / {
+        try_files \$uri \$uri/ /index.html;
+        add_header Cache-Control "no-cache, must-revalidate" always;
+    }
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable" always;
+    }
 
     location /api/ {
         set \$upstream http://api:8000;
@@ -76,7 +86,17 @@ server {
     index index.html;
     resolver 127.0.0.11 valid=10s ipv6=off;
 
-    location / { try_files \$uri \$uri/ /index.html; }
+    # index.html NIE cachen (sonst wirkt ein Update erst nach manuellem
+    # Hard-Reload — der Browser liefert die alte index.html mit altem
+    # Bundle-Hash). Content-gehashte /assets/ dagegen unveraenderlich cachen.
+    location / {
+        try_files \$uri \$uri/ /index.html;
+        add_header Cache-Control "no-cache, must-revalidate" always;
+    }
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable" always;
+    }
 
     location /api/ {
         set \$upstream http://api:8000;
