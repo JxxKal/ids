@@ -22,6 +22,7 @@ import {
   fetchRuleFiles, fetchRuleFile, saveRuleFile, deleteRuleFile,
   fetchLearnedPatterns,
   fetchDbStats, cleanupDb, vacuumDb, setRetentionPolicy, backupDbUrl, restoreDb, fetchMaintenanceAudit,
+  fetchRetentionPolicies,
   fetchPcapRetention, setPcapRetention, forcePcapCleanup,
   fetchDnsResolvers, saveDnsResolvers,
   fetchSigRules, fetchSigRulesOverrides, saveSigRulesOverrides,
@@ -1442,7 +1443,7 @@ function DatabaseMaintenance() {
       <VacuumSection onDone={reload} canReauth={canReauth} reauthHint={reauthHint} />
 
       {/* ── 4. Retention ─────────────────────────────────────────────────── */}
-      <RetentionSection stats={stats} onDone={reload} canReauth={canReauth} reauthHint={reauthHint} />
+      <RetentionSection onDone={reload} canReauth={canReauth} reauthHint={reauthHint} />
 
       {/* ── 4b. PCAP-Retention (MinIO) ───────────────────────────────────── */}
       <PcapRetentionSection />
@@ -1637,14 +1638,21 @@ function VacuumSection({ onDone, canReauth, reauthHint }: { onDone: () => void; 
 
 // ── Retention-Sektion ─────────────────────────────────────────────────────────
 
-function RetentionSection({ stats, onDone, canReauth, reauthHint }: { stats: DbStatsResponse; onDone: () => void; canReauth: boolean; reauthHint: string }) {
+
+function RetentionSection({ onDone, canReauth, reauthHint }: { onDone: () => void; canReauth: boolean; reauthHint: string }) {
   const { t } = useTranslation();
-  const [selected, setSelected] = useState(stats.hypertables[0]?.name ?? '');
+  const [data,     setData]     = useState<Awaited<ReturnType<typeof fetchRetentionPolicies>> | null>(null);
+  const [selected, setSelected] = useState('');
   const [days,     setDays]     = useState('90');
   const [password, setPassword] = useState('');
   const [busy,     setBusy]     = useState(false);
   const [msg,      setMsg]      = useState('');
   const [msgType,  setMsgType]  = useState<'ok' | 'err'>('ok');
+
+  const reload = () => fetchRetentionPolicies()
+    .then(d => { setData(d); if (!selected && d.policies[0]) setSelected(d.policies[0].hypertable); })
+    .catch(() => {});
+  useEffect(() => { reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   async function apply(removeInstead: boolean) {
     setBusy(true); setMsg('');
@@ -1655,7 +1663,7 @@ function RetentionSection({ stats, onDone, canReauth, reauthHint }: { stats: DbS
         days:       removeInstead ? null : parseInt(days, 10),
       });
       setMsgType('ok'); setMsg(r.message);
-      setPassword(''); onDone();
+      setPassword(''); reload(); onDone();
     } catch (e) {
       setMsgType('err'); setMsg(String((e as Error).message));
     } finally {
@@ -1663,18 +1671,47 @@ function RetentionSection({ stats, onDone, canReauth, reauthHint }: { stats: DbS
     }
   }
 
+  const em = data?.emergency;
+
   return (
     <ActionCard title={t('settings.dbMaint.retentionTitle')}>
-      <p className="text-xs text-slate-500">
-        {t('settings.dbMaint.retentionHint', { active: stats.retention.length === 0 ? t('settings.dbMaint.retentionNone') : stats.retention.map(p => p.hypertable).join(', ') })}
-      </p>
+      <p className="text-xs text-slate-500">{t('settings.dbMaint.retentionHint2')}</p>
+
+      {/* Pro-Hypertable-Übersicht: Größe + aktuelle Aufbewahrungsfrist */}
+      {data && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-[10px] text-slate-500 uppercase border-b border-slate-800">
+                <th className="text-left py-1.5 pr-4">Hypertable</th>
+                <th className="text-right py-1.5 pr-4">{t('settings.dbMaint.size')}</th>
+                <th className="text-right py-1.5">{t('settings.dbMaint.retention')}</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono">
+              {data.policies.map(p => (
+                <tr key={p.hypertable}
+                    className={`border-b border-slate-800/40 cursor-pointer hover:bg-slate-800/30 ${selected === p.hypertable ? 'bg-cyan-500/5' : ''}`}
+                    onClick={() => { setSelected(p.hypertable); if (p.retention_days) setDays(String(p.retention_days)); }}>
+                  <td className="py-1.5 pr-4 text-slate-200">{p.hypertable}</td>
+                  <td className="py-1.5 pr-4 text-right text-slate-400 tabular-nums">{fmtSize(p.size_bytes)}</td>
+                  <td className={`py-1.5 text-right tabular-nums ${p.retention_days ? 'text-green-400' : 'text-amber-400'}`}>
+                    {p.retention_days ? `${p.retention_days} ${t('settings.dbMaint.daysShort')}` : t('settings.dbMaint.retentionNone')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="text-[10px] text-slate-500 uppercase">Hypertable</label>
           <select value={selected} onChange={e => setSelected(e.target.value)}
                   className="cyjan-input text-xs block mt-1">
-            {stats.hypertables.map(h => (
-              <option key={h.name} value={h.name}>{h.name}</option>
+            {(data?.policies ?? []).map(h => (
+              <option key={h.hypertable} value={h.hypertable}>{h.hypertable}</option>
             ))}
           </select>
         </div>
@@ -1699,6 +1736,22 @@ function RetentionSection({ stats, onDone, canReauth, reauthHint }: { stats: DbS
         </button>
       </div>
       {msg && <p className={`text-xs ${msgType === 'ok' ? 'text-green-400' : 'text-red-400'}`}>{msg}</p>}
+
+      {/* Notfall-Cleanup-Sicherheitsnetz: Info, kein manueller Trigger (zu riskant) */}
+      {em && (
+        <div className={`mt-1 rounded border px-3 py-2 text-[11px] leading-relaxed ${
+          em.enabled ? 'border-amber-700/40 bg-amber-900/15 text-amber-200/90' : 'border-slate-700 bg-slate-800/30 text-slate-400'
+        }`}>
+          <span className="font-semibold">{t('settings.dbMaint.emergencyTitle')}</span>{' '}
+          {em.enabled
+            ? t('settings.dbMaint.emergencyOn', {
+                trigger: em.trigger_pct, target: em.target_pct,
+                disk: data?.disk_pct ?? 0,
+                tables: em.evictable.map(e => `${e.hypertable} (>${e.floor_days}d)`).join(', '),
+              })
+            : t('settings.dbMaint.emergencyOff')}
+        </div>
+      )}
     </ActionCard>
   );
 }

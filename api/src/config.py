@@ -20,6 +20,10 @@ class Config:
     retention_check_interval_s: int
     retention_disk_warn_pct: int    # Disk-Auslastung in %, ab der alarmiert wird
     retention_db_size_warn_gb: int  # DB-Größe in GB, ab der alarmiert wird (Catch-all für fehlende Retention)
+    # Notfall-Cleanup: löscht älteste Chunks, wenn die Disk trotz Retention volläuft
+    retention_emergency_enabled: bool
+    retention_emergency_pct: int        # Disk-%, ab der der Notfall-Cleanup greift
+    retention_emergency_target_pct: int # Disk-%, bis zu der heruntergelöscht wird
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -42,4 +46,7 @@ class Config:
             retention_check_interval_s=int(os.environ.get("RETENTION_CHECK_INTERVAL_S", "21600")),
             retention_disk_warn_pct=int(os.environ.get("RETENTION_DISK_WARN_PCT", "85")),
             retention_db_size_warn_gb=int(os.environ.get("RETENTION_DB_SIZE_WARN_GB", "25")),
+            retention_emergency_enabled=os.environ.get("RETENTION_EMERGENCY_ENABLED", "true").lower() == "true",
+            retention_emergency_pct=int(os.environ.get("RETENTION_EMERGENCY_PCT", "92")),
+            retention_emergency_target_pct=int(os.environ.get("RETENTION_EMERGENCY_TARGET_PCT", "82")),
         )

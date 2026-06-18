@@ -506,6 +506,10 @@ services:
       RETENTION_CHECK_INTERVAL_S: "${RETENTION_CHECK_INTERVAL_S:-21600}"
       RETENTION_DISK_WARN_PCT:    "${RETENTION_DISK_WARN_PCT:-85}"
       RETENTION_DB_SIZE_WARN_GB:  "${RETENTION_DB_SIZE_WARN_GB:-25}"
+      # Notfall-Cleanup (löscht älteste Chunks wenn Disk trotz Retention volläuft)
+      RETENTION_EMERGENCY_ENABLED:    "${RETENTION_EMERGENCY_ENABLED:-true}"
+      RETENTION_EMERGENCY_PCT:        "${RETENTION_EMERGENCY_PCT:-92}"
+      RETENTION_EMERGENCY_TARGET_PCT: "${RETENTION_EMERGENCY_TARGET_PCT:-82}"
       # Pattern-Federation Lab-Modus: aktiviert /api/pattern/export-Endpoint
       # und legt CYJAN_LAB_ID als Bundle-Origin-Tag fest. Default OFF.
       REDTEAM_ENABLED: "${REDTEAM_ENABLED:-false}"

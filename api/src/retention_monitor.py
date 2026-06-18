@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 import asyncpg
@@ -38,6 +38,15 @@ cfg = Config.from_env()
 
 _RETENTION_PROCS = ["policy_retention", "policy_compression"]
 _DEDUP_WINDOW = "24 hours"
+
+# Notfall-Cleanup: evictable Hypertables in Prioritätsreihenfolge (zuerst die
+# voluminöse, am wenigsten wertvolle) mit Schutz-Floor in Tagen — Daten jünger
+# als der Floor werden NIE gelöscht. flows = rohe Flow-Records (hohes Volumen,
+# regenerierbar), test_runs = Test-Artefakte, alerts NUR als letztes Mittel mit
+# großzügigem Floor (Kernprodukt). redteam_*/notification_deliveries bewusst
+# nicht evictable.
+_EVICTABLE = [("flows", 2), ("test_runs", 1), ("alerts", 30)]
+_MAX_DROP_ITERATIONS = 300  # harte Obergrenze gegen Runaway
 
 
 async def gather_health(pool: asyncpg.Pool) -> dict[str, Any]:
@@ -149,11 +158,16 @@ async def gather_health(pool: asyncpg.Pool) -> dict[str, Any]:
     }
 
 
+def _disk_pct() -> float:
+    du = shutil.disk_usage("/")
+    return round(du.used / du.total * 100, 1)
+
+
 async def _emit_alert(conn: asyncpg.Connection, rule_id: str, severity: str,
-                      score: float, message: str) -> bool:
+                      score: float, message: str, dedup_window: str = _DEDUP_WINDOW) -> bool:
     """Dedup'd Alert-Insert. Gibt True zurück, wenn neu eingefügt."""
     recent = await conn.fetchval(
-        f"SELECT 1 FROM alerts WHERE rule_id = $1 AND ts > now() - interval '{_DEDUP_WINDOW}' LIMIT 1",
+        f"SELECT 1 FROM alerts WHERE rule_id = $1 AND ts > now() - interval '{dedup_window}' LIMIT 1",
         rule_id,
     )
     if recent:
@@ -168,26 +182,95 @@ async def _emit_alert(conn: asyncpg.Connection, rule_id: str, severity: str,
     return True
 
 
+async def emergency_cleanup(pool: asyncpg.Pool) -> dict[str, Any]:
+    """Letzte Instanz, wenn die Disk trotz Retention volläuft: löscht die
+    ältesten Chunks der evictable Hypertables (drop_chunks, ältester zuerst)
+    bis Disk < target_pct oder alle Chunks im Schutz-Floor liegen.
+
+    drop_chunks droppt ganze Chunk-Tabellen → Platz wird sofort frei (kein
+    VACUUM-Bloat wie bei DELETE). Bounded durch Floors + _MAX_DROP_ITERATIONS.
+    """
+    target = cfg.retention_emergency_target_pct
+    dropped: dict[str, int] = {}
+    start_pct = _disk_pct()
+    async with pool.acquire() as conn:
+        now = await conn.fetchval("SELECT now()")
+        iters = 0
+        for table, floor_days in _EVICTABLE:
+            floor_cut = now - timedelta(days=floor_days)
+            while _disk_pct() >= target and iters < _MAX_DROP_ITERATIONS:
+                iters += 1
+                oldest_end = await conn.fetchval(
+                    """
+                    SELECT range_end FROM timescaledb_information.chunks
+                    WHERE hypertable_name = $1 AND range_end IS NOT NULL
+                    ORDER BY range_end ASC LIMIT 1
+                    """,
+                    table,
+                )
+                if oldest_end is None or oldest_end > floor_cut:
+                    break  # keine Chunks mehr ODER ältester liegt im Schutz-Floor
+                try:
+                    await conn.execute(
+                        "SELECT drop_chunks($1, older_than => $2::timestamptz)",
+                        table, oldest_end,
+                    )
+                    dropped[table] = dropped.get(table, 0) + 1
+                except Exception as exc:
+                    log.warning("drop_chunks(%s) fehlgeschlagen: %s", table, exc)
+                    break
+            if _disk_pct() < target:
+                break
+
+    end_pct = _disk_pct()
+    total = sum(dropped.values())
+    detail = ", ".join(f"{t}:{n}" for t, n in dropped.items()) or "nichts"
+    if total and end_pct < cfg.retention_emergency_pct:
+        msg = (f"Notfall-Cleanup: {total} Chunks gelöscht ({detail}); "
+               f"Disk {start_pct}% → {end_pct}% (Ziel {target}%).")
+    elif total:
+        msg = (f"Notfall-Cleanup: {total} Chunks gelöscht ({detail}), Disk aber WEITERHIN "
+               f"{end_pct}% (≥ {cfg.retention_emergency_pct}%). Platz liegt evtl. außerhalb der "
+               f"DB (PCAP/MinIO) oder in den Schutz-Floors — MANUELLER EINGRIFF NÖTIG.")
+    else:
+        msg = (f"Notfall-Cleanup konnte NICHTS löschen (alle Chunks innerhalb der Schutz-Floors "
+               f"oder keine Chunks). Disk {end_pct}% — MANUELLER EINGRIFF NÖTIG.")
+    log.error(msg)
+    async with pool.acquire() as conn:
+        # Kurzes Dedup-Fenster: bei anhaltender Krise soll der adaptive 30-min-
+        # Takt erneut alarmieren, aber Doppelläufe nicht spammen.
+        await _emit_alert(conn, "DISK_EMERGENCY_001", "critical", 0.95, msg,
+                          dedup_window="25 minutes")
+    return {"dropped": dropped, "start_pct": start_pct, "end_pct": end_pct, "message": msg}
+
+
 async def run_check(pool: asyncpg.Pool) -> dict[str, Any]:
     health = await gather_health(pool)
     problems = health["problems"]
-    if not problems:
+
+    if problems:
+        # Pro rule_id nur einmal alarmieren (mehrere Probleme können dieselbe
+        # ID tragen — die erste Message gewinnt, die anderen stehen im Log).
+        async with pool.acquire() as conn:
+            seen: set[str] = set()
+            for p in problems:
+                log.error("Retention-Problem [%s/%s]: %s", p["rule_id"], p["severity"], p["message"])
+                if p["rule_id"] in seen:
+                    continue
+                seen.add(p["rule_id"])
+                inserted = await _emit_alert(conn, p["rule_id"], p["severity"], p["score"], p["message"])
+                if inserted:
+                    log.warning("Alert %s in DB geschrieben (sichtbar im Web-UI).", p["rule_id"])
+    else:
         log.info("Retention-Check ok: Disk %.1f%%, DB %.1f GB",
                  health["disk_pct"], health["db_size_gb"])
-        return health
 
-    # Pro rule_id nur einmal alarmieren (mehrere Probleme können dieselbe ID
-    # tragen — die erste Message gewinnt, die anderen stehen im Log).
-    async with pool.acquire() as conn:
-        seen: set[str] = set()
-        for p in problems:
-            log.error("Retention-Problem [%s/%s]: %s", p["rule_id"], p["severity"], p["message"])
-            if p["rule_id"] in seen:
-                continue
-            seen.add(p["rule_id"])
-            inserted = await _emit_alert(conn, p["rule_id"], p["severity"], p["score"], p["message"])
-            if inserted:
-                log.warning("Alert %s in DB geschrieben (sichtbar im Web-UI).", p["rule_id"])
+    # Notfall-Cleanup, wenn die Disk trotz allem kritisch voll ist.
+    if cfg.retention_emergency_enabled and health["disk_pct"] >= cfg.retention_emergency_pct:
+        log.error("Disk %.1f%% ≥ Notfall-Schwelle %d%% — starte Notfall-Cleanup.",
+                  health["disk_pct"], cfg.retention_emergency_pct)
+        await emergency_cleanup(pool)
+
     return health
 
 
@@ -201,8 +284,13 @@ async def retention_monitor_loop(get_pool: Callable[[], asyncpg.Pool]) -> None:
     # Kurzer initialer Delay, damit Migration/Startup durch ist.
     await asyncio.sleep(60)
     while True:
+        high = False
         try:
-            await run_check(get_pool())
+            health = await run_check(get_pool())
+            high = health["disk_pct"] >= cfg.retention_disk_warn_pct
         except Exception as exc:
             log.warning("Retention-Check fehlgeschlagen: %s", exc)
-        await asyncio.sleep(cfg.retention_check_interval_s)
+        # Adaptive Kadenz: nähert sich die Disk dem Limit, schneller nachschauen
+        # (max. alle 30 min) statt erst nach dem vollen Intervall.
+        sleep_s = min(cfg.retention_check_interval_s, 1800) if high else cfg.retention_check_interval_s
+        await asyncio.sleep(sleep_s)

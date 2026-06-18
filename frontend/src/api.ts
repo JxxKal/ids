@@ -1411,6 +1411,37 @@ export async function setRetentionPolicy(body: {
   });
 }
 
+export interface RetentionPolicyRow {
+  hypertable:     string;
+  size_bytes:     number;
+  retention_days: number | null;
+}
+export interface RetentionPoliciesResponse {
+  policies:  RetentionPolicyRow[];
+  disk_pct:  number;
+  emergency: {
+    enabled:     boolean;
+    trigger_pct: number;
+    target_pct:  number;
+    evictable:   { hypertable: string; floor_days: number }[];
+  };
+}
+
+export async function fetchRetentionPolicies(): Promise<RetentionPoliciesResponse> {
+  if (isDemoMode()) {
+    return {
+      policies: [
+        { hypertable: 'flows',  size_bytes: 2_400_000_000, retention_days: null },
+        { hypertable: 'alerts', size_bytes:   180_000_000, retention_days: 90 },
+      ],
+      disk_pct: 41,
+      emergency: { enabled: true, trigger_pct: 92, target_pct: 82,
+                   evictable: [{ hypertable: 'flows', floor_days: 2 }, { hypertable: 'test_runs', floor_days: 1 }, { hypertable: 'alerts', floor_days: 30 }] },
+    };
+  }
+  return req('/api/maintenance/retention/policies');
+}
+
 export function backupDbUrl(): string {
   return `${BASE}/api/maintenance/backup`;
 }

@@ -116,6 +116,50 @@ async def _audit(
 # 1. STATS
 # ═══════════════════════════════════════════════════════════════════════════
 
+@router.get("/retention/policies", dependencies=[Depends(require_admin)])
+async def retention_policies(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
+    """Pro Hypertable: Größe + aktuelle Retention-Frist (Tage, null = keine).
+
+    Für die Settings-UI (Liste mit Set/Remove). retention_days wird aus der
+    `drop_after`-Config des policy_retention-Jobs abgeleitet.
+    """
+    out: list[dict] = []
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT h.hypertable_name AS name,
+                   hypertable_size(format('%I.%I', h.hypertable_schema, h.hypertable_name)::regclass) AS size_bytes,
+                   (SELECT round(extract(epoch FROM (j.config->>'drop_after')::interval) / 86400)::int
+                      FROM timescaledb_information.jobs j
+                     WHERE j.proc_name = 'policy_retention'
+                       AND j.hypertable_name = h.hypertable_name
+                     LIMIT 1) AS retention_days
+              FROM timescaledb_information.hypertables h
+             ORDER BY size_bytes DESC NULLS LAST
+            """
+        )
+        for r in rows:
+            out.append({
+                "hypertable":     r["name"],
+                "size_bytes":     int(r["size_bytes"]) if r["size_bytes"] is not None else 0,
+                "retention_days": r["retention_days"],
+            })
+    import shutil
+    from retention_monitor import cfg as _rcfg, _EVICTABLE
+    du = shutil.disk_usage("/")
+    return {
+        "policies": out,
+        "disk_pct": round(du.used / du.total * 100, 1),
+        "emergency": {
+            "enabled":    _rcfg.retention_emergency_enabled,
+            "trigger_pct": _rcfg.retention_emergency_pct,
+            "target_pct":  _rcfg.retention_emergency_target_pct,
+            # Welche Tabellen der Notfall-Cleanup räumt (+ Schutz-Floor in Tagen)
+            "evictable":  [{"hypertable": t, "floor_days": d} for t, d in _EVICTABLE],
+        },
+    }
+
+
 @router.get("/retention/health", dependencies=[Depends(require_admin)])
 async def retention_health(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
     """Aktueller Disk-/DB-/Policy-Job-Status des Retention-Monitors.
