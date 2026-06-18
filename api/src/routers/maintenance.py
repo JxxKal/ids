@@ -116,6 +116,17 @@ async def _audit(
 # 1. STATS
 # ═══════════════════════════════════════════════════════════════════════════
 
+@router.get("/retention/health", dependencies=[Depends(require_admin)])
+async def retention_health(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
+    """Aktueller Disk-/DB-/Policy-Job-Status des Retention-Monitors.
+
+    Liest live (kein Cache): Disk-Auslastung, DB-Größe, TimescaleDB-Policy-
+    Jobs und die abgeleitete Problemliste. `problems` leer = alles ok.
+    """
+    from retention_monitor import gather_health
+    return await gather_health(pool)
+
+
 @router.get("/stats", dependencies=[Depends(require_admin)])
 async def db_stats(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
     """Liefert Zeilen/Größe pro Tabelle + Hypertable-Infos + DB-Gesamtgröße."""

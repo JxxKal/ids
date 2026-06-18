@@ -289,6 +289,12 @@ async def startup() -> None:
     # bereits archiviert ist; sonst Snapshot in MinIO ablegen.
     asyncio.create_task(reports_router.archive_loop())
 
+    # Retention-/Disk-Monitor — alle 6h Disk-%, DB-Größe und TimescaleDB-
+    # Policy-Job-Health prüfen; bei Problemen Alert in die DB (DISK_SPACE_001
+    # critical / RETENTION_001 high). Verhindert stilles Volllaufen der Disk.
+    from retention_monitor import retention_monitor_loop
+    asyncio.create_task(retention_monitor_loop(get_pool))
+
     # PCAP-Lifecycle-Sync: wenn UI einen abweichenden Retention-Wert in
     # system_config persistiert hat, am MinIO durchsetzen. minio-init
     # läuft zwar bei jedem Stack-Start mit dem env-Var-Default, würde
