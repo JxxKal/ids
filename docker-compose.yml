@@ -123,7 +123,7 @@ services:
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: ids-kafka-ui
-    mem_limit: 384m
+    mem_limit: 512m
     restart: unless-stopped
     logging: *default-logging
     networks: [ids-net]
