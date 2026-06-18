@@ -60,6 +60,7 @@ services:
   kafka:
     image: apache/kafka:latest
     container_name: cyjan-tap-kafka
+    mem_limit: 2g
     restart: unless-stopped
     logging: *default-logging
     stop_grace_period: 30s
@@ -68,6 +69,7 @@ services:
       - kafka-data:/var/lib/kafka/data
     environment:
       KAFKA_NODE_ID: "1"
+      KAFKA_HEAP_OPTS: "-Xmx768m -Xms256m"
       KAFKA_PROCESS_ROLES: controller,broker
       # PLAINTEXT (intern, zwischen Containern) + EXTERNAL (für den Sniffer
       # der mit network_mode:host läuft und nur über localhost:9094 zu uns
@@ -126,6 +128,7 @@ services:
   sniffer:
     build: ./sniffer
     container_name: cyjan-tap-sniffer
+    mem_limit: 256m
     restart: unless-stopped
     logging: *default-logging
     network_mode: host           # AF_PACKET will den realen NIC sehen
@@ -153,6 +156,7 @@ services:
   flow-aggregator:
     build: ./flow-aggregator
     container_name: cyjan-tap-flow-aggregator
+    mem_limit: 384m
     healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
@@ -166,6 +170,7 @@ services:
   signature-engine:
     build: ./signature-engine
     container_name: cyjan-tap-signature-engine
+    mem_limit: 256m
     healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
@@ -198,6 +203,7 @@ services:
   tap-uplink:
     build: ./tap-uplink
     container_name: cyjan-tap-uplink
+    mem_limit: 384m
     healthcheck: *heartbeat-check
     restart: unless-stopped
     logging: *default-logging
@@ -255,6 +261,7 @@ services:
   tap-api:
     build: ./tap-api
     container_name: cyjan-tap-api
+    mem_limit: 256m
     healthcheck:
       test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('127.0.0.1',8000),5).close()"]
       interval: 30s
