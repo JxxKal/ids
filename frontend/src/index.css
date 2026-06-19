@@ -1,4 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap');
+/* Kein externer Google-Fonts-Import: das System ist offline (OT-Appliance) —
+   die Fonts wurden dort ohnehin nie geladen, gerendert wird über die Fallback-
+   Stacks (Inter→sans-serif, JetBrains Mono→ui-monospace/monospace). Spart den
+   sinnlosen externen Request und hält die Content-Security-Policy strikt
+   (kein style-src/font-src für fonts.googleapis/gstatic nötig). */
 
 @tailwind base;
 @tailwind components;
