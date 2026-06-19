@@ -1143,7 +1143,9 @@
     "versionInfo": {
       "title": "Versionsinformation",
       "subtitle": "Vollständige Versionshistorie. Über die Schaltflächen oben direkt zu einer Version springen.",
-      "current": "aktuell"
+      "current": "aktuell",
+      "more": "+{{count}} ältere",
+      "collapse": "weniger"
     },
     "ssl": {
       "title": "SSL / TLS-Zertifikat",

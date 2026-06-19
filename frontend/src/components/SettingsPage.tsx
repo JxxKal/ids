@@ -8408,9 +8408,12 @@ function DnsResolverSettings() {
 // Vollständige Versionshistorie aus changelog.ts, mit Sprungmarken pro Version.
 function VersionInfoSection() {
   const { t } = useTranslation();
+  const [showAllJumps, setShowAllJumps] = useState(false);
   const jump = (v: string) => {
     document.getElementById(`ver-${v}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  const JUMP_VISIBLE = 10;
+  const visibleJumps = showAllJumps ? CHANGELOG : CHANGELOG.slice(0, JUMP_VISIBLE);
   return (
     <div className="space-y-4 max-w-3xl">
       <div>
@@ -8418,14 +8421,23 @@ function VersionInfoSection() {
         <p className="text-xs text-slate-500 mt-1">{t('settings.versionInfo.subtitle')}</p>
       </div>
 
-      {/* Sprungmarken-Index */}
+      {/* Sprungmarken-Index: die ersten 10 als Buttons, ältere aufklappbar
+          (sonst sprengt die Leiste bei ~90 Versionen das Layout). */}
       <div className="flex flex-wrap gap-1.5">
-        {CHANGELOG.map(e => (
+        {visibleJumps.map(e => (
           <button key={e.version} onClick={() => jump(e.version)}
                   className="px-2 py-1 rounded text-[11px] font-mono bg-slate-800 hover:bg-cyan-700 text-slate-300 hover:text-white transition-colors">
             {e.version}
           </button>
         ))}
+        {CHANGELOG.length > JUMP_VISIBLE && (
+          <button onClick={() => setShowAllJumps(v => !v)}
+                  className="px-2 py-1 rounded text-[11px] font-mono bg-slate-700 hover:bg-slate-600 text-cyan-300 transition-colors">
+            {showAllJumps
+              ? t('settings.versionInfo.collapse')
+              : t('settings.versionInfo.more', { count: CHANGELOG.length - JUMP_VISIBLE })}
+          </button>
+        )}
       </div>
 
       {/* Historie */}
