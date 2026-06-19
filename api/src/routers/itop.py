@@ -46,6 +46,13 @@ _state: dict[str, Any] = {
 }
 
 
+def _oql_str(s: str) -> str:
+    """OQL-String-Literal escapen (einfach-gequotet, Backslash-Escapes).
+    Verhindert OQL-Injection über den frei konfigurierbaren org-Filter — ein
+    Apostroph im Org-Namen würde die Query sonst brechen bzw. manipulierbar machen."""
+    return s.replace("\\", "\\\\").replace("'", "\\'")
+
+
 def _ts() -> str:
     return datetime.now(timezone.utc).strftime("%H:%M:%S")
 
@@ -133,7 +140,7 @@ async def _sync(pool: asyncpg.Pool) -> None:
             for subnet_cls in _SUBNET_CLASSES:
                 try:
                     subnet_oql = (
-                        f"SELECT {subnet_cls} WHERE org_name = '{org}'" if org else None
+                        f"SELECT {subnet_cls} WHERE org_name = '{_oql_str(org)}'" if org else None
                     )
                     subnets = await _core_get(
                         client, base_url, user, pwd,
@@ -200,7 +207,7 @@ async def _sync(pool: asyncpg.Pool) -> None:
             # ── CI-Klassen → host_info ────────────────────────────────────────
             for cls, fields in _CI_CLASSES.items():
                 _log(f"Lade {cls} ...")
-                oql = f"SELECT {cls} WHERE org_name = '{org}'" if org else None
+                oql = f"SELECT {cls} WHERE org_name = '{_oql_str(org)}'" if org else None
                 try:
                     cis = await _core_get(client, base_url, user, pwd, cls, fields, oql)
                 except Exception as exc:

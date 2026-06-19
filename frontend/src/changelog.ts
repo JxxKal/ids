@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.45',
+    date: '2026-06-19',
+    title: 'Sicherheits-Härtung & kein Alarm-Verlust',
+    notes: [
+      'Alarme gehen bei einem DB-Ausfall nicht mehr verloren: der alert-manager puffert sie (gedeckelt) und schreibt sie nach, sobald die Datenbank zurück ist — statt sie nach wenigen Sekunden zu verwerfen.',
+      'Sicherheits-Härtung: Content-Security-Policy-Header gegen XSS, Brute-Force-Bremse am Login (5 Fehlversuche/Minute pro IP), und Absicherung des iTop-Org-Filters gegen Query-Injection.',
+    ],
+  },
+  {
     version: 'v2.5.44',
     date: '2026-06-19',
     title: '504-Fix Datenbank-Sektion (große Systeme)',

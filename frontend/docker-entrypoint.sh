@@ -46,6 +46,10 @@ server {
     location / {
         try_files \$uri \$uri/ /index.html;
         add_header Cache-Control "no-cache, must-revalidate" always;
+        # CSP: gegen XSS-Token-Diebstahl (JWT liegt in localStorage). script-src
+        # 'self' blockt injizierte Inline-Skripte; style-src 'unsafe-inline' nötig
+        # für React/Tailwind; connect-src erlaubt API + WebSocket (same-origin).
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
     }
     location /assets/ {
         expires 1y;
@@ -99,6 +103,10 @@ server {
     location / {
         try_files \$uri \$uri/ /index.html;
         add_header Cache-Control "no-cache, must-revalidate" always;
+        # CSP: gegen XSS-Token-Diebstahl (JWT liegt in localStorage). script-src
+        # 'self' blockt injizierte Inline-Skripte; style-src 'unsafe-inline' nötig
+        # für React/Tailwind; connect-src erlaubt API + WebSocket (same-origin).
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" always;
     }
     location /assets/ {
         expires 1y;

@@ -15,14 +15,20 @@ import psycopg2.extras
 
 log = logging.getLogger(__name__)
 
-BATCH_SIZE = 1   # sofortiger Flush: Alerts sofort in DB, sichtbar nach Reload
+# Alerts sind das Kernprodukt — bei DB-Ausfall wird NICHT verworfen, sondern
+# gepuffert und beim nächsten flush() (spätestens periodisch alle 60s, siehe
+# main.py) erneut versucht, bis die DB zurück ist.
+MAX_PENDING     = 10000  # Obergrenze gegen OOM bei langem Ausfall — dann älteste verwerfen
+RETRY_BACKOFF_S = 10.0   # nach einem DB-Fehler erst nach X s erneut versuchen,
+                         # statt den Consumer bei JEDEM Alert ~7s zu blockieren
 
 
 class AlertWriter:
     def __init__(self, postgres_dsn: str) -> None:
         self._dsn = postgres_dsn
         self._conn: psycopg2.extensions.connection | None = None
-        self._batch: list[dict] = []
+        self._pending: list[dict] = []   # noch nicht geschriebene Alerts (DB-Ausfall)
+        self._next_retry = 0.0           # monotone Zeit, ab der wieder versucht wird
 
     def _connect(self) -> None:
         if self._conn is None or self._conn.closed:
@@ -31,36 +37,38 @@ class AlertWriter:
             log.info("Connected to TimescaleDB")
 
     def write(self, alert: dict) -> None:
-        """Puffert einen Alert; schreibt bei BATCH_SIZE automatisch."""
-        self._batch.append(alert)
-        if len(self._batch) >= BATCH_SIZE:
-            self.flush()
+        """Puffert einen Alert und versucht zu schreiben (sofort sichtbar)."""
+        self._pending.append(alert)
+        if len(self._pending) > MAX_PENDING:
+            drop = len(self._pending) - MAX_PENDING
+            del self._pending[:drop]
+            log.error("Alert-Puffer voll (>%d) — %d älteste Alerts verworfen (DB-Ausfall?)",
+                      MAX_PENDING, drop)
+        self.flush()
 
     def flush(self) -> None:
-        """Schreibt alle gepufferten Alerts in die DB."""
-        if not self._batch:
+        """Schreibt alle gepufferten Alerts. Bei Fehler bleibt der Puffer erhalten
+        und wird nach RETRY_BACKOFF_S erneut versucht — kein stiller Verlust."""
+        if not self._pending:
             return
-        batch = self._batch[:]
-        self._batch.clear()
-
-        for attempt in range(3):
-            try:
-                self._connect()
-                self._insert(batch)
-                self._conn.commit()  # type: ignore[union-attr]
-                return
-            except Exception as exc:
-                log.error("DB write attempt %d failed: %s", attempt + 1, exc)
-                if self._conn:
-                    try:
-                        self._conn.rollback()
-                    except Exception:
-                        pass
-                    self._conn = None
-                if attempt < 2:
-                    time.sleep(2 ** attempt)
-
-        log.error("Dropping batch of %d alerts after 3 failed attempts", len(batch))
+        if time.monotonic() < self._next_retry:
+            return  # im Backoff-Fenster: nur puffern, DB nicht hämmern/blockieren
+        batch = self._pending[:]
+        try:
+            self._connect()
+            self._insert(batch)
+            self._conn.commit()  # type: ignore[union-attr]
+            self._pending.clear()
+        except Exception as exc:
+            log.error("DB-Write fehlgeschlagen — %d Alerts gepuffert, Retry in %.0fs: %s",
+                      len(self._pending), RETRY_BACKOFF_S, exc)
+            if self._conn:
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    pass
+                self._conn = None
+            self._next_retry = time.monotonic() + RETRY_BACKOFF_S
 
     def _insert(self, batch: list[dict]) -> None:
         import json as _json
