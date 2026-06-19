@@ -175,6 +175,13 @@ async def retention_health(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
 async def db_stats(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
     """Liefert Zeilen/Größe pro Tabelle + Hypertable-Infos + DB-Gesamtgröße."""
     async with pool.acquire() as conn:
+        # Pro-Statement-Timeout: auf sehr großen DBs kann z.B. MIN/MAX über die
+        # flows-Hypertable lange dauern. Statt den ganzen Request bis zum
+        # nginx-504 hängen zu lassen, bricht eine zu langsame Teil-Query ab —
+        # die per-Query try/except liefern dann Teildaten (oldest/newest=null).
+        # asyncpg setzt den Wert beim Release der Pool-Connection via RESET ALL
+        # automatisch zurück.
+        await conn.execute("SET statement_timeout = '25s'")
         # DB Gesamtgröße
         db_size = await conn.fetchval(
             "SELECT pg_database_size(current_database())"

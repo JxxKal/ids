@@ -59,6 +59,13 @@ server {
         proxy_set_header X-Real-IP       \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        # DB-Stats/Backup/Retention u.a. brauchen auf großen DBs mehr als den
+        # nginx-Default von 60s — sonst 504 Gateway Timeout beim Öffnen der
+        # Datenbank-Sektion. (Die statische nginx.conf hatte das, aber dieser
+        # zur Laufzeit generierte Block überschreibt sie.)
+        proxy_read_timeout    180s;
+        proxy_send_timeout    180s;
+        proxy_connect_timeout 10s;
     }
 
     location /ws/ {
@@ -104,6 +111,10 @@ server {
         proxy_set_header Host            \$host;
         proxy_set_header X-Real-IP       \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        # Siehe TLS-Variante: 504-Schutz auf großen DBs.
+        proxy_read_timeout    180s;
+        proxy_send_timeout    180s;
+        proxy_connect_timeout 10s;
     }
 
     location /ws/ {

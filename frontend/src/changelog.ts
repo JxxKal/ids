@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.44',
+    date: '2026-06-19',
+    title: '504-Fix Datenbank-Sektion (große Systeme)',
+    notes: [
+      'Die Datenbank-Sektion lief auf großen Installationen in einen 504 Gateway Timeout — der zur Laufzeit erzeugten nginx-Konfig fehlte das Proxy-Timeout (60s-Default). Jetzt 180s, plus pro-Statement-Timeout in der Statistik-Abfrage, damit eine langsame Teilabfrage Teildaten liefert statt zu hängen.',
+    ],
+  },
+  {
     version: 'v2.5.43',
     date: '2026-06-19',
     title: 'Versionshistorie überarbeitet',
