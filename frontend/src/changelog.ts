@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.46',
+    date: '2026-06-19',
+    title: 'Service-Token-Härtung & Sicherheits-Doku',
+    notes: [
+      'Der rule-tuner nutzt jetzt kurzlebige Service-Tokens (5 Minuten, pro Anfrage frisch) statt eines unwiderruflichen 365-Tage-Admin-Tokens — ein geleaktes Token ist damit nur Minuten gültig.',
+      'Sicherheits- und Trust-Boundary-Dokumentation im README ergänzt (Docker-Socket, Service-Auth, mTLS, CSP).',
+    ],
+  },
+  {
     version: 'v2.5.45',
     date: '2026-06-19',
     title: 'Sicherheits-Härtung & kein Alarm-Verlust',

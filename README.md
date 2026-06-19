@@ -109,6 +109,18 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 
 ---
 
+## Sicherheit & Trust-Boundaries
+
+Bewusste Architektur-Entscheidungen, die man kennen muss, bevor man am Stack schraubt:
+
+- **Docker-Socket-Mounts** (`/var/run/docker.sock`): `api` (read-write) und `redteam-orchestrator` (read-only) mounten den Host-Docker-Socket. Das ist **root-äquivalent auf dem Host** — eine Kompromittierung dieser Container = Host-Übernahme. Bewusst so, weil das Self-Update (`api` startet `docker compose up` für die Update-Pipeline) und das RedTeam-Tooling es brauchen. **Konsequenz:** Diese beiden Container sind die kritischste Angriffsfläche; Update-Endpoints sind `require_admin`-geschützt, RedTeam ist standardmäßig aus (`REDTEAM_ENABLED`). Nicht „mal eben" weitere Container mit Socket-Mount versehen.
+- **Service-zu-Service-Auth**: Interne Dienste (z.B. `rule-tuner`) authentisieren sich mit kurzlebigen JWTs (5 min), die sie selbst aus `API_SECRET_KEY` signieren — kein DB-User. Wer `API_SECRET_KEY` hat, kann beliebige Admin-Tokens minten ⇒ der Key ist das kronjuwel (ISO-Wizard generiert ihn zufällig; Startup failt bei Default-Wert).
+- **mTLS Master↔Tap**: `tap-uplink` verifiziert das Master-Cert gegen die gepinnte CA (`check_hostname=False`, weil das Server-Cert die CA selbst ist — ein MITM bräuchte den CA-Privatekey). Die CA liegt im `master-ca`-Volume; dessen Schutz = Vertraulichkeit des gesamten Tap-Verbunds.
+- **Web-Auth**: JWT im `localStorage` (XSS-exponiert, daher strikte CSP), Login-Brute-Force per IP-Rate-Limit gebremst, lokale Passwörter bcrypt.
+- **CSP**: strikt same-origin (`script-src 'self'`, keine externen CDNs). Neue externe Ressourcen werden vom Browser geblockt — bewusst, die Appliance läuft offline. Bei Bedarf lokal bündeln statt freigeben.
+
+---
+
 ## Tech Stack
 
 | Komponente | Technologie |
