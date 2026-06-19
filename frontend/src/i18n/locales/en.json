@@ -16,6 +16,11 @@
     "mobileHintDismiss": "Hide hint",
     "helpToggle": "What does this do?"
   },
+  "versionNotes": {
+    "badge": "New version installed",
+    "later": "Later",
+    "ack": "Read it — don't show again"
+  },
   "errorBoundary": {
     "title": "Rendering error",
     "reload": "Reload"
@@ -577,6 +582,7 @@
       "update": "System update",
       "db-maintenance": "Database",
       "migration": "Host migration",
+      "version-info": "Version info",
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "mqtt": "MQTT bridge",
@@ -1133,6 +1139,11 @@
       "import": "↑ Import",
       "backupDownloaded": "Backup downloaded: {{filename}}",
       "restoreSuccess": "Restore successful ({{mb}} MB in {{ms}} ms)"
+    },
+    "versionInfo": {
+      "title": "Version info",
+      "subtitle": "Full version history. Use the buttons above to jump straight to a version.",
+      "current": "current"
     },
     "ssl": {
       "title": "SSL / TLS certificate",

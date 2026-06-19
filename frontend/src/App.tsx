@@ -14,6 +14,7 @@ import { NetworksPage } from './components/NetworksPage';
 import { SettingsPage, type SectionId } from './components/SettingsPage';
 import { SeverityBarsCard } from './components/SeverityBarsCard';
 import { HostConnectionDrawer } from './components/HostConnectionDrawer';
+import { VersionNotesPopup } from './components/VersionNotesPopup';
 import { HelpTip } from './components/HelpTip';
 import { Sidebar, type NavTab } from './components/Sidebar';
 import { TestsPage } from './components/TestsPage';
@@ -468,6 +469,9 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
       {/* Globaler Host-Connection-Drawer: lauscht auf
           window.dispatchEvent(new CustomEvent('ids:show-host-connections', {detail:{ip}})) */}
       <HostConnectionDrawer />
+
+      {/* Versions-Popup beim ersten Login in eine neue Version */}
+      <VersionNotesPopup />
     </div>
   );
 }

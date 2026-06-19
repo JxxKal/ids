@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import {
-  Activity, ChevronDown, Database, FileText, Globe, HardDrive, KeyRound, ListTree, Lock, Menu, Network, Plug, RotateCcw, Server, Sliders, Sparkles, Upload, Users,
+  Activity, ChevronDown, Database, FileText, Globe, HardDrive, Info, KeyRound, ListTree, Lock, Menu, Network, Plug, RotateCcw, Server, Sliders, Sparkles, Upload, Users,
 } from 'lucide-react';
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../i18n';
 import {
@@ -43,6 +43,7 @@ import {
   restartStack as restartStackApi, rebootHost as rebootHostApi,
   fetchMe,
 } from '../api';
+import { CHANGELOG } from '../changelog';
 import type {
   SslAcmeConfig, SslSelfSignedRequest, SslStatus, SyslogConfig, SystemStats, ContainerStatus, ContainerInfo, LearnedPattern,
   DbStatsResponse, MaintenanceAuditEntry,
@@ -8403,9 +8404,64 @@ function DnsResolverSettings() {
   );
 }
 
+// ── Versionsinformation ───────────────────────────────────────────────────────
+// Vollständige Versionshistorie aus changelog.ts, mit Sprungmarken pro Version.
+function VersionInfoSection() {
+  const { t } = useTranslation();
+  const jump = (v: string) => {
+    document.getElementById(`ver-${v}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  return (
+    <div className="space-y-4 max-w-3xl">
+      <div>
+        <h2 className="text-lg font-semibold text-slate-100">{t('settings.versionInfo.title')}</h2>
+        <p className="text-xs text-slate-500 mt-1">{t('settings.versionInfo.subtitle')}</p>
+      </div>
+
+      {/* Sprungmarken-Index */}
+      <div className="flex flex-wrap gap-1.5">
+        {CHANGELOG.map(e => (
+          <button key={e.version} onClick={() => jump(e.version)}
+                  className="px-2 py-1 rounded text-[11px] font-mono bg-slate-800 hover:bg-cyan-700 text-slate-300 hover:text-white transition-colors">
+            {e.version}
+          </button>
+        ))}
+      </div>
+
+      {/* Historie */}
+      <div className="space-y-3">
+        {CHANGELOG.map((e, idx) => (
+          <div key={e.version} id={`ver-${e.version}`} className="card p-4 scroll-mt-4">
+            <div className="flex items-baseline justify-between gap-3 flex-wrap">
+              <h3 className="text-sm font-semibold text-slate-100">
+                <span className="font-mono text-cyan-400">{e.version}</span>
+                {idx === 0 && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/15 text-cyan-300 align-middle">
+                    {t('settings.versionInfo.current')}
+                  </span>
+                )}
+                <span className="text-slate-300"> — {e.title}</span>
+              </h3>
+              <span className="text-[11px] text-slate-500 font-mono">{e.date}</span>
+            </div>
+            <ul className="mt-2 space-y-1.5">
+              {e.notes.map((n, i) => (
+                <li key={i} className="flex gap-2 text-xs text-slate-400 leading-relaxed">
+                  <span className="text-slate-600 shrink-0 mt-0.5">›</span>
+                  <span>{n}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'notifications' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'migration' | 'egress-priorities' | 'remote-taps' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'notifications' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'migration' | 'egress-priorities' | 'remote-taps' | 'version-info' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -8461,6 +8517,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'geoip',          icon: <Globe     {...ICON_PROPS} /> },
       { id: 'db-maintenance', icon: <HardDrive {...ICON_PROPS} /> },
       { id: 'migration',      icon: <Server    {...ICON_PROPS} /> },
+      { id: 'version-info',   icon: <Info      {...ICON_PROPS} /> },
     ],
   },
   {
@@ -8643,6 +8700,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
             {active === 'system-health'  && <SystemHealth />}
             {active === 'db-maintenance' && <DatabaseMaintenance />}
             {active === 'migration'      && <MigrationSettings />}
+            {active === 'version-info'   && <VersionInfoSection />}
             {active === 'interfaces'    && <NetworkInterfaces />}
             {active === 'dns-resolvers' && <DnsResolverSettings />}
             {active === 'egress-priorities' && <EgressPrioritySettings />}
