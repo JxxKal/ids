@@ -93,7 +93,7 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | `enrichment-service` | Python | ✅ | Reverse-DNS, ICMP-Ping, GeoIP/ASN (DB-IP Lite oder MaxMind), Known-Network-Lookup, Host-Trust, **OT-Boundary V2 Zone-Klassifikation** (ot/it/internet) |
 | `rule-tuner` | Python | ✅ | *(nur Master)* Reservoir-Sampling über `rule-metrics`-Topic, Quantil-basiertes Schwellwert-Tuning für Heuristik-Rules, schreibt Overrides nach 6h-Cycle (siehe [ML-Tuning](#ml-tuning--automatische-schwellwert-anpassung)) |
 | `pcap-store` | Python | ✅ | Sliding-Window-Paketpuffer, PCAP-Writer, MinIO-Upload, DB-Update, WS-Push nach Upload |
-| `api` | Python FastAPI | ✅ | REST + WebSocket, JWT-Auth (8h / 365d API), Swagger UI mit Bearer-Auth, alle Datenpfade |
+| `api` | Python FastAPI | ✅ | REST + WebSocket, JWT-Auth (8h / 365d API), Swagger UI mit Bearer-Auth, alle Datenpfade. Login-Brute-Force-Bremse, Startup-Fail bei Default-`API_SECRET_KEY`. Enthält den **Retention-/Disk-Monitor** (6h-Loop) inkl. Notfall-Cleanup. |
 | `frontend` | React + Vite + TS | ✅ | Echtzeit Alert-Feed, Verbindungsgraph, PCAP-Download, Feedback, ML-Konfiguration, Sidebar-Navigation |
 | `training-loop` | Python | ✅ | Feedback-Collector (Kafka), semi-supervised Retrain, atomares Modell-Update |
 | `traffic-generator` | Python/Scapy | ✅ | 5 Test-Szenarien, Alert-Polling, TestRun-Update in DB |
@@ -118,6 +118,30 @@ Bewusste Architektur-Entscheidungen, die man kennen muss, bevor man am Stack sch
 - **mTLS Master↔Tap**: `tap-uplink` verifiziert das Master-Cert gegen die gepinnte CA (`check_hostname=False`, weil das Server-Cert die CA selbst ist — ein MITM bräuchte den CA-Privatekey). Die CA liegt im `master-ca`-Volume; dessen Schutz = Vertraulichkeit des gesamten Tap-Verbunds.
 - **Web-Auth**: JWT im `localStorage` (XSS-exponiert, daher strikte CSP), Login-Brute-Force per IP-Rate-Limit gebremst, lokale Passwörter bcrypt.
 - **CSP**: strikt same-origin (`script-src 'self'`, keine externen CDNs). Neue externe Ressourcen werden vom Browser geblockt — bewusst, die Appliance läuft offline. Bei Bedarf lokal bündeln statt freigeben.
+
+---
+
+## Betrieb & Resilienz
+
+Härtung für den 24/7-Offline-Betrieb auf der OT-Box (eingeführt über v2.5.28–v2.5.47):
+
+- **Reboot-Recovery & Boot-Health-Check**: Nach jedem Neustart bringt `cyjan-stack.service` den vollen Soll-Stack hoch (nicht nur die vorher laufenden Container). `cyjan-stack-health` prüft danach, ob alle Soll-Services wirklich healthy werden; ist der Stack unvollständig, eskaliert `cyjan-stack-alert` über **journal + Konsolen-Banner (`wall`/motd) + kritischen `BOOT_HEALTH_001`-Alert in der DB** (im Web-UI sichtbar). Schließt die Lücke, die zu einem unbemerkten 22h-Ausfall geführt hatte. Zusätzlich Ctrl-Alt-Del-Hardening gegen versehentliche IP-KVM-Reboots.
+- **Container-Healthchecks**: 14 Python-Pipeline-Dienste melden über einen `/tmp/heartbeat`-Mechanismus ihren Gesundheitszustand (Compose-`healthcheck`, unhealthy bei >120 s Stille) — ein hängender, aber nicht abgestürzter Consumer fällt jetzt auf. master-uplink/tap-api via TCP-Check.
+- **Speicher-Limits**: `mem_limit` auf allen Stack-Services (vorher nur Lab), damit ein einzelner Amok-Dienst (Kafka-JVM, ML-Retrain, pcap-Puffer) nicht den ganzen Host OOM-killt. Kafka-Heap und Redis-`maxmemory` zusätzlich passend begrenzt.
+- **Retention-/Disk-Monitor** (im `api`, alle 6 h): überwacht Disk-Auslastung, DB-Größe und die TimescaleDB-Aufräum-Jobs und alarmiert frühzeitig (`DISK_SPACE_001` critical / `RETENTION_001` high), bevor die Platte volläuft — inkl. Hinweis, welche Hypertables keine Retention haben.
+- **Notfall-Cleanup**: Läuft die Disk trotz Retention über 92 %, löscht der Monitor automatisch die ältesten Chunks evictabler Hypertables (`drop_chunks`, ältester zuerst) bis 82 %, mit Schutz-Fristen je Tabelle (flows 2 d, test_runs 1 d, alerts 30 d) — letztes Sicherheitsnetz, kein Ersatz für gesetzte Retention-Policies.
+- **Alarm-Persistenz**: Der `alert-manager` puffert Alerts bei DB-Ausfall (gedeckelt) und schreibt sie nach Wiederkehr nach, statt sie zu verwerfen.
+
+### Settings-Erweiterungen
+
+- **System Details** (Einstellungen → System): profilbewusster Container-Status (prod vs. lab) — auf einen Blick, welche Container laufen.
+- **Datenbank → Retention**: Aufbewahrungsfrist pro Hypertable setzen/entfernen (mit Größenübersicht), plus Anzeige des Notfall-Cleanup-Status.
+- **Versionsinformation**: vollständige Versionshistorie mit Sprungmarken; beim ersten Login in eine neue Version zeigt ein Popup die Neuerungen („Gelesen — nicht mehr anzeigen").
+
+### Update- & CI-Mechanik
+
+- **Profilbewusste Updates**: `cyjan-update apply <tag>` recreated alle aktiven Compose-Profile (z.B. `prod,snort`) — vorher blieben Profil-Services auf altem Stand. nginx-Config & Cache-Header werden korrekt erneuert (kein manueller Hard-Reload nach Updates mehr nötig).
+- **CI-Drift-Guard**: Der Release-Build failt, wenn ein Compose-Service mit `build:` nicht im Bundle steht (verhindert Offline-Install-Lücken). Artefakt-Retention auf 1 Tag begrenzt.
 
 ---
 
@@ -353,7 +377,7 @@ Die Web-Oberfläche ist von Grund auf für Touch-Devices ausgelegt — keine "De
 
 ### Alert-Feed
 
-- **Echtzeit-Stream** via WebSocket, automatischer Reconnect mit Token-Auth
+- **Echtzeit-Stream** via WebSocket, automatischer Reconnect mit Token-Auth (exponentielles Backoff 1s→30s + Jitter, selbstheilender Watchdog gegen hängende Verbindungen)
 - **Gruppiert / Einzeln** umschaltbar
 - **Zeitfenster-Selector** – Live, 1 Min, 15 Min, 1 Std, 4 Std, 1 Tag
 - **Quellenfilter** – Alle / Signatur / ML·KI / Suricata / Extern (IRMA)
@@ -363,6 +387,7 @@ Die Web-Oberfläche ist von Grund auf für Touch-Devices ausgelegt — keine "De
 - **Tags** – Suricata/Signatur-Tags je Alert (OT/ICS-Tags orange hervorgehoben)
 - **IRMA-Badge** – violettes „IRMA"-Label bei Alarmen aus der IRMA-Bridge
 - **IRMA ASSET-Filter** – Toggle-Schalter „∅ ASSET" blendet IRMA-Alarme mit `rule_id=ASSET::*` aus (bei Alarmstürmen durch Asset-Warnungen)
+- **Unterdrückte ausblenden** – Schalter „Unterdrückte anzeigen" blendet automatisch auf `low` herabgestufte Alarme (Tags `ml-suppressed`/`auto-suppressed`) aus; Default versteckt, persistent
 - **Enrichment** – Hostname, Netzwerk-Badge, Trust-Status, GeoIP, ASN
 - **FP/TP-Badge** – grün (False Positive) / rot (True Positive) direkt in der Zeile
 - **PCAP-Button** – grau (nicht verfügbar) / blau (Download bereit), mit Tooltip
