@@ -77,6 +77,7 @@ def _make_producer(brokers: str) -> Producer:
         "bootstrap.servers": brokers,
         "acks":              "1",
         "linger.ms":         5,
+        "compression.type":  "lz4",
     })
 
 

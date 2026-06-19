@@ -35,14 +35,30 @@ log = logging.getLogger(__name__)
 _cfg = Config.from_env()
 
 
+# Ein wiederverwendeter Redis-Client (mit interner Connection-Pool) statt pro
+# Cache-Invalidation eine neue Verbindung aufzumachen — unter Last sonst
+# FD-/Socket-Verschleiß.
+_redis_client: redis_lib.Redis | None = None
+
+
+def _redis() -> redis_lib.Redis:
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = redis_lib.from_url(
+            _cfg.redis_url, socket_timeout=2, socket_connect_timeout=2,
+        )
+    return _redis_client
+
+
 def _invalidate_enrichment_cache(ip: str) -> None:
     """Löscht den Enrichment-Cache-Eintrag für eine IP damit der nächste Alert
     frische Trust/display_name-Daten aus der DB liest."""
+    global _redis_client
     try:
-        r = redis_lib.from_url(_cfg.redis_url, socket_timeout=2)
-        r.delete(f"enrichment:{ip}")
+        _redis().delete(f"enrichment:{ip}")
     except Exception as exc:
         log.debug("Cache invalidation failed for %s: %s", ip, exc)
+        _redis_client = None  # kaputte Verbindung verwerfen → nächster Call baut neu
 
 router = APIRouter(prefix="/api/hosts", tags=["hosts"])
 

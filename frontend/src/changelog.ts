@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.47',
+    date: '2026-06-19',
+    title: 'Reliability-Feinschliff',
+    notes: [
+      'Live-Verbindung: Reconnect mit exponentiellem Backoff (1s→30s, mit Jitter) statt festem 3-Sekunden-Takt — schont Server und Netz, wenn viele Clients nach einem Neustart gleichzeitig zurückkommen.',
+      'Redis-Verbindung im API-Dienst wird wiederverwendet statt pro Cache-Invalidierung neu aufgebaut; alle Kafka-Producer nutzen jetzt einheitlich LZ4-Kompression.',
+    ],
+  },
+  {
     version: 'v2.5.46',
     date: '2026-06-19',
     title: 'Service-Token-Härtung & Sicherheits-Doku',

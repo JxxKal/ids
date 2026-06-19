@@ -7,7 +7,12 @@ import type { Alert, WsMessage } from '../types';
 const WS_BASE = import.meta.env.VITE_WS_URL
   ?? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
 
-const RECONNECT_DELAY_MS = 3000;
+// Reconnect mit exponentiellem Backoff statt festem 3s-Hämmern: 1s, 2s, 4s …
+// gedeckelt bei 30s, mit ±20% Jitter (verhindert Thundering-Herd, wenn viele
+// Clients gleichzeitig nach einem Master-Neustart reconnecten). Reset auf 0
+// nach erfolgreichem open.
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS  = 30000;
 // Wie lange ein Socket in CONNECTING verharren darf, bevor wir ihn als tot
 // betrachten und neu aufbauen. Beim Fresh-Login direkt nach dem Login-POST
 // kam es auf langsameren Prod-Hosts vor, dass der WS-Upgrade hinter nginx
@@ -26,6 +31,7 @@ export function useWebSocket() {
   const [connected, setConnected] = useState(false);
   const wsRef       = useRef<WebSocket | null>(null);
   const reconnectAt = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTries = useRef(0);
 
   const connect = useCallback(() => {
     const cur = wsRef.current;
@@ -54,14 +60,18 @@ export function useWebSocket() {
 
     const scheduleReconnect = () => {
       if (reconnectAt.current) return;
+      const exp   = Math.min(RECONNECT_BASE_MS * 2 ** reconnectTries.current, RECONNECT_MAX_MS);
+      const delay = exp * (0.8 + Math.random() * 0.4);  // ±20% Jitter
+      reconnectTries.current += 1;
       reconnectAt.current = setTimeout(() => {
         reconnectAt.current = null;
         connect();
-      }, RECONNECT_DELAY_MS);
+      }, delay);
     };
 
     ws.onopen = () => {
       clearTimeout(estTimer);
+      reconnectTries.current = 0;  // erfolgreiche Verbindung → Backoff zurücksetzen
       if (ws === wsRef.current) setConnected(true);
     };
 

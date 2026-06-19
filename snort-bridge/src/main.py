@@ -174,6 +174,7 @@ def main() -> None:
     producer = Producer({
         "bootstrap.servers": KAFKA_BROKERS,
         "linger.ms": 20,
+        "compression.type": "lz4",
     })
     overrides = SuricataOverrides()
     overrides.reload_if_changed()

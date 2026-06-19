@@ -146,6 +146,7 @@ minio_client = Minio(
 kafka_producer = Producer({
     "bootstrap.servers": cfg.kafka_brokers,
     "acks": "1",
+    "compression.type": "lz4",
 })
 
 # ── Routers einbinden ────────────────────────────────────────────────────────────

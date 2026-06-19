@@ -802,6 +802,7 @@ async def amain() -> None:
         "bootstrap.servers": KAFKA_BROKERS,
         "linger.ms": 20,
         "acks": "1",
+        "compression.type": "lz4",
     })
 
     ssl_ctx = _build_ssl_context()

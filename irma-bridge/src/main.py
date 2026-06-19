@@ -137,6 +137,7 @@ def _delivery_cb(err, msg):
 producer = Producer({
     "bootstrap.servers": KAFKA_BROKERS,
     "acks": "1",
+    "compression.type": "lz4",
 })
 
 # ── IRMA Auth ─────────────────────────────────────────────────────────────────
