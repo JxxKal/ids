@@ -16,6 +16,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.50',
+    date: '2026-06-22',
+    title: 'Host-Rollenerkennung',
+    notes: [
+      'Cyjan erkennt jetzt automatisch, welche Rolle ein Host im Netz spielt — z.B. Domain Controller, DNS-, Web-, Datenbank- oder Mail-Server, RDP-/SSH-Host, sowie OT-Geräte wie Siemens-S7-/Modbus-/BACnet-SPS und WinCC/iFix-SCADA. Grundlage sind die tatsächlich bedienten Ports (über 7 Tage beobachtet) plus, wo möglich, der MAC-Hersteller (OUI).',
+      'In der Hosts-Ansicht erscheinen die Rollen als Badges (mit Konfidenz und Begründung im Tooltip), und es lässt sich nach Rolle filtern.',
+      'Rollen sind manuell überschreibbar: eine selbst gesetzte Rolle wird gesperrt und von der automatischen Erkennung nicht mehr angefasst, bis man sie wieder freigibt — analog zum bekannten Sperr-Prinzip beim Schwellwert-Tuning.',
+      'Der Rollen-Katalog (23 Rollen) ist als YAML gepflegt und erweiterbar; er wird über den Reverse-Channel auch an gepairte Remote-Taps verteilt.',
+    ],
+  },
+  {
     version: 'v2.5.49',
     date: '2026-06-22',
     title: 'Schnelleres Laden (Code-Splitting)',

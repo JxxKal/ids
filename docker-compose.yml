@@ -622,6 +622,11 @@ services:
     depends_on:
       timescaledb:
         condition: service_healthy
+      # api fährt Migration 027 (host_info.detected_roles) im Startup —
+      # erst danach darf der erste Detektor-Cycle schreiben, sonst
+      # "column detected_roles does not exist" bis zum nächsten Cycle.
+      api:
+        condition: service_healthy
     volumes:
       - ./signature-engine/rules/host-roles:/host-roles:ro
     environment:
