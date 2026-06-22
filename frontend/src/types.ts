@@ -37,6 +37,47 @@ export interface Enrichment {
   dst_display_name?: string;
 }
 
+// ── Host-Rollenerkennung (Contract docs/contracts/host-roles.md) ─────────────
+// Pro erkannte Rolle ein Eintrag in detected_roles.roles[<role_id>].
+// V1-Scope: Port-Profile + MAC-OUI. fingerprint/flags bleiben im Schema.
+
+export interface HostRolePort {
+  port:  number;
+  proto: 'TCP' | 'UDP' | 'ANY';
+}
+
+export interface HostRoleEntry {
+  confidence:      number;          // [0,1]
+  source:          'auto' | 'manual';
+  ports:           HostRolePort[];
+  evidence:        string[];        // z.B. ["port:88/TCP", "oui:Dell"]
+  flags:           string[];
+  flow_count:      number;
+  since:           string;          // ISO — erste Detektion, stabil über Cycles
+  last_confirmed:  string;          // ISO
+}
+
+export interface HostRoleManualLock {
+  locked:  boolean;
+  set_by:  string;
+  set_at:  string;                  // ISO
+}
+
+export interface DetectedRoles {
+  roles:         Record<string, HostRoleEntry>;
+  manual:        Record<string, HostRoleManualLock>;
+  evaluated_at:  string;            // ISO
+}
+
+// Katalog-Eintrag aus GET /api/hosts/role-catalog (eingefroren).
+export interface RoleCatalogEntry {
+  id:        string;
+  label:     string;
+  category:  string;
+}
+
+export type HostRoleAction = 'set' | 'reset' | 'remove';
+
 export interface Host {
   ip: string;
   hostname?: string;
@@ -48,7 +89,12 @@ export interface Host {
   ping_ms?: number;
   last_seen?: string;
   updated_at: string;
+  // Rollenerkennung — NULL/undefined ⇒ Host nie evaluiert.
+  detected_roles?: DetectedRoles | null;
 }
+
+// Alias — die API liefert für GET /api/hosts/{ip} dasselbe Shape wie Host.
+export type HostResponse = Host;
 
 export interface Alert {
   alert_id: string;

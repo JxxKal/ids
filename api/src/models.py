@@ -92,6 +92,9 @@ class HostResponse(BaseModel):
     ping_ms:      float | None = None
     last_seen:    datetime | None = None
     updated_at:   datetime
+    # Host-Rollenerkennung (Shape: docs/contracts/host-roles.md §1).
+    # NULL ⇒ Host wurde nie vom Detektor evaluiert.
+    detected_roles: dict[str, Any] | None = None
 
 
 class HostCreate(BaseModel):
@@ -104,6 +107,18 @@ class HostCreate(BaseModel):
 class HostUpdate(BaseModel):
     display_name: str | None = None
     trusted:      bool | None = None
+
+
+class HostRoleUpdate(BaseModel):
+    """Manuelle Rollen-Korrektur (PUT /api/hosts/{ip}/roles).
+
+    Semantik laut Contract §4:
+      set    – Rolle manuell setzen + locken (Detektor fasst sie nicht mehr an)
+      reset  – manuellen Lock aufheben, Rolle wieder dem Detektor überlassen
+      remove – auto-erkannte Rolle einmalig entfernen (kein Lock)
+    """
+    role_id: str
+    action:  str = Field(..., pattern="^(set|reset|remove)$")
 
 
 # ── Networks ──────────────────────────────────────────────────────────────────

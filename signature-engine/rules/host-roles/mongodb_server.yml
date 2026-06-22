@@ -1,0 +1,14 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: mongodb_server
+  label: "MongoDB Server"
+  category: database
+  match:
+    required_ports:
+      - {port: 27017, proto: TCP}  # MongoDB
+    any_ports: null
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.80            # Port 27017 ist eindeutig MongoDB
+  confidence_bonus: {per_optional_port: 0.0, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

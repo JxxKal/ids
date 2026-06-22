@@ -1,0 +1,17 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: ethernetip_plc
+  label: "EtherNet/IP PLC"
+  category: ot
+  match:
+    required_ports:
+      - {port: 44818, proto: TCP}  # EtherNet/IP (CIP) explicit messaging
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 2222, proto: UDP} # EtherNet/IP implicit I/O messaging
+    optional_flags: []
+  min_flows_per_port: 1
+  base_confidence: 0.66            # CIP-Port eindeutig, aber OT-Einzelsignal — konservativ
+  confidence_bonus: {per_optional_port: 0.05, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

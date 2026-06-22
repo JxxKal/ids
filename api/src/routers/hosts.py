@@ -21,6 +21,7 @@ import csv
 import io
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Annotated
 
 import asyncpg
@@ -29,7 +30,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 
 from config import Config
 from database import get_pool
-from models import HostCreate, HostResponse, HostUpdate
+from deps import require_admin
+from models import HostCreate, HostResponse, HostRoleUpdate, HostUpdate
+from role_catalog import load_catalog
 
 log = logging.getLogger(__name__)
 _cfg = Config.from_env()
@@ -75,6 +78,9 @@ def _row_to_host(row: asyncpg.Record) -> HostResponse:
         ping_ms=row["ping_ms"],
         last_seen=row["last_seen"],
         updated_at=row["updated_at"],
+        # detected_roles ist JSONB; asyncpg liefert es bereits als dict
+        # (jsonb-Codec). NULL ⇒ Host nie evaluiert.
+        detected_roles=dict(row["detected_roles"]) if row["detected_roles"] else None,
     )
 
 
@@ -136,10 +142,19 @@ async def list_unknown_hosts(
     ]
 
 
+@router.get("/role-catalog", summary="Verfügbare Host-Rollen (id/label/category)")
+async def get_role_catalog() -> list[dict]:
+    """Liefert den Rollen-Katalog für die GUI (Rollen-Filter + manuelle
+    Zuweisung). Quelle: Katalog-YAMLs im signature-engine, gemountet im
+    api-Container (siehe role_catalog.py)."""
+    return load_catalog()
+
+
 @router.get("", response_model=list[HostResponse])
 async def list_hosts(
     trusted: bool | None = None,
     search:  str | None  = None,
+    role:    str | None  = Query(None, description="Filter auf eine erkannte/gesetzte Rolle"),
     limit:   Annotated[int, Query(ge=1, le=1000)] = 200,
     pool:    asyncpg.Pool = Depends(get_pool),
 ) -> list[HostResponse]:
@@ -154,6 +169,10 @@ async def list_hosts(
             f"(ip::text ILIKE ${idx} OR hostname ILIKE ${idx} OR display_name ILIKE ${idx})"
         )
         params.append(f"%{search}%"); idx += 1
+    if role:
+        # JSONB-Key-Existenz: detected_roles->'roles' enthält die role_id als Key.
+        filters.append(f"(detected_roles->'roles') ? ${idx}")
+        params.append(role); idx += 1
 
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
 
@@ -161,7 +180,7 @@ async def list_hosts(
         rows = await conn.fetch(
             f"""
             SELECT ip, hostname, display_name, trusted, trust_source,
-                   asn, geo, ping_ms, last_seen, updated_at
+                   asn, geo, ping_ms, last_seen, updated_at, detected_roles
             FROM host_info
             {where}
             ORDER BY trusted DESC, last_seen DESC NULLS LAST
@@ -248,6 +267,90 @@ async def update_host(
         raise HTTPException(status_code=404, detail="Host not found")
     _invalidate_enrichment_cache(ip)
     return _row_to_host(row)
+
+
+@router.put("/{ip}/roles", response_model=HostResponse)
+async def update_host_roles(
+    ip:   str,
+    body: HostRoleUpdate,
+    user: dict           = Depends(require_admin),
+    pool: asyncpg.Pool   = Depends(get_pool),
+) -> HostResponse:
+    """Manuelle Rollen-Korrektur (set/reset/remove) — siehe Contract §4.
+
+    Wir nehmen die host_info-Zeile per ``SELECT ... FOR UPDATE`` in die
+    Transaktion, damit ein paralleler Detektor-Cycle (alleiniger sonstiger
+    Schreiber von detected_roles) nicht zwischen Read und Write reingrätscht.
+    """
+    role_id = body.role_id
+    now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            try:
+                row = await conn.fetchrow(
+                    "SELECT detected_roles FROM host_info WHERE ip = $1::inet FOR UPDATE",
+                    ip,
+                )
+            except asyncpg.InvalidTextRepresentationError:
+                raise HTTPException(status_code=422, detail="Invalid IP address format")
+            if not row:
+                raise HTTPException(status_code=404, detail="Host not found")
+
+            # detected_roles=NULL ⇒ Host nie evaluiert; mit leerem Shape starten.
+            dr = dict(row["detected_roles"]) if row["detected_roles"] else {}
+            roles  = dict(dr.get("roles")  or {})
+            manual = dict(dr.get("manual") or {})
+
+            if body.action == "set":
+                # Rolle manuell setzen + locken. Vorhandene auto-Evidenz bleibt
+                # erhalten, source/confidence werden auf manuell überschrieben.
+                existing = dict(roles.get(role_id) or {})
+                existing.update({
+                    "source":     "manual",
+                    "confidence": 1.0,
+                })
+                roles[role_id] = existing
+                manual[role_id] = {
+                    "locked":  True,
+                    "set_by":  user.get("username") or user.get("sub") or "admin",
+                    "set_at":  now_iso,
+                }
+
+            elif body.action == "reset":
+                # Lock aufheben → nächster Detektor-Cycle übernimmt die Rolle
+                # wieder. Wenn die Rolle aktuell als manual existiert, source
+                # zurück auf auto stellen; entfernen darf nur der Detektor.
+                manual.pop(role_id, None)
+                if role_id in roles:
+                    entry = dict(roles[role_id])
+                    entry["source"] = "auto"
+                    roles[role_id] = entry
+
+            elif body.action == "remove":
+                # auto-Rolle einmalig entfernen (kein Lock). Den manual-Lock
+                # nehmen wir gleich mit raus, falls vorhanden.
+                roles.pop(role_id, None)
+                manual.pop(role_id, None)
+
+            dr["roles"]  = roles
+            dr["manual"] = manual
+            # evaluated_at bleibt Sache des Detektors (Contract §1) — hier nicht
+            # fabrizieren; ein nie-evaluierter Host hat schlicht keins.
+
+            # dict direkt — jsonb-Codec, KEIN json.dumps + ::jsonb.
+            updated = await conn.fetchrow(
+                """
+                UPDATE host_info
+                   SET detected_roles = $2, updated_at = now()
+                 WHERE ip = $1::inet
+                RETURNING ip, hostname, display_name, trusted, trust_source,
+                          asn, geo, ping_ms, last_seen, updated_at, detected_roles
+                """,
+                ip, dr,
+            )
+
+    return _row_to_host(updated)
 
 
 @router.delete("/{ip}", status_code=204, response_model=None)

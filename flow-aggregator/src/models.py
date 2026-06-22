@@ -79,7 +79,9 @@ class FlowRecord:
     ip_version: int
     pkt_count: int
     byte_count: int
-    # Alle berechneten Features – geht als JSONB in die DB
+    # Alle berechneten Features – geht als JSONB in die DB.
+    # Enthält u.a. src_mac/dst_mac (Mode-MAC pro Client/Server-Seite, aus
+    # flow.to_record()) für das MAC-OUI-Matching im host-role-detector.
     stats: dict
 
     def to_kafka_dict(self) -> dict:

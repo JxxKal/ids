@@ -5,16 +5,30 @@ import {
   createHost,
   deleteHost,
   fetchHosts,
+  fetchRoleCatalog,
+  updateHostRoles,
   downloadHostsExampleCsv,
   importHostsCsv,
   updateHost,
 } from '../api';
-import type { Host } from '../types';
+import type { Host, HostRoleAction, RoleCatalogEntry } from '../types';
 import { showHostConnections } from './HostConnectionDrawer';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TrustBadge } from './TrustBadge';
+import { RoleBadge } from './RoleBadge';
 
 type EditState = { ip: string; display_name: string; trusted: boolean } | null;
+
+// Sortierte Rollen-Keys eines Hosts (erst manual, dann nach Confidence absteigend).
+function sortedRoleIds(h: Host): string[] {
+  const roles = h.detected_roles?.roles;
+  if (!roles) return [];
+  return Object.keys(roles).sort((a, b) => {
+    const ra = roles[a], rb = roles[b];
+    if (ra.source !== rb.source) return ra.source === 'manual' ? -1 : 1;
+    return (rb.confidence ?? 0) - (ra.confidence ?? 0);
+  });
+}
 
 export function HostsPage() {
   const { t } = useTranslation();
@@ -22,6 +36,8 @@ export function HostsPage() {
   const [hosts, setHosts]       = useState<Host[]>([]);
   const [search, setSearch]     = useState('');
   const [filter, setFilter]     = useState<'all' | 'trusted' | 'unknown'>('all');
+  const [roleFilter, setRoleFilter] = useState<string>('');   // '' = alle Rollen
+  const [catalog, setCatalog]   = useState<RoleCatalogEntry[]>([]);
   const [editState, setEdit]    = useState<EditState>(null);
   const [newIp, setNewIp]       = useState('');
   const [newName, setNewName]   = useState('');
@@ -39,6 +55,24 @@ export function HostsPage() {
   };
 
   useEffect(() => { load(); }, [filter, search]);
+  useEffect(() => { fetchRoleCatalog().then(setCatalog).catch(() => {}); }, []);
+
+  // Rollen-Filter clientseitig — die /api/hosts?role=-Variante wäre ein
+  // Round-Trip pro Wechsel; bei der überschaubaren Inventar-Größe reicht das.
+  const visibleHosts = roleFilter
+    ? hosts.filter(h => !!h.detected_roles?.roles?.[roleFilter])
+    : hosts;
+
+  // Manuelles Set/Reset/Remove einer Rolle; danach Host-Liste neu laden.
+  const changeRole = async (ip: string, roleId: string, action: HostRoleAction) => {
+    setError('');
+    try {
+      await updateHostRoles(ip, roleId, action);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.errorGeneric'));
+    }
+  };
 
   const addHost = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,20 +211,33 @@ export function HostsPage() {
             {t(`hosts.filter${f.charAt(0).toUpperCase() + f.slice(1)}`)}
           </button>
         ))}
-        <span className="text-xs text-slate-500 ml-auto">{t('hosts.count', { count: hosts.length })}</span>
+        {catalog.length > 0 && (
+          <select
+            value={roleFilter}
+            onChange={e => setRoleFilter(e.target.value)}
+            title={t('roles.filterTitle')}
+            className="input w-auto text-xs py-2 md:py-1"
+          >
+            <option value="">{t('roles.filterAll')}</option>
+            {catalog.map(c => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        )}
+        <span className="text-xs text-slate-500 ml-auto">{t('hosts.count', { count: visibleHosts.length })}</span>
       </div>
 
       {/* Mobile: Card-Stack */}
       <div className="md:hidden flex flex-col gap-2">
-        {hosts.length === 0 && (
+        {visibleHosts.length === 0 && (
           <div className="card p-6 text-center text-slate-600 text-xs">{t('hosts.noHosts')}</div>
         )}
-        {hosts.map(h => (
+        {visibleHosts.map(h => (
           <div key={h.ip} className="card p-3">
             <div className="flex items-start justify-between gap-2 mb-2">
               <button
                 type="button"
-                onClick={() => showHostConnections(h.ip)}
+                onClick={() => showHostConnections(h.ip, { roles: h.detected_roles, catalog })}
                 title={t('hosts.showConnectionsTitle')}
                 className="inline-flex items-center gap-1.5 font-mono text-sm text-slate-200 hover:text-cyan-300 transition-colors min-w-0"
               >
@@ -201,6 +248,14 @@ export function HostsPage() {
                 <TrustBadge trusted={h.trusted} source={h.trust_source} />
               </div>
             </div>
+
+            {sortedRoleIds(h).length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2">
+                {sortedRoleIds(h).map(rid => (
+                  <RoleBadge key={rid} roleId={rid} entry={h.detected_roles!.roles[rid]} catalog={catalog} />
+                ))}
+              </div>
+            )}
 
             {editState?.ip === h.ip ? (
               <div className="flex flex-col gap-2 mb-2">
@@ -220,6 +275,7 @@ export function HostsPage() {
                   />
                   {t('hosts.trustedToggle')}
                 </label>
+                <RoleEditor host={h} catalog={catalog} onChange={changeRole} />
               </div>
             ) : (
               <div className="text-xs text-slate-300 mb-2 truncate">
@@ -276,6 +332,7 @@ export function HostsPage() {
               <th>{t('hosts.columns.ip')}</th>
               <th>{t('hosts.columns.displayHostname')}</th>
               <th>{t('hosts.columns.trust')}</th>
+              <th>{t('hosts.columns.roles')}</th>
               <th>{t('hosts.columns.geoAsn')}</th>
               <th>{t('hosts.columns.ping')}</th>
               <th>{t('hosts.columns.lastSeen')}</th>
@@ -283,17 +340,17 @@ export function HostsPage() {
             </tr>
           </thead>
           <tbody>
-            {hosts.length === 0 && (
+            {visibleHosts.length === 0 && (
               <tr>
-                <td colSpan={7} className="text-center text-slate-600 py-8">{t('hosts.noHosts')}</td>
+                <td colSpan={8} className="text-center text-slate-600 py-8">{t('hosts.noHosts')}</td>
               </tr>
             )}
-            {hosts.map(h => (
+            {visibleHosts.map(h => (
               <tr key={h.ip} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                 <td className="px-4 py-2 font-mono text-slate-200">
                   <button
                     type="button"
-                    onClick={() => showHostConnections(h.ip)}
+                    onClick={() => showHostConnections(h.ip, { roles: h.detected_roles, catalog })}
                     title={t('hosts.showConnectionsTitle')}
                     className="group inline-flex items-center gap-1.5 hover:text-cyan-300 transition-colors"
                   >
@@ -329,6 +386,19 @@ export function HostsPage() {
                     </label>
                   ) : (
                     <TrustBadge trusted={h.trusted} source={h.trust_source} />
+                  )}
+                </td>
+                <td className="px-4 py-2">
+                  {editState?.ip === h.ip ? (
+                    <RoleEditor host={h} catalog={catalog} onChange={changeRole} />
+                  ) : sortedRoleIds(h).length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {sortedRoleIds(h).map(rid => (
+                        <RoleBadge key={rid} roleId={rid} entry={h.detected_roles!.roles[rid]} catalog={catalog} />
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-600">–</span>
                   )}
                 </td>
                 <td className="px-4 py-2 text-slate-500">
@@ -374,6 +444,69 @@ export function HostsPage() {
           onConfirm={() => { setConfirmIp(null); remove(confirmIp); }}
           onCancel={() => setConfirmIp(null)}
         />
+      )}
+    </div>
+  );
+}
+
+// ── Inline-Rollen-Editor (Edit-State) ────────────────────────────────────────
+// Pro bereits erkannter Rolle: Reset (Lock raus → auto) bzw. Remove (auto weg).
+// Darunter ein Select, um eine Katalog-Rolle manuell zu setzen (source=manual).
+function RoleEditor({
+  host,
+  catalog,
+  onChange,
+}: {
+  host:     Host;
+  catalog:  RoleCatalogEntry[];
+  onChange: (ip: string, roleId: string, action: HostRoleAction) => void;
+}) {
+  const { t } = useTranslation();
+  const roles = host.detected_roles?.roles ?? {};
+  const ids = sortedRoleIds(host);
+  // Im Set-Select nur Rollen anbieten, die der Host noch nicht trägt.
+  const assignable = catalog.filter(c => !roles[c.id]);
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {ids.map(rid => {
+        const entry = roles[rid];
+        const label = catalog.find(c => c.id === rid)?.label ?? rid;
+        return (
+          <div key={rid} className="flex items-center gap-1.5">
+            <RoleBadge roleId={rid} entry={entry} catalog={catalog} />
+            {entry.source === 'manual' ? (
+              <button
+                onClick={() => onChange(host.ip, rid, 'reset')}
+                className="btn-ghost text-[10px] text-amber-400 px-1 py-0.5"
+                title={t('roles.resetTitle', { role: label })}
+              >
+                {t('roles.reset')}
+              </button>
+            ) : (
+              <button
+                onClick={() => onChange(host.ip, rid, 'remove')}
+                className="btn-ghost text-[10px] text-red-400 px-1 py-0.5"
+                title={t('roles.removeTitle', { role: label })}
+              >
+                {t('roles.remove')}
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {assignable.length > 0 && (
+        <select
+          value=""
+          onChange={e => { if (e.target.value) onChange(host.ip, e.target.value, 'set'); }}
+          title={t('roles.setTitle')}
+          className="input w-auto text-[11px] py-1"
+        >
+          <option value="">{t('roles.setPlaceholder')}</option>
+          {assignable.map(c => (
+            <option key={c.id} value={c.id}>{c.label}</option>
+          ))}
+        </select>
       )}
     </div>
   );

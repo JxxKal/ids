@@ -1,0 +1,19 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: web_server
+  label: "Web Server"
+  category: infrastructure
+  match:
+    required_ports: []             # einzelne Web-Ports reichen (any_ports)
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 80,   proto: TCP} # HTTP
+        - {port: 443,  proto: TCP} # HTTPS
+        - {port: 8080, proto: TCP} # HTTP-Alt
+        - {port: 8443, proto: TCP} # HTTPS-Alt
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.70            # Web-Port allein → schwach (jeder Service hat eins)
+  confidence_bonus: {per_optional_port: 0.05, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

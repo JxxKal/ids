@@ -1,0 +1,14 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: modbus_plc
+  label: "Modbus PLC"
+  category: ot
+  match:
+    required_ports:
+      - {port: 502, proto: TCP}    # Modbus/TCP
+    any_ports: null
+    optional_flags: []
+  min_flows_per_port: 1
+  base_confidence: 0.65            # 502 allein → schwach; Fingerprint/OUI hebt (V2)
+  confidence_bonus: {per_optional_port: 0.0, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

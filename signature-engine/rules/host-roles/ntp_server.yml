@@ -1,0 +1,14 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: ntp_server
+  label: "NTP Server"
+  category: infrastructure
+  match:
+    required_ports:
+      - {port: 123, proto: UDP}    # NTP
+    any_ports: null
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.70            # viele Clients sprechen 123/UDP — Responder-Rolle nötig
+  confidence_bonus: {per_optional_port: 0.0, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

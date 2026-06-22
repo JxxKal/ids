@@ -1,0 +1,17 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: dns_server
+  label: "DNS Server"
+  category: infrastructure
+  match:
+    required_ports:
+      - {port: 53, proto: UDP}     # DNS-Queries
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 53, proto: TCP}   # Zonentransfer / große Antworten
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.78
+  confidence_bonus: {per_optional_port: 0.05, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

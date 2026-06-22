@@ -1,0 +1,14 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: mysql_server
+  label: "MySQL / MariaDB Server"
+  category: database
+  match:
+    required_ports:
+      - {port: 3306, proto: TCP}   # MySQL / MariaDB
+    any_ports: null
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.82            # Port 3306 ist nahezu eindeutig MySQL/MariaDB
+  confidence_bonus: {per_optional_port: 0.0, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

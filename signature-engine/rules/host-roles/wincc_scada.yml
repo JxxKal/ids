@@ -1,0 +1,23 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: wincc_scada
+  label: "Siemens WinCC / OPC-UA SCADA"
+  category: ot
+  match:
+    required_ports: []
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 4840, proto: TCP} # OPC-UA
+        - {port: 5450, proto: TCP} # WinCC / SIMATIC (CCAgent)
+        - {port: 102,  proto: TCP} # S7comm (Anbindung an PLCs)
+    optional_flags: []
+  min_flows_per_port: 1
+  base_confidence: 0.62            # OT-Einzelports schwach — OPC-UA auch generisch
+  confidence_bonus: {per_optional_port: 0.04, long_lived: 0.05}
+  fingerprint: null
+  mac_oui:                         # Siemens-OUI-Präfixe
+    - "00:0E:8C"
+    - "00:1B:1B"
+    - "8C:F3:19"
+    - "20:87:56"
+    - "00:1F:F8"

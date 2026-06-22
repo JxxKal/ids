@@ -1,0 +1,14 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: ifix_scada
+  label: "GE Proficy iFIX SCADA"
+  category: ot
+  match:
+    required_ports:
+      - {port: 2010, proto: TCP}   # iFIX SCADA-Netzwerk (FIX-Dienst)
+    any_ports: null
+    optional_flags: []
+  min_flows_per_port: 1
+  base_confidence: 0.58            # proprietärer Port, Einzelsignal — konservativ
+  confidence_bonus: {per_optional_port: 0.0, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

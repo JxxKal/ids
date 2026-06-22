@@ -1,0 +1,14 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: bacnet_device
+  label: "BACnet Device"
+  category: ot
+  match:
+    required_ports:
+      - {port: 47808, proto: UDP}  # BACnet/IP (0xBAC0)
+    any_ports: null
+    optional_flags: []
+  min_flows_per_port: 1
+  base_confidence: 0.68            # 47808/UDP nahezu exklusiv BACnet, aber Einzelsignal
+  confidence_bonus: {per_optional_port: 0.0, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

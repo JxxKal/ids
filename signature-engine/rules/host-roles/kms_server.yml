@@ -1,0 +1,14 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: kms_server
+  label: "KMS Activation Server"
+  category: infrastructure
+  match:
+    required_ports:
+      - {port: 1688, proto: TCP}   # Microsoft KMS Activation
+    any_ports: null
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.85            # Port 1688 ist eindeutig Microsoft-KMS
+  confidence_bonus: {per_optional_port: 0.0, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

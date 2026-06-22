@@ -89,6 +89,7 @@
       "ip": "IP",
       "displayHostname": "Anzeigename / Hostname",
       "trust": "Trust",
+      "roles": "Rollen",
       "geoAsn": "Geo / ASN",
       "ping": "Ping",
       "lastSeen": "Zuletzt gesehen"
@@ -96,6 +97,22 @@
     "showConnectionsTitle": "Verbindungs-Übersicht für diesen Host anzeigen",
     "trustedToggle": "Trusted",
     "deleteConfirm": "Host {{ip}} löschen?"
+  },
+  "roles": {
+    "filterAll": "Alle Rollen",
+    "filterTitle": "Nach erkannter Rolle filtern",
+    "setPlaceholder": "+ Rolle setzen …",
+    "setTitle": "Rolle manuell zuweisen (gesperrt für Auto-Erkennung)",
+    "reset": "Zurücksetzen",
+    "resetTitle": "Manuellen Lock für \"{{role}}\" aufheben – Auto-Erkennung übernimmt wieder",
+    "remove": "Entfernen",
+    "removeTitle": "Erkannte Rolle \"{{role}}\" einmalig entfernen",
+    "tooltip": {
+      "auto": "Automatisch erkannt · Konfidenz {{confidence}} %",
+      "manual": "Manuell gesetzt (gesperrt)",
+      "evidence": "Belege: {{evidence}}",
+      "since": "Erstmals erkannt: {{since}}"
+    }
   },
   "networks": {
     "addNetwork": "Netzwerk hinzufügen",

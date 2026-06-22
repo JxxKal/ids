@@ -1,0 +1,19 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: reverse_proxy
+  label: "Reverse Proxy / Load Balancer"
+  category: infrastructure
+  match:
+    required_ports:
+      - {port: 80,  proto: TCP}    # HTTP-Frontend
+      - {port: 443, proto: TCP}    # HTTPS-Frontend
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 8080, proto: TCP} # Backend-HTTP
+        - {port: 8443, proto: TCP} # Backend-HTTPS
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.62            # nur Port-Kombination → schwer von Web-Server zu trennen
+  confidence_bonus: {per_optional_port: 0.04, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

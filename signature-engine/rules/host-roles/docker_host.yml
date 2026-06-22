@@ -1,0 +1,17 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: docker_host
+  label: "Docker Host"
+  category: infrastructure
+  match:
+    required_ports: []
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 2375, proto: TCP} # Docker API (unverschlüsselt)
+        - {port: 2376, proto: TCP} # Docker API (TLS)
+    optional_flags: []
+  min_flows_per_port: 1
+  base_confidence: 0.80            # exponierte Docker-API ist eindeutig
+  confidence_bonus: {per_optional_port: 0.05, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

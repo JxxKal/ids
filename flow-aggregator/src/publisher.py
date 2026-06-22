@@ -109,6 +109,10 @@ class FlowPublisher:
     # ── Kafka ─────────────────────────────────────────────────────────────────
 
     def _send_kafka(self, record: FlowRecord) -> None:
+        # to_kafka_dict() merged record.stats auf Root-Ebene — damit reisen
+        # die in flow.to_record() gesetzten stats['src_mac']/['dst_mac'] ohne
+        # Sonderbehandlung mit ins flows-Topic (und via Json(r.stats) auch in
+        # die DB). Der host-role-detector liest sie aus der flows.stats-JSONB.
         key     = record.src_ip.encode()
         payload = orjson.dumps(record.to_kafka_dict())
 

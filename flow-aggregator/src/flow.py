@@ -177,6 +177,14 @@ class FlowState:
         "PSH": 0, "URG": 0, "ECE": 0, "CWR": 0,
     })
 
+    # MAC-Adressen (Mode pro Richtung). Wir merken die zuletzt gesehene MAC
+    # jeder Seite – bei einem L2-Host bleibt die über den Flow stabil, geroutet
+    # ist es die Router-MAC. Der host-role-detector leitet daraus die Mode-MAC
+    # pro Host für das MAC-OUI-Matching ab. src_mac/dst_mac beziehen sich auf
+    # die Client/Server-Konvention (src=Client), nicht auf die Paket-Richtung.
+    src_mac: Optional[str] = None   # MAC der Client-Seite (src_ip)
+    dst_mac: Optional[str] = None   # MAC der Server-Seite (dst_ip)
+
     # Verbindungszustand
     conn_state: str        = ConnState.NEW
     should_flush: bool     = False   # True = sofort flushen (RST/FIN-Closed)
@@ -336,9 +344,17 @@ class FlowState:
         if is_forward:
             self.pkt_count_fwd  += 1
             self.byte_count_fwd += pkt.pkt_len
+            # Forward-Paket: Eth-src = Client (src_ip-Seite), Eth-dst = Server.
+            if pkt.eth:
+                self.src_mac = pkt.eth.src_mac
+                self.dst_mac = pkt.eth.dst_mac
         else:
             self.pkt_count_rev  += 1
             self.byte_count_rev += pkt.pkt_len
+            # Reverse-Paket: Eth-src = Server-Seite, Eth-dst = Client-Seite.
+            if pkt.eth:
+                self.src_mac = pkt.eth.dst_mac
+                self.dst_mac = pkt.eth.src_mac
 
         # TCP: Flags zählen und Zustandsautomat
         if pkt.transport and pkt.transport.tcp:
@@ -408,6 +424,11 @@ class FlowState:
             "pkt_count_rev":    self.pkt_count_rev,
             "byte_count_fwd":   self.byte_count_fwd,
             "byte_count_rev":   self.byte_count_rev,
+            # MAC-Adressen pro Client/Server-Seite (Mode = zuletzt gesehene,
+            # bei L2-Hosts stabil). Speist das MAC-OUI-Matching im
+            # host-role-detector. None wenn die Richtung nie ein Paket trug.
+            "src_mac":          self.src_mac,
+            "dst_mac":          self.dst_mac,
         }
 
         return FlowRecord(

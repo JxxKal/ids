@@ -1,4 +1,4 @@
-import type { Alert, Host, KnownNetwork, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, RuleListResponse, RuleSource, SamlConfig, SystemUpdateStatus, TestRun, ThreatLevel, UpdateStatus, User } from './types';
+import type { Alert, Host, HostRoleAction, KnownNetwork, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, RoleCatalogEntry, RuleListResponse, RuleSource, SamlConfig, SystemUpdateStatus, TestRun, ThreatLevel, UpdateStatus, User } from './types';
 import * as demo from './demo/api';
 import { isDemoMode } from './demo/mode';
 
@@ -248,6 +248,33 @@ export async function updateHost(ip: string, data: { display_name?: string; trus
 
 export async function deleteHost(ip: string): Promise<void> {
   await req(`/api/hosts/${encodeURIComponent(ip)}`, { method: 'DELETE' });
+}
+
+// ── Host-Rollen (Contract docs/contracts/host-roles.md) ──────────────────────
+
+// Katalog der erkennbaren Rollen — Optionen für Filter + manuelle Zuweisung.
+export async function fetchRoleCatalog(): Promise<RoleCatalogEntry[]> {
+  if (isDemoMode()) return [
+    { id: 'domain_controller', label: 'Domain Controller', category: 'identity' },
+    { id: 'dns_server',        label: 'DNS Server',         category: 'infrastructure' },
+    { id: 'web_server',        label: 'Web Server',         category: 'application' },
+    { id: 'plc_s7',            label: 'PLC (S7)',           category: 'ot' },
+  ];
+  return req<RoleCatalogEntry[]>('/api/hosts/role-catalog');
+}
+
+// Manuelles Set/Reset/Remove einer Rolle. set ⇒ source=manual + Lock,
+// reset ⇒ Lock raus + source zurück auf auto, remove ⇒ auto-Rolle einmalig weg.
+export async function updateHostRoles(
+  ip: string,
+  role_id: string,
+  action: HostRoleAction,
+): Promise<Host> {
+  if (isDemoMode()) return Promise.reject(new Error('Demo mode'));
+  return req<Host>(`/api/hosts/${encodeURIComponent(ip)}/roles`, {
+    method: 'PUT',
+    body:   JSON.stringify({ role_id, action }),
+  });
 }
 
 export async function importHostsCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {

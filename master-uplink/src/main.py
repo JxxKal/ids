@@ -332,6 +332,7 @@ def _build_bundle_sync() -> tuple[dict, bool]:
         "rules_overrides": None,
         "suricata_overrides": None,
         "known_networks": None,
+        "host_role_catalog": None,
         "dns_resolvers": [],
     }
 
@@ -373,6 +374,18 @@ def _build_bundle_sync() -> tuple[dict, bool]:
             log.warning("_known_networks.json nicht parsebar: %s", exc)
             bundle["complete"] = False
 
+    # _host_role_catalog.json (gebündelte Host-Rollen-Katalog-YAMLs) — wird
+    # von der API aus dem Read-only-Katalog-Mount geschrieben und über den
+    # Reverse-Channel an gepairte Taps verteilt (V1-forward; ein dortiger
+    # Detektor sieht denselben Katalog).
+    role_catalog_path = custom_dir / "_host_role_catalog.json"
+    if role_catalog_path.is_file():
+        try:
+            bundle["host_role_catalog"] = orjson.loads(role_catalog_path.read_bytes())
+        except Exception as exc:
+            log.warning("_host_role_catalog.json nicht parsebar: %s", exc)
+            bundle["complete"] = False
+
     return bundle, bundle["complete"]
 
 
@@ -388,6 +401,8 @@ async def build_config_bundle(auth: TapAuth) -> tuple[bytes, str]:
         "rules":              {filename: yaml_content},
         "rules_overrides":    {...} oder null,
         "suricata_overrides": {...} oder null,
+        "known_networks":     {...} oder null,
+        "host_role_catalog":  {...} oder null,
         "dns_resolvers":      [...]
       }
 

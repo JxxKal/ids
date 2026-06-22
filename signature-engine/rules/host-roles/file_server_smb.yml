@@ -1,0 +1,17 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: file_server_smb
+  label: "SMB File Server"
+  category: infrastructure
+  match:
+    required_ports:
+      - {port: 445, proto: TCP}    # SMB direct
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 139, proto: TCP}  # NetBIOS Session Service
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.72            # 445 allein auch von DCs/Workstations bedient
+  confidence_bonus: {per_optional_port: 0.05, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

@@ -604,6 +604,35 @@ services:
       LOG_LEVEL: INFO
 
   # ───────────────────────────────────────────────────────────────────────
+  # HOST-ROLE-DETECTOR – leitet aus den servierten Ports + Mode-MAC pro Host
+  # (Fenster DETECT_WINDOW_DAYS) gegen den YAML-Katalog die Rollen ab und
+  # schreibt host_info.detected_roles (alleiniger Schreiber, manual-Locks
+  # respektiert). Reine DB-Aggregation, kein Kafka. Master-only.
+  # Katalog read-only aus signature-engine/rules/host-roles gemountet.
+  # ───────────────────────────────────────────────────────────────────────
+  host-role-detector:
+    build: ./host-role-detector
+    container_name: ids-host-role-detector
+    mem_limit: 256m
+    healthcheck: *heartbeat-check
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: [prod]
+    networks: [ids-net]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    volumes:
+      - ./signature-engine/rules/host-roles:/host-roles:ro
+    environment:
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      ROLE_CATALOG_DIR: /host-roles
+      DETECT_INTERVAL_S: ${ROLE_DETECT_INTERVAL_S:-1800}
+      DETECT_WINDOW_DAYS: ${ROLE_DETECT_WINDOW_DAYS:-7}
+      ROLE_MIN_CONFIDENCE: ${ROLE_MIN_CONFIDENCE:-0.6}
+      LOG_LEVEL: INFO
+
+  # ───────────────────────────────────────────────────────────────────────
   # MASTER-UPLINK – mTLS-WebSocket-Endpunkt für Remote-Taps. Hört separat
   # auf 8443, damit der reguläre api-Container weiterhin nur JWT-Auth
   # macht. Teilt sich das master-ca-Volume mit der api (api bootstrappt

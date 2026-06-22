@@ -25,6 +25,8 @@ import type {
   HostConnectionPeer,
   HostConnectionWindow,
 } from '../api';
+import type { DetectedRoles, RoleCatalogEntry } from '../types';
+import { RoleBadge } from './RoleBadge';
 
 const WINDOWS: { id: HostConnectionWindow; label: string }[] = [
   { id: '15m', label: '15 min' },
@@ -55,14 +57,19 @@ export function HostConnectionDrawer() {
   const [data,   setData]   = useState<HostConnectionsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,  setError]  = useState<string | null>(null);
+  // Optional vom Trigger mitgegebene Rolleninfos (z.B. aus der Hosts-Liste).
+  const [roles,   setRoles]   = useState<DetectedRoles | null>(null);
+  const [roleCat, setRoleCat] = useState<RoleCatalogEntry[]>([]);
 
   // ── Globaler Event-Listener für Open/Close ─────────────────────────────────
   useEffect(() => {
     function open(e: Event) {
-      const ce = e as CustomEvent<{ ip?: string }>;
+      const ce = e as CustomEvent<{ ip?: string; roles?: DetectedRoles | null; catalog?: RoleCatalogEntry[] }>;
       const newIp = ce.detail?.ip;
       if (typeof newIp === 'string' && newIp) {
         setIp(newIp);
+        setRoles(ce.detail?.roles ?? null);
+        setRoleCat(ce.detail?.catalog ?? []);
         setError(null);
       }
     }
@@ -117,6 +124,19 @@ export function HostConnectionDrawer() {
           <div className="flex-1 min-w-0">
             <p className="text-[10px] uppercase tracking-widest text-slate-500">{t('hostConnDrawer.title')}</p>
             <h2 className="font-mono text-base text-slate-100 truncate">{ip}</h2>
+            {roles?.roles && Object.keys(roles.roles).length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {Object.keys(roles.roles)
+                  .sort((a, b) => {
+                    const ra = roles.roles[a], rb = roles.roles[b];
+                    if (ra.source !== rb.source) return ra.source === 'manual' ? -1 : 1;
+                    return (rb.confidence ?? 0) - (ra.confidence ?? 0);
+                  })
+                  .map(rid => (
+                    <RoleBadge key={rid} roleId={rid} entry={roles.roles[rid]} catalog={roleCat} />
+                  ))}
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -422,6 +442,11 @@ function PeerList({ peers, truncated }: { peers: HostConnectionPeer[]; truncated
 
 // ── Convenience-Helper für Trigger-Sites ─────────────────────────────────────
 
-export function showHostConnections(ip: string): void {
-  window.dispatchEvent(new CustomEvent('ids:show-host-connections', { detail: { ip } }));
+export function showHostConnections(
+  ip: string,
+  opts?: { roles?: DetectedRoles | null; catalog?: RoleCatalogEntry[] },
+): void {
+  window.dispatchEvent(new CustomEvent('ids:show-host-connections', {
+    detail: { ip, roles: opts?.roles ?? null, catalog: opts?.catalog ?? [] },
+  }));
 }

@@ -1,0 +1,22 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: mail_server
+  label: "Mail Server"
+  category: infrastructure
+  match:
+    required_ports: []
+    any_ports:
+      min_any: 2                    # ein einzelner Mail-Port ist mehrdeutig
+      ports:
+        - {port: 25,  proto: TCP}  # SMTP
+        - {port: 465, proto: TCP}  # SMTPS
+        - {port: 587, proto: TCP}  # Submission
+        - {port: 110, proto: TCP}  # POP3
+        - {port: 143, proto: TCP}  # IMAP
+        - {port: 993, proto: TCP}  # IMAPS
+        - {port: 995, proto: TCP}  # POP3S
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.78            # ≥2 Mail-Ports zusammen sind recht eindeutig
+  confidence_bonus: {per_optional_port: 0.03, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

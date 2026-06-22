@@ -1,0 +1,18 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: print_server
+  label: "Print Server"
+  category: infrastructure
+  match:
+    required_ports: []
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 515,  proto: TCP} # LPD / LPR
+        - {port: 631,  proto: TCP} # IPP / CUPS
+        - {port: 9100, proto: TCP} # RAW / JetDirect
+    optional_flags: []
+  min_flows_per_port: 3
+  base_confidence: 0.74            # Einzel-Druckport mehrdeutig (auch direkt am Drucker)
+  confidence_bonus: {per_optional_port: 0.05, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

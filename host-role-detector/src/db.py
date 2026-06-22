@@ -1,0 +1,179 @@
+"""DB-Layer für den host-role-detector.
+
+Liest aus der `flows`-Hypertable (Aggregation servierter Ports + Mode-MAC
+pro Host) und ist der **alleinige Schreiber** von `host_info.detected_roles`.
+Schreibe-Pfad nimmt das dict direkt (asyncpg-jsonb-Codec) — KEIN json.dumps,
+KEIN ::jsonb-Cast (siehe MEMORY: asyncpg jsonb-codec).
+"""
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timedelta, timezone
+
+import asyncpg
+
+log = logging.getLogger(__name__)
+
+
+async def _init_conn(conn: asyncpg.Connection) -> None:
+    """json/jsonb-Codec registrieren — Python-dicts wandern direkt nach
+    $-Parametern, gelesene Werte kommen direkt als dict zurück."""
+    for pg_type in ("json", "jsonb"):
+        await conn.set_type_codec(
+            pg_type,
+            encoder=json.dumps,
+            decoder=json.loads,
+            schema="pg_catalog",
+        )
+
+
+class Db:
+    def __init__(self, dsn: str) -> None:
+        self._dsn = dsn
+        self._pool: asyncpg.Pool | None = None
+
+    async def connect(self) -> None:
+        self._pool = await asyncpg.create_pool(
+            self._dsn, min_size=1, max_size=4, init=_init_conn,
+        )
+
+    async def close(self) -> None:
+        if self._pool:
+            await self._pool.close()
+
+    # ── Aggregation aus flows ─────────────────────────────────────────────
+
+    async def served_ports(
+        self, window_days: int, min_flows_per_port: int,
+    ) -> dict[str, dict[tuple[int, str], int]]:
+        """Servierte Ports pro Host über das Beobachtungsfenster.
+
+        Host = Responder = dst_ip; ein Flow zählt für einen Port nur, wenn
+        die Verbindung als beantwortet gilt (connection_state ∈
+        ESTABLISHED|CLOSED — half-open/SYN-only werden nicht als 'serviert'
+        gewertet, sonst zählt jeder Portscan-Probe als Service).
+
+        Rückgabe: {host_ip: {(dst_port, proto): flow_count}}, gefiltert auf
+        flow_count >= min_flows_per_port.
+        """
+        assert self._pool is not None
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        rows = await self._pool.fetch(
+            """
+            SELECT host(dst_ip) AS host, dst_port, proto, COUNT(*) AS n
+              FROM flows
+             WHERE start_ts >= $1
+               AND dst_port IS NOT NULL
+               AND (stats->>'connection_state') IN ('ESTABLISHED', 'CLOSED')
+             GROUP BY host(dst_ip), dst_port, proto
+            HAVING COUNT(*) >= $2
+            """,
+            since, min_flows_per_port,
+        )
+        out: dict[str, dict[tuple[int, str], int]] = {}
+        for r in rows:
+            host = str(r["host"])
+            out.setdefault(host, {})[(int(r["dst_port"]), str(r["proto"]))] = int(r["n"])
+        return out
+
+    async def host_first_seen(self, window_days: int) -> dict[str, datetime]:
+        """Ältester servierter Flow pro Host im Fenster — für den
+        long_lived-Bonus."""
+        assert self._pool is not None
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        rows = await self._pool.fetch(
+            """
+            SELECT host(dst_ip) AS host, MIN(start_ts) AS first_seen
+              FROM flows
+             WHERE start_ts >= $1
+               AND (stats->>'connection_state') IN ('ESTABLISHED', 'CLOSED')
+             GROUP BY host(dst_ip)
+            """,
+            since,
+        )
+        return {str(r["host"]): r["first_seen"] for r in rows}
+
+    async def mode_macs(self, window_days: int) -> dict[str, str]:
+        """Mode-MAC pro Host. Ein Host kann sowohl als src (src_mac) wie als
+        dst (dst_mac) aufgetaucht sein — wir zählen beide Vorkommen und
+        nehmen die häufigste MAC. NULL-MACs werden ignoriert.
+
+        Rückgabe: {host_ip: 'aa:bb:cc:dd:ee:ff'} (Original-Format aus stats).
+        """
+        assert self._pool is not None
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        # UNION ALL beider Perspektiven, dann pro Host die häufigste MAC via
+        # DISTINCT ON + Count-Sortierung.
+        rows = await self._pool.fetch(
+            """
+            SELECT DISTINCT ON (host) host, mac
+              FROM (
+                SELECT host, mac, COUNT(*) AS n
+                  FROM (
+                    SELECT host(src_ip) AS host, stats->>'src_mac' AS mac
+                      FROM flows
+                     WHERE start_ts >= $1 AND stats->>'src_mac' IS NOT NULL
+                    UNION ALL
+                    SELECT host(dst_ip) AS host, stats->>'dst_mac' AS mac
+                      FROM flows
+                     WHERE start_ts >= $1 AND stats->>'dst_mac' IS NOT NULL
+                  ) macs
+                 GROUP BY host, mac
+              ) counted
+             ORDER BY host, n DESC
+            """,
+            since,
+        )
+        return {str(r["host"]): str(r["mac"]) for r in rows if r["mac"]}
+
+    # ── Schreiber: host_info.detected_roles ───────────────────────────────
+
+    async def get_detected_roles(self, host_ip: str) -> dict | None:
+        """Aktueller detected_roles-Stand eines Hosts (oder None)."""
+        assert self._pool is not None
+        row = await self._pool.fetchrow(
+            "SELECT detected_roles FROM host_info WHERE ip = $1::inet", host_ip,
+        )
+        if row is None:
+            return None
+        val = row["detected_roles"]
+        return val if isinstance(val, dict) else None
+
+    async def write_detected_roles(self, host_ip: str, payload: dict) -> None:
+        """Alleiniger Schreiber von detected_roles. SELECT ... FOR UPDATE auf
+        die Host-Zeile (Lock gegen den seltenen Fall, dass die API zeitgleich
+        einen manuellen Roles-PUT macht), dann UPDATE — bzw. INSERT, wenn der
+        Host noch keine host_info-Zeile hat.
+
+        `payload` wird als dict übergeben (jsonb-Codec) — kein json.dumps,
+        kein ::jsonb-Cast.
+        """
+        assert self._pool is not None
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                locked = await conn.fetchrow(
+                    "SELECT ip FROM host_info WHERE ip = $1::inet FOR UPDATE",
+                    host_ip,
+                )
+                if locked is None:
+                    await conn.execute(
+                        """
+                        INSERT INTO host_info (ip, detected_roles)
+                        VALUES ($1::inet, $2)
+                        ON CONFLICT (ip) DO UPDATE
+                          SET detected_roles = EXCLUDED.detected_roles,
+                              updated_at = now()
+                        """,
+                        host_ip, payload,
+                    )
+                else:
+                    await conn.execute(
+                        """
+                        UPDATE host_info
+                           SET detected_roles = $2,
+                               updated_at = now()
+                         WHERE ip = $1::inet
+                        """,
+                        host_ip, payload,
+                    )

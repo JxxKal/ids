@@ -708,6 +708,14 @@ def _apply_config_bundle(bundle: dict) -> tuple[int, int]:
         # Param-Split (Phase-1-ML-Tuner-Vorbereitung) konsumiert.
         _atomic_write(custom_dir / "_known_networks.json", orjson.dumps(kn))
         side_files += 1
+    hrc = bundle.get("host_role_catalog")
+    if hrc is not None:
+        # Gebündelte Host-Rollen-Katalog-YAMLs vom Master. Am Tap aktuell noch
+        # nicht aktiv konsumiert (Detektor läuft master-only), aber für
+        # V1-forward schon mit-synct, damit ein künftiger Tap-Detektor denselben
+        # Katalog sieht.
+        _atomic_write(custom_dir / "_host_role_catalog.json", orjson.dumps(hrc))
+        side_files += 1
     dns = bundle.get("dns_resolvers")
     if dns is not None:
         # Eigene Datei – am Tap aktuell nicht aktiv konsumiert (alert-manager

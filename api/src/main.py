@@ -275,6 +275,14 @@ async def startup() -> None:
     except Exception as exc:
         log.warning("known_networks-Sync beim Startup fehlgeschlagen: %s", exc)
 
+    # Host-Rollen-Katalog ins sig-rules-Volume bündeln, damit der
+    # Reverse-Channel (master-uplink /config) ihn an gepairte Taps verteilt.
+    try:
+        from sig_sync import sync_host_role_catalog_file
+        await sync_host_role_catalog_file(get_pool())
+    except Exception as exc:
+        log.warning("host-role-catalog-Sync beim Startup fehlgeschlagen: %s", exc)
+
     # WebSocket-Broadcast-Task
     asyncio.create_task(_broadcast_loop())
 
