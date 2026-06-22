@@ -58,7 +58,7 @@ services:
   # 168h-Retention nötig: 24h ist mehr als genug.
   # ───────────────────────────────────────────────────────────────────────
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka:4.2.0
     container_name: cyjan-tap-kafka
     mem_limit: 2g
     restart: unless-stopped
@@ -110,7 +110,7 @@ services:
       start_period: 30s
 
   kafka-init:
-    image: apache/kafka:latest
+    image: apache/kafka:4.2.0
     container_name: cyjan-tap-kafka-init
     networks: [tap-net]
     depends_on:

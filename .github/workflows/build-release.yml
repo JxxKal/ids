@@ -82,17 +82,17 @@ jobs:
 
           # Externe Runtime-Images für den Master.
           EXTERNALS_MASTER=(
-            timescale/timescaledb:latest-pg16
-            redis:7-alpine
-            apache/kafka:latest
-            minio/minio:latest
-            minio/mc:latest
-            provectuslabs/kafka-ui:latest
+            timescale/timescaledb:2.26.3-pg16
+            redis:7.4.8-alpine
+            apache/kafka:4.2.0
+            minio/minio:RELEASE.2025-09-07T16-13-09Z
+            minio/mc:RELEASE.2025-08-13T08-35-41Z
+            provectuslabs/kafka-ui:v0.7.2
           )
           # Externe Runtime-Images für den Tap. Nur Kafka – keine DB, kein Redis,
           # kein MinIO, keine Web-UI – am Tap läuft alles in-memory + lokal.
           EXTERNALS_TAP=(
-            apache/kafka:latest
+            apache/kafka:4.2.0
           )
 
           for img in "${EXTERNALS_MASTER[@]}"; do

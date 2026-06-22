@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.48',
+    date: '2026-06-22',
+    title: 'Reproduzierbare Builds (Image-Pinning)',
+    notes: [
+      'Die externen Basis-Images (TimescaleDB, Kafka, Redis, MinIO, Kafka-UI) sind jetzt auf feste Versionen gepinnt statt „latest" — damit liefert jeder Build dasselbe, und es gibt keine unbemerkte Versions-Drift mehr zwischen Releases.',
+    ],
+  },
+  {
     version: 'v2.5.47',
     date: '2026-06-19',
     title: 'Reliability-Feinschliff',
