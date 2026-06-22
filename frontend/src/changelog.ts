@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.51',
+    date: '2026-06-22',
+    title: 'Host-Rollen im Dashboard-Alarmfeed',
+    notes: [
+      'Die erkannten Host-Rollen (Domain Controller, Web-/DB-/Mail-Server, SCADA/PLC …) erscheinen jetzt auch direkt im Alarm-Feed des Dashboards — als kompakte Badges neben Quell- und Ziel-IP, mit Konfidenz und Begründung im Tooltip. So sieht man auf einen Blick, welche Art von System an einem Alarm beteiligt ist, ohne in die Hosts-Ansicht wechseln zu müssen.',
+    ],
+  },
+  {
     version: 'v2.5.50',
     date: '2026-06-22',
     title: 'Host-Rollenerkennung',
