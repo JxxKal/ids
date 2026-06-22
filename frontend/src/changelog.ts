@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.49',
+    date: '2026-06-22',
+    title: 'Schnelleres Laden (Code-Splitting)',
+    notes: [
+      'Das Web-UI lädt beim Start spürbar weniger: die einzelnen Seiten (Einstellungen, Hosts, Netzwerke, Berichte, …) werden erst beim Öffnen nachgeladen statt alles vorab. Der Erst-Ladevorgang ist rund 40 % kleiner.',
+    ],
+  },
+  {
     version: 'v2.5.48',
     date: '2026-06-22',
     title: 'Reproduzierbare Builds (Image-Pinning)',

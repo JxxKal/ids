@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clearToken, fetchAlerts, fetchMe, fetchSystemStats, fetchTaps, fetchUnknownHosts, getToken, setToken } from './api';
 import type { SystemStats } from './api';
@@ -7,18 +7,23 @@ import { disableDemoMode } from './demo/mode';
 import { resetStore as resetDemoStore } from './demo/store';
 import { AlertFeed } from './components/AlertFeed';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { GettingStartedPage } from './components/GettingStartedPage';
-import { HostsPage } from './components/HostsPage';
 import { LoginPage } from './components/LoginPage';
-import { NetworksPage } from './components/NetworksPage';
-import { SettingsPage, type SectionId } from './components/SettingsPage';
+import type { SectionId } from './components/SettingsPage';
 import { SeverityBarsCard } from './components/SeverityBarsCard';
 import { HostConnectionDrawer } from './components/HostConnectionDrawer';
 import { VersionNotesPopup } from './components/VersionNotesPopup';
 import { HelpTip } from './components/HelpTip';
 import { Sidebar, type NavTab } from './components/Sidebar';
-import { TestsPage } from './components/TestsPage';
-import { WeeklyReportPage } from './components/WeeklyReportPage';
+
+// Code-Splitting: die Nicht-Dashboard-Pages werden erst bei Tab-Wechsel geladen,
+// statt im initialen Bundle zu hängen (Settings allein ist ~8.6k Zeilen). Das
+// Dashboard + Login bleiben eager, weil sie der Erst-Paint sind.
+const GettingStartedPage = lazy(() => import('./components/GettingStartedPage').then(m => ({ default: m.GettingStartedPage })));
+const HostsPage          = lazy(() => import('./components/HostsPage').then(m => ({ default: m.HostsPage })));
+const NetworksPage       = lazy(() => import('./components/NetworksPage').then(m => ({ default: m.NetworksPage })));
+const SettingsPage       = lazy(() => import('./components/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const TestsPage          = lazy(() => import('./components/TestsPage').then(m => ({ default: m.TestsPage })));
+const WeeklyReportPage   = lazy(() => import('./components/WeeklyReportPage').then(m => ({ default: m.WeeklyReportPage })));
 import { ThreatGauge } from './components/ThreatGauge';
 import { TopBar } from './components/TopBar';
 import { TopProtocolsCard } from './components/TopProtocolsCard';
@@ -456,12 +461,20 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
         )}
 
-        {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><GettingStartedPage onNavigate={navigateTo} /></div>}
-        {tab === 'networks' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><NetworksPage user={user} /></div>}
-        {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><HostsPage    /></div>}
-        {tab === 'tests'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><TestsPage    /></div>}
-        {tab === 'reports'  && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><WeeklyReportPage /></div>}
-        {tab === 'settings' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><SettingsPage key={settingsSection ?? 'default'} initialSection={settingsSection} /></div>}
+        {tab !== 'dashboard' && (
+          <Suspense fallback={
+            <div className="flex-1 flex items-center justify-center">
+              <span className="text-slate-600 text-sm">{t('common.loading')}</span>
+            </div>
+          }>
+            {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><GettingStartedPage onNavigate={navigateTo} /></div>}
+            {tab === 'networks' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><NetworksPage user={user} /></div>}
+            {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><HostsPage    /></div>}
+            {tab === 'tests'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><TestsPage    /></div>}
+            {tab === 'reports'  && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><WeeklyReportPage /></div>}
+            {tab === 'settings' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><SettingsPage key={settingsSection ?? 'default'} initialSection={settingsSection} /></div>}
+          </Suspense>
+        )}
       </main>
 
       {showUnknown && <UnknownHostsDrawer onClose={() => setShowUnknown(false)} />}
