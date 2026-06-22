@@ -1,13 +1,14 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Alert, Enrichment, RemoteTap } from '../types';
+import type { Alert, Enrichment, RemoteTap, DetectedRoles, RoleCatalogEntry } from '../types';
 import { isSuppressed } from '../types';
-import { alertsExportUrl, createEgressWhitelist, fetchTaps } from '../api';
+import { alertsExportUrl, createEgressWhitelist, fetchTaps, fetchHosts, fetchRoleCatalog } from '../api';
 import { countryFlag, geoTooltip } from '../lib/country';
 import { effectiveSeverity } from '../lib/severity';
 import { AlertDetail } from './AlertDetail';
 import { HelpTip } from './HelpTip';
 import { SeverityBadge } from './SeverityBadge';
+import { RoleBadge } from './RoleBadge';
 import { PcapPreview } from './PcapPreview';
 
 // ── PCAP-Vorschau ─────────────────────────────────────────────────────────────
@@ -35,15 +36,43 @@ function PcapButton({ alertId, available }: { alertId: string; available: boolea
   );
 }
 
+// ── Rollen-Chips (kompakt fürs Alarm-Feed) ─────────────────────────────────────
+// Zeigt die erkannten Host-Rollen einer IP: die zwei mit der höchsten Confidence
+// als Badge, der Rest als "+N" mit Tooltip. Nichts rendern, wenn keine Rolle.
+function RoleChips({ roles, catalog }: { roles?: DetectedRoles; catalog?: RoleCatalogEntry[] }) {
+  const entries = roles?.roles ? Object.entries(roles.roles) : [];
+  if (!entries.length) return null;
+  entries.sort((a, b) => (b[1].confidence ?? 0) - (a[1].confidence ?? 0));
+  const shown = entries.slice(0, 2);
+  const extra = entries.length - shown.length;
+  return (
+    <div className="flex flex-wrap items-center gap-0.5 mt-0.5">
+      {shown.map(([rid, entry]) => (
+        <RoleBadge key={rid} roleId={rid} entry={entry} catalog={catalog} size="xs" />
+      ))}
+      {extra > 0 && (
+        <span
+          className="text-[10px] text-cyan-500/80 tabular-nums"
+          title={entries.map(([rid]) => catalog?.find(c => c.id === rid)?.label ?? rid).join(', ')}
+        >
+          +{extra}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ── IP-Zelle mit Hostname + Trust-Badge ────────────────────────────────────────
 
 function IpCell({
-  ip, port, enrichment, dir,
+  ip, port, enrichment, dir, roles, catalog,
 }: {
   ip?: string;
   port?: number;
   enrichment?: Enrichment;
   dir: 'src' | 'dst';
+  roles?: DetectedRoles;
+  catalog?: RoleCatalogEntry[];
 }) {
   const { t } = useTranslation();
   const hostname    = dir === 'src' ? enrichment?.src_hostname    : enrichment?.dst_hostname;
@@ -87,6 +116,7 @@ function IpCell({
           ✓{srcLabel && <span className="text-green-600">{srcLabel}</span>}
         </span>
       )}
+      <RoleChips roles={roles} catalog={catalog} />
     </div>
   );
 }
@@ -450,6 +480,11 @@ export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, 
   // server-side anwenden kann. Lokale Filter-Logik unten greift zusätzlich
   // für Live-Mode (WebSocket broadcastet alle Alerts).
   const [taps,              setTaps]              = useState<RemoteTap[]>([]);
+  // Host-Rollen für die IP-Zellen: einmal alle Hosts holen, IP→detected_roles
+  // mappen (nur Hosts mit Rollen). Rollen ändern sich langsam (30-min-Cycles),
+  // ein Fetch beim Mount reicht fürs Dashboard.
+  const [rolesByIp,         setRolesByIp]         = useState<Record<string, DetectedRoles>>({});
+  const [roleCatalog,       setRoleCatalog]       = useState<RoleCatalogEntry[]>([]);
   // Mobile-Filter-Drawer: alles außer Search + Severity-Pills wird auf
   // <768px collapsed. Zähler zeigt non-default-Filter (damit User auch
   // im collapsed-Zustand sieht ob was aktiv ist).
@@ -463,6 +498,23 @@ export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, 
                         ohne Tap-Spalte/Filter weiterfahren. */ });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRoleCatalog().then(c => { if (!cancelled) setRoleCatalog(c); }).catch(() => {});
+    fetchHosts().then(hosts => {
+      if (cancelled) return;
+      const m: Record<string, DetectedRoles> = {};
+      for (const h of hosts) {
+        if (h.detected_roles?.roles && Object.keys(h.detected_roles.roles).length) {
+          m[h.ip] = h.detected_roles;
+        }
+      }
+      setRolesByIp(m);
+    }).catch(() => { /* Hosts-Listing optional – ohne Rollen weiterfahren. */ });
+    return () => { cancelled = true; };
+  }, []);
+
   const showTapColumn = taps.length > 0;
   const tapsById = useMemo(
     () => Object.fromEntries(taps.map(tap => [tap.id, tap])) as Record<string, RemoteTap>,
@@ -1075,7 +1127,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, 
                   {showCol('source') && (
                     <td className="px-3 py-2 overflow-hidden" style={tdStyle('source')}>
                       <div className="flex items-center gap-1.5">
-                        <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" />
+                        <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" roles={g.src_ip ? rolesByIp[g.src_ip] : undefined} catalog={roleCatalog} />
                         {g.bidirectional && (
                           <span title={t('alertFeed.bidirectional')} className="text-cyan-500 text-sm shrink-0">↔</span>
                         )}
@@ -1084,7 +1136,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, 
                   )}
                   {showCol('destination') && (
                     <td className="px-3 py-2 overflow-hidden" style={tdStyle('destination')}>
-                      <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" />
+                      <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" roles={g.dst_ip ? rolesByIp[g.dst_ip] : undefined} catalog={roleCatalog} />
                     </td>
                   )}
                   {showCol('hits') && (
@@ -1187,12 +1239,12 @@ export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, 
                   )}
                   {showCol('source') && (
                     <td className="px-3 py-2 overflow-hidden" style={tdStyle('source')}>
-                      <IpCell ip={a.src_ip} enrichment={a.enrichment} dir="src" />
+                      <IpCell ip={a.src_ip} enrichment={a.enrichment} dir="src" roles={a.src_ip ? rolesByIp[a.src_ip] : undefined} catalog={roleCatalog} />
                     </td>
                   )}
                   {showCol('destination') && (
                     <td className="px-3 py-2 overflow-hidden" style={tdStyle('destination')}>
-                      <IpCell ip={a.dst_ip} port={a.dst_port} enrichment={a.enrichment} dir="dst" />
+                      <IpCell ip={a.dst_ip} port={a.dst_port} enrichment={a.enrichment} dir="dst" roles={a.dst_ip ? rolesByIp[a.dst_ip] : undefined} catalog={roleCatalog} />
                     </td>
                   )}
                   {showCol('hits') && (
