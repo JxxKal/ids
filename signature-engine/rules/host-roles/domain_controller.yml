@@ -1,0 +1,21 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: domain_controller
+  label: "Domain Controller"
+  category: identity
+  match:
+    required_ports:
+      - {port: 88,  proto: TCP}    # Kerberos
+      - {port: 389, proto: TCP}    # LDAP
+      - {port: 445, proto: TCP}    # SMB
+    any_ports:
+      min_any: 1
+      ports:
+        - {port: 636,  proto: TCP} # LDAPS
+        - {port: 3268, proto: TCP} # Global Catalog
+    optional_flags:
+      - {flag: dns, port: 53, proto: ANY}
+  min_flows_per_port: 3
+  base_confidence: 0.85
+  confidence_bonus: {per_optional_port: 0.03, long_lived: 0.05}
+  fingerprint: null
+  mac_oui: []

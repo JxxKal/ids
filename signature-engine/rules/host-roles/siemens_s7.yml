@@ -1,0 +1,22 @@
+# Host-Rollen-Katalog — siehe docs/contracts/host-roles.md
+- id: plc_s7
+  label: "Siemens S7 PLC"
+  category: ot
+  match:
+    required_ports:
+      - {port: 102, proto: TCP}    # ISO-on-TCP / S7comm
+    any_ports: null
+    optional_flags: []
+  min_flows_per_port: 1
+  base_confidence: 0.70            # Port 102 allein → schwach; OUI/Fingerprint hebt
+  confidence_bonus: {per_optional_port: 0.0, long_lived: 0.05}
+  fingerprint:                     # V2: S7comm-Ident hebt confidence
+    proto: s7comm
+    match: cotp_connect
+    confidence_floor: 0.95
+  mac_oui:                         # V1: Siemens-OUI-Präfixe → confidence-Bonus
+    - "00:0E:8C"
+    - "00:1B:1B"
+    - "8C:F3:19"
+    - "20:87:56"
+    - "00:1F:F8"
