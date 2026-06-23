@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.52',
+    date: '2026-06-23',
+    title: 'Host-Rollen: dauerhaft unterdrücken (Negativ-Lock)',
+    notes: [
+      'Eine fälschlich erkannte Host-Rolle lässt sich jetzt dauerhaft unterdrücken — im Host-Editor (Hosts → Bearbeiten) gibt es neben „Entfernen" einen „🚫 Unterdrücken"-Button. „Entfernen" wirkte nur einmalig (die automatische Erkennung fügte die Rolle im nächsten Durchlauf wieder hinzu); „Unterdrücken" hält sie dauerhaft fern.',
+      'Unterdrückte Rollen werden im Editor separat (durchgestrichen) gelistet und lassen sich mit „Aufheben" wieder der Auto-Erkennung übergeben.',
+    ],
+  },
+  {
     version: 'v2.5.51',
     date: '2026-06-22',
     title: 'Host-Rollen im Dashboard-Alarmfeed',
