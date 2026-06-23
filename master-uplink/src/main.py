@@ -281,6 +281,28 @@ class TapAuth:
             tap_id, version,
         )
 
+    async def upsert_host_profile(
+        self, tap_id: str, host_ip: str, ports: list, mac: str | None,
+        first_seen: str | None,
+    ) -> None:
+        """Tap-gemeldetes Host-Port-Profil persistieren (für die
+        Tap-Host-Rollenerkennung). UPSERT pro (tap_id, host_ip); updated_at
+        steuert die Recency, die der Detektor zum Windowing nutzt. ports als
+        orjson.dumps + ::jsonb (TapAuth-Pool hat keinen json-Codec registriert)."""
+        assert self._pool
+        await self._pool.execute(
+            """
+            INSERT INTO tap_host_profiles (tap_id, host_ip, ports, mac, first_seen, updated_at)
+            VALUES ($1, $2::inet, $3::jsonb, $4, $5::timestamptz, now())
+            ON CONFLICT (tap_id, host_ip) DO UPDATE
+              SET ports      = EXCLUDED.ports,
+                  mac        = EXCLUDED.mac,
+                  first_seen = LEAST(tap_host_profiles.first_seen, EXCLUDED.first_seen),
+                  updated_at = now()
+            """,
+            tap_id, host_ip, orjson.dumps(ports).decode(), mac, first_seen,
+        )
+
     async def get_dns_resolvers(self) -> list[str]:
         """Liest die system_config-Allowlist 'dns_resolvers'. JSONB-Spalte;
         asyncpg gibt sie als String zurück (kein automatisches JSON-Decode),
@@ -697,6 +719,26 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                     metrics_received += 1
                 except Exception as exc:
                     log.error("Kafka produce (metric) fehlgeschlagen: %s", exc)
+                continue
+
+            if mtype == "host_profile":
+                # Tap-gemeldetes Port-Profil eines Hosts (für die Tap-Host-
+                # Rollenerkennung). Wir taggen mit tap_id und upserten in
+                # tap_host_profiles; der host-role-detector liest die Einträge
+                # im nächsten Cycle und merged sie mit seiner Flow-Aggregation.
+                prof = msg.get("payload") or {}
+                host_ip = prof.get("host_ip") if isinstance(prof, dict) else None
+                ports = prof.get("ports") if isinstance(prof, dict) else None
+                if not host_ip or not isinstance(ports, list) or not ports:
+                    continue
+                try:
+                    await auth.upsert_host_profile(
+                        tap_id, host_ip, ports,
+                        prof.get("mac"), prof.get("first_seen"),
+                    )
+                except Exception as exc:
+                    log.warning("host_profile-Upsert (%s/%s) fehlgeschlagen: %s",
+                                tap_name, host_ip, exc)
                 continue
 
             if mtype == "pcap_upload":

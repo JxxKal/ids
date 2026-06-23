@@ -216,6 +216,13 @@ services:
       ALERTS_TOPIC: alerts-raw
       METRICS_TOPIC: rule-metrics
       KAFKA_GROUP_ID: tap-uplink
+      # Host-Profiler: aggregiert den lokalen flows-Stream zu Port-Profilen und
+      # schickt sie als host_profile-Frames an den Master, damit der die Rollen
+      # von Hosts erkennt, die NUR dieser Tap sieht. =false schaltet es ab.
+      FLOWS_TOPIC: flows
+      HOST_PROFILE_ENABLED:    "${HOST_PROFILE_ENABLED:-true}"
+      HOST_PROFILE_INTERVAL_S: "${HOST_PROFILE_INTERVAL_S:-1800}"
+      HOST_PROFILE_WINDOW_S:   "${HOST_PROFILE_WINDOW_S:-604800}"
       # PCAP-Side V1: tap-uplink hält in-memory einen ±60s-Ringbuffer
       # aus pcap-headers, baut bei Tap-Alerts das PCAP-File und schickt
       # es als pcap_upload-Frame über die mTLS-WSS. PCAP_WINDOW_S muss

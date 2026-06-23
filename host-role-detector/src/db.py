@@ -127,6 +127,48 @@ class Db:
         )
         return {str(r["host"]): str(r["mac"]) for r in rows if r["mac"]}
 
+    async def tap_profiles(
+        self, window_days: int,
+    ) -> dict[str, dict]:
+        """Von Remote-Taps gemeldete Port-Profile (tap_host_profiles), nur
+        recent (updated_at im Fenster). Über mehrere Taps hinweg pro Host
+        aggregiert: Ports vereinigt (Counts summiert), MAC = erste nicht-leere,
+        first_seen = früheste.
+
+        Rückgabe: {host_ip: {"ports": {(port, proto): count}, "mac": str|None,
+                              "first_seen": datetime|None}}.
+        jsonb kommt dank _init_conn-Codec bereits als Python-Liste zurück.
+        """
+        assert self._pool is not None
+        since = datetime.now(timezone.utc) - timedelta(days=window_days)
+        try:
+            rows = await self._pool.fetch(
+                """
+                SELECT host(host_ip) AS host, ports, mac, first_seen
+                  FROM tap_host_profiles
+                 WHERE updated_at >= $1
+                """,
+                since,
+            )
+        except asyncpg.UndefinedTableError:
+            return {}   # Migration 028 noch nicht eingespielt — failsoft.
+        out: dict[str, dict] = {}
+        for r in rows:
+            host = str(r["host"])
+            entry = out.setdefault(host, {"ports": {}, "mac": None, "first_seen": None})
+            for p in (r["ports"] or []):
+                try:
+                    key = (int(p["port"]), str(p.get("proto") or ""))
+                except (KeyError, TypeError, ValueError):
+                    continue
+                entry["ports"][key] = entry["ports"].get(key, 0) + int(p.get("count", 1))
+            if entry["mac"] is None and r["mac"]:
+                entry["mac"] = r["mac"]
+            fs = r["first_seen"]
+            if fs is not None and (entry["first_seen"] is None or fs < entry["first_seen"]):
+                entry["first_seen"] = fs
+        return out
+
     # ── Schreiber: host_info.detected_roles ───────────────────────────────
 
     async def get_detected_roles(self, host_ip: str) -> dict | None:

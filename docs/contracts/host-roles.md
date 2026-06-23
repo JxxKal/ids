@@ -100,3 +100,27 @@ Master-only Service `host-role-detector/` (Compose-Vorlage `rule-tuner`). Cadenc
 `DETECT_INTERVAL_S=1800`, Fenster `DETECT_WINDOW_DAYS=7`, `ROLE_MIN_CONFIDENCE=0.6`.
 Aggregation (served ports + Mode-MAC pro Host) aus `flows`; Matching gegen Katalog;
 manual-Locks respektieren; alleiniger Schreiber von `detected_roles`.
+
+## 6. Tap-Host-Profile (für Rollen von Tap-only-Hosts)
+
+Hosts, die nur ein Remote-Tap sieht, fehlen in der Master-`flows`-Tabelle. Der
+Tap (`tap-uplink/host_profiler.py`) aggregiert seinen lokalen `flows`-Stream zu
+einem verdichteten Port-Profil pro Host (served ports + count, Mode-MAC,
+first_seen) und schickt es alle `HOST_PROFILE_INTERVAL_S` (default 1800) als
+`host_profile`-Frame über den bestehenden mTLS-Uplink. **Kein** Forwarding roher
+Flows.
+
+```jsonc
+{ "type": "host_profile", "payload": {
+    "host_ip": "10.0.0.5",
+    "ports": [{"port": 80, "proto": "TCP", "count": 123}],
+    "mac": "aa:bb:cc:dd:ee:ff",   // mode-MAC oder null
+    "first_seen": "<iso8601>", "observed_until": "<iso8601>" } }
+```
+
+`master-uplink` taggt mit `tap_id` und upsertet nach `tap_host_profiles`
+(Migration 028, PK `(tap_id, host_ip)`). Der Detektor liest dort Einträge mit
+recent `updated_at` (`db.tap_profiles`) und merged sie in seine Flow-Aggregation
+(Ports vereinigt, MAC nur wenn Master keine hat, first_seen früheste). Der Rest
+der Pipeline (Matching, Provenance/Lock, `detected_roles`-Write) ist identisch —
+ein Tap-Host bekommt so eine `host_info`-Zeile mit Rollen wie jeder andere.

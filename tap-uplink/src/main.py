@@ -45,6 +45,7 @@ from cryptography import x509
 
 from disk_queue import DiskQueue
 from state      import StateWriter
+import host_profiler
 
 # ── Konfiguration ─────────────────────────────────────────────────────────────
 
@@ -854,6 +855,21 @@ async def amain() -> None:
     t_pcap.start()
     t_flush.start()
 
+    # Host-Profiler: aggregiert den flows-Stream zu Port-Profilen und schickt
+    # sie periodisch als host_profile-Frames an den Master (für Tap-Host-
+    # Rollenerkennung). Failsoft: wenn das flows-Topic fehlt, beendet sich der
+    # Consumer-Thread und der Rest läuft weiter.
+    profiler_threads: list[threading.Thread] = []
+    if host_profiler.HOST_PROFILE_ENABLED:
+        hp = host_profiler.HostProfiler(KAFKA_BROKERS, GROUP_ID)
+        t_hp_c = threading.Thread(
+            target=hp.consume_loop, args=(_beat, stop), daemon=True)
+        t_hp_e = threading.Thread(
+            target=host_profiler.emit_loop, args=(hp, diskq, _beat, stop), daemon=True)
+        t_hp_c.start()
+        t_hp_e.start()
+        profiler_threads = [t_hp_c, t_hp_e]
+
     # Reverse-Channel-Polling parallel zur WSS-Uplink-Schleife. Beide laufen
     # nebenher; Ausfall des einen beendet nicht den anderen.
     poll_task = asyncio.create_task(config_poll_loop())
@@ -867,6 +883,8 @@ async def amain() -> None:
         t.join(timeout=5)
         t_pcap.join(timeout=5)
         t_flush.join(timeout=5)
+        for tp in profiler_threads:
+            tp.join(timeout=5)
 
 
 if __name__ == "__main__":
