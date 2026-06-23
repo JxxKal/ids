@@ -16,6 +16,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.53',
+    date: '2026-06-23',
+    title: 'Fix: Host-Rollen auf Offline-Hosts',
+    notes: [
+      'Behebt leere Rollen-Spalten auf Hosts, die per Offline-Update (statt frischem ISO) auf v2.5.50+ gebracht wurden: der Rollen-Katalog liegt als Datei neben den Heuristik-Regeln und wurde bisher nicht ins Update-Paket gelegt — dadurch fand die Erkennung keine Rollen und es ließ sich auch manuell keine setzen.',
+      'Das Update-Paket enthält jetzt die Regel-/Katalog-Dateien (signature-engine/rules). Nebeneffekt: auch Änderungen an den normalen Heuristik-Regeln erreichen Air-Gap-Hosts künftig über das Update statt nur über ein neues ISO.',
+      'Nach Einspielen erscheinen die Rollen automatisch innerhalb des nächsten Detektor-Durchlaufs; das manuelle Setzen/Unterdrücken pro Host funktioniert wieder.',
+    ],
+  },
+  {
     version: 'v2.5.52',
     date: '2026-06-23',
     title: 'Host-Rollen: dauerhaft unterdrücken (Negativ-Lock)',

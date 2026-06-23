@@ -602,6 +602,16 @@ jobs:
           cp .env.example           "$PKG/"
           cp -r infra/              "$PKG/infra/"
 
+          # signature-engine/rules/ ist HOST-gemountet (./signature-engine/rules
+          # → /rules/builtin bei signature-engine; host-roles/ zusätzlich bei api
+          # + host-role-detector) und wird NICHT ins Image gebacken (Dockerfiles
+          # COPYen nur src/). Ohne diese Dateien im Bundle fehlen auf Air-Gap-Hosts,
+          # die per Update statt frischem ISO aktualisiert werden, sowohl
+          # builtin-Rule-Updates als auch der komplette Host-Rollen-Katalog →
+          # leere Rollen-Spalten + kein manuelles Setzen (role-catalog liefert []).
+          mkdir -p "$PKG/signature-engine"
+          cp -r signature-engine/rules "$PKG/signature-engine/rules"
+
           # post-update.sh: optionale Host-Wartung, die der API-Update-Container
           # nicht selbst ausführen kann (greift auf /etc/docker/ und systemd zu).
           # User wird nach erfolgreichem GUI-Update einmal manuell zur sudo-
