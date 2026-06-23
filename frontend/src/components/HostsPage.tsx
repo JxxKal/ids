@@ -463,15 +463,20 @@ function RoleEditor({
 }) {
   const { t } = useTranslation();
   const roles = host.detected_roles?.roles ?? {};
+  const manual = host.detected_roles?.manual ?? {};
   const ids = sortedRoleIds(host);
-  // Im Set-Select nur Rollen anbieten, die der Host noch nicht trägt.
-  const assignable = catalog.filter(c => !roles[c.id]);
+  // Dauerhaft unterdrückte Rollen (Negativ-Lock) — nicht in `roles`, nur im
+  // manual-Block. Separat unten gelistet mit Aufheben-Button.
+  const suppressedIds = Object.keys(manual).filter(id => manual[id]?.suppressed);
+  const labelOf = (id: string) => catalog.find(c => c.id === id)?.label ?? id;
+  // Im Set-Select nur Rollen anbieten, die der Host weder trägt noch unterdrückt.
+  const assignable = catalog.filter(c => !roles[c.id] && !manual[c.id]?.suppressed);
 
   return (
     <div className="flex flex-col gap-1.5">
       {ids.map(rid => {
         const entry = roles[rid];
-        const label = catalog.find(c => c.id === rid)?.label ?? rid;
+        const label = labelOf(rid);
         return (
           <div key={rid} className="flex items-center gap-1.5">
             <RoleBadge roleId={rid} entry={entry} catalog={catalog} />
@@ -484,17 +489,43 @@ function RoleEditor({
                 {t('roles.reset')}
               </button>
             ) : (
-              <button
-                onClick={() => onChange(host.ip, rid, 'remove')}
-                className="btn-ghost text-[10px] text-red-400 px-1 py-0.5"
-                title={t('roles.removeTitle', { role: label })}
-              >
-                {t('roles.remove')}
-              </button>
+              <>
+                <button
+                  onClick={() => onChange(host.ip, rid, 'remove')}
+                  className="btn-ghost text-[10px] text-red-400 px-1 py-0.5"
+                  title={t('roles.removeTitle', { role: label })}
+                >
+                  {t('roles.remove')}
+                </button>
+                <button
+                  onClick={() => onChange(host.ip, rid, 'suppress')}
+                  className="btn-ghost text-[10px] text-slate-400 px-1 py-0.5"
+                  title={t('roles.suppressTitle', { role: label })}
+                >
+                  🚫 {t('roles.suppress')}
+                </button>
+              </>
             )}
           </div>
         );
       })}
+      {suppressedIds.map(rid => (
+        <div key={`sup-${rid}`} className="flex items-center gap-1.5">
+          <span
+            className="px-1 py-0.5 text-xs rounded bg-slate-800/60 text-slate-500 border border-slate-700/50 line-through"
+            title={t('roles.suppressedTitle', { role: labelOf(rid) })}
+          >
+            🚫 {labelOf(rid)}
+          </span>
+          <button
+            onClick={() => onChange(host.ip, rid, 'reset')}
+            className="btn-ghost text-[10px] text-amber-400 px-1 py-0.5"
+            title={t('roles.unsuppressTitle', { role: labelOf(rid) })}
+          >
+            {t('roles.unsuppress')}
+          </button>
+        </div>
+      ))}
       {assignable.length > 0 && (
         <select
           value=""

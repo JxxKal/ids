@@ -107,6 +107,11 @@
     "resetTitle": "Release manual lock for \"{{role}}\" – auto-detection takes over again",
     "remove": "Remove",
     "removeTitle": "Remove detected role \"{{role}}\" once",
+    "suppress": "Suppress",
+    "suppressTitle": "Permanently suppress role \"{{role}}\" – auto-detection never re-adds it",
+    "suppressedTitle": "Role \"{{role}}\" is permanently suppressed (negative lock)",
+    "unsuppress": "Unsuppress",
+    "unsuppressTitle": "Release suppression for \"{{role}}\" – auto-detection takes over again",
     "tooltip": {
       "auto": "Auto-detected · confidence {{confidence}}%",
       "manual": "Set manually (locked)",

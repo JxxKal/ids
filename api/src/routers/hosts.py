@@ -318,9 +318,11 @@ async def update_host_roles(
                 }
 
             elif body.action == "reset":
-                # Lock aufheben → nächster Detektor-Cycle übernimmt die Rolle
-                # wieder. Wenn die Rolle aktuell als manual existiert, source
-                # zurück auf auto stellen; entfernen darf nur der Detektor.
+                # Lock ODER Suppress aufheben → nächster Detektor-Cycle
+                # übernimmt die Rolle wieder. Wenn die Rolle aktuell als manual
+                # existiert, source zurück auf auto stellen; entfernen darf nur
+                # der Detektor. (Bei aufgehobenem Suppress ist role_id nicht in
+                # roles → der Detektor fügt sie beim nächsten Match neu hinzu.)
                 manual.pop(role_id, None)
                 if role_id in roles:
                     entry = dict(roles[role_id])
@@ -332,6 +334,17 @@ async def update_host_roles(
                 # nehmen wir gleich mit raus, falls vorhanden.
                 roles.pop(role_id, None)
                 manual.pop(role_id, None)
+
+            elif body.action == "suppress":
+                # Negativ-Lock: Rolle dauerhaft unterdrücken. Rolle aus dem
+                # aktiven Set raus + manual[id].suppressed=true — der Detektor
+                # fügt sie nie wieder hinzu (matcher überspringt suppressed).
+                roles.pop(role_id, None)
+                manual[role_id] = {
+                    "suppressed": True,
+                    "set_by":     user.get("username") or user.get("sub") or "admin",
+                    "set_at":     now_iso,
+                }
 
             dr["roles"]  = roles
             dr["manual"] = manual

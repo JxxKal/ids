@@ -107,6 +107,11 @@
     "resetTitle": "Manuellen Lock für \"{{role}}\" aufheben – Auto-Erkennung übernimmt wieder",
     "remove": "Entfernen",
     "removeTitle": "Erkannte Rolle \"{{role}}\" einmalig entfernen",
+    "suppress": "Unterdrücken",
+    "suppressTitle": "Rolle \"{{role}}\" dauerhaft unterdrücken – die Auto-Erkennung fügt sie nie wieder hinzu",
+    "suppressedTitle": "Rolle \"{{role}}\" ist dauerhaft unterdrückt (Negativ-Lock)",
+    "unsuppress": "Aufheben",
+    "unsuppressTitle": "Unterdrückung für \"{{role}}\" aufheben – Auto-Erkennung übernimmt wieder",
     "tooltip": {
       "auto": "Automatisch erkannt · Konfidenz {{confidence}} %",
       "manual": "Manuell gesetzt (gesperrt)",

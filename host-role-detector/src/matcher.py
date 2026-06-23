@@ -124,6 +124,13 @@ def _is_manual(existing_role: dict, existing_manual: dict, role_id: str) -> bool
     return False
 
 
+def _is_suppressed(existing_manual: dict, role_id: str) -> bool:
+    """Negativ-Lock: manual[role_id].suppressed=true ⇒ der Detektor fügt die
+    Rolle nie hinzu, auch wenn das Port-Profil matchen würde."""
+    man = existing_manual.get(role_id)
+    return isinstance(man, dict) and man.get("suppressed") is True
+
+
 def build_detected_roles(
     profile: HostProfile,
     catalog: list[RoleDef],
@@ -154,6 +161,9 @@ def build_detected_roles(
     for role in catalog:
         # manual-Lock gewinnt — kein auto-Override.
         if role.id in new_roles:
+            continue
+        # Negativ-Lock: dauerhaft unterdrückte Rolle nie hinzufügen.
+        if _is_suppressed(old_manual, role.id):
             continue
         m = match_role(profile, role, oui_bonus)
         if m is None or m.confidence < min_confidence:

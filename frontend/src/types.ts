@@ -58,9 +58,12 @@ export interface HostRoleEntry {
 }
 
 export interface HostRoleManualLock {
-  locked:  boolean;
-  set_by:  string;
-  set_at:  string;                  // ISO
+  // Positiv-Lock (manuell gesetzte Rolle) trägt locked=true; Negativ-Lock
+  // (dauerhaft unterdrückte auto-Rolle) trägt suppressed=true. Genau eins.
+  locked?:     boolean;
+  suppressed?: boolean;
+  set_by:      string;
+  set_at:      string;              // ISO
 }
 
 export interface DetectedRoles {
@@ -76,7 +79,7 @@ export interface RoleCatalogEntry {
   category:  string;
 }
 
-export type HostRoleAction = 'set' | 'reset' | 'remove';
+export type HostRoleAction = 'set' | 'reset' | 'remove' | 'suppress';
 
 export interface Host {
   ip: string;

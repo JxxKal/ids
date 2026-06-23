@@ -113,12 +113,14 @@ class HostRoleUpdate(BaseModel):
     """Manuelle Rollen-Korrektur (PUT /api/hosts/{ip}/roles).
 
     Semantik laut Contract §4:
-      set    – Rolle manuell setzen + locken (Detektor fasst sie nicht mehr an)
-      reset  – manuellen Lock aufheben, Rolle wieder dem Detektor überlassen
-      remove – auto-erkannte Rolle einmalig entfernen (kein Lock)
+      set      – Rolle manuell setzen + locken (Detektor fasst sie nicht mehr an)
+      reset    – manuellen Lock/Suppress aufheben, Rolle wieder dem Detektor überlassen
+      remove   – auto-erkannte Rolle einmalig entfernen (kein Lock)
+      suppress – auto-Rolle dauerhaft unterdrücken (Negativ-Lock): Rolle raus +
+                 manual[id].suppressed=true, der Detektor fügt sie nie wieder hinzu
     """
     role_id: str
-    action:  str = Field(..., pattern="^(set|reset|remove)$")
+    action:  str = Field(..., pattern="^(set|reset|remove|suppress)$")
 
 
 # ── Networks ──────────────────────────────────────────────────────────────────

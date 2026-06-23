@@ -26,7 +26,8 @@ V1-Scope (mit User abgestimmt): **Port-Profile + MAC-OUI**. L7-Fingerprints
     }
   },
   "manual": {
-    "plc_s7": {"locked": true, "set_by": "admin", "set_at": "2026-06-21T11:00:00Z"}
+    "plc_s7":     {"locked": true,     "set_by": "admin", "set_at": "2026-06-21T11:00:00Z"},
+    "web_server": {"suppressed": true, "set_by": "admin", "set_at": "2026-06-23T09:00:00Z"}
   },
   "evaluated_at": "2026-06-22T14:45:00Z"
 }
@@ -34,7 +35,8 @@ V1-Scope (mit User abgestimmt): **Port-Profile + MAC-OUI**. L7-Fingerprints
 
 Regeln:
 - `source="manual"` ⇒ Detektor fasst die Rolle **nie** an (kein Update, kein Entfernen).
-- `manual[role_id].locked=true` ⇒ Lock. **Reset** = Eintrag aus `manual` raus + `source` zurück auf `auto`; der nächste Detektor-Cycle übernimmt.
+- `manual[role_id].locked=true` ⇒ **Positiv-Lock**. Rolle liegt in `roles` mit `source=manual`. **Reset** = Eintrag aus `manual` raus + `source` zurück auf `auto`; der nächste Detektor-Cycle übernimmt.
+- `manual[role_id].suppressed=true` ⇒ **Negativ-Lock**. Rolle ist **nicht** in `roles`; der Detektor fügt sie nie hinzu, auch wenn das Port-Profil matcht. **Reset** hebt auch dies auf (Eintrag aus `manual` raus → nächster Match fügt sie wieder als `auto` hinzu).
 - Eine nicht mehr matchende `auto`-Rolle wird beim Cycle entfernt; eine `manual`-Rolle nie.
 - Mehrfachrollen = mehrere Keys in `roles` (Set).
 - `detected_roles = NULL` ⇒ Host nie evaluiert.
@@ -84,10 +86,11 @@ GET /api/hosts/{ip}
   → HostResponse zusätzlich mit:  "detected_roles": <Shape oben> | null
 
 PUT /api/hosts/{ip}/roles        (require_admin)
-  Body: {"role_id": "<id>", "action": "set" | "reset" | "remove"}
-    set    → roles[id]={source:"manual",confidence:1.0,...}, manual[id]={locked:true,set_by,set_at}
-    reset  → manual[id] entfernt, source→auto (oder Eintrag weg, wenn aktuell nicht gematcht)
-    remove → auto-Rolle einmalig entfernen (kein Lock)
+  Body: {"role_id": "<id>", "action": "set" | "reset" | "remove" | "suppress"}
+    set      → roles[id]={source:"manual",confidence:1.0,...}, manual[id]={locked:true,set_by,set_at}
+    reset    → manual[id] entfernt (Lock ODER Suppress), source→auto (oder Eintrag weg, wenn aktuell nicht gematcht)
+    remove   → auto-Rolle einmalig entfernen (kein Lock; nächster Cycle kann sie neu erkennen)
+    suppress → Negativ-Lock: Rolle aus roles raus + manual[id]={suppressed:true,set_by,set_at}; Detektor fügt sie nie wieder hinzu
   → 200 HostResponse (mit aktualisierten detected_roles)
 ```
 
