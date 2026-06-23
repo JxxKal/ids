@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.54',
+    date: '2026-06-23',
+    title: 'Host-Rollen auch für Tap-Hosts',
+    notes: [
+      'Die Host-Rollenerkennung erfasst jetzt auch Geräte, die nur ein Remote-Tap sieht (und nicht der Master selbst). Der Tap fasst dafür laufend zusammen, welche Ports seine beobachteten Hosts bedienen, und schickt dieses kompakte Profil über die bestehende verschlüsselte Tap-Verbindung an den Master — ganz ohne den vollen Netzwerk-Mitschnitt zu übertragen.',
+      'Der Master führt Tap- und eigene Beobachtungen pro Host zusammen und klassifiziert sie identisch (gleiche Badges, Filter, manuelles Überschreiben/Unterdrücken). Standardmäßig aktiv; pro Tap abschaltbar.',
+    ],
+  },
+  {
     version: 'v2.5.53',
     date: '2026-06-23',
     title: 'Fix: Host-Rollen auf Offline-Hosts',
