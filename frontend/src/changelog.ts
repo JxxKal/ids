@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.55',
+    date: '2026-06-23',
+    title: 'Tap-MOTD: Update-Befehl korrigiert',
+    notes: [
+      'Das Login-Banner auf Remote-Tap-Hosts zeigt jetzt das korrekte Update-Kommando „cyjan-tap update --from-master" statt des generischen „ids-update". Kommt auf bestehende Taps mit dem nächsten Update.',
+    ],
+  },
+  {
     version: 'v2.5.54',
     date: '2026-06-23',
     title: 'Host-Rollen auch für Tap-Hosts',

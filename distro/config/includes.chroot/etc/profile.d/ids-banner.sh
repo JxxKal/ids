@@ -127,7 +127,7 @@ if [ "$MODE" = "tap" ]; then
   echo "  ║  cyjan-tap reconnect   – Reconnect erzwingen ║"
   echo "  ║  cyjan-tap logs follow – Live-Logs streamen  ║"
   echo "  ║  cyjan-tap test        – Test-Alert senden   ║"
-  echo "  ║  ids-update            – System aktualisieren║"
+  echo "  ║  cyjan-tap update --from-master – vom Master ║"
   echo "  ║  ids-setup             – Setup neu starten   ║"
   echo "  ╚══════════════════════════════════════════════╝"
 else
