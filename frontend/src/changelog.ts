@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.56',
+    date: '2026-06-24',
+    title: 'CLI-Update aktualisiert auch das Tap-Bundle',
+    notes: [
+      'Behebt, dass nach einem Konsolen-Update (`cyjan-update apply`) am Master das an die Taps ausgelieferte Bundle (`/opt/ids/tap-update/`) veraltet blieb — das GUI-System-Update tat das schon, die CLI nicht. Dadurch zog ein „Update pushen" auf einen Tap bisher die alte Version.',
+      'Ab jetzt hält der Konsolen-Updater das Tap-Bundle genauso frisch wie das GUI-Update. Greift ab dem nächsten `cyjan-update apply` nach Einspielen dieser Version.',
+    ],
+  },
+  {
     version: 'v2.5.55',
     date: '2026-06-23',
     title: 'Tap-MOTD: Update-Befehl korrigiert',

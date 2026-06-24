@@ -193,6 +193,20 @@ cmd_apply() {
       "$stage/" "$IDS_DIR/"
   fi
 
+  # tap-update/ wird oben bewusst aus dem allgemeinen Sync ausgeschlossen
+  # (großes images-tap.tar.zst; im --delete-after-Pfad würde ein altes ZIP ohne
+  # tap-update/ das Verzeichnis sonst wipen). Hier gezielt aus dem ZIP-Stage
+  # nachziehen, FALLS eines dabei ist — damit der CLI-Update den Master-Push-
+  # Pfad (/opt/ids/tap-update/ → master-uplink /tap-update/<file>) genauso
+  # frisch hält wie das GUI-System-Update. Ohne dies serviert der Master nach
+  # einem CLI-Update weiter das ALTE Tap-Bundle, und `cyjan-tap update
+  # --from-master` zieht eine veraltete Version.
+  if [ -d "$stage/tap-update" ]; then
+    echo "$TAG tap-update/ aus ZIP nachziehen (Master-Push-Bundle aktualisieren)"
+    mkdir -p "$IDS_DIR/tap-update"
+    rsync -a --delete "$stage/tap-update/" "$IDS_DIR/tap-update/"
+  fi
+
   # ── Images laden ─────────────────────────────────────────────────────────
   echo "$TAG Lade Images via docker load (kann je nach Bundle 1-3 min dauern) …"
   zstd -dc "$stage/images.tar.zst" | docker load
