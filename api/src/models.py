@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -121,6 +121,43 @@ class HostRoleUpdate(BaseModel):
     """
     role_id: str
     action:  str = Field(..., pattern="^(set|reset|remove|suppress)$")
+
+
+# ── Custom-Rollen (benutzerdefinierter Katalog) ────────────────────────────────
+
+class CustomRolePort(BaseModel):
+    """Ein Port oder Port-Range einer Custom-Rolle. Entweder `port` (Einzel)
+    ODER `port_from`+`port_to` (Range) setzen."""
+    port:      Optional[int] = Field(None, ge=0, le=65535)
+    port_from: Optional[int] = Field(None, ge=0, le=65535)
+    port_to:   Optional[int] = Field(None, ge=0, le=65535)
+    proto:     str = Field("TCP", pattern="^(TCP|UDP|ANY)$")
+
+
+class CustomRoleUpsert(BaseModel):
+    """Anlegen/Ändern einer Custom-Rolle (PUT /api/hosts/role-catalog/custom/{id}).
+    `ports` + `mode` werden serverseitig in den match-Block übersetzt:
+    mode=all → alle Ports required, mode=any → mind. min_any aus der Liste."""
+    label:    str = Field(..., min_length=1, max_length=64)
+    category: str = Field("custom", max_length=32)
+    ports:    list[CustomRolePort] = Field(..., min_length=1)
+    mode:     str = Field("all", pattern="^(all|any)$")
+    min_any:  int = Field(1, ge=1)
+    base_confidence:    float = Field(0.7, ge=0.0, le=1.0)
+    min_flows_per_port: int   = Field(1, ge=1)
+    enabled:  bool = True
+
+
+class CustomRoleResponse(BaseModel):
+    id:       str
+    label:    str
+    category: str
+    ports:    list[CustomRolePort]
+    mode:     str
+    min_any:  int
+    base_confidence:    float
+    min_flows_per_port: int
+    enabled:  bool
 
 
 # ── Networks ──────────────────────────────────────────────────────────────────

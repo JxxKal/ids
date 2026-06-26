@@ -36,25 +36,35 @@ class RoleMatch:
     flow_count: int
 
 
-def _port_served(profile: HostProfile, spec: PortSpec, min_flows: int) -> bool:
-    """Ist der geforderte Port serviert? proto=ANY matcht jedes Protokoll,
-    sonst muss flows.proto exakt passen. Der Port-Flow-Count muss die
-    per-Rolle-Schwelle min_flows erreichen (Contract HAVING count>=min_flows)."""
+def _first_served(profile: HostProfile, spec: PortSpec, min_flows: int):
+    """Erster servierter (port, proto), der die Spec erfüllt — oder None.
+    proto=ANY matcht jedes Protokoll; bei port_to (Range) zählt jeder Port in
+    [port, port_to]. Der Port-Flow-Count muss min_flows erreichen (Contract
+    HAVING count>=min_flows). Bei Range deterministisch: kleinster Port zuerst."""
+    best = None
     for (port, proto), n in profile.served.items():
-        if port != spec.port or n < min_flows:
+        if n < min_flows:
             continue
-        if spec.proto == "ANY" or spec.proto == proto:
-            return True
-    return False
+        if spec.proto != "ANY" and spec.proto != proto:
+            continue
+        if spec.port_to is None:
+            if port != spec.port:
+                continue
+        else:
+            if not (spec.port <= port <= spec.port_to):
+                continue
+        if best is None or port < best[0]:
+            best = (port, proto)
+    return best
+
+
+def _port_served(profile: HostProfile, spec: PortSpec, min_flows: int) -> bool:
+    return _first_served(profile, spec, min_flows) is not None
 
 
 def _flag_served(profile: HostProfile, flag: FlagSpec, min_flows: int) -> bool:
-    for (port, proto), n in profile.served.items():
-        if port != flag.port or n < min_flows:
-            continue
-        if flag.proto == "ANY" or flag.proto == proto:
-            return True
-    return False
+    spec = PortSpec(port=flag.port, proto=flag.proto)
+    return _first_served(profile, spec, min_flows) is not None
 
 
 def match_role(profile: HostProfile, role: RoleDef, oui_bonus: float) -> RoleMatch | None:
@@ -77,13 +87,16 @@ def match_role(profile: HostProfile, role: RoleDef, oui_bonus: float) -> RoleMat
     flags: list[str] = []
 
     for spec in role.required_ports:
-        ports.append({"port": spec.port, "proto": spec.proto})
-        evidence.append(f"port:{spec.port}/{spec.proto}")
+        hit = _first_served(profile, spec, mf)
+        port = hit[0] if hit else spec.port
+        ports.append({"port": port, "proto": spec.proto})
+        evidence.append(f"port:{port}/{spec.proto}")
     # Getroffene any_ports zählen als evidence + per_optional_port-Bonus.
     for spec in role.any_ports:
-        if _port_served(profile, spec, mf):
-            ports.append({"port": spec.port, "proto": spec.proto})
-            evidence.append(f"port:{spec.port}/{spec.proto}")
+        hit = _first_served(profile, spec, mf)
+        if hit is not None:
+            ports.append({"port": hit[0], "proto": spec.proto})
+            evidence.append(f"port:{hit[0]}/{spec.proto}")
             confidence += role.per_optional_port
 
     # 3. optional_flags: kein Match-Zwang, setzen flags/evidence (+Bonus).

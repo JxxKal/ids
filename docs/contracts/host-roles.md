@@ -118,6 +118,24 @@ Flows.
     "first_seen": "<iso8601>", "observed_until": "<iso8601>" } }
 ```
 
+## 7. Custom-Rollen (benutzerdefinierter Katalog)
+
+Admin-definierte Rollen, über Ports/Port-Ranges beschrieben, DB-gespeichert
+(`host_role_custom`, Migration 029) — der Detektor liest sie pro Cycle über
+seine DB-Verbindung und wertet sie wie Built-in-Rollen aus (Auto-Match, plus
+manuelles set/suppress wie gehabt). Kein YAML-Host-File (umgeht den
+Offline-Katalog-Sync).
+
+- **Port-Ranges**: `PortSpec` trägt optional `port_to` (None = Einzelport).
+  match-Specs: `{"port":N,"proto"}` oder `{"from":A,"to":B,"proto"}`.
+- **API** (`/api/hosts/role-catalog/custom`, require_admin): `GET` Liste,
+  `PUT /{id}` Upsert (id `^custom_[a-z0-9_]+`), `DELETE /{id}`. `GET
+  /api/hosts/role-catalog` mischt aktivierte Custom-Rollen unter die Built-ins.
+- **Modus**: `all` → alle Ports `required_ports`; `any` → `any_ports` mit
+  `min_any`. id-Kollision mit Built-in ⇒ Built-in gewinnt (Detektor skippt).
+
+---
+
 `master-uplink` taggt mit `tap_id` und upsertet nach `tap_host_profiles`
 (Migration 028, PK `(tap_id, host_ip)`). Der Detektor liest dort Einträge mit
 recent `updated_at` (`db.tap_profiles`) und merged sie in seine Flow-Aggregation

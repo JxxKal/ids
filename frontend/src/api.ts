@@ -1,4 +1,4 @@
-import type { Alert, Host, HostRoleAction, KnownNetwork, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, RoleCatalogEntry, RuleListResponse, RuleSource, SamlConfig, SystemUpdateStatus, TestRun, ThreatLevel, UpdateStatus, User } from './types';
+import type { Alert, CustomRoleDef, Host, HostRoleAction, KnownNetwork, MLConfig, MLStatus, RemoteTap, RemoteTapPairingToken, RoleCatalogEntry, RuleListResponse, RuleSource, SamlConfig, SystemUpdateStatus, TestRun, ThreatLevel, UpdateStatus, User } from './types';
 import * as demo from './demo/api';
 import { isDemoMode } from './demo/mode';
 
@@ -275,6 +275,27 @@ export async function updateHostRoles(
     method: 'PUT',
     body:   JSON.stringify({ role_id, action }),
   });
+}
+
+// ── Custom-Rollen (benutzerdefinierter Katalog) ─────────────────────────────
+export async function fetchCustomRoles(): Promise<CustomRoleDef[]> {
+  if (isDemoMode()) return [];
+  return req<CustomRoleDef[]>('/api/hosts/role-catalog/custom');
+}
+
+export type CustomRoleUpsert = Omit<CustomRoleDef, 'id'>;
+
+export async function upsertCustomRole(id: string, body: CustomRoleUpsert): Promise<CustomRoleDef> {
+  if (isDemoMode()) return Promise.reject(new Error('Demo mode'));
+  return req<CustomRoleDef>(`/api/hosts/role-catalog/custom/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body:   JSON.stringify(body),
+  });
+}
+
+export async function deleteCustomRole(id: string): Promise<void> {
+  if (isDemoMode()) return;
+  await req(`/api/hosts/role-catalog/custom/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export async function importHostsCsv(file: File): Promise<{ imported: number; skipped: number; errors: string[] }> {

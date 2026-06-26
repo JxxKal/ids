@@ -117,6 +117,27 @@
       "manual": "Manuell gesetzt (gesperrt)",
       "evidence": "Belege: {{evidence}}",
       "since": "Erstmals erkannt: {{since}}"
+    },
+    "custom": {
+      "title": "Custom-Rollen",
+      "hint": "Eigene Rollen über Ports/Port-Ranges definieren – der Detektor erkennt sie automatisch an allen passenden Hosts (wie Built-in-Rollen).",
+      "label": "Name",
+      "labelPlaceholder": "z.B. Drucker-Pool",
+      "proto": "Protokoll",
+      "ports": "Ports / Ranges (z.B. 2010, 9100-9110)",
+      "mode": "Treffer",
+      "modeAll": "alle Ports erforderlich",
+      "modeAny": "mindestens N Ports",
+      "modeAllShort": "alle",
+      "modeAnyShort": "≥1",
+      "minAny": "Mind. Anzahl",
+      "confidence": "Konfidenz (0–1)",
+      "enabled": "Aktiv (Auto-Erkennung)",
+      "add": "Rolle anlegen",
+      "errLabel": "Name darf nicht leer sein.",
+      "errPort": "Ungültiger Port/Range: {{tok}}",
+      "errNoPort": "Mindestens einen Port oder Range angeben.",
+      "confirmDelete": "Custom-Rolle \"{{label}}\" wirklich löschen?"
     }
   },
   "networks": {

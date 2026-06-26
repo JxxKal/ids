@@ -13,6 +13,7 @@ import {
 } from '../api';
 import type { Host, HostRoleAction, RoleCatalogEntry } from '../types';
 import { showHostConnections } from './HostConnectionDrawer';
+import { CustomRolesPanel } from './CustomRolesPanel';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TrustBadge } from './TrustBadge';
 import { RoleBadge } from './RoleBadge';
@@ -55,7 +56,8 @@ export function HostsPage() {
   };
 
   useEffect(() => { load(); }, [filter, search]);
-  useEffect(() => { fetchRoleCatalog().then(setCatalog).catch(() => {}); }, []);
+  const reloadCatalog = () => { fetchRoleCatalog().then(setCatalog).catch(() => {}); };
+  useEffect(() => { reloadCatalog(); }, []);
 
   // Rollen-Filter clientseitig — die /api/hosts?role=-Variante wäre ein
   // Round-Trip pro Wechsel; bei der überschaubaren Inventar-Größe reicht das.
@@ -226,6 +228,8 @@ export function HostsPage() {
         )}
         <span className="text-xs text-slate-500 ml-auto">{t('hosts.count', { count: visibleHosts.length })}</span>
       </div>
+
+      <CustomRolesPanel onCatalogChange={reloadCatalog} />
 
       {/* Mobile: Card-Stack */}
       <div className="md:hidden flex flex-col gap-2">

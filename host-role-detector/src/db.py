@@ -169,6 +169,34 @@ class Db:
                 entry["first_seen"] = fs
         return out
 
+    async def load_custom_roles(self) -> list[dict]:
+        """Aktivierte benutzerdefinierte Rollen (host_role_custom). Liefert
+        dicts im selben Schema wie ein YAML-Katalog-Eintrag, damit
+        catalog.parse_role() sie direkt in RoleDef wandelt. `match` kommt dank
+        jsonb-Codec bereits als dict. failsoft, wenn die Tabelle noch fehlt."""
+        assert self._pool is not None
+        try:
+            rows = await self._pool.fetch(
+                """
+                SELECT id, label, category, match, min_flows_per_port, base_confidence
+                  FROM host_role_custom
+                 WHERE enabled = true
+                """,
+            )
+        except asyncpg.UndefinedTableError:
+            return []   # Migration 029 noch nicht eingespielt.
+        out: list[dict] = []
+        for r in rows:
+            out.append({
+                "id":       r["id"],
+                "label":    r["label"],
+                "category": r["category"],
+                "match":    r["match"] if isinstance(r["match"], dict) else {},
+                "min_flows_per_port": int(r["min_flows_per_port"] or 1),
+                "base_confidence":    float(r["base_confidence"] or 0.0),
+            })
+        return out
+
     # ── Schreiber: host_info.detected_roles ───────────────────────────────
 
     async def get_detected_roles(self, host_ip: str) -> dict | None:

@@ -81,6 +81,27 @@ export interface RoleCatalogEntry {
 
 export type HostRoleAction = 'set' | 'reset' | 'remove' | 'suppress';
 
+// Benutzerdefinierte Rolle (über Ports/Port-Ranges definiert, vom Detektor
+// auto-gematcht wie die Built-in-Rollen).
+export interface CustomRolePort {
+  port?:      number | null;
+  port_from?: number | null;
+  port_to?:   number | null;
+  proto:      'TCP' | 'UDP' | 'ANY';
+}
+
+export interface CustomRoleDef {
+  id:                 string;
+  label:              string;
+  category:           string;
+  ports:              CustomRolePort[];
+  mode:               'all' | 'any';
+  min_any:            number;
+  base_confidence:    number;
+  min_flows_per_port: number;
+  enabled:            boolean;
+}
+
 export interface Host {
   ip: string;
   hostname?: string;

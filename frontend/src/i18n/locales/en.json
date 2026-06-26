@@ -117,6 +117,27 @@
       "manual": "Set manually (locked)",
       "evidence": "Evidence: {{evidence}}",
       "since": "First detected: {{since}}"
+    },
+    "custom": {
+      "title": "Custom roles",
+      "hint": "Define your own roles via ports/port ranges – the detector auto-attaches them to all matching hosts (like built-in roles).",
+      "label": "Name",
+      "labelPlaceholder": "e.g. Printer pool",
+      "proto": "Protocol",
+      "ports": "Ports / ranges (e.g. 2010, 9100-9110)",
+      "mode": "Match",
+      "modeAll": "all ports required",
+      "modeAny": "at least N ports",
+      "modeAllShort": "all",
+      "modeAnyShort": "≥1",
+      "minAny": "Min. count",
+      "confidence": "Confidence (0–1)",
+      "enabled": "Enabled (auto-detection)",
+      "add": "Create role",
+      "errLabel": "Name must not be empty.",
+      "errPort": "Invalid port/range: {{tok}}",
+      "errNoPort": "Specify at least one port or range.",
+      "confirmDelete": "Really delete custom role \"{{label}}\"?"
     }
   },
   "networks": {

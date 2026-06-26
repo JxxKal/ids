@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from aggregator import build_profiles
-from catalog import load_catalog
+from catalog import load_catalog, parse_role
 from config import Config
 from db import Db
 from matcher import build_detected_roles
@@ -51,6 +51,29 @@ async def _run_cycle(cfg: Config, db: Db) -> None:
     damit ein einzelner Fehler nicht den ganzen Cycle abbricht.
     """
     catalog = load_catalog(cfg.catalog_dir)
+
+    # Benutzerdefinierte Rollen (DB, host_role_custom) anhängen — gleiche
+    # Auswertung wie Built-ins. Bei id-Kollision gewinnt die Built-in-Rolle.
+    try:
+        custom = await db.load_custom_roles()
+    except Exception as exc:
+        log.warning("Custom-Rollen laden fehlgeschlagen: %s", exc)
+        custom = []
+    if custom:
+        builtin_ids = {r.id for r in catalog}
+        added = 0
+        for raw in custom:
+            rd = parse_role(raw)
+            if rd is None:
+                continue
+            if rd.id in builtin_ids:
+                log.warning("Custom-Rolle %s kollidiert mit Built-in-id — übersprungen", rd.id)
+                continue
+            catalog.append(rd)
+            added += 1
+        if added:
+            log.info("Custom-Rollen aktiv: %d", added)
+
     if not catalog:
         log.warning("Leerer Katalog — Cycle übersprungen")
         return

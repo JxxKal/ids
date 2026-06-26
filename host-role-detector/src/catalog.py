@@ -28,6 +28,10 @@ _VALID_PROTO = {"TCP", "UDP", "ANY"}
 class PortSpec:
     port: int
     proto: str  # TCP | UDP | ANY
+    # Optionale Range-Obergrenze. None = Einzelport. port_to gesetzt ⇒ die Spec
+    # matcht jeden servierten Port in [port, port_to] (für Custom-Rollen mit
+    # Port-Ranges, z.B. 9100-9110). Built-in-YAMLs nutzen nur Einzelports.
+    port_to: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -54,13 +58,28 @@ class RoleDef:
 
 
 def _parse_port(raw: dict) -> Optional[PortSpec]:
-    try:
-        port = int(raw["port"])
-        proto = str(raw.get("proto", "ANY")).upper()
-    except (KeyError, TypeError, ValueError):
+    if not isinstance(raw, dict):
         return None
+    proto = str(raw.get("proto", "ANY")).upper()
     if proto not in _VALID_PROTO:
         log.warning("Port-Spec mit ungültigem proto=%s ignoriert", proto)
+        return None
+    # Range-Form: {"from": 9100, "to": 9110} (Custom-Rollen). Grenzen werden
+    # normalisiert (from<=to) und geclamped auf gültige Portbereiche.
+    if raw.get("from") is not None and raw.get("to") is not None:
+        try:
+            a, b = int(raw["from"]), int(raw["to"])
+        except (TypeError, ValueError):
+            return None
+        if a > b:
+            a, b = b, a
+        a = max(0, min(65535, a))
+        b = max(0, min(65535, b))
+        return PortSpec(port=a, proto=proto, port_to=b)
+    # Einzelport-Form: {"port": 80}
+    try:
+        port = int(raw["port"])
+    except (KeyError, TypeError, ValueError):
         return None
     return PortSpec(port=port, proto=proto)
 
@@ -126,6 +145,14 @@ def _parse_role(raw: dict) -> Optional[RoleDef]:
         long_lived_bonus=float(bonus.get("long_lived", 0.0) or 0.0),
         mac_oui=mac_oui,
     )
+
+
+def parse_role(raw: dict) -> Optional[RoleDef]:
+    """Öffentlicher Wrapper um _parse_role — für Custom-Rollen aus der DB, die
+    dasselbe Schema wie die YAML-Einträge tragen (id, label, category, match,
+    base_confidence, min_flows_per_port). Port-Ranges via {from,to} werden
+    unterstützt."""
+    return _parse_role(raw)
 
 
 def _norm_oui(raw: str) -> str:

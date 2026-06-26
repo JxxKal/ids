@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Annotated
@@ -31,7 +32,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from config import Config
 from database import get_pool
 from deps import require_admin
-from models import HostCreate, HostResponse, HostRoleUpdate, HostUpdate
+from models import (
+    HostCreate, HostResponse, HostRoleUpdate, HostUpdate,
+    CustomRolePort, CustomRoleUpsert, CustomRoleResponse,
+)
 from role_catalog import load_catalog
 
 log = logging.getLogger(__name__)
@@ -142,12 +146,132 @@ async def list_unknown_hosts(
     ]
 
 
+_CUSTOM_ID_RE = re.compile(r"^custom_[a-z0-9_]{1,40}$")
+
+
+def _ports_to_specs(ports: list[CustomRolePort]) -> list[dict]:
+    """CustomRolePort[] → match-Port-Specs (Einzelport oder {from,to}-Range)."""
+    specs: list[dict] = []
+    for p in ports:
+        if p.port_from is not None and p.port_to is not None:
+            a, b = p.port_from, p.port_to
+            specs.append({"from": min(a, b), "to": max(a, b), "proto": p.proto})
+        elif p.port is not None:
+            specs.append({"port": p.port, "proto": p.proto})
+    return specs
+
+
+def _build_match(body: CustomRoleUpsert) -> dict:
+    specs = _ports_to_specs(body.ports)
+    if not specs:
+        raise HTTPException(422, "Mindestens ein gültiger Port oder Range nötig")
+    if body.mode == "all":
+        return {"required_ports": specs, "any_ports": {"min_any": 0, "ports": []}}
+    return {"required_ports": [], "any_ports": {"min_any": body.min_any, "ports": specs}}
+
+
+def _match_to_view(match: dict):
+    """match-Block → (mode, min_any, ports[]) für den Editor."""
+    req = match.get("required_ports") or []
+    anyb = match.get("any_ports") or {}
+    anyp = anyb.get("ports") or []
+    if anyp and not req:
+        mode, specs, min_any = "any", anyp, int(anyb.get("min_any", 1) or 1)
+    else:
+        mode, specs, min_any = "all", req, 1
+    ports: list[CustomRolePort] = []
+    for s in specs:
+        if s.get("from") is not None and s.get("to") is not None:
+            ports.append(CustomRolePort(port_from=s["from"], port_to=s["to"],
+                                        proto=s.get("proto", "TCP")))
+        elif s.get("port") is not None:
+            ports.append(CustomRolePort(port=s["port"], proto=s.get("proto", "TCP")))
+    return mode, min_any, ports
+
+
 @router.get("/role-catalog", summary="Verfügbare Host-Rollen (id/label/category)")
-async def get_role_catalog() -> list[dict]:
+async def get_role_catalog(pool: asyncpg.Pool = Depends(get_pool)) -> list[dict]:
     """Liefert den Rollen-Katalog für die GUI (Rollen-Filter + manuelle
-    Zuweisung). Quelle: Katalog-YAMLs im signature-engine, gemountet im
-    api-Container (siehe role_catalog.py)."""
-    return load_catalog()
+    Zuweisung). Quelle: Built-in-Katalog-YAMLs (role_catalog.py) + aktivierte
+    Custom-Rollen aus host_role_custom."""
+    cat = load_catalog()
+    try:
+        rows = await pool.fetch(
+            "SELECT id, label, category FROM host_role_custom WHERE enabled = true ORDER BY label"
+        )
+        builtin_ids = {c["id"] for c in cat}
+        for r in rows:
+            if r["id"] not in builtin_ids:
+                cat.append({"id": r["id"], "label": r["label"], "category": r["category"]})
+    except asyncpg.UndefinedTableError:
+        pass   # Migration 029 noch nicht eingespielt.
+    except Exception as exc:
+        log.warning("Custom-Rollen für Katalog laden fehlgeschlagen: %s", exc)
+    return cat
+
+
+@router.get("/role-catalog/custom", response_model=list[CustomRoleResponse],
+            summary="Custom-Rollen (volle Definition, Admin)")
+async def list_custom_roles(
+    user: dict = Depends(require_admin), pool: asyncpg.Pool = Depends(get_pool),
+) -> list[CustomRoleResponse]:
+    rows = await pool.fetch(
+        """SELECT id, label, category, match, min_flows_per_port, base_confidence, enabled
+             FROM host_role_custom ORDER BY label"""
+    )
+    out: list[CustomRoleResponse] = []
+    for r in rows:
+        m = r["match"] if isinstance(r["match"], dict) else {}
+        mode, min_any, ports = _match_to_view(m)
+        out.append(CustomRoleResponse(
+            id=r["id"], label=r["label"], category=r["category"], ports=ports,
+            mode=mode, min_any=min_any, base_confidence=float(r["base_confidence"]),
+            min_flows_per_port=int(r["min_flows_per_port"]), enabled=r["enabled"],
+        ))
+    return out
+
+
+@router.put("/role-catalog/custom/{role_id}", response_model=CustomRoleResponse,
+            summary="Custom-Rolle anlegen/ändern (Admin)")
+async def upsert_custom_role(
+    role_id: str, body: CustomRoleUpsert,
+    user: dict = Depends(require_admin), pool: asyncpg.Pool = Depends(get_pool),
+) -> CustomRoleResponse:
+    if not _CUSTOM_ID_RE.match(role_id):
+        raise HTTPException(422, "id muss dem Muster custom_[a-z0-9_] entsprechen")
+    match = _build_match(body)
+    # match als dict direkt — die api-Pool hat einen jsonb-Codec registriert.
+    await pool.execute(
+        """
+        INSERT INTO host_role_custom
+            (id, label, category, match, min_flows_per_port, base_confidence,
+             enabled, created_by, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+        ON CONFLICT (id) DO UPDATE
+          SET label=EXCLUDED.label, category=EXCLUDED.category, match=EXCLUDED.match,
+              min_flows_per_port=EXCLUDED.min_flows_per_port,
+              base_confidence=EXCLUDED.base_confidence, enabled=EXCLUDED.enabled,
+              updated_at=now()
+        """,
+        role_id, body.label, body.category, match, body.min_flows_per_port,
+        body.base_confidence, body.enabled,
+        user.get("username") or user.get("sub") or "admin",
+    )
+    return CustomRoleResponse(
+        id=role_id, label=body.label, category=body.category, ports=body.ports,
+        mode=body.mode, min_any=body.min_any, base_confidence=body.base_confidence,
+        min_flows_per_port=body.min_flows_per_port, enabled=body.enabled,
+    )
+
+
+@router.delete("/role-catalog/custom/{role_id}", status_code=204, response_model=None,
+               summary="Custom-Rolle löschen (Admin)")
+async def delete_custom_role(
+    role_id: str, user: dict = Depends(require_admin), pool: asyncpg.Pool = Depends(get_pool),
+) -> None:
+    res = await pool.execute("DELETE FROM host_role_custom WHERE id=$1", role_id)
+    if res.endswith(" 0"):
+        raise HTTPException(404, "Custom-Rolle nicht gefunden")
 
 
 @router.get("", response_model=list[HostResponse])
