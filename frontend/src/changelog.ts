@@ -16,6 +16,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.58',
+    date: '2026-06-26',
+    title: 'Fix: Tap-Update scheiterte am Kafka-Image-Tag',
+    notes: [
+      'Behebt einen Fehler beim Tap-Update vom Master: das vom Master neu gebaute Tap-Bundle lieferte das Kafka-Image unter „latest", während das Tap-Compose seit der Image-Pinning-Änderung eine feste Version verlangt — der Tap versuchte dann (offline erfolglos) nachzuladen. Das Bundle trägt jetzt immer den Tag, den das Tap-Compose erwartet.',
+    ],
+  },
+  {
     version: 'v2.5.57',
     date: '2026-06-26',
     title: 'Eigene Host-Rollen (Custom-Rollen)',

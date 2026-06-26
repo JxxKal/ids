@@ -79,10 +79,27 @@ if [ "$need_tap_images" -eq 1 ]; then
     docker compose -f docker-compose.tap.yml build tap-uplink tap-api
 fi
 
+# Kafka-Image-Tag aus dem Tap-Compose ableiten, NICHT hardcoden. Seit v2.5.48
+# pinnt docker-compose.tap.yml apache/kafka auf eine feste Version; ein
+# hardgecodetes apache/kafka:latest im Bundle ließ den Tap offline am Pull
+# scheitern ("failed to resolve apache/kafka:4.2.0"), weil compose den
+# gepinnten Tag verlangt, das Bundle aber nur :latest mitbrachte.
+KAFKA_IMG=$(grep -oE 'apache/kafka:[A-Za-z0-9._-]+' docker-compose.tap.yml | head -1)
+[ -z "$KAFKA_IMG" ] && KAFKA_IMG="apache/kafka:latest"
+# Falls am Master nur apache/kafka:latest vorliegt (älterer Stand), unter dem
+# gepinnten Tag aliasen — so trägt das Bundle garantiert den Tag, den der
+# Tap-Compose erwartet.
+if ! docker image inspect "$KAFKA_IMG" >/dev/null 2>&1 \
+     && docker image inspect apache/kafka:latest >/dev/null 2>&1; then
+  echo "  apache/kafka:latest → $KAFKA_IMG aliasen (gepinnter Tag fehlte im Daemon)"
+  docker tag apache/kafka:latest "$KAFKA_IMG"
+fi
+echo "  Kafka-Image fürs Bundle: $KAFKA_IMG"
+
 # --force: überschreibt eine bestehende images-tap.tar.zst stillschweigend.
 docker save \
   ids-sniffer:latest ids-flow-aggregator:latest ids-signature-engine:latest \
-  ids-tap-uplink:latest ids-tap-api:latest apache/kafka:latest \
+  ids-tap-uplink:latest ids-tap-api:latest "$KAFKA_IMG" \
   | zstd -3 -T0 --force -o tap-update/images-tap.tar.zst
 
 SHA=$(sha256sum tap-update/images-tap.tar.zst | cut -d' ' -f1)
