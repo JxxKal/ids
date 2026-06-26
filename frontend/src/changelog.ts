@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.57',
+    date: '2026-06-26',
+    title: 'Eigene Host-Rollen (Custom-Rollen)',
+    notes: [
+      'Unter Hosts → „Custom-Rollen" lassen sich jetzt eigene Rollen anlegen, definiert über Ports und Port-Ranges (z.B. „2010, 9100-9110"). Die Erkennung taggt damit automatisch alle Hosts, die diese Ports bedienen — genau wie die mitgelieferten Rollen.',
+      'Pro Rolle wählbar: Treffer-Modus (alle Ports erforderlich oder mindestens N), Protokoll und Konfidenz. Custom-Rollen erscheinen automatisch im Rollen-Filter, als Badge und sind pro Host manuell überschreib- und unterdrückbar.',
+    ],
+  },
+  {
     version: 'v2.5.56',
     date: '2026-06-24',
     title: 'CLI-Update aktualisiert auch das Tap-Bundle',
