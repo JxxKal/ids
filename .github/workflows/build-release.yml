@@ -271,7 +271,12 @@ jobs:
           log() { echo "$*" | tee -a "$LOG"; }
 
           log "=== Version-Marker schreiben ==="
-          VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
+          VERSION="${GITHUB_REF_NAME}"
+          # Bei workflow_dispatch checkt actions/checkout mit --no-tags --depth=1
+          # aus → git describe findet das Tag nicht. Daher REF_NAME bevorzugen
+          # (ist bei Tag-Dispatch/-Push der Tag-Name), nur sonst auf describe
+          # zurückfallen. Sonst landet "dev" in /etc/cyjan-version + ISO-Namen.
+          [[ "$VERSION" =~ ^v ]] || VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
           BUILD_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           BUILD_COMMIT=$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD 2>/dev/null || echo "?")
           mkdir -p "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc"
@@ -300,7 +305,12 @@ jobs:
             exit 1
           fi
 
-          VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
+          VERSION="${GITHUB_REF_NAME}"
+          # Bei workflow_dispatch checkt actions/checkout mit --no-tags --depth=1
+          # aus → git describe findet das Tag nicht. Daher REF_NAME bevorzugen
+          # (ist bei Tag-Dispatch/-Push der Tag-Name), nur sonst auf describe
+          # zurückfallen. Sonst landet "dev" in /etc/cyjan-version + ISO-Namen.
+          [[ "$VERSION" =~ ^v ]] || VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
           ISO_NAME="cyjan-ids-${VERSION}.iso"
           ISO_LATEST="cyjan-ids-latest.iso"
           cp "$ISO" "${GITHUB_WORKSPACE}/${ISO_NAME}"
@@ -471,7 +481,12 @@ jobs:
           log() { echo "$*" | tee -a "$LOG"; }
 
           log "=== Version-Marker schreiben (Tap-Variante) ==="
-          VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
+          VERSION="${GITHUB_REF_NAME}"
+          # Bei workflow_dispatch checkt actions/checkout mit --no-tags --depth=1
+          # aus → git describe findet das Tag nicht. Daher REF_NAME bevorzugen
+          # (ist bei Tag-Dispatch/-Push der Tag-Name), nur sonst auf describe
+          # zurückfallen. Sonst landet "dev" in /etc/cyjan-version + ISO-Namen.
+          [[ "$VERSION" =~ ^v ]] || VERSION=$(git -C "${GITHUB_WORKSPACE}" describe --tags --always 2>/dev/null || echo "dev")
           BUILD_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           BUILD_COMMIT=$(git -C "${GITHUB_WORKSPACE}" rev-parse HEAD 2>/dev/null || echo "?")
           mkdir -p "${GITHUB_WORKSPACE}/distro/config/includes.chroot/etc"
