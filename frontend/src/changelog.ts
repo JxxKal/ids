@@ -16,6 +16,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.5.59',
+    date: '2026-06-29',
+    title: 'PCAP-Pakete lesbar decodiert',
+    notes: [
+      'In der PCAP-Vorschau zeigt die Detailansicht eines Pakets jetzt einen aufgeschlüsselten Protokoll-Baum (Ethernet, IPv4/IPv6, TCP/UDP/ICMP/ARP — mit benannten Feldern, ausgeschriebenen TCP-Flags und decodierten TCP-Optionen) statt nur einer rohen Hex-Zeile.',
+      'Dazu ein klassischer Hex+ASCII-Dump mit Byte-Offset und — soweit im Mitschnitt sichtbar — App-Layer-Hinweise (HTTP-Request, TLS-SNI, DNS-Name, Modbus-Funktionscode, S7comm). Alles rein im Browser, ohne Server-Last.',
+    ],
+  },
+  {
     version: 'v2.5.58',
     date: '2026-06-26',
     title: 'Fix: Tap-Update scheiterte am Kafka-Image-Tag',
