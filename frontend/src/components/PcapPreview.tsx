@@ -21,6 +21,7 @@ interface PcapPacket {
   icmpCode: number | null;
   info: string;
   raw: Uint8Array;
+  linkType: number;   // pcap link-layer type (1=Ethernet, …) — für den Layer-Decoder
 }
 
 // ─── PCAP Parser ──────────────────────────────────────────────────────────────
@@ -54,7 +55,7 @@ const ICMP4: Record<number,string> = { 0:'Echo Reply', 3:'Dest Unreachable', 5:'
 const ICMP6: Record<number,string> = { 1:'Dest Unreachable', 2:'Packet Too Big', 3:'TTL Exceeded', 128:'Echo Request', 129:'Echo Reply', 133:'Router Solicitation', 134:'Router Advertisement', 135:'Neighbor Solicitation', 136:'Neighbor Advertisement' };
 
 function mkBase(num: number, tsSec: number, tsUsec: number, capLen: number, origLen: number, raw: Uint8Array): PcapPacket {
-  return { num, tsSec, tsUsec, capLen, origLen, raw, proto:'?', srcIp:'', dstIp:'', srcPort:null, dstPort:null, tcpFlags:0, icmpType:null, icmpCode:null, info:'' };
+  return { num, tsSec, tsUsec, capLen, origLen, raw, proto:'?', srcIp:'', dstIp:'', srcPort:null, dstPort:null, tcpFlags:0, icmpType:null, icmpCode:null, info:'', linkType:1 };
 }
 
 function parseTcp(raw: Uint8Array, o: number, si: string, di: string, b: PcapPacket): PcapPacket {
@@ -114,7 +115,7 @@ function parseIpv6(raw: Uint8Array, o: number, b: PcapPacket): PcapPacket {
 }
 
 function parseOnePacket(raw: Uint8Array, num: number, tsSec: number, tsUsec: number, capLen: number, origLen: number, linkType: number): PcapPacket {
-  const b = mkBase(num, tsSec, tsUsec, capLen, origLen, raw);
+  const b = { ...mkBase(num, tsSec, tsUsec, capLen, origLen, raw), linkType };
   let ethOff=0, et=0;
   if (linkType===1) {
     if (raw.length<14) return {...b, info:'<short frame>'};
@@ -293,8 +294,295 @@ function deltaTs(p: PcapPacket, base: PcapPacket): string {
   return ((p.tsSec-base.tsSec)+(p.tsUsec-base.tsUsec)/1_000_000).toFixed(6);
 }
 
-function hexLine(arr: Uint8Array, maxBytes=128): string {
-  return Array.from(arr.slice(0,maxBytes)).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+// ─── Layer-Decoder (Wireshark-artiger Protokoll-Baum für die Detail-Ansicht) ───
+// Rein im Frontend — nutzt dieselben Offsets wie der Summary-Parser, gibt aber
+// strukturierte Header-Felder pro Layer heraus. Alle Reads bounds-gecheckt
+// (Snaplen 128 → höhere Layer können abgeschnitten sein).
+
+interface DecField { name: string; value: string; }
+interface DecLayer { name: string; fields: DecField[] }
+
+function macStr(a: Uint8Array, o: number): string {
+  if (o+6 > a.length) return '–';
+  return Array.from(a.slice(o,o+6)).map(b=>b.toString(16).padStart(2,'0')).join(':');
+}
+
+const ETHERTYPES: Record<number,string> = { 0x0800:'IPv4', 0x86DD:'IPv6', 0x0806:'ARP', 0x8100:'802.1Q VLAN', 0x88CC:'LLDP' };
+const IP_PROTOS: Record<number,string>  = { 1:'ICMP', 2:'IGMP', 6:'TCP', 17:'UDP', 41:'IPv6', 47:'GRE', 50:'ESP', 51:'AH', 58:'ICMPv6', 89:'OSPF', 103:'PIM', 112:'VRRP', 132:'SCTP' };
+const ICMP4_CODES: Record<number,Record<number,string>> = {
+  3: {0:'Net Unreachable',1:'Host Unreachable',2:'Protocol Unreachable',3:'Port Unreachable',4:'Frag Needed (DF)',13:'Communication Administratively Prohibited'},
+  5: {0:'Redirect Network',1:'Redirect Host'},
+  11:{0:'TTL Exceeded in Transit',1:'Frag Reassembly Time Exceeded'},
+};
+
+function tcpOptions(raw: Uint8Array, o: number, end: number): string {
+  const parts: string[] = [];
+  let i = o;
+  while (i < end && i < raw.length) {
+    const kind = raw[i];
+    if (kind === 0) { parts.push('EOL'); break; }
+    if (kind === 1) { parts.push('NOP'); i++; continue; }
+    const len = raw[i+1];
+    if (!len || i+len > raw.length) break;
+    if (kind === 2 && len === 4)      parts.push(`MSS=${r16be(raw,i+2)}`);
+    else if (kind === 3 && len === 3) parts.push(`WScale=${raw[i+2]}`);
+    else if (kind === 4)              parts.push('SACK-Perm');
+    else if (kind === 5)              parts.push('SACK');
+    else if (kind === 8 && len === 10) parts.push(`TSval=${r32be(raw,i+2)} TSecr=${r32be(raw,i+6)}`);
+    else parts.push(`opt${kind}`);
+    i += len;
+  }
+  return parts.join(', ');
+}
+
+function appHint(raw: Uint8Array, o: number, proto: string, sp: number|null, dp: number|null): DecLayer | null {
+  if (o >= raw.length) return null;
+  const port = (p: number) => sp === p || dp === p;
+  const ascii = (s: number, e: number) => Array.from(raw.slice(s, Math.min(e, raw.length))).map(b => (b>=32&&b<127)?String.fromCharCode(b):'.').join('');
+
+  // HTTP: Request-Line / Status-Line + Host-Header (heuristisch über die
+  // Payload, port-agnostisch; TLS wird danach separat erkannt).
+  if (proto === 'TCP') {
+    const head = ascii(o, o+8);
+    if (/^(GET|POST|PUT|HEAD|DELETE|PATCH|OPTIONS|HTTP\/)/.test(head)) {
+      const text = ascii(o, raw.length);
+      const line = text.split('\r\n')[0] || text.split('\n')[0] || '';
+      const host = (text.match(/\r?\nHost:\s*([^\r\n]+)/i) || [])[1];
+      const f: DecField[] = [{name:'Request', value: line.slice(0,80)}];
+      if (host) f.push({name:'Host', value: host.slice(0,60)});
+      return {name:'HTTP', fields:f};
+    }
+  }
+  // TLS ClientHello → SNI
+  if (proto === 'TCP' && port(443) && raw[o]===0x16 && raw[o+1]===0x03 && raw[o+5]===0x01) {
+    const sni = tlsSni(raw, o);
+    return {name:'TLS', fields:[{name:'Record', value:'Handshake · ClientHello'}, ...(sni?[{name:'SNI', value:sni}]:[])]};
+  }
+  // DNS (UDP/53): ID, QR, erste Query
+  if ((proto==='UDP'||proto==='TCP') && port(53) && o+12 <= raw.length) {
+    const base = proto==='TCP' ? o+2 : o;   // TCP-DNS hat 2 Byte Length-Präfix
+    if (base+12 <= raw.length) {
+      const flags = r16be(raw, base+2);
+      const qr = (flags>>15)&1;
+      const qname = dnsName(raw, base+12);
+      return {name:'DNS', fields:[
+        {name:'ID', value:'0x'+r16be(raw,base).toString(16).padStart(4,'0')},
+        {name:'Type', value: qr?'Response':'Query'},
+        ...(qname?[{name:'Name', value:qname}]:[]),
+      ]};
+    }
+  }
+  // Modbus/TCP (502): MBAP + Function Code
+  if (proto==='TCP' && port(502) && o+8 <= raw.length) {
+    const fn = raw[o+7];
+    return {name:'Modbus/TCP', fields:[
+      {name:'Transaction', value:String(r16be(raw,o))},
+      {name:'Unit ID', value:String(raw[o+6])},
+      {name:'Function', value:`${fn} (0x${fn.toString(16)})`},
+    ]};
+  }
+  // S7comm (102): TPKT/COTP → S7 ROSCTR
+  if (proto==='TCP' && port(102) && o+8 <= raw.length && raw[o]===0x03) {
+    const cotpLen = raw[o+4];
+    const s7 = o+5+cotpLen;
+    const f: DecField[] = [{name:'TPKT', value:`v${raw[o]} len=${r16be(raw,o+2)}`}];
+    if (s7+2 <= raw.length && raw[s7]===0x32) {
+      const ros = raw[s7+1];
+      const ROS: Record<number,string> = {1:'Job Request',2:'Ack',3:'Ack-Data',7:'Userdata'};
+      f.push({name:'S7 ROSCTR', value: ROS[ros] ?? String(ros)});
+    }
+    return {name:'S7comm', fields:f};
+  }
+  return null;
+}
+
+function tlsSni(raw: Uint8Array, o: number): string | null {
+  // TLS record(5) + handshake(4) + version(2) + random(32) → session/cipher/ext.
+  try {
+    let p = o + 5 + 4 + 2 + 32;
+    if (p >= raw.length) return null;
+    p += 1 + raw[p];                                   // session id
+    if (p+2 > raw.length) return null;
+    p += 2 + r16be(raw, p);                            // cipher suites
+    if (p+1 > raw.length) return null;
+    p += 1 + raw[p];                                   // compression
+    if (p+2 > raw.length) return null;
+    let extEnd = p + 2 + r16be(raw, p); p += 2;        // extensions block
+    extEnd = Math.min(extEnd, raw.length);
+    while (p + 4 <= extEnd) {
+      const type = r16be(raw, p), len = r16be(raw, p+2); p += 4;
+      if (type === 0) {                                // server_name
+        // server_name_list(2) + type(1) + name_len(2) + name
+        const nameLen = r16be(raw, p+3);
+        const s = p+5;
+        if (s+nameLen <= raw.length) return Array.from(raw.slice(s, s+nameLen)).map(b=>String.fromCharCode(b)).join('');
+        return null;
+      }
+      p += len;
+    }
+  } catch { /* truncated */ }
+  return null;
+}
+
+function dnsName(raw: Uint8Array, o: number): string {
+  const labels: string[] = [];
+  let p = o, guard = 0;
+  while (p < raw.length && guard++ < 20) {
+    const len = raw[p];
+    if (len === 0) break;
+    if ((len & 0xc0) === 0xc0) break;                  // Pointer — Snaplen-Kontext, abbrechen
+    if (p+1+len > raw.length) break;
+    labels.push(Array.from(raw.slice(p+1, p+1+len)).map(b=>String.fromCharCode(b)).join(''));
+    p += 1 + len;
+  }
+  return labels.join('.');
+}
+
+function decodeLayers(raw: Uint8Array, linkType: number): DecLayer[] {
+  const layers: DecLayer[] = [];
+  let et = 0, off = 0;
+
+  if (linkType === 1) {
+    if (raw.length < 14) return layers;
+    et = r16be(raw, 12); off = 14;
+    const f: DecField[] = [
+      {name:'Destination', value: macStr(raw,0)},
+      {name:'Source', value: macStr(raw,6)},
+    ];
+    if (et === 0x8100 && raw.length >= 18) {
+      f.push({name:'VLAN', value:String(r16be(raw,14) & 0x0fff)});
+      et = r16be(raw,16); off = 18;
+    }
+    f.push({name:'EtherType', value:`${ETHERTYPES[et] ?? '?'} (0x${et.toString(16).padStart(4,'0')})`});
+    layers.push({name:'Ethernet II', fields:f});
+  } else if (linkType === 113) {
+    if (raw.length < 16) return layers;
+    et = r16be(raw,14); off = 16;
+    layers.push({name:'Linux SLL', fields:[{name:'EtherType', value:`${ETHERTYPES[et] ?? '?'} (0x${et.toString(16).padStart(4,'0')})`}]});
+  } else if (linkType === 228) { et = 0x0800; }
+  else if (linkType === 229)   { et = 0x86DD; }
+  else { layers.push({name:`LinkType ${linkType}`, fields:[]}); return layers; }
+
+  if (et === 0x0806) { decodeArp(raw, off, layers); return layers; }
+  if (et === 0x0800) decodeIpv4(raw, off, layers);
+  else if (et === 0x86DD) decodeIpv6(raw, off, layers);
+  return layers;
+}
+
+function decodeArp(raw: Uint8Array, o: number, layers: DecLayer[]) {
+  if (o+28 > raw.length) { layers.push({name:'ARP', fields:[{name:'(truncated)', value:''}]}); return; }
+  const op = r16be(raw,o+6);
+  layers.push({name:'ARP', fields:[
+    {name:'Operation', value: op===1?'Request (1)': op===2?'Reply (2)':String(op)},
+    {name:'Sender MAC', value: macStr(raw,o+8)},
+    {name:'Sender IP', value: ipv4Str(raw,o+14)},
+    {name:'Target MAC', value: macStr(raw,o+18)},
+    {name:'Target IP', value: ipv4Str(raw,o+24)},
+  ]});
+}
+
+function decodeIpv4(raw: Uint8Array, o: number, layers: DecLayer[]) {
+  if (o+20 > raw.length) { layers.push({name:'IPv4', fields:[{name:'(truncated)', value:''}]}); return; }
+  const ihl = (raw[o]&0x0f)*4, proto = raw[o+9], flags = raw[o+6]>>5, frag = r16be(raw,o+6)&0x1fff;
+  layers.push({name:'IPv4', fields:[
+    {name:'Version', value:String(raw[o]>>4)},
+    {name:'Header Length', value:`${ihl} B`},
+    {name:'DSCP/ECN', value:`0x${raw[o+1].toString(16).padStart(2,'0')}`},
+    {name:'Total Length', value:String(r16be(raw,o+2))},
+    {name:'Identification', value:'0x'+r16be(raw,o+4).toString(16).padStart(4,'0')},
+    {name:'Flags', value:`${flags&2?'DF ':''}${flags&1?'MF':''}`.trim() || '–'},
+    {name:'Fragment Offset', value:String(frag)},
+    {name:'TTL', value:String(raw[o+8])},
+    {name:'Protocol', value:`${IP_PROTOS[proto] ?? '?'} (${proto})`},
+    {name:'Checksum', value:'0x'+r16be(raw,o+10).toString(16).padStart(4,'0')},
+    {name:'Source', value: ipv4Str(raw,o+12)},
+    {name:'Destination', value: ipv4Str(raw,o+16)},
+  ]});
+  const l4 = o+ihl;
+  if (proto===6)  decodeTcp(raw,l4,layers);
+  else if (proto===17) decodeUdp(raw,l4,layers);
+  else if (proto===1)  decodeIcmp4(raw,l4,layers);
+}
+
+function decodeIpv6(raw: Uint8Array, o: number, layers: DecLayer[]) {
+  if (o+40 > raw.length) { layers.push({name:'IPv6', fields:[{name:'(truncated)', value:''}]}); return; }
+  const next = raw[o+6];
+  layers.push({name:'IPv6', fields:[
+    {name:'Version', value:String(raw[o]>>4)},
+    {name:'Payload Length', value:String(r16be(raw,o+4))},
+    {name:'Next Header', value:`${IP_PROTOS[next] ?? '?'} (${next})`},
+    {name:'Hop Limit', value:String(raw[o+7])},
+    {name:'Source', value: ipv6Str(raw,o+8)},
+    {name:'Destination', value: ipv6Str(raw,o+24)},
+  ]});
+  const l4 = o+40;
+  if (next===6)  decodeTcp(raw,l4,layers);
+  else if (next===17) decodeUdp(raw,l4,layers);
+  else if (next===58) decodeIcmp6(raw,l4,layers);
+}
+
+function decodeTcp(raw: Uint8Array, o: number, layers: DecLayer[]) {
+  if (o+20 > raw.length) { layers.push({name:'TCP', fields:[{name:'(truncated)', value:''}]}); return; }
+  const sp=r16be(raw,o), dp=r16be(raw,o+2), doff=(raw[o+12]>>4)*4, fl=raw[o+13];
+  const opts = doff>20 ? tcpOptions(raw, o+20, o+doff) : '';
+  layers.push({name:'TCP', fields:[
+    {name:'Source Port', value:String(sp)},
+    {name:'Destination Port', value:String(dp)},
+    {name:'Sequence', value:String(r32be(raw,o+4))},
+    {name:'Acknowledgment', value:String(r32be(raw,o+8))},
+    {name:'Header Length', value:`${doff} B`},
+    {name:'Flags', value: tcpFlagsStr(fl)},
+    {name:'Window', value:String(r16be(raw,o+14))},
+    {name:'Checksum', value:'0x'+r16be(raw,o+16).toString(16).padStart(4,'0')},
+    ...(opts?[{name:'Options', value:opts}]:[]),
+  ]});
+  const h = appHint(raw, o+doff, 'TCP', sp, dp); if (h) layers.push(h);
+}
+
+function decodeUdp(raw: Uint8Array, o: number, layers: DecLayer[]) {
+  if (o+8 > raw.length) { layers.push({name:'UDP', fields:[{name:'(truncated)', value:''}]}); return; }
+  const sp=r16be(raw,o), dp=r16be(raw,o+2);
+  layers.push({name:'UDP', fields:[
+    {name:'Source Port', value:String(sp)},
+    {name:'Destination Port', value:String(dp)},
+    {name:'Length', value:String(r16be(raw,o+4))},
+    {name:'Checksum', value:'0x'+r16be(raw,o+6).toString(16).padStart(4,'0')},
+  ]});
+  const h = appHint(raw, o+8, 'UDP', sp, dp); if (h) layers.push(h);
+}
+
+function decodeIcmp4(raw: Uint8Array, o: number, layers: DecLayer[]) {
+  if (o+4 > raw.length) { layers.push({name:'ICMP', fields:[{name:'(truncated)', value:''}]}); return; }
+  const t=raw[o], c=raw[o+1];
+  const codeName = ICMP4_CODES[t]?.[c];
+  layers.push({name:'ICMP', fields:[
+    {name:'Type', value:`${ICMP4[t] ?? '?'} (${t})`},
+    {name:'Code', value: codeName ? `${codeName} (${c})` : String(c)},
+    {name:'Checksum', value:'0x'+r16be(raw,o+2).toString(16).padStart(4,'0')},
+  ]});
+}
+
+function decodeIcmp6(raw: Uint8Array, o: number, layers: DecLayer[]) {
+  if (o+4 > raw.length) { layers.push({name:'ICMPv6', fields:[{name:'(truncated)', value:''}]}); return; }
+  const t=raw[o], c=raw[o+1];
+  layers.push({name:'ICMPv6', fields:[
+    {name:'Type', value:`${ICMP6[t] ?? '?'} (${t})`},
+    {name:'Code', value:String(c)},
+    {name:'Checksum', value:'0x'+r16be(raw,o+2).toString(16).padStart(4,'0')},
+  ]});
+}
+
+// xxd-artiger Hex+ASCII-Dump mit Byte-Offset.
+function hexDumpLines(arr: Uint8Array, maxBytes=128): { off: string; hex: string; ascii: string }[] {
+  const out: { off: string; hex: string; ascii: string }[] = [];
+  const n = Math.min(arr.length, maxBytes);
+  for (let i = 0; i < n; i += 16) {
+    const slice = arr.slice(i, Math.min(i+16, n));
+    const hex = Array.from(slice).map(b=>b.toString(16).padStart(2,'0')).join(' ').padEnd(16*3-1, ' ');
+    const ascii = Array.from(slice).map(b=>(b>=32&&b<127)?String.fromCharCode(b):'.').join('');
+    out.push({ off: i.toString(16).padStart(4,'0'), hex, ascii });
+  }
+  return out;
 }
 
 const PROTO_CLS: Record<string,string> = { TCP:'text-blue-300', UDP:'text-green-300', ICMP:'text-yellow-300', ICMPv6:'text-yellow-400', ARP:'text-purple-300' };
@@ -373,6 +661,9 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
   const botPad   = Math.max(0, (filtered.length - visEnd) * ROW_H);
 
   const selPkt = selected!==null ? filtered.find(p=>p.num===selected)??null : null;
+  // Decodierter Layer-Baum + xxd-Dump für die Detail-Ansicht (memoisiert pro Paket).
+  const decoded = useMemo(() => selPkt ? decodeLayers(selPkt.raw, selPkt.linkType) : [], [selPkt]);
+  const dump    = useMemo(() => selPkt ? hexDumpLines(selPkt.raw) : [], [selPkt]);
 
   const download = useCallback(async()=>{
     if (!rawBuf||dl) return;
@@ -511,23 +802,53 @@ export function PcapPreview({ alertId, filename, onClose }: { alertId:string; fi
                 </table>
               </div>
 
-              {/* Detail panel */}
+              {/* Detail panel — decodierter Protokoll-Baum + xxd-Dump */}
               {selPkt && (
-                <div className="shrink-0 border-t border-slate-700 bg-slate-950/80 px-4 py-3 max-h-40 overflow-y-auto">
-                  <div className="text-xs font-mono space-y-1.5">
+                <div className="shrink-0 border-t border-slate-700 bg-slate-950/80 px-4 py-3 max-h-72 overflow-y-auto">
+                  <div className="text-xs font-mono space-y-2">
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-slate-400">
                       <span>{t('pcap.detail.packet')} <span className="text-slate-200">#{selPkt.num}</span></span>
                       <span>{t('pcap.detail.proto')} <span className={PROTO_CLS[selPkt.proto]??'text-slate-200'}>{selPkt.proto}</span></span>
                       {selPkt.srcIp&&<span>{t('pcap.detail.from')} <span className="text-slate-200">{selPkt.srcIp}{selPkt.srcPort!=null?`:${selPkt.srcPort}`:''}</span></span>}
                       {selPkt.dstIp&&<span>{t('pcap.detail.to')} <span className="text-slate-200">{selPkt.dstIp}{selPkt.dstPort!=null?`:${selPkt.dstPort}`:''}</span></span>}
                       <span>{t('pcap.detail.captured')} <span className="text-slate-200">{selPkt.capLen}</span> / {t('pcap.detail.original')} <span className="text-slate-200">{selPkt.origLen}</span> B</span>
-                      {selPkt.tcpFlags!==0&&<span>{t('pcap.detail.flags')} <span className="text-slate-200">{tcpFlagsStr(selPkt.tcpFlags)}</span></span>}
                     </div>
-                    {selPkt.info&&<div className="text-slate-300">{selPkt.info}</div>}
-                    <div className="text-slate-600 leading-relaxed break-all">
-                      <span className="text-slate-700">{t('pcap.detail.hex')} </span>
-                      <span className="text-slate-500">{hexLine(selPkt.raw)}</span>
-                      {selPkt.raw.length>=128&&<span className="text-slate-700"> {t('pcap.detail.snaplen')}</span>}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-2">
+                      {/* Layer-Baum */}
+                      <div className="space-y-1.5">
+                        {decoded.length === 0 && <div className="text-slate-600">{t('pcap.detail.noDecode')}</div>}
+                        {decoded.map((layer, li) => (
+                          <div key={li}>
+                            <div className="text-cyan-300/90 font-semibold">{layer.name}</div>
+                            <div className="pl-3 border-l border-slate-700/60 mt-0.5 space-y-0.5">
+                              {layer.fields.map((fld, fi) => (
+                                <div key={fi} className="flex gap-2">
+                                  <span className="text-slate-500 shrink-0 min-w-[130px]">{fld.name}</span>
+                                  <span className="text-slate-200 break-all">{fld.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* xxd-Hex+ASCII-Dump */}
+                      <div>
+                        <div className="text-slate-500 mb-0.5">
+                          {t('pcap.detail.hexDump')}
+                          {selPkt.raw.length>=128 && <span className="text-slate-700"> {t('pcap.detail.snaplen')}</span>}
+                        </div>
+                        <div className="leading-tight whitespace-pre text-[11px]">
+                          {dump.map((l, i) => (
+                            <div key={i}>
+                              <span className="text-slate-600">{l.off}</span>{'  '}
+                              <span className="text-slate-400">{l.hex}</span>{'  '}
+                              <span className="text-emerald-300/70">{l.ascii}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>

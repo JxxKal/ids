@@ -250,7 +250,9 @@
       "original": "Original",
       "flags": "Flags",
       "hex": "hex:",
-      "snaplen": "… [snaplen 128B]"
+      "snaplen": "… [snaplen 128B]",
+      "hexDump": "Hex / ASCII:",
+      "noDecode": "Keine decodierten Layer (zu kurz/unbekannt)"
     }
   },
   "connectionGraph": {
