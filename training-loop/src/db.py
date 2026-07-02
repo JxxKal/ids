@@ -25,7 +25,12 @@ class TrainingDB:
     def _connect(self) -> None:
         if self._conn is None or self._conn.closed:
             self._conn = psycopg2.connect(self._dsn)
-            self._conn.autocommit = False
+            # Autocommit ist Pflicht: die Reader (load_samples, count_new_samples,
+            # load_flows_for_bootstrap) committen nie — mit autocommit=False bleibt
+            # die Verbindung dauerhaft "idle in transaction" und hält AccessShare-
+            # Locks auf flows-/alerts-Chunks. Das blockiert drop_chunks der
+            # TimescaleDB-Retention-Policies tagelang (Prod-Vorfall 2026-07-02).
+            self._conn.autocommit = True
 
     def save_sample(self, alert_id: str, label: str, features: dict, source: str = "feedback") -> None:
         """Speichert einen gelabelten Flow in training_samples."""
@@ -41,7 +46,6 @@ class TrainingDB:
                         """,
                         (alert_id, label, json.dumps(features), source),
                     )
-                self._conn.commit()                # type: ignore[union-attr]
                 return
             except Exception as exc:
                 log.error("save_sample attempt %d: %s", attempt + 1, exc)

@@ -1356,6 +1356,7 @@
         "title": "Container status",
         "running": "{{running}}/{{total}} running",
         "missing": "not present",
+        "initDone": "init completed ✓",
         "group": {
           "active": "Active deployment",
           "lab": "Lab / RedTeam"

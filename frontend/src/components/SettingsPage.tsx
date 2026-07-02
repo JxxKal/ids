@@ -6656,7 +6656,9 @@ function ContainerStatusSection() {
                   }`}>
                     {c.state === 'missing'
                       ? t('settings.systemHealth.containers.missing')
-                      : (c.status || c.state)}
+                      : isCleanOneshot(c)
+                        ? t('settings.systemHealth.containers.initDone')
+                        : (c.status || c.state)}
                   </span>
                 </div>
               ))}
