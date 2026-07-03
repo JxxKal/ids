@@ -46,6 +46,51 @@ def _read_runtime_config(models_dir: str) -> dict:
             pass
     return {}
 
+
+def _write_runtime_config(models_dir: str, updates: dict) -> None:
+    """Merged `updates` in ml_config.json und schreibt atomar zurück. Bestehende
+    Keys (z.B. contamination, retrain_interval_s, manuelle Overrides) bleiben
+    erhalten."""
+    import json
+    path = Path(models_dir) / "ml_config.json"
+    cfg = _read_runtime_config(models_dir)
+    cfg.update(updates)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg))
+    tmp.rename(path)
+
+
+def _calibrate_startup(model, cfg) -> None:
+    """Einmalige Threshold-Kalibrierung beim Start.
+
+    Greift für Hosts, die ein Modell haben, aber (noch) keine kalibrierte
+    ml_config.json — genau der Fall nach einer Neuinstallation / frischem
+    Models-Volume, wo sonst der Fallback-Threshold gälte und ML wirkungslos
+    wäre. Respektiert einen manuellen Lock (threshold_source == "manual") und
+    fasst dann nichts an."""
+    rt = _read_runtime_config(cfg.models_dir)
+    if rt.get("threshold_source") == "manual":
+        log.info("Threshold ist manuell gesetzt (%.4f) – keine Auto-Kalibrierung",
+                 rt.get("alert_threshold", ALERT_THRESHOLD))
+        return
+    if not model.is_ready:
+        return
+    target_rate = float(rt.get("target_alert_rate", cfg.target_alert_rate))
+    flows = load_flows(cfg.postgres_dsn, limit=cfg.calibration_samples)
+    thr = model.calibrate_threshold(flows, target_rate)
+    if thr is None:
+        log.info("Kalibrierung übersprungen (nur %d Flows) – Threshold bleibt %.4f",
+                 len(flows), rt.get("alert_threshold", ALERT_THRESHOLD))
+        return
+    _write_runtime_config(cfg.models_dir, {
+        "alert_threshold":   thr,
+        "threshold_source":  "auto",
+        "target_alert_rate": target_rate,
+        "calibrated_at":     time.time(),
+    })
+    log.info("Auto-kalibrierter Threshold: %.4f (target_rate=%.4f, n_flows=%d)",
+             thr, target_rate, len(flows))
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)-8s %(name)s – %(message)s",
@@ -78,8 +123,14 @@ ALERTS_TOPIC = "alerts-raw"
 POLL_TIMEOUT = 1.0
 GROUP_ID     = "ml-engine"
 
-# Score-Schwellwert ab dem ein Alert erzeugt wird (überschreibbar via ml_config.json)
-ALERT_THRESHOLD   = 0.65
+# Fallback-Score-Schwellwert (überschreibbar via ml_config.json). Bewusst NICHT
+# mehr 0.65: der IsolationForest-Score (clip(0.5 - decision_function)) liegt für
+# Normal-Traffic strukturell knapp um/unter 0.5, der Max real selten über ~0.6.
+# 0.65 lag damit über der GESAMTEN Verteilung → nie ein Alert. Der echte Wert
+# wird beim Startup + nach jedem Retrain aus der Score-Verteilung kalibriert
+# (siehe _calibrate_startup / trainer.retrain); 0.55 ist nur der Notnagel, falls
+# noch keine Kalibrierung stattfand.
+ALERT_THRESHOLD   = 0.55
 CONFIG_POLL_FLOWS = 500   # Alle N Flows Konfig-Datei prüfen
 
 
@@ -152,10 +203,20 @@ def run(cfg: Config) -> None:
             if bootstrap_flows:
                 model.train(bootstrap_flows)
 
+    # Threshold beim Start aus der echten Score-Verteilung kalibrieren, damit
+    # ein frisch installierter Host (Modell da, aber keine ml_config.json) nicht
+    # mit dem toten Fallback-Threshold läuft. Fehler hier dürfen den Start nicht
+    # verhindern — im Zweifel gilt der Fallback/das bestehende Config-File.
+    try:
+        _calibrate_startup(model, cfg)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Startup-Kalibrierung fehlgeschlagen: %s", exc)
+
     consumer = _make_consumer(cfg.kafka_brokers)
     producer  = _make_producer(cfg.kafka_brokers)
     consumer.subscribe([FLOWS_TOPIC])
-    log.info("ML engine ready | model_ready=%s | threshold=%.2f", model.is_ready, ALERT_THRESHOLD)
+    _startup_thr = _read_runtime_config(cfg.models_dir).get("alert_threshold", ALERT_THRESHOLD)
+    log.info("ML engine ready | model_ready=%s | threshold=%.3f", model.is_ready, _startup_thr)
 
     running = True
     flows_since_partial = 0

@@ -324,6 +324,10 @@ services:
       TEST_MODE: ${TEST_MODE:-false}
       BOOTSTRAP_MIN_SAMPLES: ${ML_BOOTSTRAP_MIN:-25000}
       CONTAMINATION: ${ML_CONTAMINATION:-0.005}
+      # Ziel-Alert-Rate der Auto-Threshold-Kalibrierung (Anteil der Flows, der
+      # als ML-Anomalie gemeldet wird). Der Threshold wird daraus als Quantil
+      # der echten Score-Verteilung berechnet — kein fixer Magic-Wert mehr.
+      ML_TARGET_ALERT_RATE: ${ML_TARGET_ALERT_RATE:-0.001}
 
   alert-manager:
     build: ./alert-manager
@@ -741,6 +745,8 @@ services:
       MODELS_DIR: /models
       RETRAIN_INTERVAL_S: ${RETRAIN_INTERVAL_S:-86400}
       TEST_MODE: ${TEST_MODE:-false}
+      # Threshold-Kalibrierung nach jedem Retrain (Quantil der Score-Verteilung).
+      ML_TARGET_ALERT_RATE: ${ML_TARGET_ALERT_RATE:-0.001}
 
   # ────────────────────────────────────────────────────────────────────────────
   # IRMA BRIDGE  (immer aktiv wenn IRMA_USER + IRMA_PASS gesetzt)

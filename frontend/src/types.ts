@@ -645,6 +645,10 @@ export interface MLFeatureDeviation {
 
 export interface MLConfig {
   alert_threshold:       number;
+  // "auto" = aus der Score-Verteilung kalibriert; "manual" = Operator-Lock.
+  threshold_source?:     'auto' | 'manual';
+  // Ziel-Alert-Rate der Auto-Kalibrierung (Anteil der Flows).
+  target_alert_rate?:    number;
   contamination:         number;
   bootstrap_min_samples: number;
   partial_fit_interval:  number;

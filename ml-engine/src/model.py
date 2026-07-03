@@ -166,6 +166,55 @@ class AnomalyModel:
         score = max(0.0, min(1.0, 0.5 - raw))
         return round(score, 4)
 
+    def score_batch(self, flows: list[dict]) -> "np.ndarray":
+        """Vektorisiertes Scoring einer Flow-Liste (nur für Kalibrierung).
+        Ungültige Flows werden übersprungen. Gibt ein 1D-Array der Scores
+        zurück (leer, wenn Modell nicht bereit oder keine gültigen Flows)."""
+        if not self._trained:
+            return np.empty(0, dtype=np.float32)
+        vecs: list[np.ndarray] = []
+        for f in flows:
+            try:
+                v = extract(f)
+                if not (np.any(np.isnan(v)) or np.any(np.isinf(v))):
+                    vecs.append(v)
+            except Exception:
+                continue
+        if not vecs:
+            return np.empty(0, dtype=np.float32)
+        X = np.stack(vecs).astype(np.float32)
+        Xs = self._scaler.transform(X)                    # type: ignore[union-attr]
+        raw = self._iforest.decision_function(Xs)          # type: ignore[union-attr]
+        # Identisch zu score(): clip(0.5 - decision_function).
+        return np.clip(0.5 - raw, 0.0, 1.0)
+
+    def calibrate_threshold(
+        self,
+        flows: list[dict],
+        target_rate: float,
+        floor: float = 0.50,
+        ceil:  float = 0.90,
+        min_samples: int = 100,
+    ) -> float | None:
+        """Leitet einen Alert-Threshold aus der Score-Verteilung realer Flows ab.
+
+        Warum: der IsolationForest-Score ist `clip(0.5 - decision_function)`;
+        für Normal-Traffic liegt er strukturell knapp unter/um 0.5, der Max
+        selten über ~0.6. Ein fixer Default (0.65) liegt damit ÜBER der ganzen
+        Verteilung → nie ein Alert. Statt einer Magic-Zahl kalibrieren wir den
+        Threshold als (1 - target_rate)-Quantil der beobachteten Scores: er
+        trifft die gewünschte Alert-Rate und wandert automatisch mit dem Modell
+        mit. Geclamped auf [floor, ceil] (floor=0.5 = Modell-Entscheidungsgrenze,
+        konsistent mit dem [0.5, 0.95]-Contract der API).
+
+        Gibt None zurück, wenn zu wenige gültige Samples vorliegen (dann bleibt
+        der bestehende/Default-Threshold unangetastet)."""
+        scores = self.score_batch(flows)
+        if scores.size < min_samples:
+            return None
+        q = float(np.quantile(scores, 1.0 - target_rate))
+        return round(max(floor, min(ceil, q)), 4)
+
     def add_to_buffer(self, flow: dict) -> int:
         """
         Fügt einen Flow zum Scaler-Update-Buffer hinzu.

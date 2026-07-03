@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -32,6 +33,65 @@ log = logging.getLogger(__name__)
 _SCALER_FILE  = "scaler.joblib"
 _IFOREST_FILE = "iforest.joblib"
 _META_FILE    = "meta.json"
+_CONFIG_FILE  = "ml_config.json"
+
+
+def _calibrate_and_persist_threshold(
+    iforest: IsolationForest,
+    X_scaled_normal: np.ndarray,
+    models_path: Path,
+) -> None:
+    """Leitet nach dem Training den Alert-Threshold aus der Score-Verteilung der
+    NORMAL-Samples ab und schreibt ihn nach ml_config.json.
+
+    Score-Mapping identisch zur ml-engine (`clip(0.5 - decision_function)`).
+    Threshold = (1 - target_rate)-Quantil, geclamped auf [0.50, 0.90]. So trifft
+    der Threshold die gewünschte Alert-Rate statt einer Magic-Zahl, die je nach
+    Modell über der gesamten Score-Verteilung liegen kann (→ 0 Alerts).
+
+    Respektiert einen manuellen Lock: steht in ml_config.json
+    `threshold_source == "manual"`, wird der Threshold NICHT überschrieben (aber
+    andere Keys bleiben unberührt). target_alert_rate wird aus ml_config.json
+    gelesen (operator-tunbar), sonst aus ML_TARGET_ALERT_RATE, sonst 0.1 %."""
+    cfg_path = models_path / _CONFIG_FILE
+    cfg: dict = {}
+    if cfg_path.exists():
+        try:
+            cfg = json.loads(cfg_path.read_text())
+        except Exception:
+            cfg = {}
+
+    if cfg.get("threshold_source") == "manual":
+        log.info("Threshold manuell gelockt (%.4f) – Kalibrierung übersprungen",
+                 cfg.get("alert_threshold", 0.0))
+        return
+
+    if len(X_scaled_normal) < 100:
+        log.info("Zu wenige Normal-Samples (%d) für Threshold-Kalibrierung",
+                 len(X_scaled_normal))
+        return
+
+    target_rate = float(cfg.get("target_alert_rate",
+                                os.environ.get("ML_TARGET_ALERT_RATE", "0.001")))
+    raw = iforest.decision_function(X_scaled_normal)
+    scores = np.clip(0.5 - raw, 0.0, 1.0)
+    q = float(np.quantile(scores, 1.0 - target_rate))
+    threshold = round(max(0.50, min(0.90, q)), 4)
+
+    cfg.update({
+        "alert_threshold":   threshold,
+        "threshold_source":  "auto",
+        "target_alert_rate": target_rate,
+        "calibrated_at":     time.time(),
+    })
+    tmp = cfg_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(cfg))
+    tmp.rename(cfg_path)
+    log.info("Threshold auto-kalibriert: %.4f (target_rate=%.4f, n_normal=%d, "
+             "score P50=%.3f P99=%.3f max=%.3f)",
+             threshold, target_rate, len(scores),
+             float(np.percentile(scores, 50)), float(np.percentile(scores, 99)),
+             float(scores.max()))
 
 
 # Muss synchron zu ml-engine/src/features.py FEATURE_DIM=18 bleiben
@@ -152,6 +212,15 @@ def retrain(
         n_jobs=-1,
     )
     iforest.fit(X_scaled)
+
+    # Threshold aus der Score-Verteilung der NORMAL-Samples kalibrieren. X_all
+    # ist [normal … , attack …] — die ersten len(X_normal) Zeilen sind die
+    # Normal-Samples (inkl. der als benign gelabelten). Fehler dürfen den
+    # Retrain nicht scheitern lassen (Modell ist wichtiger als der Threshold).
+    try:
+        _calibrate_and_persist_threshold(iforest, X_scaled[:len(X_normal)], models_path)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Threshold-Kalibrierung fehlgeschlagen: %s", exc)
 
     # Atomar: erst tmp-Dateien, dann umbenennen
     tmp_s = models_path / "scaler.tmp.joblib"

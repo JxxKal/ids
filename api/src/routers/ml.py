@@ -24,7 +24,15 @@ RETRAIN_TRIGGER   = MODELS_DIR / "retrain.trigger"
 
 # Defaults
 DEFAULT_CONFIG: dict = {
-    "alert_threshold":      0.65,
+    # Fallback bis die erste Auto-Kalibrierung (ml-engine/training-loop) einen
+    # Wert aus der echten Score-Verteilung schreibt. NICHT 0.65 — der lag über
+    # der gesamten Verteilung → nie ein Alert.
+    "alert_threshold":      0.55,
+    # "auto" = von der Kalibrierung gepflegt; "manual" = vom Operator gesetzt →
+    # Kalibrierung fasst den Threshold dann nicht mehr an.
+    "threshold_source":     "auto",
+    # Ziel-Alert-Rate der Auto-Kalibrierung (Anteil der Flows). Operator-tunbar.
+    "target_alert_rate":    0.001,
     "contamination":        0.01,
     "bootstrap_min_samples": 500,
     "partial_fit_interval": 200,
@@ -107,6 +115,8 @@ class FeatureDeviation(BaseModel):
 
 class MLConfig(BaseModel):
     alert_threshold:       float   # 0.50 – 0.95
+    threshold_source:      str = "auto"   # "auto" (kalibriert) | "manual" (Operator-Lock)
+    target_alert_rate:     float = 0.001  # Ziel-Alert-Rate der Auto-Kalibrierung
     contamination:         float   # 0.001 – 0.50
     bootstrap_min_samples: int     # 100 – 50000
     partial_fit_interval:  int     # 50 – 5000
@@ -114,6 +124,11 @@ class MLConfig(BaseModel):
 
 class MLConfigPatch(BaseModel):
     alert_threshold:       float | None = None
+    # target_alert_rate setzen behält den Auto-Modus (die nächste Kalibrierung
+    # nutzt die neue Rate). alert_threshold setzen aktiviert den Manual-Lock.
+    # reset_to_auto=True hebt einen Manual-Lock wieder auf.
+    target_alert_rate:     float | None = None
+    reset_to_auto:         bool  | None = None
     contamination:         float | None = None
     bootstrap_min_samples: int   | None = None
     partial_fit_interval:  int   | None = None
@@ -343,8 +358,23 @@ async def update_ml_config(
     cfg = _read_ml_config()
     needs_retrain = False
 
+    if body.reset_to_auto:
+        # Manual-Lock aufheben → Auto-Kalibrierung übernimmt wieder (greift beim
+        # nächsten Retrain bzw. ml-engine-Restart). Ein sofortiger Retrain macht
+        # den neuen Auto-Threshold direkt sichtbar.
+        cfg["threshold_source"] = "auto"
+        needs_retrain = True
     if body.alert_threshold is not None:
+        # Manueller Threshold → Lock setzen, damit die Auto-Kalibrierung ihn
+        # nicht wieder überschreibt.
         cfg["alert_threshold"] = round(max(0.5, min(0.95, body.alert_threshold)), 3)
+        cfg["threshold_source"] = "manual"
+    if body.target_alert_rate is not None:
+        # Ziel-Rate der Auto-Kalibrierung (0.001 %–5 %). Bleibt im Auto-Modus;
+        # Retrain anstoßen, damit der neue Rate-Wert sofort einen Threshold ergibt.
+        cfg["target_alert_rate"] = round(max(0.00001, min(0.05, body.target_alert_rate)), 6)
+        if cfg.get("threshold_source") != "manual":
+            needs_retrain = True
     if body.contamination is not None:
         new_c = round(max(0.001, min(0.5, body.contamination)), 4)
         if abs(new_c - cfg["contamination"]) > 0.0001:
