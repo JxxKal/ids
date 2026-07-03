@@ -6,7 +6,7 @@
     required_ports:
       - {port: 44818, proto: TCP}  # EtherNet/IP (CIP) explicit messaging
     any_ports:
-      min_any: 1
+      min_any: 0                   # 2222/UDP nur Bonus — 44818/TCP allein genügt
       ports:
         - {port: 2222, proto: UDP} # EtherNet/IP implicit I/O messaging
     optional_flags: []

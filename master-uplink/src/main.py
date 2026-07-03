@@ -160,19 +160,26 @@ def _upload_pcap(alert_id: str, pcap_bytes: bytes) -> str | None:
     return None
 
 
-async def _mark_pcap_available(alert_id: str, pcap_key: str) -> None:
+async def _mark_pcap_available(alert_id: str, pcap_key: str, tap_id: str) -> str:
     """alerts.pcap_available = TRUE + pcap_key setzen. Lazy-Pool, weil
-    der WSS-Server ohne Master-DB läuft (nur TapAuth nutzt asyncpg)."""
+    der WSS-Server ohne Master-DB läuft (nur TapAuth nutzt asyncpg).
+
+    Ownership-Guard: die Zeile wird nur geflaggt, wenn sie diesem Tap
+    gehört (`tap_id`-Match). So kann ein böswilliger Tap nicht das
+    pcap_available/pcap_key eines fremden (anderer Tap oder master-lokalen)
+    Alerts umbiegen. Liefert die Command-Tag-Zeichenkette von asyncpg
+    (z.B. 'UPDATE 1' / 'UPDATE 0') für Logging."""
     global _pcap_pool
     if _pcap_pool is None:
         _pcap_pool = await asyncpg.create_pool(POSTGRES_DSN, min_size=1, max_size=2)
-    await _pcap_pool.execute(
+    return await _pcap_pool.execute(
         """
         UPDATE alerts
            SET pcap_available = TRUE, pcap_key = $2
          WHERE alert_id = $1
+           AND tap_id = $3::uuid
         """,
-        alert_id, pcap_key,
+        alert_id, pcap_key, tap_id,
     )
 
 
@@ -329,6 +336,53 @@ class TapAuth:
 def _delivery_cb(err, _msg) -> None:
     if err is not None:
         log.error("Kafka delivery failure: %s", err)
+
+
+# ── Trust-Boundary: Feld-Whitelist für Tap-Frames ────────────────────────────
+#
+# Ein gepairter Tap ist authentifiziert (mTLS), aber NICHT vertrauenswürdig
+# im Sinne von "darf beliebige Felder in die Master-Pipeline schreiben". Ohne
+# Whitelist könnte ein böswilliger (oder kompromittierter) Tap z.B.
+# `feedback:"tp"` + `metric_values` mitsenden und damit den rule-tuner
+# fleet-weit in eine Threshold-Verschiebung zwingen — Feedback ist eine
+# Operator-Eingabe AM MASTER, kein Tap-Input. Deshalb lesen wir aus jedem
+# Frame nur die explizit erwarteten Felder aus; alles andere wird verworfen.
+#
+# `alert_id` bleibt drin (der Tap generiert die UUID lokal, um seinen späteren
+# pcap_upload-Frame mit dem Alert zu korrelieren). `feedback*` ist bewusst
+# NICHT enthalten.
+_ALERT_ALLOWED_FIELDS: frozenset[str] = frozenset({
+    "alert_id", "rule_id", "rule_name", "source", "severity", "score",
+    "tags", "description",
+    "src_ip", "src_port", "dst_ip", "dst_port", "proto",
+    "flow_id", "ts", "is_test", "metric_values", "tunable",
+})
+
+# Phase-2 Shadow-Metrik-Record: {rule_id, param_name, metric_value, src_ip,
+# scope, ts}. Mehr nicht — der Tuner-Consumer liest nur diese Felder.
+_METRIC_ALLOWED_FIELDS: frozenset[str] = frozenset({
+    "rule_id", "param_name", "metric_value", "src_ip", "scope", "ts",
+})
+
+
+def _sanitize_tap_alert(payload: dict, tap_id: str) -> dict:
+    """Reduziert ein Tap-Alert-Dict auf die Whitelist und stempelt tap_id +
+    source-Default. `feedback`/`feedback_note`/`feedback_ts` werden nie
+    übernommen — die setzt ausschließlich die Master-Pipeline."""
+    clean = {k: payload[k] for k in _ALERT_ALLOWED_FIELDS if k in payload}
+    clean["source"] = clean.get("source") or "signature"
+    clean["tap_id"] = tap_id
+    return clean
+
+
+def _sanitize_tap_metric(payload: dict, tap_id: str) -> dict | None:
+    """Reduziert einen Tap-Metric-Record auf die Whitelist + tap_id-Tag.
+    Liefert None, wenn Pflichtfelder fehlen (rule_id)."""
+    if "rule_id" not in payload:
+        return None
+    clean = {k: payload[k] for k in _METRIC_ALLOWED_FIELDS if k in payload}
+    clean["tap_id"] = tap_id
+    return clean
 
 
 # ── Reverse-Channel: Config-Bundle für Tap-Pull ──────────────────────────────
@@ -676,11 +730,12 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                         log.warning("report_version fail %s: %s", tap_name, exc)
                 continue
             if mtype == "alert":
-                alert = msg.get("payload") or {}
-                if not isinstance(alert, dict):
+                raw_alert = msg.get("payload") or {}
+                if not isinstance(raw_alert, dict):
                     continue
-                alert["tap_id"] = tap_id
-                alert["source"] = alert.get("source", "signature")  # Default falls fehlt
+                # Feld-Whitelist: nur erwartete Alert-Felder durchlassen,
+                # insbesondere KEIN tap-geliefertes feedback (Tuner-Poisoning).
+                alert = _sanitize_tap_alert(raw_alert, tap_id)
 
                 try:
                     producer.produce(
@@ -704,10 +759,13 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                 # Wir taggen mit tap_id, damit der Tuner später Master- und
                 # Tap-Beiträge auseinanderhalten kann (z.B. um pro Tap einen
                 # eigenen Reservoir-Stream zu fahren).
-                metric = msg.get("payload") or {}
-                if not isinstance(metric, dict) or "rule_id" not in metric:
+                raw_metric = msg.get("payload") or {}
+                if not isinstance(raw_metric, dict):
                     continue
-                metric["tap_id"] = tap_id
+                # Feld-Whitelist analog zum Alert-Frame.
+                metric = _sanitize_tap_metric(raw_metric, tap_id)
+                if metric is None:
+                    continue
                 try:
                     producer.produce(
                         METRICS_TOPIC,
@@ -766,7 +824,17 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                     continue
                 key = await asyncio.to_thread(_upload_pcap, alert_id, pcap_bytes)
                 if key:
-                    await _mark_pcap_available(alert_id, key)
+                    # Ownership-scoped Mark: nur wenn der Alert diesem Tap
+                    # gehört, wird geflaggt + gebroadcastet. Fremde alert_ids
+                    # (Cross-Tap / master-lokal) treffen 0 Zeilen.
+                    tag = await _mark_pcap_available(alert_id, key, tap_id)
+                    if tag == "UPDATE 0":
+                        log.warning(
+                            "pcap_upload von %s für nicht-eigenen/unbekannten "
+                            "alert_id=%s verworfen (kein tap_id-Match)",
+                            tap_name, alert_id[:8],
+                        )
+                        continue
                     # Frontend live benachrichtigen — alerts-enriched-push ist
                     # der Topic den die api-WebSocket-Streamer konsumiert.
                     try:

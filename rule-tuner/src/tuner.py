@@ -21,7 +21,6 @@ import json
 import logging
 import threading
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -45,6 +44,13 @@ SAFETY_MARGIN = 1.05  # Quantil × 1.05, damit knappe Treffer nicht alarmieren
 # - Konflikt (FP-Untergrenze > TP-Obergrenze): Constraint verwerfen, alten Wert behalten.
 FP_TP_MIN_FEEDBACK = 3
 
+# Trust-Boundary: rule_id/param_name in eingehenden rule-metrics-Records sind
+# tap-kontrolliert. Absurd lange Strings werden verworfen (Speicher-Missbrauch),
+# und neue Reservoir-Keys müssen — sobald die Rule-Schema-Allowlist geladen ist
+# — einem tatsächlich existierenden, metric-deklarierten (rule, param) ent-
+# sprechen. Zusätzlich greift die harte Key-Obergrenze aus der Config.
+MAX_KEY_LEN = 128
+
 
 async def _init_conn(conn: asyncpg.Connection) -> None:
     """Spiegelt api/src/database.py: Codec für json/jsonb registrieren, damit
@@ -63,10 +69,15 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 class Tuner:
     def __init__(self, cfg: Config) -> None:
         self._cfg = cfg
-        # Reservoir-Map: {(rule_id, param_name, scope): Reservoir}
-        self._reservoirs: dict[tuple[str, str, str], Reservoir] = defaultdict(
-            lambda: Reservoir(capacity=cfg.reservoir_size)
-        )
+        # Reservoir-Map: {(rule_id, param_name, scope): Reservoir}. Bewusst KEIN
+        # defaultdict mehr — Keys werden nur nach Admission-Check angelegt, sonst
+        # könnte ein böswilliger Tap unbegrenzt Reservoirs erzeugen.
+        self._reservoirs: dict[tuple[str, str, str], Reservoir] = {}
+        # Allowlist gültiger (rule_id, param_name) aus dem Rule-Schema. None =
+        # noch nicht geladen → Admission fällt auf die Key-Obergrenze zurück.
+        self._valid_keys: set[tuple[str, str]] | None = None
+        # Zähler verworfener Records für throttled Logging.
+        self._dropped_keys: int = 0
         # Reservoir-Mutex (Kafka-Consumer läuft im Thread, persist_loop in async).
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -126,8 +137,26 @@ class Tuner:
                     continue
                 if not isinstance(value, (int, float)) or isinstance(value, bool):
                     continue
+                key = (rid, pname, scope)
                 with self._lock:
-                    self._reservoirs[(rid, pname, scope)].add(float(value))
+                    present = key in self._reservoirs
+                    if not self._key_admissible(
+                        rid, pname, self._valid_keys, present,
+                        len(self._reservoirs), self._cfg.max_reservoir_keys,
+                    ):
+                        self._dropped_keys += 1
+                        if self._dropped_keys % 1000 == 1:
+                            log.warning(
+                                "rule-metrics: Record mit unbekanntem/überzähligem "
+                                "Key (%s/%s/%s) verworfen — bisher %d gedroppt",
+                                rid[:64], pname[:64], scope, self._dropped_keys,
+                            )
+                        continue
+                    res = self._reservoirs.get(key)
+                    if res is None:
+                        res = Reservoir(capacity=self._cfg.reservoir_size)
+                        self._reservoirs[key] = res
+                    res.add(float(value))
         finally:
             consumer.close()
             log.info("Kafka-Consumer beendet")
@@ -137,6 +166,77 @@ class Tuner:
             target=self._consumer_run, daemon=True, name="rule-metrics-consumer"
         )
         self._consumer_thread.start()
+
+    # ── Trust-Boundary: Reservoir-Key-Admission ──────────────────────────
+    #
+    # Pure Funktionen (kein Kafka/DB-State) — direkt unit-testbar.
+
+    @staticmethod
+    def _key_admissible(
+        rid: str,
+        pname: str,
+        valid_keys: set[tuple[str, str]] | None,
+        existing_key_present: bool,
+        current_key_count: int,
+        max_keys: int,
+    ) -> bool:
+        """Entscheidet, ob ein rule-metrics-Record ein (ggf. neues) Reservoir
+        befüllen darf.
+
+        - Bereits bekannter Key → immer zulässig (kein neues Reservoir).
+        - Neuer Key: String-Längen-Sanity, Schema-Allowlist (falls geladen)
+          und harte Obergrenze der distinkten Keys müssen passen.
+        """
+        if existing_key_present:
+            return True
+        if len(rid) > MAX_KEY_LEN or len(pname) > MAX_KEY_LEN:
+            return False
+        if valid_keys is not None and (rid, pname) not in valid_keys:
+            return False
+        if current_key_count >= max_keys:
+            return False
+        return True
+
+    @staticmethod
+    def _build_valid_keys(rules: list[dict]) -> set[tuple[str, str]]:
+        """Baut die Allowlist gültiger (rule_id, param_name) aus dem Rule-
+        Schema — nur Params mit `metric:`-Deklaration sind ML-tunbar und
+        werden überhaupt gesamplet."""
+        vk: set[tuple[str, str]] = set()
+        for rule in rules:
+            rid = rule.get("id")
+            if not rid:
+                continue
+            schema = rule.get("parameters_schema") or {}
+            if not isinstance(schema, dict):
+                continue
+            for pname, ps in schema.items():
+                if isinstance(ps, dict) and ps.get("metric"):
+                    vk.add((rid, pname))
+        return vk
+
+    async def refresh_valid_keys(self, api: ApiClient) -> None:
+        """Zieht die aktuelle Rule-Schema-Allowlist von der API und ersetzt
+        `self._valid_keys` atomar (Referenz-Swap unter Lock). Fehler sind
+        nicht fatal — dann bleibt die vorige Allowlist (oder None) stehen und
+        die Key-Obergrenze greift weiter."""
+        rules = await api.list_rules()
+        vk = self._build_valid_keys(rules)
+        with self._lock:
+            self._valid_keys = vk
+            # Bogus-Keys wegräumen, die vor dem ersten Allowlist-Load unter der
+            # reinen Key-Obergrenze durchrutschen konnten (oder deren Rule/Param
+            # inzwischen entfernt wurde). Nur wenn die Allowlist nicht leer ist —
+            # ein transient leeres list_rules() soll nicht alle Reservoirs nuken.
+            if vk:
+                stale = [
+                    k for k in self._reservoirs
+                    if (k[0], k[1]) not in vk
+                ]
+                for k in stale:
+                    del self._reservoirs[k]
+                if stale:
+                    log.info("Reservoir-Cleanup: %d ungültige Keys entfernt", len(stale))
 
     # ── Persistierung in rule_baselines ──────────────────────────────────
 
@@ -209,6 +309,14 @@ class Tuner:
                 log.warning("ml/status-Poll fehlgeschlagen: %s", exc)
                 await asyncio.sleep(self._cfg.state_poll_interval_s)
                 continue
+
+            # Reservoir-Key-Allowlist aktuell halten (neue/entfernte Rules).
+            # Nicht fatal bei Fehler — der Consumer fällt dann auf die
+            # Key-Obergrenze zurück.
+            try:
+                await self.refresh_valid_keys(api)
+            except Exception as exc:
+                log.debug("valid-keys-Refresh fehlgeschlagen: %s", exc)
 
             state = self._status_cache.get("state", {})
             cur = state.get("state")

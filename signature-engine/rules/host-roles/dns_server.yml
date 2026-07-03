@@ -6,7 +6,7 @@
     required_ports:
       - {port: 53, proto: UDP}     # DNS-Queries
     any_ports:
-      min_any: 1
+      min_any: 0                   # 53/TCP nur Bonus — 53/UDP allein reicht (SMB-445-Analogie)
       ports:
         - {port: 53, proto: TCP}   # Zonentransfer / große Antworten
     optional_flags: []

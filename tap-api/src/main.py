@@ -17,6 +17,7 @@ größeres Problem als das Fehlen von Login-Boxen.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -54,6 +55,75 @@ TAP_CERT      = os.environ.get("TAP_CERT", "/etc/cyjan/tap.pem")
 MIRROR_IFACE  = os.environ.get("MIRROR_IFACE", "")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# ── Trust-Boundary für die Pairing-Endpoints ─────────────────────────────────
+#
+# /api/pair und /api/auto-pair-start machen server-seitige Requests an eine
+# vom Aufrufer gelieferte master_url (SSRF-Fläche) und legen fest, an welchen
+# Master sich der Tap bindet. Ein Angreifer, der diese Endpoints erreicht,
+# könnte den Tap auf einen Rogue-Master zeigen. Deshalb:
+#
+#  1. Compose bindet tap-api per Default auf 127.0.0.1 (TAP_UI_BIND) — nur der
+#     Tap-Host selbst (und damit die `cyjan-tap`-CLI) erreicht die Endpoints.
+#     DAS ist die maßgebliche Schranke; bitte NICHT auf 0.0.0.0 aufweiten,
+#     ohne einen authentifizierenden Reverse-Proxy davorzusetzen.
+#  2. Zusätzlich (Defense-in-Depth, hier im App-Layer): die Pairing-Endpoints
+#     akzeptieren nur Requests aus einem Trusted-CIDR-Set. Default = Loopback
+#     + RFC1918/ULA/Link-Local — die CLI erreicht den Container über das
+#     Docker-Bridge-Gateway (eine RFC1918-Adresse), bleibt also funktionsfähig,
+#     während ein direkt geroutetes/WAN-exponiertes Setup öffentliche
+#     Quell-IPs abweist.
+#
+# Restrisiko: Wird tap-api bewusst auf 0.0.0.0 im Mgmt-VLAN exponiert, kann der
+# App-Layer einen Angreifer im selben VLAN nicht von der lokalen CLI unter-
+# scheiden (beide erscheinen hinter dem Docker-Proxy als Gateway-IP). Für den
+# Fall ist ein Auth-Proxy oder das Belassen des 127.0.0.1-Binds nötig.
+_DEFAULT_TRUSTED_CIDRS = (
+    "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,"
+    "192.168.0.0/16,169.254.0.0/16,fc00::/7,fe80::/10"
+)
+
+
+def _parse_cidrs(raw: str) -> list:
+    nets = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(part, strict=False))
+        except ValueError:
+            log.warning("Ungültiges Trusted-CIDR ignoriert: %r", part)
+    return nets
+
+
+PAIR_TRUSTED_CIDRS = _parse_cidrs(
+    os.environ.get("TAP_PAIR_TRUSTED_CIDRS", _DEFAULT_TRUSTED_CIDRS)
+)
+
+
+def _ip_trusted(ip: str | None, nets: list) -> bool:
+    """True, wenn `ip` in einem der `nets`-CIDRs liegt. Leere ip / Parse-Fehler
+    → False (fail-closed)."""
+    if not ip:
+        return False
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in n for n in nets)
+
+
+def _require_trusted_pairing(request: Request) -> None:
+    """Guard für die Pairing-Endpoints. Nutzt ausschließlich die TCP-Peer-IP
+    (request.client.host) — X-Forwarded-For wird bewusst NICHT ausgewertet,
+    weil spoofbar. 403 bei nicht-vertrauenswürdiger Quelle."""
+    client = request.client
+    peer = client.host if client else None
+    if not _ip_trusted(peer, PAIR_TRUSTED_CIDRS):
+        log.warning("Pairing-Request von nicht-vertrauenswürdiger Quelle %s abgewiesen", peer)
+        raise HTTPException(403, "pairing nur von vertrauenswürdiger Quelle erlaubt")
+
 
 app = FastAPI(title="Cyjan IDS Remote Tap", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -347,7 +417,7 @@ class PairBody(BaseModel):
 
 
 @app.post("/api/pair")
-async def api_pair(body: PairBody) -> JSONResponse:
+async def api_pair(body: PairBody, request: Request) -> JSONResponse:
     """Generiert lokal Key + CSR, postet sie mit dem Pairing-Token an den
     Master, schreibt das signierte Cert + die Master-CA nach /etc/cyjan.
     Idempotent NICHT – jeder Token ist one-shot. Wer das Cert verloren
@@ -358,6 +428,7 @@ async def api_pair(body: PairBody) -> JSONResponse:
     Uplink-URL. Wir hängen `/api/taps/pair` an. Beispiel:
         https://192.168.1.230:8001
     """
+    _require_trusted_pairing(request)
     cert_dir = Path("/etc/cyjan")
     if (cert_dir / "tap.pem").exists():
         raise HTTPException(409, "Tap ist bereits gepairt – cert existiert. Reset zuerst.")
@@ -477,11 +548,12 @@ class AutoPairStartBody(BaseModel):
 
 
 @app.post("/api/auto-pair-start")
-async def api_auto_pair_start(body: AutoPairStartBody) -> JSONResponse:
+async def api_auto_pair_start(body: AutoPairStartBody, request: Request) -> JSONResponse:
     """Lokal Key+CSR erzeugen, Master /api/taps/announce rufen, State
     persistieren. Idempotent: wenn der State-File schon existiert (Re-Run),
     wird das vorhandene Material wiederverwendet — der Master macht selbst
     UPSERT auf hardware_id+fingerprint."""
+    _require_trusted_pairing(request)
     cert_dir = Path("/etc/cyjan")
     if (cert_dir / "tap.pem").exists():
         raise HTTPException(409, "Tap ist bereits gepairt – cert existiert. Reset zuerst.")
@@ -630,11 +702,16 @@ async def _check_auto_pair_status() -> dict:
 
 
 @app.get("/api/auto-pair-status")
-async def api_auto_pair_status() -> JSONResponse:
+async def api_auto_pair_status(request: Request) -> JSONResponse:
     """Pollt Master und installiert das Cert wenn approved.
 
     Identisch zum Background-Poller — manuelle CLI-Trigger bleibt aber
-    zusätzlich verfügbar (cyjan-tap auto-pair pollt diesen Endpoint)."""
+    zusätzlich verfügbar (cyjan-tap auto-pair pollt diesen Endpoint). Der
+    Poll löst einen server-seitigen Request an die persistierte master_url aus
+    und installiert bei Approval Cert-Material, daher ebenfalls Trusted-Source-
+    geschützt. Der Background-Poller (_auto_pair_poller_loop) ruft
+    _check_auto_pair_status() direkt und ist davon unberührt."""
+    _require_trusted_pairing(request)
     return JSONResponse(await _check_auto_pair_status())
 
 

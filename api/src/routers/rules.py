@@ -222,7 +222,10 @@ async def list_sources() -> list[RuleSource]:
 
 
 @router.post("/sources", response_model=RuleSource, status_code=201)
-async def add_source(body: RuleSourceCreate) -> RuleSource:
+async def add_source(
+    body: RuleSourceCreate,
+    _admin: dict = Depends(require_admin),
+) -> RuleSource:
     sources = _load_sources()
     new: dict[str, Any] = {
         "id":      str(uuid4()),
@@ -238,7 +241,11 @@ async def add_source(body: RuleSourceCreate) -> RuleSource:
 
 
 @router.patch("/sources/{source_id}", response_model=RuleSource)
-async def update_source(source_id: str, body: RuleSourcePatch) -> RuleSource:
+async def update_source(
+    source_id: str,
+    body: RuleSourcePatch,
+    _admin: dict = Depends(require_admin),
+) -> RuleSource:
     sources = _load_sources()
     for s in sources:
         if s["id"] == source_id:
@@ -254,7 +261,10 @@ async def update_source(source_id: str, body: RuleSourcePatch) -> RuleSource:
 
 
 @router.delete("/sources/{source_id}", status_code=204, response_model=None)
-async def delete_source(source_id: str) -> None:
+async def delete_source(
+    source_id: str,
+    _admin: dict = Depends(require_admin),
+) -> None:
     sources = _load_sources()
     source = next((s for s in sources if s["id"] == source_id), None)
     if not source:
@@ -275,7 +285,7 @@ async def list_rules(
 
 
 @router.post("/update", response_model=UpdateStatus)
-async def trigger_update() -> UpdateStatus:
+async def trigger_update(_admin: dict = Depends(require_admin)) -> UpdateStatus:
     """Schreibt Trigger-Datei und enabled-URLs → Snort-Entrypoint lädt neu."""
     sources = _load_sources()
     _write_enabled_urls(sources)

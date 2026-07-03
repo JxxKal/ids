@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Component, lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useTranslation, withTranslation, type WithTranslation } from 'react-i18next';
 import { clearToken, fetchAlerts, fetchMe, fetchSystemStats, fetchTaps, fetchUnknownHosts, getToken, setToken } from './api';
 import type { SystemStats } from './api';
 import { UnknownHostsDrawer } from './components/UnknownHostsDrawer';
@@ -60,6 +60,61 @@ function unixToLocalDtInput(unixSec: number): string {
 function localDtInputToUnix(s: string): number {
   return Math.floor(new Date(s).getTime() / 1000);
 }
+
+// ErrorBoundary um die lazy-geladenen Pages. Nach einem Deployment referenziert
+// eine noch offene Session das alte index.html; ein Tab-Wechsel triggert dann
+// ein import() des inzwischen gelöschten Hash-Chunks → 404 → ChunkLoadError.
+// Ohne Boundary unmountet React den gesamten Baum (weißer Screen). Dieses
+// Boundary fängt das ab: bei einem Chunk-/dynamic-import-Fehler zeigt es einen
+// Reload-Hinweis (frische Version laden), bei sonstigen Render-Fehlern einen
+// generischen Fallback mit Retry — analog zum bestehenden ErrorBoundary um den
+// AlertFeed. Muss eine Class-Component sein (Hooks können keine Fehler fangen);
+// i18n via withTranslation wie beim bestehenden ErrorBoundary.
+interface LazyBoundaryProps extends WithTranslation { children: ReactNode }
+interface LazyBoundaryState { error: Error | null }
+
+function isChunkLoadError(err: Error): boolean {
+  const s = `${err.name} ${err.message}`;
+  return /ChunkLoadError|Loading chunk|dynamically imported module|import.*module script failed/i.test(s);
+}
+
+class LazyChunkBoundaryInner extends Component<LazyBoundaryProps, LazyBoundaryState> {
+  state: LazyBoundaryState = { error: null };
+
+  static getDerivedStateFromError(error: Error): LazyBoundaryState {
+    return { error };
+  }
+
+  render() {
+    const { t } = this.props;
+    const err = this.state.error;
+    if (err) {
+      if (isChunkLoadError(err)) {
+        return (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 text-sm p-8">
+            <p className="text-cyan-300 font-medium">{t('chunkError.title')}</p>
+            <p className="text-slate-500 max-w-md text-center">{t('chunkError.hint')}</p>
+            <button onClick={() => window.location.reload()} className="btn-primary">
+              {t('chunkError.reload')}
+            </button>
+          </div>
+        );
+      }
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-sm p-8">
+          <p className="text-red-400 font-medium">{t('errorBoundary.title')}</p>
+          <pre className="text-xs text-slate-500 max-w-lg whitespace-pre-wrap">{err.message}</pre>
+          <button onClick={() => this.setState({ error: null })} className="btn-primary">
+            {t('errorBoundary.reload')}
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const LazyChunkBoundary = withTranslation()(LazyChunkBoundaryInner);
 
 export default function App() {
   const { t } = useTranslation();
@@ -462,18 +517,20 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
         )}
 
         {tab !== 'dashboard' && (
-          <Suspense fallback={
-            <div className="flex-1 flex items-center justify-center">
-              <span className="text-slate-600 text-sm">{t('common.loading')}</span>
-            </div>
-          }>
-            {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><GettingStartedPage onNavigate={navigateTo} /></div>}
-            {tab === 'networks' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><NetworksPage user={user} /></div>}
-            {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><HostsPage    /></div>}
-            {tab === 'tests'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><TestsPage    /></div>}
-            {tab === 'reports'  && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><WeeklyReportPage /></div>}
-            {tab === 'settings' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><SettingsPage key={settingsSection ?? 'default'} initialSection={settingsSection} /></div>}
-          </Suspense>
+          <LazyChunkBoundary>
+            <Suspense fallback={
+              <div className="flex-1 flex items-center justify-center">
+                <span className="text-slate-600 text-sm">{t('common.loading')}</span>
+              </div>
+            }>
+              {tab === 'gettingStarted' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><GettingStartedPage onNavigate={navigateTo} /></div>}
+              {tab === 'networks' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><NetworksPage user={user} /></div>}
+              {tab === 'hosts'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><HostsPage    /></div>}
+              {tab === 'tests'    && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><TestsPage    /></div>}
+              {tab === 'reports'  && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><WeeklyReportPage /></div>}
+              {tab === 'settings' && <div className="flex-1 overflow-auto p-5 pb-20 md:pb-5"><SettingsPage key={settingsSection ?? 'default'} initialSection={settingsSection} /></div>}
+            </Suspense>
+          </LazyChunkBoundary>
         )}
       </main>
 

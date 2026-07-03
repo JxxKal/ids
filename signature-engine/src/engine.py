@@ -141,12 +141,32 @@ class SignatureEngine:
         self._net     = _NetHelper(self._loader)
         # {(rule_id, src_ip): last_fired_ts}
         self._cooldowns: dict[tuple[str, str], float] = {}
+        # Gate für periodisches Cooldown-Pruning (monotonic).
+        self._last_cooldown_prune: float = time.monotonic()
         # Self-Traffic-Filter: IDS-eigene IPs/CIDRs. Flows mit src ODER dst
         # in dieser Liste werden in evaluate() + compute_metrics() vor der
         # Rule-Auswertung gedroppt. Verhindert FPs durch enrichment-
         # service-ICMP-Pings, DNS-Lookups vom Master, etc.
         self._own_ips: frozenset[str] = frozenset(own_ips or ())
         self._own_nets = tuple(own_nets or ())
+
+    def _prune_cooldowns(self, now: float) -> None:
+        """Entfernt Cooldown-Einträge, deren Cooldown-Fenster bereits abgelaufen
+        ist. Ohne Pruning wächst `_cooldowns` mit jeder distinct (rule, src_ip)-
+        Kombination monoton bis zum OOM (Internet-Uplink / gespoofte Scan-IPs).
+
+        Semantik bleibt exakt erhalten: ein Eintrag wird nur gelöscht, wenn
+        `now - last_fired >= cooldown_s` — dann liefert der Cooldown-Check ohnehin
+        denselben Wert wie der defaultwert 0.0 eines fehlenden Keys. Für Rules,
+        die es nicht mehr gibt (cooldown unbekannt), wird 0.0 angenommen → der
+        Eintrag ist sicher entfernbar."""
+        cooldowns = {r.id: r.cooldown_s for r in self._loader.rules}
+        stale = [
+            key for key, ts in self._cooldowns.items()
+            if now - ts >= cooldowns.get(key[0], 0.0)
+        ]
+        for key in stale:
+            del self._cooldowns[key]
 
     def _is_own_ip(self, ip: str) -> bool:
         if not ip:
@@ -201,6 +221,13 @@ class SignatureEngine:
 
         now        = time.time()
         alerts     = []
+
+        # Periodisches Cooldown-Pruning (analog RuleContext._cleanup) — hält
+        # _cooldowns bei vielen distinct Source-IPs beschränkt.
+        mono = time.monotonic()
+        if mono - self._last_cooldown_prune > 60:
+            self._prune_cooldowns(now)
+            self._last_cooldown_prune = mono
 
         for rule in self._loader.rules:
             fparams = _FlowParams(rule.parameters, is_internal)

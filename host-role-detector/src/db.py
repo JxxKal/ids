@@ -54,6 +54,15 @@ class Db:
         ESTABLISHED|CLOSED — half-open/SYN-only werden nicht als 'serviert'
         gewertet, sonst zählt jeder Portscan-Probe als Service).
 
+        Zusätzlich Bidirektionalitäts-Check: pkt_count_rev > 0 verlangt, dass
+        der Host (dst_ip=Server) tatsächlich mindestens ein Paket zurück-
+        geschickt hat. Nötig, weil UDP/ICMP-Flows bereits nach dem ersten
+        Paket auf ESTABLISHED gesetzt werden (flow.py) — ohne diesen Filter
+        würde eine einzelne unbeantwortete UDP-Probe (`nmap -sU`) dem Ziel
+        einen 'servierten' Port und damit eine Rolle verpassen. Bei TCP ist
+        ESTABLISHED implizit schon bidirektional (SYN+ACK ist ein Rev-Paket),
+        der Filter ist dort ein No-Op.
+
         Rückgabe: {host_ip: {(dst_port, proto): flow_count}}, gefiltert auf
         flow_count >= min_flows_per_port.
         """
@@ -66,6 +75,7 @@ class Db:
              WHERE start_ts >= $1
                AND dst_port IS NOT NULL
                AND (stats->>'connection_state') IN ('ESTABLISHED', 'CLOSED')
+               AND COALESCE((stats->>'pkt_count_rev')::int, 0) > 0
              GROUP BY host(dst_ip), dst_port, proto
             HAVING COUNT(*) >= $2
             """,
@@ -79,7 +89,10 @@ class Db:
 
     async def host_first_seen(self, window_days: int) -> dict[str, datetime]:
         """Ältester servierter Flow pro Host im Fenster — für den
-        long_lived-Bonus."""
+        long_lived-Bonus. Gleiche 'serviert'-Semantik wie served_ports:
+        beantwortete Verbindung (ESTABLISHED|CLOSED) UND Bidirektionalität
+        (pkt_count_rev > 0), damit eine unbeantwortete UDP-Probe den
+        first_seen nicht künstlich nach vorne zieht."""
         assert self._pool is not None
         since = datetime.now(timezone.utc) - timedelta(days=window_days)
         rows = await self._pool.fetch(
@@ -88,6 +101,7 @@ class Db:
               FROM flows
              WHERE start_ts >= $1
                AND (stats->>'connection_state') IN ('ESTABLISHED', 'CLOSED')
+               AND COALESCE((stats->>'pkt_count_rev')::int, 0) > 0
              GROUP BY host(dst_ip)
             """,
             since,
@@ -199,33 +213,39 @@ class Db:
 
     # ── Schreiber: host_info.detected_roles ───────────────────────────────
 
-    async def get_detected_roles(self, host_ip: str) -> dict | None:
-        """Aktueller detected_roles-Stand eines Hosts (oder None)."""
-        assert self._pool is not None
-        row = await self._pool.fetchrow(
-            "SELECT detected_roles FROM host_info WHERE ip = $1::inet", host_ip,
-        )
-        if row is None:
-            return None
-        val = row["detected_roles"]
-        return val if isinstance(val, dict) else None
+    async def update_detected_roles(self, host_ip: str, build_payload) -> dict:
+        """Alleiniger Schreiber von detected_roles — Read-Modify-Write in EINER
+        Transaktion mit `SELECT ... FOR UPDATE`.
 
-    async def write_detected_roles(self, host_ip: str, payload: dict) -> None:
-        """Alleiniger Schreiber von detected_roles. SELECT ... FOR UPDATE auf
-        die Host-Zeile (Lock gegen den seltenen Fall, dass die API zeitgleich
-        einen manuellen Roles-PUT macht), dann UPDATE — bzw. INSERT, wenn der
-        Host noch keine host_info-Zeile hat.
+        TOCTOU-Schutz: Der Merge (manual-Locks respektieren, auto-Rollen neu
+        berechnen) muss auf dem FRISCH GESPERRTEN Zustand laufen. Läse der
+        Detektor den detected_roles-Stand außerhalb der Schreib-Transaktion
+        (wie zuvor über einen zweiten Pool-Connect), könnte ein zeitgleicher
+        manueller Roles-PUT (`action=suppress`/lock) zwischen Read und Write
+        rutschen und würde vom Detektor mit dem Vor-Edit-Stand überschrieben.
+        Durch die Zeilen-Sperre serialisiert der Detektor gegen die API.
 
-        `payload` wird als dict übergeben (jsonb-Codec) — kein json.dumps,
+        `build_payload` ist ein Callable(existing: dict | None) -> dict, das
+        den Merge auf dem gesperrten `existing` durchführt. Rückgabe: das
+        geschriebene Payload (für den ≥1-Rolle-Zähler in main.py).
+
+        Payloads gehen als dict rein (jsonb-Codec) — kein json.dumps,
         kein ::jsonb-Cast.
         """
         assert self._pool is not None
         async with self._pool.acquire() as conn:
             async with conn.transaction():
                 locked = await conn.fetchrow(
-                    "SELECT ip FROM host_info WHERE ip = $1::inet FOR UPDATE",
+                    "SELECT detected_roles FROM host_info WHERE ip = $1::inet FOR UPDATE",
                     host_ip,
                 )
+                existing = None
+                if locked is not None:
+                    val = locked["detected_roles"]
+                    existing = val if isinstance(val, dict) else None
+
+                payload = build_payload(existing)
+
                 if locked is None:
                     await conn.execute(
                         """
@@ -247,3 +267,4 @@ class Db:
                         """,
                         host_ip, payload,
                     )
+                return payload

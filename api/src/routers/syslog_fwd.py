@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from database import get_pool
+from deps import require_admin
 
 log = logging.getLogger("syslog-fwd")
 router = APIRouter(prefix="/api/syslog", tags=["syslog"])
@@ -105,6 +106,7 @@ async def get_syslog_config(pool: asyncpg.Pool = Depends(get_pool)) -> SyslogCon
 async def save_syslog_config(
     body: SyslogConfig,
     pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
 ) -> SyslogConfig:
     async with pool.acquire() as conn:
         await conn.execute(
@@ -118,7 +120,10 @@ async def save_syslog_config(
 
 
 @router.post("/test")
-async def test_syslog(body: SyslogTestRequest) -> dict:
+async def test_syslog(
+    body: SyslogTestRequest,
+    _admin: dict = Depends(require_admin),
+) -> dict:
     test_alert = {
         "id": "test-0000",
         "rule_id": "TEST_SYSLOG_001",

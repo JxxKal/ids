@@ -89,11 +89,15 @@ async def _run_cycle(cfg: Config, db: Db) -> None:
     written = 0
     for ip, profile in profiles.items():
         try:
-            existing = await db.get_detected_roles(ip)
-            payload = build_detected_roles(
-                profile, catalog, existing, cfg.min_confidence, cfg.oui_confidence_bonus,
-            )
-            await db.write_detected_roles(ip, payload)
+            # Read-Modify-Write atomar: build_detected_roles läuft INNERHALB
+            # der FOR-UPDATE-Transaktion auf dem gesperrten Stand, damit ein
+            # zeitgleicher manueller Roles-PUT nicht verloren geht (TOCTOU).
+            def _build(existing, _profile=profile):
+                return build_detected_roles(
+                    _profile, catalog, existing,
+                    cfg.min_confidence, cfg.oui_confidence_bonus,
+                )
+            payload = await db.update_detected_roles(ip, _build)
             if payload.get("roles"):
                 written += 1
         except Exception as exc:

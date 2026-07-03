@@ -12,7 +12,6 @@ Objekt als der ids-api-Service-Container.
 from __future__ import annotations
 
 import asyncio
-import io
 import os
 import shlex
 import shutil
@@ -62,53 +61,51 @@ def _log(msg: str) -> None:
         _state["log"] = _state["log"][-200:]
 
 
-def _extract(zip_bytes: bytes, dest: Path) -> tuple[int, str | None]:
-    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-        tmp.write(zip_bytes)
-        tmp_path = Path(tmp.name)
+def _extract(zip_path: Path, dest: Path) -> tuple[int, str | None]:
+    # zip_path zeigt auf die bereits gestreamte Upload-Datei auf Disk (siehe
+    # start_update). Wir öffnen sie direkt — das ZIP liegt so nie komplett im
+    # RAM, wichtig weil der api-Container mem_limit 512m hat und das Bundle
+    # ~1,5 GB groß ist. Aufräumen der Datei obliegt dem Caller (_run_update).
     images_entry: str | None = None
     dest_resolved = dest.resolve()
-    try:
-        with zipfile.ZipFile(tmp_path, "r") as zf:
-            members = zf.namelist()
-            if not members:
-                raise ValueError("ZIP ist leer")
-            prefix = members[0].split("/")[0] + "/"
-            count = 0
-            for member in members:
-                rel = member.removeprefix(prefix)
-                if not rel:
-                    continue
-                parts = rel.split("/")
-                if parts[0] in _PROTECT:
-                    continue
-                if parts[-1] in _IMAGE_FILES:
-                    images_entry = member
-                    continue
-                target = dest / rel
-                # Zip-Slip-Schutz: ein Member wie '…/../../etc/cron.d/pwn' oder ein
-                # absoluter Pfad ('/etc/...') würde sonst außerhalb von dest landen.
-                # Der API-Container läuft als root mit gemountetem /opt/ids + docker.sock,
-                # also wäre ein Write außerhalb ein Root-File-Write am Host → RCE.
-                # resolve() normalisiert '..'; relative_to wirft bei Ausbruch.
-                try:
-                    target.resolve().relative_to(dest_resolved)
-                except ValueError:
-                    _log(f"Übersprungen (Pfad-Traversal-Versuch): {member}")
-                    continue
-                if member.endswith("/"):
-                    target.mkdir(parents=True, exist_ok=True)
-                else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with zf.open(member) as src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    count += 1
-        return count, images_entry
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        members = zf.namelist()
+        if not members:
+            raise ValueError("ZIP ist leer")
+        prefix = members[0].split("/")[0] + "/"
+        count = 0
+        for member in members:
+            rel = member.removeprefix(prefix)
+            if not rel:
+                continue
+            parts = rel.split("/")
+            if parts[0] in _PROTECT:
+                continue
+            if parts[-1] in _IMAGE_FILES:
+                images_entry = member
+                continue
+            target = dest / rel
+            # Zip-Slip-Schutz: ein Member wie '…/../../etc/cron.d/pwn' oder ein
+            # absoluter Pfad ('/etc/...') würde sonst außerhalb von dest landen.
+            # Der API-Container läuft als root mit gemountetem /opt/ids + docker.sock,
+            # also wäre ein Write außerhalb ein Root-File-Write am Host → RCE.
+            # resolve() normalisiert '..'; relative_to wirft bei Ausbruch.
+            try:
+                target.resolve().relative_to(dest_resolved)
+            except ValueError:
+                _log(f"Übersprungen (Pfad-Traversal-Versuch): {member}")
+                continue
+            if member.endswith("/"):
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                count += 1
+    return count, images_entry
 
 
-def _unpack_images_to_temp(zip_bytes: bytes, member: str) -> Path:
+def _unpack_images_to_temp(zip_path: Path, member: str) -> Path:
     if member.endswith(".zst"):
         suffix = ".tar.zst"
     elif member.endswith(".gz"):
@@ -116,7 +113,7 @@ def _unpack_images_to_temp(zip_bytes: bytes, member: str) -> Path:
     else:
         suffix = ".tar"
     tmp = Path(tempfile.mktemp(suffix=suffix))
-    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+    with zipfile.ZipFile(zip_path) as zf:
         with zf.open(member) as src, open(tmp, "wb") as dst:
             shutil.copyfileobj(src, dst)
     return tmp
@@ -221,7 +218,7 @@ def _spawn_compose_up_runner(ids_dir: Path, profile: str) -> None:
     )
 
 
-async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
+async def _run_update(zip_path: Path, pull_images: bool) -> None:
     _state.update({
         "phase":       "extracting",
         "log":         [],
@@ -231,8 +228,12 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
     })
     try:
         # ── 1. ZIP entpacken (0-10%) ──────────────────────────────────────────
-        _log(f"Entpacke ZIP ({len(zip_bytes) // 1024} KB) nach {IDS_DIR} ...")
-        count, images_entry = await asyncio.to_thread(_extract, zip_bytes, IDS_DIR)
+        try:
+            size_kb = zip_path.stat().st_size // 1024
+        except OSError:
+            size_kb = 0
+        _log(f"Entpacke ZIP ({size_kb} KB) nach {IDS_DIR} ...")
+        count, images_entry = await asyncio.to_thread(_extract, zip_path, IDS_DIR)
         _log(f"{count} Dateien entpackt. .env und .git bleiben erhalten.")
         _state["progress"] = 10
 
@@ -253,7 +254,7 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
             _log(f"Vorgebaute Images gefunden ({img_name}) – lade via docker load ...")
             _state["progress"] = 12
 
-            tmp_img = await asyncio.to_thread(_unpack_images_to_temp, zip_bytes, images_entry)
+            tmp_img = await asyncio.to_thread(_unpack_images_to_temp, zip_path, images_entry)
             try:
                 loaded = [0]
                 def on_load_line(line: str) -> None:
@@ -324,16 +325,20 @@ async def _run_update(zip_bytes: bytes, pull_images: bool) -> None:
         _state["phase"] = "error"
         _log(f"FEHLER: {exc}")
     finally:
+        # Gestreamte Upload-Datei in JEDEM Pfad aufräumen (Erfolg mit return,
+        # Fehler). Die Images sind zu diesem Zeitpunkt bereits geladen und der
+        # Compose-Runner-Spawn braucht das ZIP nicht mehr → gefahrlos löschen.
+        zip_path.unlink(missing_ok=True)
         if not _state.get("finished_at"):
             _state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
-def _peek_zip_version(zip_bytes: bytes) -> str | None:
+def _peek_zip_version(zip_path: Path) -> str | None:
     """Liest VERSION aus dem ZIP ohne zu extrahieren. Gibt None zurück
     wenn das Bundle keinen lesbaren Marker hat (z.B. uralte Builds vor
     dem VERSION-File-Pinning) — in dem Fall lassen wir das Update zu."""
     try:
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        with zipfile.ZipFile(zip_path) as zf:
             members = zf.namelist()
             if not members:
                 return None
@@ -347,7 +352,7 @@ def _peek_zip_version(zip_bytes: bytes) -> str | None:
     return None
 
 
-def _validate_bundle(zip_bytes: bytes) -> None:
+def _validate_bundle(zip_path: Path) -> None:
     """Prüft die ZIP-Struktur, bevor das Update überhaupt scheduled wird.
 
     Häufiger User-Fehler: aus dem GitHub-Actions-„Artifacts"-Tab statt aus den
@@ -366,7 +371,7 @@ def _validate_bundle(zip_bytes: bytes) -> None:
     Bei Fehler → HTTPException(400) mit klarer User-Message.
     """
     try:
-        zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
+        zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile as exc:
         raise HTTPException(400, f"Datei ist kein gültiges ZIP: {exc}")
     members = zf.namelist()
@@ -442,32 +447,46 @@ async def start_update(
         raise HTTPException(409, "Ein Update läuft bereits")
     if not (file.filename or "").endswith(".zip"):
         raise HTTPException(400, "Nur ZIP-Dateien erlaubt")
-    zip_bytes = await file.read()
 
-    # Vor allem anderen: Struktur prüfen. Wirft 400 mit spezifischer Message
-    # wenn z.B. wrapped GitHub-Actions-Artifacts geladen wurden.
-    _validate_bundle(zip_bytes)
+    # Upload streamend (chunked) auf eine Temp-Datei schreiben statt file.read()
+    # in den RAM zu ziehen: das Update-ZIP ist ~1,5 GB, der api-Container hat
+    # mem_limit 512m → ein read() aller Bytes würde den Container mitten im
+    # Update OOM-killen. Ab hier arbeiten alle Schritte auf dem Dateipfad.
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        zip_path = Path(tmp.name)
+        while chunk := await file.read(1 << 20):
+            tmp.write(chunk)
 
-    incoming = _peek_zip_version(zip_bytes)
-    current = _read_version()
-    if incoming and current and not force:
-        in_sv = _parse_semver(incoming)
-        cur_sv = _parse_semver(current)
-        if in_sv and cur_sv:
-            if in_sv < cur_sv:
-                raise HTTPException(
-                    400,
-                    f"ZIP enthält {incoming}, installiert ist {current} — Downgrade abgelehnt. "
-                    f"Mit force=true erzwingbar.",
-                )
-            if in_sv == cur_sv:
-                raise HTTPException(
-                    400,
-                    f"ZIP-Version {incoming} entspricht der installierten — kein Update notwendig. "
-                    f"Mit force=true erzwingbar.",
-                )
+    try:
+        # Vor allem anderen: Struktur prüfen. Wirft 400 mit spezifischer Message
+        # wenn z.B. wrapped GitHub-Actions-Artifacts geladen wurden.
+        _validate_bundle(zip_path)
 
-    background_tasks.add_task(_run_update, zip_bytes, pull_images)
+        incoming = _peek_zip_version(zip_path)
+        current = _read_version()
+        if incoming and current and not force:
+            in_sv = _parse_semver(incoming)
+            cur_sv = _parse_semver(current)
+            if in_sv and cur_sv:
+                if in_sv < cur_sv:
+                    raise HTTPException(
+                        400,
+                        f"ZIP enthält {incoming}, installiert ist {current} — Downgrade abgelehnt. "
+                        f"Mit force=true erzwingbar.",
+                    )
+                if in_sv == cur_sv:
+                    raise HTTPException(
+                        400,
+                        f"ZIP-Version {incoming} entspricht der installierten — kein Update notwendig. "
+                        f"Mit force=true erzwingbar.",
+                    )
+    except BaseException:
+        # Jeder Fehler/Abbruch vor dem Scheduling → Temp-Datei sofort räumen.
+        # Ab dem add_task übernimmt _run_update (finally) das Aufräumen.
+        zip_path.unlink(missing_ok=True)
+        raise
+
+    background_tasks.add_task(_run_update, zip_path, pull_images)
     return {
         "status":   "started",
         "incoming": incoming or "?",

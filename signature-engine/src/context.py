@@ -94,12 +94,30 @@ class RuleContext:
         return dq
 
     def _cleanup(self) -> None:
-        """Entfernt alle Einträge die älter als MAX_WINDOW_S sind."""
+        """Entfernt alle Einträge die älter als MAX_WINDOW_S sind UND löscht
+        anschließend leer gewordene per-src_ip-Keys aus den defaultdicts.
+
+        Ohne das Key-Pruning wüchsen die Dicts bei vielen distinct Source-IPs
+        (Internet-Uplink, gespoofte Scans) monoton bis zum OOM — die Query-
+        Methoden vivifizieren über defaultdict-Zugriff sogar für reine
+        Lookups leere Deques. Die Sliding-Window-Semantik bleibt unberührt:
+        es werden nur Einträge älter als MAX_WINDOW_S entfernt (identisch zu
+        vorher), zusätzlich verschwinden nur wirklich leere Keys."""
         cutoff = time.time() - self.MAX_WINDOW_S
         for storage in (self._dst_ports, self._dst_ips, self._syn):
-            for dq in storage.values():
+            empty_keys = []
+            for src_ip, dq in storage.items():
                 while dq and dq[0][0] < cutoff:
                     dq.popleft()
-        for dq in self._flow_ts.values():
+                if not dq:
+                    empty_keys.append(src_ip)
+            for k in empty_keys:
+                del storage[k]
+        empty_keys = []
+        for src_ip, dq in self._flow_ts.items():
             while dq and dq[0] < cutoff:
                 dq.popleft()
+            if not dq:
+                empty_keys.append(src_ip)
+        for k in empty_keys:
+            del self._flow_ts[k]

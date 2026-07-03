@@ -9,7 +9,11 @@
       ports:
         - {port: 4840, proto: TCP} # OPC-UA
         - {port: 5450, proto: TCP} # WinCC / SIMATIC (CCAgent)
-        - {port: 102,  proto: TCP} # S7comm (Anbindung an PLCs)
+        # Port 102 (S7comm) bewusst NICHT als any_ports-Klassifikator: den Port
+        # SERVIERT die PLC (Responder), nicht der WinCC-Server — WinCC ist dort
+        # Client (ausgehend). Als any_ports würde 102 jede reine S7-PLC
+        # fälschlich als WinCC-SCADA klassifizieren (Überschneidung mit plc_s7).
+        # WinCC wird über 4840/5450 identifiziert; S7-Anbindung ist kein Signal.
     optional_flags: []
   min_flows_per_port: 1
   base_confidence: 0.62            # OT-Einzelports schwach — OPC-UA auch generisch

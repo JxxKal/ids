@@ -6,8 +6,10 @@ import ipaddress
 import os
 import subprocess
 
-from fastapi import APIRouter, Form, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from pydantic import BaseModel
+
+from deps import require_admin
 
 router = APIRouter(prefix="/api/ssl", tags=["ssl"])
 
@@ -82,6 +84,7 @@ async def ssl_upload(
     cert: UploadFile = File(...),
     key:  UploadFile = File(...),
     ca:   UploadFile | None = File(default=None),
+    _admin: dict = Depends(require_admin),
 ) -> SslStatusResponse:
     os.makedirs(CERT_DIR, exist_ok=True)
     cert_data = await cert.read()
@@ -103,6 +106,7 @@ async def ssl_upload(
 async def ssl_upload_pfx(
     pfx:      UploadFile = File(...),
     password: str        = Form(""),
+    _admin:   dict       = Depends(require_admin),
 ) -> SslStatusResponse:
     """Importiert ein PFX/PKCS#12-Zertifikat (z.B. von Windows CA). Extrahiert Zertifikat und privaten Schlüssel."""
     os.makedirs(CERT_DIR, exist_ok=True)
@@ -149,7 +153,10 @@ async def get_hostname() -> dict:
 
 
 @router.post("/hostname", summary="Hostnamen für nginx server_name setzen")
-async def set_hostname(body: HostnameRequest) -> dict:
+async def set_hostname(
+    body: HostnameRequest,
+    _admin: dict = Depends(require_admin),
+) -> dict:
     os.makedirs(CERT_DIR, exist_ok=True)
     hostname = body.hostname.strip()
     with open(HOSTNAME_FILE, "w") as f:
@@ -158,7 +165,10 @@ async def set_hostname(body: HostnameRequest) -> dict:
 
 
 @router.post("/self-signed", response_model=SslStatusResponse)
-async def ssl_self_signed(body: SelfSignedRequest) -> SslStatusResponse:
+async def ssl_self_signed(
+    body: SelfSignedRequest,
+    _admin: dict = Depends(require_admin),
+) -> SslStatusResponse:
     os.makedirs(CERT_DIR, exist_ok=True)
     try:
         from cryptography import x509
@@ -212,7 +222,10 @@ async def ssl_self_signed(body: SelfSignedRequest) -> SslStatusResponse:
 
 
 @router.post("/acme", response_model=SslStatusResponse)
-async def ssl_acme(body: AcmeConfig) -> SslStatusResponse:
+async def ssl_acme(
+    body: AcmeConfig,
+    _admin: dict = Depends(require_admin),
+) -> SslStatusResponse:
     """Speichert ACME-Konfiguration. Zertifikat-Bezug via certbot/acme.sh muss manuell oder per Cronjob erfolgen."""
     os.makedirs(CERT_DIR, exist_ok=True)
     import json

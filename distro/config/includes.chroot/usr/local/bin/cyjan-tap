@@ -517,6 +517,7 @@ cmd_update() {
   require_curl
   command -v zstd >/dev/null || { echo "zstd fehlt"; exit 1; }
   command -v sha256sum >/dev/null || { echo "sha256sum fehlt"; exit 1; }
+  command -v openssl >/dev/null || { echo "openssl fehlt (für Server-Cert-Pinning)"; exit 1; }
 
   # Certs liegen im Docker-Volume tap-cert (Mount-Punkt /etc/cyjan IM
   # Container, am Host nicht direkt sichtbar). Wir kopieren sie via
@@ -565,15 +566,41 @@ cmd_update() {
   master_base=$(echo "$master_url" | sed -E 's|^wss://|https://|; s|^ws://|https://|; s|/[^/]*$||')
   echo "Master:        $master_base"
 
-  # --insecure ist hier mit Bedacht: das Master-Server-Cert ist gleich-
-  # zeitig die Master-CA und hat keinen IP-SAN — curl würde sonst am
-  # Hostname-Mismatch scheitern. Die echte Authentifizierung läuft über
-  # das mTLS-Client-Cert (--cert/--key), das nur der gepairte Tap besitzt
-  # und das der Server gegen die CA validiert. Das ist genau das Modell
-  # das tap-uplink fährt (check_hostname=False, verify_mode=CERT_REQUIRED).
-  # V2-Backlog: dediziertes Server-Cert mit IP-SAN am master-uplink, dann
-  # kann --insecure weg und --cacert wieder die echte CA-Pin sein.
+  # Server-Authentifizierung via Public-Key-Pinning.
+  #
+  # Das Master-Server-Cert IST in V1 das Master-CA-Cert selbst (siehe
+  # master-uplink _build_ssl_context + api/src/master_ca.py): CN='Cyjan IDS
+  # Master CA', OHNE IP/DNS-SAN. Deshalb kann curl den Hostnamen nicht gegen
+  # das Cert matchen — reines --cacert scheitert am Hostname-Mismatch
+  # (curl: (60) certificate subject name does not match target host).
+  #
+  # Statt wie früher blind --insecure zu vertrauen (→ MITM = fremde Images +
+  # fremdes post-update.sh als root), pinnen wir den EXAKTEN Public Key aus
+  # dem beim Pairing installierten master-ca.pem. --pinnedpubkey wird von curl
+  # auch unter --insecure hart erzwungen: nur der echte Master (der den
+  # CA-Privatekey besitzt) kann ein Cert mit genau diesem Key präsentieren.
+  # Damit ist die Verbindung server-authentisch, ein On-Path-Angreifer wird
+  # abgewiesen, und der sha256-Check am Bundle (Erwartungswert aus dem
+  # Manifest, das über denselben gepinnten Kanal kommt) ist wieder wirksam.
+  # Funktional identisch zum tap-uplink (check_hostname=False +
+  # verify_mode=CERT_REQUIRED gegen die Master-CA).
+  #
+  # --insecure bleibt nur, um den unerfüllbaren Hostname-/SAN-Check auf dem
+  # SAN-losen Self-CA-Cert zu überspringen — die Authentizität trägt der Pin.
+  # V2-Backlog: dediziertes Server-Cert mit IP/DNS-SAN am master-uplink, dann
+  # kann --insecure raus und --cacert "$ca" die reguläre CA-Pin übernehmen.
+  local master_pin
+  master_pin=$(openssl x509 -in "$ca" -pubkey -noout \
+                 | openssl pkey -pubin -outform der 2>/dev/null \
+                 | openssl dgst -sha256 -binary \
+                 | openssl enc -base64) || master_pin=""
+  if [ -z "$master_pin" ]; then
+    echo "FEHLER: Public-Key-Pin konnte nicht aus master-ca.pem berechnet werden." >&2
+    echo "  Ist openssl vorhanden und master-ca.pem gültig?" >&2
+    exit 1
+  fi
   local curl_mtls=(curl --silent --show-error --fail --insecure
+                   --pinnedpubkey "sha256//$master_pin"
                    --cert "$cert" --key "$key"
                    --connect-timeout 10 --max-time 1200)
 

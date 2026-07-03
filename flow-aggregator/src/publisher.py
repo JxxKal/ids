@@ -27,6 +27,12 @@ TOPIC_FLOWS = "flows"
 
 
 class FlowPublisher:
+    # Obergrenze für den DB-Puffer bei anhaltendem DB-Ausfall. Solange die DB
+    # weg ist, behalten wir nicht-committete Flows (kein stiller Datenverlust),
+    # aber unbegrenzt wachsen darf der Puffer nicht → OOM-Schutz. Bei Überlauf
+    # werden die ÄLTESTEN Flows verworfen (rate-limited geloggt).
+    MAX_PENDING = 50_000
+
     def __init__(self, kafka_brokers: str, postgres_dsn: str | None, batch_size: int = 100) -> None:
         self._producer = Producer({
             "bootstrap.servers":            kafka_brokers,
@@ -42,6 +48,11 @@ class FlowPublisher:
             "retry.backoff.ms":             "100",
         })
 
+        # Original-DSN merken — für den Reconnect. NICHT self._conn.dsn nutzen:
+        # psycopg2 ≥2.7 maskiert dort das Passwort ("password=xxx"), ein
+        # Reconnect damit scheitert an der Auth selbst wenn die DB erreichbar ist.
+        self._dsn = postgres_dsn
+
         # postgres_dsn=None: Tap-Mode, kein lokales Postgres → DB-Pfad
         # komplett deaktiviert. Records gehen weiterhin nach Kafka.
         if postgres_dsn:
@@ -54,6 +65,10 @@ class FlowPublisher:
 
         self._batch_size  = batch_size
         self._pending_db: list[FlowRecord] = []
+        # Backoff-Deadline (monotonic) für Reconnect-Versuche + rate-limit
+        # für die Puffer-Overflow-Warnung.
+        self._db_backoff_until: float = 0.0
+        self._last_pending_warn: float = 0.0
 
         # Metriken
         self.kafka_ok:        int = 0
@@ -155,9 +170,56 @@ class FlowPublisher:
 
     # ── TimescaleDB ───────────────────────────────────────────────────────────
 
-    def _flush_db(self) -> None:
-        if not self._pending_db:
+    def _reconnect(self) -> None:
+        """Versucht einen Reconnect mit der ORIGINAL-DSN. Fängt Fehler selbst
+        ab und propagiert NIE — ein anhaltender DB-Ausfall darf die flow-
+        aggregator-Hauptschleife nicht crashen (sonst gingen alle In-Memory-
+        Flows verloren + Restart-Loop). Bei erneutem Fehlschlag greift ein
+        kurzer Backoff, damit wir nicht bei jedem Batch neu verbinden."""
+        now = time.monotonic()
+        if now < self._db_backoff_until:
             return
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        try:
+            self._conn = psycopg2.connect(self._dsn)
+            self._conn.autocommit = False
+            self._db_backoff_until = 0.0
+            logger.info("DB-Reconnect erfolgreich")
+        except Exception as e:
+            # Verbindung bleibt tot (self._conn ist jetzt closed) — nächster
+            # Flush-Zyklus versucht es nach Ablauf des Backoffs erneut.
+            self._db_backoff_until = now + 5.0
+            logger.error("DB-Reconnect fehlgeschlagen: %s – Backoff 5s", e)
+
+    def _bound_pending(self) -> None:
+        """Begrenzt den DB-Puffer bei anhaltendem Ausfall (OOM-Schutz).
+        Verwirft die ältesten Flows über MAX_PENDING hinaus."""
+        overflow = len(self._pending_db) - self.MAX_PENDING
+        if overflow <= 0:
+            return
+        del self._pending_db[:overflow]
+        now = time.monotonic()
+        if now - self._last_pending_warn > 5.0:
+            logger.warning(
+                "DB-Puffer über %d – älteste %d Flows verworfen (DB-Ausfall?)",
+                self.MAX_PENDING, overflow,
+            )
+            self._last_pending_warn = now
+
+    def _flush_db(self) -> None:
+        if not self._pending_db or self._conn is None:
+            return
+
+        # Verbindung tot (z.B. vorheriger Reconnect scheiterte)? Erst wieder
+        # aufbauen. Klappt das nicht, Batch behalten (bounded) und später erneut.
+        if self._conn.closed:
+            self._reconnect()
+            if self._conn.closed:
+                self._bound_pending()
+                return
 
         rows = [
             (
@@ -194,26 +256,26 @@ class FlowPublisher:
             self._conn.commit()
             self.db_ok += len(self._pending_db)
             logger.debug("DB-Batch committed: %d flows", len(self._pending_db))
+            # NUR bei erfolgreichem Commit clearen — sonst Datenverlust.
+            self._pending_db.clear()
 
-        except psycopg2.OperationalError as e:
-            # Verbindungsfehler → reconnect versuchen
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+            # Verbindungsfehler (DB weg / Connection mitten im Insert gerissen)
+            # → Reconnect versuchen, Batch BEHALTEN und im nächsten Zyklus erneut
+            # einspielen. _reconnect() propagiert nicht (kein Crash).
             logger.error("DB-Verbindungsfehler: %s – versuche Reconnect", e)
             self.db_err += 1
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            # Reconnect mit denselben DSN-Daten (gespeichert im Connection-Objekt)
-            self._conn = psycopg2.connect(self._conn.dsn)
-            self._conn.autocommit = False
+            self._reconnect()
+            self._bound_pending()
 
         except Exception as e:
-            logger.error("DB-Insert-Fehler: %s", e)
+            # Daten-/Integritätsfehler (Poison-Batch) → Rollback + verwerfen.
+            # Behalten würde eine Endlosschleife bauen, die den Puffer bis zum
+            # OOM wachsen lässt und alle folgenden Flows blockiert.
+            logger.error("DB-Insert-Fehler (Batch verworfen): %s", e)
             self.db_err += 1
             try:
                 self._conn.rollback()
             except Exception:
                 pass
-
-        finally:
             self._pending_db.clear()

@@ -20,6 +20,12 @@ class Config:
     # geklemmt. Verhindert dass ein flach verteiltes Reservoir die Schwelle
     # auf semantisch unsinnige Werte (z.B. SCAN port_count=8) drückt.
     floor_factor:     float
+    # Trust-Boundary: die rule-metrics-Records stammen (auch) von gepairten
+    # Taps. Ein böswilliger Tap könnte beliebige rule_id/param_name-Kombis
+    # senden und damit unbegrenzt Reservoirs anlegen (Master-OOM + Bogus-
+    # Baselines). Harte Obergrenze der distinkten Reservoir-Keys als Backstop
+    # zusätzlich zur Schema-Validierung.
+    max_reservoir_keys: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -46,4 +52,5 @@ class Config:
             tuning_cycle_s=float(os.environ.get("TUNING_CYCLE_S", str(6 * 3600))),
             min_samples=int(os.environ.get("MIN_SAMPLES", "100")),
             floor_factor=float(os.environ.get("TUNER_FLOOR_FACTOR", "0.3")),
+            max_reservoir_keys=int(os.environ.get("MAX_RESERVOIR_KEYS", "2000")),
         )

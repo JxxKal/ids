@@ -13,14 +13,17 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import json
+import socket
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 import asyncpg
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
 from database import get_pool
+from deps import require_admin
 
 router = APIRouter(prefix="/api/itop", tags=["itop"])
 
@@ -81,10 +84,48 @@ async def _get_cfg(pool: asyncpg.Pool) -> dict:
 
 
 def _build_client(cfg: dict) -> httpx.AsyncClient:
+    # TLS-Verifikation standardmäßig AN. Self-signed iTop-Instanzen müssen
+    # explizit ssl_verify=false in der Config setzen — nicht mehr der Default,
+    # sonst ist jeder POST an die frei konfigurierbare base_url MitM-offen.
     return httpx.AsyncClient(
-        verify=cfg.get("ssl_verify", False),
+        verify=cfg.get("ssl_verify", True),
         timeout=30,
     )
+
+
+def _guard_egress(base_url: str) -> None:
+    """SSRF-Schutz: blockt Requests an Loopback- und Link-Local-Ziele
+    (inkl. Cloud-Metadata 169.254.169.254). ``base_url`` ist user-konfigurierbar
+    und wird server-seitig angefragt — ohne diesen Guard könnte ein Admin-
+    fremder Konfig-Wert den API-Container gegen interne Management-Endpunkte
+    feuern lassen. Private LAN-Ranges bleiben erlaubt (On-Prem-iTop ist
+    legitim im 192.168/10-Netz)."""
+    host = (urlparse(base_url).hostname or "").strip()
+    if not host:
+        raise HTTPException(400, "iTop base_url ohne gültigen Host.")
+
+    candidates: set[str] = set()
+    try:
+        ipaddress.ip_address(host)
+        candidates.add(host)
+    except ValueError:
+        # Hostname → auflösen und alle A/AAAA-Records prüfen.
+        try:
+            for info in socket.getaddrinfo(host, None):
+                candidates.add(info[4][0])
+        except socket.gaierror as exc:
+            raise HTTPException(400, f"iTop-Host '{host}' nicht auflösbar: {exc}") from exc
+
+    for addr in candidates:
+        try:
+            ip = ipaddress.ip_address(addr.split("%")[0])  # %zone bei link-local v6 strippen
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_link_local:
+            raise HTTPException(
+                400,
+                f"iTop-Ziel {addr} ist nicht erlaubt (loopback/link-local, SSRF-Schutz).",
+            )
 
 
 async def _core_get(client: httpx.AsyncClient, base_url: str, user: str, pwd: str,
@@ -128,6 +169,7 @@ async def _sync(pool: asyncpg.Pool) -> None:
         pwd      = cfg["password"]
         org      = (cfg.get("org_filter") or "").strip()
 
+        _guard_egress(base_url)
         _log(f"Verbinde mit {base_url} ...")
 
         nets_ok = hosts_ok = nets_err = hosts_err = 0
@@ -272,7 +314,10 @@ async def _sync(pool: asyncpg.Pool) -> None:
 
 
 @router.post("/sync", summary="iTop-Sync starten")
-async def start_sync(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
+async def start_sync(
+    pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
+) -> dict:
     if _state["phase"] == "running":
         raise HTTPException(409, "Sync läuft bereits.")
     asyncio.create_task(_sync(pool))
@@ -285,11 +330,15 @@ async def sync_status() -> dict:
 
 
 @router.post("/test", summary="Verbindungstest")
-async def test_connection(pool: asyncpg.Pool = Depends(get_pool)) -> dict:
+async def test_connection(
+    pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
+) -> dict:
     cfg = await _get_cfg(pool)
     base_url = cfg["base_url"]
     user     = cfg["user"]
     pwd      = cfg["password"]
+    _guard_egress(base_url)
 
     payload = json.dumps({"operation": "core/get", "class": "Organization",
                           "key": "SELECT Organization", "output_fields": "name"})

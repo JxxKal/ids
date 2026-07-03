@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from database import get_pool
+from deps import require_admin
 
 router = APIRouter(prefix="/api/ml", tags=["ml"])
 
@@ -335,7 +336,10 @@ async def get_ml_config() -> MLConfig:
 
 
 @router.patch("/config", response_model=MLConfig)
-async def update_ml_config(body: MLConfigPatch) -> MLConfig:
+async def update_ml_config(
+    body: MLConfigPatch,
+    _admin: dict = Depends(require_admin),
+) -> MLConfig:
     cfg = _read_ml_config()
     needs_retrain = False
 
@@ -365,7 +369,7 @@ async def update_ml_config(body: MLConfigPatch) -> MLConfig:
 
 
 @router.post("/retrain", response_model=RetrainStatus)
-async def trigger_retrain() -> RetrainStatus:
+async def trigger_retrain(_admin: dict = Depends(require_admin)) -> RetrainStatus:
     """Manuellen Sofort-Retrain anstoßen."""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     now = time.time()

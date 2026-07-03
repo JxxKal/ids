@@ -107,26 +107,35 @@ class HostProfiler:
         src_mac = flow.get("src_mac")
         dst_mac = flow.get("dst_mac")
         with self._lock:
+            # Servierter Port ZUERST: nur ein Responder (dst_ip) mit BEANTWORTETER
+            # Verbindung (ESTABLISHED|CLOSED UND pkt_count_rev>0) legt einen Host-
+            # Slot an. Ohne den pkt_count_rev-Check würde eine unbeantwortete
+            # UDP/ICMP-Probe (flow.py setzt UDP/ICMP nach 1 Paket auf ESTABLISHED)
+            # als 'serviert' zählen — ein einzelnes nmap -sU verpasst dem Ziel
+            # sonst eine Rolle.
+            state = flow.get("connection_state")
+            dst_port = flow.get("dst_port")
+            answered = int(flow.get("pkt_count_rev") or 0) > 0
+            if dst_ip and dst_port and state in _SERVED_STATES and answered:
+                proto = str(flow.get("proto") or "")
+                agg = self._get(dst_ip, now)
+                if agg is not None:
+                    key = (int(dst_port), proto)
+                    slot = agg.ports.get(key)
+                    if slot is None:
+                        agg.ports[key] = [1, now]
+                    else:
+                        slot[0] += 1
+                        slot[1] = now
+                    agg.last_seen = now
+            # MAC-Tracking NUR für Hosts, die bereits einen Slot haben (d.h.
+            # mindestens einen Port servieren). Sonst fressen reine Client-/
+            # Remote-IPs (Internet-Mirror) die MAX_HOSTS-Slots mit Nur-MAC-
+            # Einträgen und der echte interne Server wird nie profiliert.
             if _looks_like_mac(src_mac) and src_ip:
                 self._touch_mac(src_ip, src_mac, now)
             if _looks_like_mac(dst_mac) and dst_ip:
                 self._touch_mac(dst_ip, dst_mac, now)
-            # Servierter Port: Host = Responder (dst_ip), beantwortete Verbindung.
-            state = flow.get("connection_state")
-            dst_port = flow.get("dst_port")
-            if dst_ip and dst_port and state in _SERVED_STATES:
-                proto = str(flow.get("proto") or "")
-                agg = self._get(dst_ip, now)
-                if agg is None:
-                    return
-                key = (int(dst_port), proto)
-                slot = agg.ports.get(key)
-                if slot is None:
-                    agg.ports[key] = [1, now]
-                else:
-                    slot[0] += 1
-                    slot[1] = now
-                agg.last_seen = now
 
     def _get(self, ip: str, now: float) -> _HostAgg | None:
         agg = self._hosts.get(ip)
@@ -138,7 +147,10 @@ class HostProfiler:
         return agg
 
     def _touch_mac(self, ip: str, mac: str, now: float) -> None:
-        agg = self._get(ip, now)
+        """MAC-Zähler eines Hosts fortschreiben — legt KEINEN neuen Host an
+        (nur bereits servierende Hosts tragen einen Slot). Reine Client-IPs
+        ohne servierten Port bleiben damit außen vor."""
+        agg = self._hosts.get(ip)
         if agg is None:
             return
         agg.macs[mac] = agg.macs.get(mac, 0) + 1

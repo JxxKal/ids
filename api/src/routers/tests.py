@@ -11,6 +11,7 @@ from confluent_kafka import Producer
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from database import get_pool
+from deps import require_admin
 from models import TestRunRequest, TestRunResponse
 
 router = APIRouter(prefix="/api/tests", tags=["tests"])
@@ -45,6 +46,7 @@ def make_run_endpoint(producer: Producer):
     async def run_test(
         body: TestRunRequest,
         pool: asyncpg.Pool = Depends(get_pool),
+        _admin: dict = Depends(require_admin),
     ) -> TestRunResponse:
         scenario = _SCENARIOS.get(body.scenario_id)
         if not scenario:

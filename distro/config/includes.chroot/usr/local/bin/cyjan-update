@@ -45,6 +45,64 @@ have_root()      { [ "$EUID" -eq 0 ]; }
 have_jq()        { command -v jq >/dev/null 2>&1; }
 read_version()   { [ -r "$VERSION_FILE" ] && tr -d '[:space:]' < "$VERSION_FILE" || echo "unknown"; }
 
+# Verifiziert die sha256-Summe einer Datei gegen einen Erwartungswert.
+# Akzeptiert Hex mit/ohne 'sha256:'-Prefix, case-insensitiv. Rückgabe 0 = OK.
+verify_sha256() {
+  local path="$1" expected="$2" actual norm
+  norm=$(printf '%s' "$expected" | grep -oiE '[0-9a-f]{64}' | head -1 | tr 'A-F' 'a-f')
+  if [ -z "$norm" ]; then
+    echo "$TAG FEHLER: ungültiger sha256-Erwartungswert: '$expected'" >&2
+    return 1
+  fi
+  actual=$(sha256sum "$path" | awk '{print $1}' | tr 'A-F' 'a-f')
+  if [ "$actual" != "$norm" ]; then
+    echo "$TAG FEHLER: SHA256-Mismatch am Update-ZIP — Abbruch." >&2
+    echo "$TAG   erwartet: $norm" >&2
+    echo "$TAG   bekommen: $actual" >&2
+    return 1
+  fi
+  echo "$TAG Integrität OK (sha256 $actual)"
+  return 0
+}
+
+# Versucht den erwarteten sha256 des Release-Assets serverseitig (über TLS)
+# zu ermitteln — ohne Workflow-Änderung nutzbar. Reihenfolge:
+#   (a) '<asset>.sha256'-Companion-Asset (Standard-Konvention), falls angehängt
+#   (b) GitHub-API: assets[].digest ('sha256:<hex>', von GitHub berechnet)
+# Gibt lowercase-Hex auf stdout aus oder nichts (return 1), wenn nichts findbar.
+fetch_expected_sha() {
+  local tag="$1" asset="$2" url="$3" sha="" sha_txt resp digest
+  # (a) Companion-Asset
+  sha_txt=$(curl -fsSL --max-time 60 "${url}.sha256" 2>/dev/null || true)
+  if [ -n "$sha_txt" ]; then
+    sha=$(printf '%s\n' "$sha_txt" | grep -oiE '[0-9a-f]{64}' | head -1 || true)
+    if [ -n "$sha" ]; then printf '%s' "$sha" | tr 'A-F' 'a-f'; return 0; fi
+  fi
+  # (b) GitHub-API asset.digest
+  resp=$(curl -fsSL --max-time 30 -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/$REPO/releases/tags/$tag" 2>/dev/null || true)
+  if [ -n "$resp" ]; then
+    if have_jq; then
+      digest=$(jq -r --arg n "$asset" '.assets[]? | select(.name==$n) | .digest // empty' <<<"$resp" 2>/dev/null | head -1)
+    else
+      digest=$(printf '%s' "$resp" | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+n=sys.argv[1]
+for a in d.get("assets",[]) or []:
+    if a.get("name")==n and a.get("digest"):
+        print(a["digest"]); break
+' "$asset" 2>/dev/null || true)
+    fi
+    if [ -n "$digest" ]; then
+      sha=$(printf '%s' "$digest" | grep -oiE '[0-9a-f]{64}' | head -1 || true)
+      if [ -n "$sha" ]; then printf '%s' "$sha" | tr 'A-F' 'a-f'; return 0; fi
+    fi
+  fi
+  return 1
+}
+
 api_latest_tag() {
   # GitHub-API: latest release tag. Liefert leer wenn offline oder rate-limited.
   local resp
@@ -86,16 +144,21 @@ Verwendung:
 
 Optionen für apply:
   -y, --yes                           Ohne Rückfrage durchziehen
+  --sha256 HASH                       Erwartete sha256 des Update-ZIP (Integritätsprüfung).
+                                      Ohne Angabe wird der Digest — wenn verfügbar —
+                                      serverseitig über TLS ermittelt und geprüft;
+                                      sonst wird eine deutliche Warnung ausgegeben.
   --skip-postupdate                   post-update.sh NICHT laufen lassen
   --skip-compose                      Compose-Recreate überspringen (nur Images laden)
 EOF
 }
 
 cmd_apply() {
-  local target="" from_zip="" yes=0 skip_post=0 skip_compose=0
+  local target="" from_zip="" yes=0 skip_post=0 skip_compose=0 expected_sha=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --from-zip)        from_zip="$2"; shift 2 ;;
+      --sha256)          expected_sha="$2"; shift 2 ;;
       -y|--yes)          yes=1; shift ;;
       --skip-postupdate) skip_post=1; shift ;;
       --skip-compose)    skip_compose=1; shift ;;
@@ -107,14 +170,20 @@ cmd_apply() {
 
   if ! have_root; then
     command -v sudo >/dev/null || { echo "$TAG braucht root, sudo fehlt"; exit 1; }
-    exec sudo -E "$0" apply ${target:+"$target"} \
-         ${from_zip:+--from-zip "$from_zip"} \
-         $([ "$yes" -eq 1 ] && echo --yes) \
-         $([ "$skip_post" -eq 1 ] && echo --skip-postupdate) \
-         $([ "$skip_compose" -eq 1 ] && echo --skip-compose)
+    # Re-Exec-Argumente sauber als Array — quotet Pfade mit Leerzeichen korrekt
+    # (früher war --from-zip "$from_zip" unquoted → Word-Splitting bei
+    # Pfaden mit Spaces) und reicht --sha256 mit durch.
+    local -a reexec=(apply)
+    [ -n "$target" ]        && reexec+=("$target")
+    [ -n "$from_zip" ]      && reexec+=(--from-zip "$from_zip")
+    [ -n "$expected_sha" ]  && reexec+=(--sha256 "$expected_sha")
+    [ "$yes" -eq 1 ]        && reexec+=(--yes)
+    [ "$skip_post" -eq 1 ]  && reexec+=(--skip-postupdate)
+    [ "$skip_compose" -eq 1 ] && reexec+=(--skip-compose)
+    exec sudo -E "$0" "${reexec[@]}"
   fi
 
-  for bin in curl unzip zstd docker; do
+  for bin in curl unzip zstd docker sha256sum; do
     command -v "$bin" >/dev/null || { echo "$TAG benötigt $bin"; exit 1; }
   done
 
@@ -142,9 +211,33 @@ cmd_apply() {
       case "$a" in y|Y|yes) ;; *) echo "Abgebrochen."; exit 0 ;; esac
     fi
     zip_path="/tmp/cyjan-update-${target}.zip"
-    local url="https://github.com/$REPO/releases/download/$target/cyjan-ids-update-${target}.zip"
+    local asset_name="cyjan-ids-update-${target}.zip"
+    local url="https://github.com/$REPO/releases/download/$target/${asset_name}"
     echo "$TAG Lade $url …"
     curl -fL --progress-bar --max-time 1800 -o "$zip_path" "$url"
+    # Erwarteten Hash serverseitig ermitteln, falls nicht per --sha256 gesetzt.
+    if [ -z "$expected_sha" ]; then
+      expected_sha=$(fetch_expected_sha "$target" "$asset_name" "$url") || expected_sha=""
+      [ -n "$expected_sha" ] && echo "$TAG Server-Digest gefunden — Integrität wird geprüft."
+    fi
+  fi
+
+  # ── Integritätsprüfung des ZIP (vor docker load / rsync / post-update.sh) ──
+  # Konsistent zum gehärteten Tap-Pfad (cyjan-tap update prüft das Bundle
+  # gegen den Manifest-sha256). Ohne verifizierbaren Hash wird NICHT still
+  # weitergemacht — es gibt eine deutliche Warnung, damit der Operator den
+  # ungeprüften Rollout bewusst akzeptiert.
+  if [ -n "$expected_sha" ]; then
+    verify_sha256 "$zip_path" "$expected_sha" || exit 1
+  else
+    echo "$TAG ────────────────────────────────────────────────────────────" >&2
+    echo "$TAG ⚠  WARNUNG: Update-ZIP wird OHNE Integritätsprüfung angewendet." >&2
+    echo "$TAG    Kein --sha256 angegeben und kein serverseitiger Digest" >&2
+    echo "$TAG    gefunden. Der Schutz beschränkt sich auf TLS zum Download —" >&2
+    echo "$TAG    ein kompromittiertes Release/TLS-Bypass bliebe unentdeckt." >&2
+    echo "$TAG    Für einen verifizierten Rollout den erwarteten Hash setzen:" >&2
+    echo "$TAG      cyjan-update apply ${target:-<tag>} --sha256 <hash>" >&2
+    echo "$TAG ────────────────────────────────────────────────────────────" >&2
   fi
 
   # ── ZIP entpacken (Sources + images.tar.zst nach /tmp) ────────────────────

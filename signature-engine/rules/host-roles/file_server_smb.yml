@@ -6,7 +6,7 @@
     required_ports:
       - {port: 445, proto: TCP}    # SMB direct
     any_ports:
-      min_any: 1
+      min_any: 0                   # 139/TCP nur Bonus — modernes SMB-only-445 muss matchen
       ports:
         - {port: 139, proto: TCP}  # NetBIOS Session Service
     optional_flags: []

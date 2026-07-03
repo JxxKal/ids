@@ -8,7 +8,9 @@
       - {port: 389, proto: TCP}    # LDAP
       - {port: 445, proto: TCP}    # SMB
     any_ports:
-      min_any: 1
+      min_any: 0                   # 636/3268 nur Bonus — 88+389+445 (Kerberos+LDAP+SMB)
+                                   # zusammen ist bereits DC-eindeutig; ein DC ohne
+                                   # LDAPS-Cert / ohne GC-Rolle muss trotzdem matchen
       ports:
         - {port: 636,  proto: TCP} # LDAPS
         - {port: 3268, proto: TCP} # Global Catalog

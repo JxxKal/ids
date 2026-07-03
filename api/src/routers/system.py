@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from database import get_pool
+from deps import require_admin
 from models import ConfigResponse, ConfigUpdate, ThreatLevelResponse
 
 _SYS_NET  = Path("/host/sys/class/net")
@@ -344,7 +345,10 @@ def _spawn_sniffer_reconfig(ids_dir: Path, profile: str) -> None:
 
 
 @router.post("/system/interfaces/config", summary="Sniffer-/Management-Interface setzen")
-async def set_interface_config(body: InterfaceConfigRequest) -> dict:
+async def set_interface_config(
+    body: InterfaceConfigRequest,
+    _admin: dict = Depends(require_admin),
+) -> dict:
     iface = body.iface.strip()
     if not iface or "/" in iface or " " in iface:
         raise HTTPException(400, "Ungültiger Interface-Name")
@@ -406,14 +410,21 @@ async def get_threat_level(pool: asyncpg.Pool = Depends(get_pool)) -> ThreatLeve
 
 
 @router.get("/config", response_model=list[ConfigResponse])
-async def list_config(pool: asyncpg.Pool = Depends(get_pool)) -> list[ConfigResponse]:
+async def list_config(
+    pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
+) -> list[ConfigResponse]:
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT key, value FROM system_config ORDER BY key")
     return [ConfigResponse(key=r["key"], value=dict(r["value"])) for r in rows]
 
 
 @router.get("/config/{key}", response_model=ConfigResponse)
-async def get_config(key: str, pool: asyncpg.Pool = Depends(get_pool)) -> ConfigResponse:
+async def get_config(
+    key: str,
+    pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
+) -> ConfigResponse:
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT key, value FROM system_config WHERE key = $1", key)
     if not row:
@@ -426,6 +437,7 @@ async def update_config(
     key:  str,
     body: ConfigUpdate,
     pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
 ) -> ConfigResponse:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -486,6 +498,7 @@ async def get_feature_flags(pool: asyncpg.Pool = Depends(get_pool)) -> FeatureFl
 async def update_feature_flags(
     body: FeatureFlagsUpdate,
     pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
 ) -> FeatureFlags:
     """Patch-Semantik: nur Felder die in der Request !=None sind werden
     geschrieben. Nicht erkannte Keys werden ignoriert."""

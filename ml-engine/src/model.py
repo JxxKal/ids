@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import time
+from collections import deque
 from pathlib import Path
 
 import joblib
@@ -33,6 +34,13 @@ log = logging.getLogger(__name__)
 _SCALER_FILE  = "scaler.joblib"
 _IFOREST_FILE = "iforest.joblib"
 _META_FILE    = "meta.json"
+
+# Obergrenze für den Scaler-Update-Buffer. Im Passthrough-/Bootstrap-Modus
+# (kein Scaler geladen) drainiert partial_fit_scaler() den Buffer nicht →
+# ohne Cap wüchse er pro Flow unbegrenzt bis zum OOM. Als Ring-Buffer hält er
+# nur die jüngsten Flows; sobald ein Scaler da ist, verarbeitet partial_fit
+# sie und leert ihn.
+_BUFFER_MAXLEN = 10_000
 
 
 class AnomalyModel:
@@ -50,9 +58,14 @@ class AnomalyModel:
         self._iforest: IsolationForest | None = None
         self._n_samples = 0
         self._trained = False
+        # mtime der iforest.joblib zum Zeitpunkt des letzten Load/Save. Damit
+        # erkennt reload_if_updated(), ob training-loop zwischenzeitlich ein
+        # frisches Modell eingespielt hat.
+        self._loaded_mtime: float = 0.0
 
-        # Buffer für inkrementelles Scaler-Update
-        self._buffer: list[np.ndarray] = []
+        # Buffer für inkrementelles Scaler-Update (bounded → OOM-Schutz im
+        # Passthrough-Modus, wenn partial_fit_scaler() nichts drainiert).
+        self._buffer: deque[np.ndarray] = deque(maxlen=_BUFFER_MAXLEN)
 
     @property
     def is_ready(self) -> bool:
@@ -73,11 +86,39 @@ class AnomalyModel:
                 meta = json.loads(mf.read_text())
                 self._n_samples = meta.get("n_samples", 0)
             self._trained = True
+            try:
+                self._loaded_mtime = ff.stat().st_mtime
+            except OSError:
+                self._loaded_mtime = time.time()
             log.info("Model loaded from %s (n_samples=%d)", self._dir, self._n_samples)
             return True
         except Exception as exc:
             log.warning("Could not load model: %s – will retrain", exc)
             return False
+
+    def reload_if_updated(self) -> bool:
+        """Lädt das Modell neu, wenn die Dateien auf Disk NEUER sind als unser
+        In-Memory-Stand — z.B. weil training-loop atomar ein Retrain eingespielt
+        hat. Ohne diesen Check würde ein anschließendes save() den frischeren
+        Stand mit dem alten In-Memory-Modell überschreiben (Retrain wirkungslos).
+
+        Race-Sicherheit: training-loop benennt scaler.joblib VOR iforest.joblib
+        atomar um (rename). Wir triggern auf der iforest-mtime (zuletzt
+        geschrieben) → sobald sie neuer ist, sind beide Dateien bereits der neue,
+        konsistente Stand. Gibt True zurück, wenn neu geladen wurde."""
+        ff = self._dir / _IFOREST_FILE
+        try:
+            disk_mtime = ff.stat().st_mtime
+        except OSError:
+            return False
+        # +1e-6 Epsilon gegen Float-Gleichheits-Jitter beim eigenen Save.
+        if disk_mtime <= self._loaded_mtime + 1e-6:
+            return False
+        log.info(
+            "Neueres Modell auf Disk erkannt (mtime %.3f > %.3f) – lade neu",
+            disk_mtime, self._loaded_mtime,
+        )
+        return self.load_if_exists()
 
     def train(self, flows: list[dict]) -> None:
         """Vollständiges Training auf einer Liste von Flow-Dicts."""
@@ -146,8 +187,9 @@ class AnomalyModel:
     # ── Persistenz ────────────────────────────────────────────────────────────
 
     def _save(self) -> None:
+        ff = self._dir / _IFOREST_FILE
         joblib.dump(self._scaler,  self._dir / _SCALER_FILE)
-        joblib.dump(self._iforest, self._dir / _IFOREST_FILE)
+        joblib.dump(self._iforest, ff)
         meta = {
             "n_samples": self._n_samples,
             "ts": time.time(),
@@ -155,8 +197,19 @@ class AnomalyModel:
             "contamination": self._contamination,
         }
         (self._dir / _META_FILE).write_text(json.dumps(meta))
+        # eigene Schreib-mtime merken, damit reload_if_updated() den eigenen
+        # Save nicht fälschlich als fremdes Retrain interpretiert.
+        try:
+            self._loaded_mtime = ff.stat().st_mtime
+        except OSError:
+            self._loaded_mtime = time.time()
 
     def save(self) -> None:
-        if self._trained:
-            self._save()
-            log.debug("Model saved (n_samples=%d)", self._n_samples)
+        if not self._trained:
+            return
+        # Falls training-loop zwischenzeitlich ein Retrain atomar eingespielt
+        # hat: erst nachladen, damit wir es nicht mit dem alten Stand
+        # überschreiben. Danach persistieren wir den (ggf. neu geladenen) Stand.
+        self.reload_if_updated()
+        self._save()
+        log.debug("Model saved (n_samples=%d)", self._n_samples)

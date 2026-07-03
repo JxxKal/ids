@@ -25,6 +25,11 @@
     "title": "Rendering-Fehler",
     "reload": "Neu laden"
   },
+  "chunkError": {
+    "title": "Neue Version verfügbar",
+    "hint": "Diese Seite wurde aktualisiert. Bitte lade sie neu, um weiterzuarbeiten.",
+    "reload": "Seite neu laden"
+  },
   "tests": {
     "title": "Test-Szenarien",
     "deleteFailed": "Löschen fehlgeschlagen",
@@ -1175,6 +1180,7 @@
       "emergencyOn": "aktiv. Läuft die Disk trotz Retention über {{trigger}}%, werden automatisch die ältesten Daten gelöscht, bis {{target}}% erreicht sind (Reihenfolge mit Schutz-Frist: {{tables}}). Aktuell {{disk}}% belegt.",
       "emergencyOff": "deaktiviert. Bei voller Disk erfolgt KEINE automatische Bereinigung.",
       "days": "Tage",
+      "daysInvalid": "Bitte eine gültige Anzahl Tage (1–36500) eingeben.",
       "setPolicy": "Policy setzen",
       "remove": "Entfernen",
       "backupHint1": "Komplettes pg_dump als gzip. Der Dump enthält Schema + Daten und kann mit dem Restore-Button an gleicher Stelle wieder eingespielt werden.",

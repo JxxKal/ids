@@ -25,6 +25,11 @@
     "title": "Rendering error",
     "reload": "Reload"
   },
+  "chunkError": {
+    "title": "New version available",
+    "hint": "This page has been updated. Please reload it to continue.",
+    "reload": "Reload page"
+  },
   "tests": {
     "title": "Test scenarios",
     "deleteFailed": "Delete failed",
@@ -1175,6 +1180,7 @@
       "emergencyOn": "active. If the disk exceeds {{trigger}}% despite retention, the oldest data is deleted automatically until {{target}}% is reached (order with protected floor: {{tables}}). Currently {{disk}}% used.",
       "emergencyOff": "disabled. No automatic cleanup when the disk fills up.",
       "days": "Days",
+      "daysInvalid": "Please enter a valid number of days (1–36500).",
       "setPolicy": "Set policy",
       "remove": "Remove",
       "backupHint1": "Full pg_dump as gzip. The dump contains schema + data and can be restored in place using the restore button.",

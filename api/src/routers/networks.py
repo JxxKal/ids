@@ -51,6 +51,7 @@ async def list_networks(pool: asyncpg.Pool = Depends(get_pool)) -> list[NetworkR
 async def create_network(
     body: NetworkCreate,
     pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
 ) -> NetworkResponse:
     kind = _normalize_kind(body.kind)
     try:
@@ -111,6 +112,7 @@ async def networks_example_csv() -> Response:
 async def import_networks_csv(
     file: UploadFile = File(...),
     pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     """
     CSV-Import für bekannte Netzwerke.
@@ -265,6 +267,7 @@ async def update_network(
     network_id: str,
     body: NetworkUpdate,
     pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
 ) -> NetworkResponse:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -304,6 +307,7 @@ async def update_network(
 async def delete_network(
     network_id: str,
     pool: asyncpg.Pool = Depends(get_pool),
+    _admin: dict = Depends(require_admin),
 ) -> None:
     async with pool.acquire() as conn:
         result = await conn.execute(

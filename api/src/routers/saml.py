@@ -56,6 +56,20 @@ def _build_saml_settings(cfg: dict) -> dict:
     return {
         "strict": True,
         "debug":  False,
+        # Signatur-Härtung: ohne diesen Block defaultet python3-saml auf
+        # wantAssertionsSigned=False — ein Unauthentifizierter könnte dann eine
+        # gefälschte, unsignierte SAMLResponse an den ACS posten und sich als
+        # beliebiger User ausgeben. wantAssertionsSigned=True erzwingt eine
+        # gültige Signatur über die Assertion (gegen idp_x509_cert geprüft).
+        # wantMessagesSigned bleibt per Default aus, weil viele IdPs nur die
+        # Assertion signieren und nicht das Response-Envelope — hart auf True
+        # würde legitime Logins brechen. Per Config-Flag optional zuschaltbar.
+        "security": {
+            "wantAssertionsSigned":  True,
+            "wantMessagesSigned":    bool(cfg.get("want_messages_signed", False)),
+            "wantNameIdEncrypted":   False,
+            "requestedAuthnContext": False,
+        },
         "sp": {
             "entityId": cfg["sp_entity_id"],
             "assertionConsumerService": {

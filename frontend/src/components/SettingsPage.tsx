@@ -1655,13 +1655,24 @@ function RetentionSection({ onDone, canReauth, reauthHint }: { onDone: () => voi
     .catch(() => {});
   useEffect(() => { reload(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
+  const parsedDays = parseInt(days, 10);
+  const daysValid  = Number.isInteger(parsedDays) && parsedDays >= 1 && parsedDays <= 36500;
+
   async function apply(removeInstead: boolean) {
+    // Ein leeres/ungültiges Tage-Feld darf NIE als `null` durchrutschen —
+    // `null` entspricht exakt dem "Policy entfernen"-Pfad und würde die
+    // Aufbewahrungsfrist unbemerkt löschen (Hypertable wächst unbegrenzt).
+    // `null` kommt daher ausschließlich über den expliziten Remove-Button.
+    if (!removeInstead && !daysValid) {
+      setMsgType('err'); setMsg(t('settings.dbMaint.daysInvalid'));
+      return;
+    }
     setBusy(true); setMsg('');
     try {
       const r = await setRetentionPolicy({
         password,
         hypertable: selected,
-        days:       removeInstead ? null : parseInt(days, 10),
+        days:       removeInstead ? null : parsedDays,
       });
       setMsgType('ok'); setMsg(r.message);
       setPassword(''); reload(); onDone();
@@ -1725,8 +1736,8 @@ function RetentionSection({ onDone, canReauth, reauthHint }: { onDone: () => voi
       </div>
       <div className="flex items-center gap-2">
         <PasswordInput value={password} onChange={setPassword} />
-        <button disabled={!password || !selected || busy || !canReauth} onClick={() => apply(false)}
-                title={canReauth ? '' : reauthHint}
+        <button disabled={!password || !selected || busy || !canReauth || !daysValid} onClick={() => apply(false)}
+                title={canReauth ? (daysValid ? '' : t('settings.dbMaint.daysInvalid')) : reauthHint}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-cyan-700 hover:bg-cyan-600 text-white disabled:opacity-40 disabled:cursor-not-allowed">
           {t('settings.dbMaint.setPolicy')}
         </button>

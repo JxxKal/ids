@@ -199,9 +199,16 @@ export function useWebSocket() {
       const ws   = wsRef.current;
       const open = ws?.readyState === WebSocket.OPEN;
       setConnected(prev => (prev === !!open ? prev : !!open));
-      // Weder offen noch im Aufbau → connect() (no-op wenn bereits CONNECTING).
+      // Weder offen noch im Aufbau → Reconnect. Aber NICHT direkt connect()
+      // hämmern: solange scheduleReconnect() bereits einen (exponentiell +
+      // gejitterten) Reconnect eingeplant hat (reconnectAt gesetzt), respektieren
+      // wir dieses Backoff und halten uns raus — sonst würde der 4s-Watchdog das
+      // Backoff aushebeln und alle Clients nach einem Master-Restart im ≤4s-Takt
+      // reconnecten (Thundering Herd). Nur wenn KEIN Reconnect ansteht (z.B.
+      // verschlucktes close-Event → onclose lief nie → kein Timer gesetzt), heilt
+      // der Watchdog den hängenden Socket selbst per direktem connect().
       if (!ws || (ws.readyState !== WebSocket.OPEN && ws.readyState !== WebSocket.CONNECTING)) {
-        connect();
+        if (!reconnectAt.current) connect();
       }
     }, WATCHDOG_INTERVAL_MS);
 

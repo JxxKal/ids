@@ -134,7 +134,10 @@ services:
       KAFKA_CLUSTERS_0_NAME: ids-cluster
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
     ports:
-      - "${MANAGEMENT_IP:-0.0.0.0}:8080:8080"
+      # Kafka-UI hat KEINEN eigenen Auth-Stack — wer :8080 erreicht, liest/
+      # schreibt alle Topics inkl. raw-packets (komplette gesnifferte Payloads).
+      # Deshalb nur auf localhost binden; Admins tunneln per SSH (ssh -L 8080:…).
+      - "127.0.0.1:8080:8080"                        # Kafka-UI – nur localhost (kein Auth)
 
   timescaledb:
     image: timescale/timescaledb:2.26.3-pg16
