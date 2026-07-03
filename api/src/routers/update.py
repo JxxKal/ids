@@ -67,6 +67,7 @@ def _extract(zip_bytes: bytes, dest: Path) -> tuple[int, str | None]:
         tmp.write(zip_bytes)
         tmp_path = Path(tmp.name)
     images_entry: str | None = None
+    dest_resolved = dest.resolve()
     try:
         with zipfile.ZipFile(tmp_path, "r") as zf:
             members = zf.namelist()
@@ -85,6 +86,16 @@ def _extract(zip_bytes: bytes, dest: Path) -> tuple[int, str | None]:
                     images_entry = member
                     continue
                 target = dest / rel
+                # Zip-Slip-Schutz: ein Member wie '…/../../etc/cron.d/pwn' oder ein
+                # absoluter Pfad ('/etc/...') würde sonst außerhalb von dest landen.
+                # Der API-Container läuft als root mit gemountetem /opt/ids + docker.sock,
+                # also wäre ein Write außerhalb ein Root-File-Write am Host → RCE.
+                # resolve() normalisiert '..'; relative_to wirft bei Ausbruch.
+                try:
+                    target.resolve().relative_to(dest_resolved)
+                except ValueError:
+                    _log(f"Übersprungen (Pfad-Traversal-Versuch): {member}")
+                    continue
                 if member.endswith("/"):
                     target.mkdir(parents=True, exist_ok=True)
                 else:
@@ -418,6 +429,7 @@ async def start_update(
     file: UploadFile = File(...),
     pull_images: bool = Form(False),
     force: bool = Form(False),
+    user: dict = Depends(_require_admin_late),
 ) -> dict:
     """Offline-Update via Update-ZIP. Validiert die VERSION im ZIP gegen
     die installierte Version — Downgrades + Same-Version-Re-Plays werden
@@ -497,7 +509,9 @@ def _spawn_compose_restart_runner(ids_dir: Path, profile: str) -> None:
 
 
 @router.post("/restart", summary="Stack-Neustart")
-async def restart_stack() -> dict:
+async def restart_stack(
+    user: dict = Depends(_require_admin_late),
+) -> dict:
     if _state["phase"] not in ("idle", "done", "error"):
         raise HTTPException(409, "Ein Update läuft bereits – bitte warten.")
     profile_file = Path("/etc/cyjan/profile")

@@ -10,6 +10,7 @@ class Config:
     kafka_brokers:  str
     postgres_dsn:   str
     input_topic:    str
+    test_topic:     str
     group_id:       str
     poll_timeout_s: float
     # Throttling: refresh DB-Channel-Cache alle N Sekunden, damit neu angelegte
@@ -29,7 +30,13 @@ class Config:
             kafka_brokers  = os.environ.get("KAFKA_BROKERS", "kafka:9092"),
             postgres_dsn   = os.environ.get("POSTGRES_DSN",
                                              "postgres://ids:ids@timescaledb:5432/ids"),
-            input_topic    = os.environ.get("NOTIFY_INPUT_TOPIC", "alerts-enriched-push"),
+            # WICHTIG: echte, vollständige Alerts liegen auf 'alerts-enriched'
+            # (alert-manager). 'alerts-enriched-push' trägt nur WS-Envelopes
+            # ({"type":…,"data":…} von enrichment-service/pcap-store) PLUS den
+            # synthetischen Test-Alert des API-/test-Endpoints. Daher beide
+            # Topics abonnieren, Envelopes im Consumer verwerfen.
+            input_topic    = os.environ.get("NOTIFY_INPUT_TOPIC", "alerts-enriched"),
+            test_topic     = os.environ.get("NOTIFY_TEST_TOPIC", "alerts-enriched-push"),
             group_id       = os.environ.get("NOTIFY_GROUP_ID", "notification-dispatcher"),
             poll_timeout_s = float(os.environ.get("NOTIFY_POLL_TIMEOUT_S", "1.0")),
             cache_ttl_s    = float(os.environ.get("NOTIFY_CACHE_TTL_S", "30")),

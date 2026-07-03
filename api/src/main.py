@@ -40,7 +40,7 @@ from config import Config
 from database import close_pool, get_pool, init_pool
 import master_ca
 import migrate
-from deps import get_current_user
+from deps import get_current_user, require_admin
 from routers import alerts as alerts_router
 from routers import auth as auth_router
 from routers import flows as flows_router
@@ -160,6 +160,7 @@ make_run_endpoint(kafka_producer)
 reports_router.configure_archive(minio_client, cfg.reports_bucket)
 
 _auth = [Depends(get_current_user)]
+_admin = [Depends(require_admin)]
 
 # Auth-Router ohne Schutz (Login ist öffentlich)
 app.include_router(auth_router.router)
@@ -183,7 +184,10 @@ app.include_router(reports_router.router,  dependencies=_auth)
 app.include_router(taps_router.router)
 app.include_router(system_router.router,   dependencies=_auth)
 app.include_router(tests_router.router,    dependencies=_auth)
-app.include_router(users_router.router,    dependencies=_auth)
+# User-Management ist durchgängig Admin-only (Anlegen/Ändern/Löschen/Token-
+# Erzeugung = Rechtevergabe). Router-Level require_admin, damit kein einzelner
+# Endpoint versehentlich nur JWT-gated bleibt (CVE-Fix: Viewer→Admin-Eskalation).
+app.include_router(users_router.router,    dependencies=_admin)
 app.include_router(ssl_router.router,      dependencies=_auth)
 app.include_router(syslog_router,          dependencies=_auth)
 app.include_router(update_router.router,   dependencies=_auth)

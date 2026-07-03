@@ -1,8 +1,10 @@
 """notification-dispatcher — Kafka-Consumer + Plugin-Dispatcher.
 
-Liest enriched-Alerts aus Kafka 'alerts-enriched-push', filtert pro Channel
-(severity / rule_prefix / source), throttled, und ruft den passenden Handler.
-Result landet in notification_deliveries.
+Liest vollständige Alerts aus Kafka 'alerts-enriched' (alert-manager), filtert
+pro Channel (severity / rule_prefix / source), throttled, und ruft den passenden
+Handler. Result landet in notification_deliveries. Zusätzlich wird
+'alerts-enriched-push' abonniert — dort liegt der synthetische Test-Alert des
+/test-Endpoints; die WS-Envelopes desselben Topics werden verworfen.
 
 Architektur bewusst plugin-basiert (siehe handlers.py): Phase 2 (Cyjan-Cloud-
 Companion-App) registriert nur einen neuen Handler unter type='cyjan-cloud',
@@ -190,6 +192,26 @@ def make_consumer(brokers: str, group_id: str) -> Consumer:
     })
 
 
+# Envelope-Discriminator: enrichment-service/pcap-store publizieren auf
+# 'alerts-enriched-push' Nachrichten der Form {"type":…,"data":{…}} für den
+# WebSocket-Push — die tragen KEIN 'rule_id'. Echte Alerts (alert-manager) und
+# der synthetische Test-Alert tragen dagegen immer 'rule_id' und kein 'data'.
+_ENVELOPE_TYPES = {"alert_enriched", "pcap_available", "feedback_updated"}
+
+
+def _is_notifiable_alert(msg: Any) -> bool:
+    """True nur für echte/Test-Alerts, False für WS-Envelopes."""
+    if not isinstance(msg, dict):
+        return False
+    # Klarer Envelope: type ∈ bekannte Push-Typen + data-Payload, kein rule_id.
+    if msg.get("type") in _ENVELOPE_TYPES and "data" in msg and "rule_id" not in msg:
+        return False
+    # Defensiv: alles mit data-Feld aber ohne rule_id ist kein Alert.
+    if "data" in msg and "rule_id" not in msg:
+        return False
+    return True
+
+
 async def handle_alert(
     alert: dict, cache: ChannelCache, pool: asyncpg.Pool, ctx: DispatcherContext,
 ) -> None:
@@ -270,7 +292,13 @@ async def run(cfg: Config) -> None:
     )
 
     consumer = make_consumer(cfg.kafka_brokers, cfg.group_id)
-    consumer.subscribe([cfg.input_topic])
+    # Beide Topics: input_topic = echte Alerts (alert-manager), test_topic =
+    # Test-Alerts des /test-Endpoints. Envelopes auf test_topic werden unten
+    # verworfen (siehe _is_notifiable_alert).
+    subscribe_topics = [cfg.input_topic]
+    if cfg.test_topic and cfg.test_topic != cfg.input_topic:
+        subscribe_topics.append(cfg.test_topic)
+    consumer.subscribe(subscribe_topics)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_event_loop()
@@ -295,6 +323,12 @@ async def run(cfg: Config) -> None:
                 alert = orjson.loads(msg.value())
             except Exception:
                 log.warning("nicht-parsbarer Alert ignored")
+                continue
+            if not _is_notifiable_alert(alert):
+                # WS-Envelope ({"type":"alert_enriched"|"pcap_available","data":…})
+                # von enrichment-service/pcap-store auf alerts-enriched-push —
+                # kein Alert, verwerfen (sonst 'filtered'-Delivery-Bloat +
+                # Garbage-Pushes an severity_min=low-Channels).
                 continue
             await handle_alert(alert, cache, pool, ctx)
     finally:

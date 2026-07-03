@@ -428,7 +428,10 @@ services:
     environment:
       KAFKA_BROKERS:        kafka:9092
       POSTGRES_DSN:         "postgres://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids"
-      NOTIFY_INPUT_TOPIC:   alerts-enriched-push
+      # Echte Alerts liegen auf alerts-enriched (alert-manager). -push trägt nur
+      # WS-Envelopes + den Test-Alert des /test-Endpoints → als test_topic.
+      NOTIFY_INPUT_TOPIC:   alerts-enriched
+      NOTIFY_TEST_TOPIC:    alerts-enriched-push
       NOTIFY_GROUP_ID:      notification-dispatcher
       NOTIFY_CACHE_TTL_S:   "30"
       # System-SMTP-Defaults — pro Channel überschreibbar via config-JSON.
