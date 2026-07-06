@@ -32,6 +32,18 @@ on:
         default: both
         options: [master, tap, both]
 
+# Platzhalter-Secrets NUR für die Compose-Interpolation in der CI. Seit v2.6.0
+# sind POSTGRES_PASSWORD/MINIO_SECRET_KEY im Compose fail-closed (${VAR:?}) —
+# ohne gesetzten Wert bricht `docker compose build`/`config` an der
+# Interpolation ab (die CI hat keine .env). Die Image-Builds backen diese
+# Runtime-Secrets NICHT ein; auf echten Hosts kommen sie aus der .env
+# (ids-setup/Wizard). Diese Dummy-Werte laufen nie in einem echten Stack.
+env:
+  POSTGRES_PASSWORD: ci-build-placeholder
+  MINIO_SECRET_KEY: ci-build-placeholder
+  MIRROR_INTERFACE: eth0
+  MIRROR_IFACE: eth0
+
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
   # Alle Custom-Images (ids-*) bauen + externe Runtime-Images (timescaledb,
