@@ -257,10 +257,19 @@ async def event_consumer_loop(cfg: Config, bridge: Bridge, taps: TapResolver) ->
     consumer.subscribe([cfg.alerts_topic])
     log.info("Kafka-Consumer subscribed: %s", cfg.alerts_topic)
 
+    # poll() läuft im to_thread-Worker. Beim Config-Reconnect cancelt gather
+    # diesen Loop, während der Worker evtl. noch bis zu 1s weiterpollt. Wir
+    # shielden den poll-Task, damit die Cancellation ihn NICHT abschneidet,
+    # und warten im finally auf sein Ende, BEVOR consumer.close() kommt —
+    # librdkafka ist nicht threadsafe für concurrent poll/close (Segfault).
+    poll_task: Optional[asyncio.Task] = None
     try:
         while True:
             # Nicht-blockierend pollen, damit asyncio-Scheduling fluent bleibt
-            msg = await asyncio.to_thread(consumer.poll, 1.0)
+            if poll_task is None:
+                poll_task = asyncio.ensure_future(asyncio.to_thread(consumer.poll, 1.0))
+            msg = await asyncio.shield(poll_task)
+            poll_task = None
             if msg is None:
                 continue
             if msg.error():
@@ -277,6 +286,16 @@ async def event_consumer_loop(cfg: Config, bridge: Bridge, taps: TapResolver) ->
 
             await _publish_alert(cfg, bridge, taps, alert)
     finally:
+        # Auf einen evtl. noch laufenden poll-Thread warten (max ~1s), auch
+        # wenn wir gerade gecancelt werden — sonst racet close() mit poll().
+        if poll_task is not None:
+            while not poll_task.done():
+                try:
+                    await asyncio.shield(poll_task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
         consumer.close()
 
 

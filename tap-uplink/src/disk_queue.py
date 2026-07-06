@@ -42,6 +42,14 @@ class DiskQueue:
                 payload BLOB NOT NULL
             )"""
         )
+        # In-Memory-Byte-Zähler: einmalig aus der DB berechnet, danach
+        # inkrementell bei push/ack/trim gepflegt. Ersetzt den früheren
+        # SUM(LENGTH(payload))-Full-Table-Scan pro push() (lief unter dem
+        # Lock und blockierte damit pop_batch_after).
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM queue"
+        ).fetchone()
+        self._bytes = int(row[0] or 0)
 
     def push(self, payload: bytes) -> None:
         with self._lock:
@@ -49,6 +57,7 @@ class DiskQueue:
                 "INSERT INTO queue (ts, payload) VALUES (?, ?)",
                 (time.time(), payload),
             )
+            self._bytes += len(payload)
             self._maybe_trim()
 
     def pop_batch(self, n: int) -> list[tuple[int, bytes]]:
@@ -61,41 +70,73 @@ class DiskQueue:
             )
             return list(cur.fetchall())
 
+    def pop_batch_after(self, after_id: int, n: int) -> list[tuple[int, bytes]]:
+        """Wie pop_batch, aber nur Zeilen mit id > after_id. Erlaubt dem
+        Sender, einen Cursor mitzuführen und innerhalb einer Verbindung nicht
+        dieselben (noch nicht bestätigten) Frames erneut zu poppen. Bei
+        Reconnect startet der Sender wieder bei after_id=0 und liefert alle
+        noch nicht per ack gelöschten (= unbestätigten) Frames neu aus."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT id, payload FROM queue WHERE id > ? ORDER BY id ASC LIMIT ?",
+                (after_id, n),
+            )
+            return list(cur.fetchall())
+
     def ack(self, ids: list[int]) -> None:
         if not ids:
             return
         placeholders = ",".join("?" * len(ids))
         with self._lock:
+            # Freigegebene Bytes über die (kleine) Ack-Menge bestimmen und vom
+            # Zähler abziehen — Scan bleibt auf die ack-ids beschränkt, kein
+            # Full-Table-Scan.
+            freed = self._conn.execute(
+                f"SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM queue "
+                f"WHERE id IN ({placeholders})",
+                ids,
+            ).fetchone()[0] or 0
             self._conn.execute(
                 f"DELETE FROM queue WHERE id IN ({placeholders})",
                 ids,
             )
+            self._bytes = max(0, self._bytes - int(freed))
 
     def stats(self) -> dict:
         with self._lock:
             cur = self._conn.execute(
-                "SELECT COUNT(*), COALESCE(SUM(LENGTH(payload)), 0), MIN(ts), MAX(ts) FROM queue"
+                "SELECT COUNT(*), MIN(ts), MAX(ts) FROM queue"
             )
-            count, bytes_, min_ts, max_ts = cur.fetchone()
+            count, min_ts, max_ts = cur.fetchone()
+            bytes_ = self._bytes
         return {
             "count":   int(count),
-            "bytes":   int(bytes_ or 0),
+            "bytes":   int(bytes_),
             "min_ts":  min_ts,
             "max_ts":  max_ts,
         }
 
     def _maybe_trim(self) -> None:
-        # Cheap-and-correct: nur prüfen wenn die Tabelle nicht-leer ist und
-        # über dem Limit liegt. Wir drehen uns auf SUM(LENGTH()) als grobe
-        # Größenmetrik – overhead durch Indizes ignorieren wir bewusst.
-        cur = self._conn.execute("SELECT COALESCE(SUM(LENGTH(payload)), 0) FROM queue")
-        size = int(cur.fetchone()[0] or 0)
-        if size <= self._max_bytes:
+        # Nutzt den in-memory Byte-Zähler statt SUM(LENGTH()) über die ganze
+        # Queue — kein Full-Table-Scan mehr pro push() unter gehaltenem Lock.
+        if self._bytes <= self._max_bytes:
             return
         # In TRIM_BATCH-Häppchen droppen, damit eine einzige Insert-Ladung
-        # nicht die gesamte Queue umkrempelt.
-        deleted = self._conn.execute(
-            f"DELETE FROM queue WHERE id IN (SELECT id FROM queue ORDER BY id ASC LIMIT {TRIM_BATCH})"
-        ).rowcount
+        # nicht die gesamte Queue umkrempelt. Die tatsächlich freigegebenen
+        # Bytes (über die gedroppte Häppchen-Menge, per PK-Index limitiert)
+        # ziehen wir vom Zähler ab.
+        rows = self._conn.execute(
+            "SELECT id, LENGTH(payload) FROM queue ORDER BY id ASC LIMIT ?",
+            (TRIM_BATCH,),
+        ).fetchall()
+        if not rows:
+            return
+        ids = [r[0] for r in rows]
+        freed = sum(int(r[1]) for r in rows)
+        placeholders = ",".join("?" * len(ids))
+        self._conn.execute(
+            f"DELETE FROM queue WHERE id IN ({placeholders})", ids
+        )
+        self._bytes = max(0, self._bytes - freed)
         log.warning("Queue über %d Bytes – %d älteste Einträge verworfen",
-                    self._max_bytes, deleted)
+                    self._max_bytes, len(ids))

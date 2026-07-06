@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Alert } from '../types';
 import { isSuppressed } from '../types';
+import { effectiveSeverity } from '../lib/severity';
 
 interface Props {
   alerts: Alert[];
@@ -27,7 +28,10 @@ export function SeverityBarsCard({ alerts, showTest, showSuppressed }: Props) {
     );
     const c: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0 };
     for (const a of visible) {
-      if (c[a.severity] !== undefined) c[a.severity]++;
+      // effective statt Original-Severity — sonst widerspricht die KPI dem
+      // Feed (FP→low, P0→critical werden dort ebenfalls effektiv gezählt).
+      const sev = effectiveSeverity(a);
+      if (c[sev] !== undefined) c[sev]++;
     }
     return c;
   }, [alerts, showTest, showSuppressed]);

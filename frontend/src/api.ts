@@ -645,7 +645,7 @@ export async function fetchSamlConfig(): Promise<SamlConfig> {
 
 export async function fetchSamlEnabled(): Promise<{ enabled: boolean; login_url: string }> {
   try {
-    const r = await fetch('/api/auth/saml/enabled');
+    const r = await fetch(`${BASE}/api/auth/saml/enabled`);
     if (!r.ok) return { enabled: false, login_url: '' };
     return r.json();
   } catch { return { enabled: false, login_url: '' }; }

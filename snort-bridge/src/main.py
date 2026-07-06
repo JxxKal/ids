@@ -144,28 +144,57 @@ def _map_alert(rec: dict) -> dict | None:
 
 def _tail(path: str):
     """Liefert neue Zeilen aus einer wachsenden Datei.
-    Erkennt Datei-Truncation (Suricata-Neustart / Log-Rotation)."""
+    Erkennt Datei-Truncation (Suricata-Neustart) und Rotation-per-Rename
+    (logrotate ohne copytruncate) via Inode-Vergleich."""
     while not os.path.exists(path):
         _beat()
         log.info("Warte auf EVE-Log %s …", path)
         time.sleep(2)
 
-    with open(path, "r") as fh:
-        fh.seek(0, 2)   # bestehenden Inhalt überspringen
-        log.info("Lese Events aus %s", path)
+    fh = open(path, "r")
+    fh.seek(0, 2)   # bestehenden Inhalt überspringen
+    # Inode/Device des offenen fd merken, um Rotation-per-Rename zu erkennen:
+    # logrotate legt bei Standard-Rotation (ohne copytruncate) eine neue Datei
+    # unter demselben Pfad an — der alte fd zeigt dann auf die weg-rotierte
+    # Datei und liefert nie wieder Events. Beim Inode-Wechsel re-openen wir.
+    fd_stat = os.fstat(fh.fileno())
+    open_ino, open_dev = fd_stat.st_ino, fd_stat.st_dev
+    log.info("Lese Events aus %s", path)
+    try:
         while True:
             _beat()
             line = fh.readline()
             if line:
                 yield line.strip()
-            else:
-                try:
-                    if fh.tell() > os.path.getsize(path):
-                        log.warning("EVE-Log wurde gekürzt – starte von vorne")
-                        fh.seek(0)
-                except OSError:
-                    pass
-                time.sleep(0.05)
+                continue
+
+            # Kein Nachschub — auf Truncation und Rotation prüfen.
+            try:
+                if fh.tell() > os.path.getsize(path):
+                    log.warning("EVE-Log wurde gekürzt – starte von vorne")
+                    fh.seek(0)
+                    time.sleep(0.05)
+                    continue
+            except OSError:
+                pass
+
+            try:
+                path_stat = os.stat(path)
+                if (path_stat.st_ino, path_stat.st_dev) != (open_ino, open_dev):
+                    log.warning("EVE-Log rotiert (Inode-Wechsel) – öffne neu")
+                    fh.close()
+                    fh = open(path, "r")   # neue Datei von Anfang an lesen
+                    fd_stat = os.fstat(fh.fileno())
+                    open_ino, open_dev = fd_stat.st_ino, fd_stat.st_dev
+                    continue
+            except OSError:
+                # Pfad kurzzeitig weg (Rename-Fenster) — alten fd weiterlesen,
+                # nächste Runde sieht die neue Datei.
+                pass
+
+            time.sleep(0.05)
+    finally:
+        fh.close()
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

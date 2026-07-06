@@ -6,6 +6,15 @@
 #   Test/Dev:     docker compose --profile test up -d
 #
 # Voraussetzung: .env aus .env.example erzeugen und anpassen
+#
+# ⚠ UPGRADE-HINWEIS (seit v2.5.64): POSTGRES_PASSWORD und MINIO_SECRET_KEY sind
+#   fail-closed (`${VAR:?…}`) — der Stack startet NICHT mehr ohne gesetztes
+#   Secret, statt still auf ein bekanntes Default zu fallen. Hosts, die bisher
+#   OHNE diese Variablen liefen, initialisierten ihre DB-/MinIO-Volumes mit dem
+#   alten Default ("ids-change-me" / "ids-secret-change-me"). Vor dem Upgrade
+#   dort GENAU diese Alt-Werte in .env eintragen (sonst passt das Passwort nicht
+#   zum bereits initialisierten Volume) — erst danach bei Gelegenheit rotieren.
+#   ISO-/Wizard-Installationen sind nicht betroffen (ids-setup setzt die Secrets).
 # ══════════════════════════════════════════════════════════════════════════════
 
 networks:
@@ -158,7 +167,7 @@ services:
     environment:
       POSTGRES_DB: ids
       POSTGRES_USER: ids
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ids-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}
     ports:
       - "127.0.0.1:5432:5432"                       # Nur localhost
     healthcheck:
@@ -201,7 +210,7 @@ services:
       - minio-data:/data
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-ids-access}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}
     command: server /data --console-address ":9001"
     ports:
       - "127.0.0.1:9001:9001"                       # MinIO Console – nur localhost
@@ -225,7 +234,7 @@ services:
     environment:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}
       # Lifecycle-Retention pro Bucket. Default 7 Tage für PCAPs, weil
       # pcap-store typisch 10–20 GB pro Tag schreibt — bei 30 Tagen wäre
       # ein 500 GB Volume nötig. Konfigurierbar in .env, greift bei
@@ -257,7 +266,7 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       FLOW_TIMEOUT_S: ${FLOW_TIMEOUT_S:-30}
       FLOW_MAX_DURATION_S: ${FLOW_MAX_DURATION_S:-300}
       TEST_MODE: ${TEST_MODE:-false}
@@ -319,7 +328,7 @@ services:
       - ml-models:/models
     environment:
       KAFKA_BROKERS: kafka:9092
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       MODELS_DIR: /models
       TEST_MODE: ${TEST_MODE:-false}
       BOOTSTRAP_MIN_SAMPLES: ${ML_BOOTSTRAP_MIN:-25000}
@@ -349,7 +358,7 @@ services:
         condition: service_started
     environment:
       KAFKA_BROKERS: kafka:9092
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       DEDUP_WINDOW_S: ${DEDUP_WINDOW_S:-300}
       TEST_MODE: ${TEST_MODE:-false}
       # Self-Traffic-Filter (richtungs-bewusst):
@@ -395,7 +404,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       REDIS_URL: redis://redis:6379
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       # Hinweis: Pings gehen über die Bridge-IP des Containers.
       # Für striktes Interface-Binding (Prod): network_mode: host setzen
       # und KAFKA_BROKERS auf localhost:9094 / REDIS_URL auf localhost:6379 ändern.
@@ -434,7 +443,7 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BROKERS:        kafka:9092
-      POSTGRES_DSN:         "postgres://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids"
+      POSTGRES_DSN:         "postgres://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids"
       # Echte Alerts liegen auf alerts-enriched (alert-manager). -push trägt nur
       # WS-Envelopes + den Test-Alert des /test-Endpoints → als test_topic.
       NOTIFY_INPUT_TOPIC:   alerts-enriched
@@ -469,10 +478,10 @@ services:
       KAFKA_BROKERS: kafka:9092
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}
       PCAP_BUCKET: ids-pcaps
       PCAP_WINDOW_S: ${PCAP_WINDOW_S:-60}          # ±Sekunden um Alert-Timestamp
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
 
   api:
     build: ./api
@@ -491,11 +500,11 @@ services:
       kafka:
         condition: service_healthy
     environment:
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       REDIS_URL: redis://redis:6379
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}
       PCAP_BUCKET: ids-pcaps
       KAFKA_BROKERS: kafka:9092
       TEST_MODE: ${TEST_MODE:-false}
@@ -600,7 +609,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       METRICS_TOPIC: rule-metrics
       KAFKA_GROUP_ID: rule-tuner
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       API_BASE_URL: http://api:8000
       # Identisch zum SECRET_KEY der api — der Tuner mintet selbst ein
       # langlebiges JWT mit role=admin (kein User-DB-Eintrag nötig, weil
@@ -640,7 +649,7 @@ services:
     volumes:
       - ./signature-engine/rules/host-roles:/host-roles:ro
     environment:
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       ROLE_CATALOG_DIR: /host-roles
       DETECT_INTERVAL_S: ${ROLE_DETECT_INTERVAL_S:-1800}
       DETECT_WINDOW_DAYS: ${ROLE_DETECT_WINDOW_DAYS:-7}
@@ -677,7 +686,7 @@ services:
       KAFKA_BROKERS: kafka:9092
       ALERTS_TOPIC: alerts-raw
       METRICS_TOPIC: rule-metrics
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       MASTER_CA_DIR: /var/lib/cyjan/master-ca
       UPLINK_HOST: 0.0.0.0
       UPLINK_PORT: 8443
@@ -688,7 +697,7 @@ services:
       # die mTLS-WSS, master-uplink lädt es hier in den ids-pcaps-Bucket).
       MINIO_ENDPOINT:   minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-ids-access}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-ids-secret-change-me}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}
       PCAP_BUCKET:      ids-pcaps
       PUSH_TOPIC:       alerts-enriched-push
     volumes:
@@ -741,7 +750,7 @@ services:
       - ml-models:/models
     environment:
       KAFKA_BROKERS: kafka:9092
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       MODELS_DIR: /models
       RETRAIN_INTERVAL_S: ${RETRAIN_INTERVAL_S:-86400}
       TEST_MODE: ${TEST_MODE:-false}
@@ -772,7 +781,7 @@ services:
       - irma-data:/data
     environment:
       KAFKA_BROKERS:       kafka:9092
-      POSTGRES_DSN:        postgresql://ids:${POSTGRES_PASSWORD}@timescaledb:5432/ids
+      POSTGRES_DSN:        postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       IRMA_BASE_URL:       ${IRMA_BASE_URL:-https://10.133.168.115/rest}
       IRMA_USER:           ${IRMA_USER:-}
       IRMA_PASS:           ${IRMA_PASS:-}
@@ -804,7 +813,7 @@ services:
     environment:
       MQTT_ENABLED:               ${MQTT_ENABLED:-false}
       KAFKA_BROKERS:              kafka:9092
-      POSTGRES_DSN:               postgresql://ids:${POSTGRES_PASSWORD}@timescaledb:5432/ids
+      POSTGRES_DSN:               postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       MQTT_ALERTS_TOPIC:          alerts-enriched
       MQTT_BROKER_HOST:           ${MQTT_BROKER_HOST:-}
       MQTT_BROKER_PORT:           ${MQTT_BROKER_PORT:-8883}
@@ -908,7 +917,7 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BROKERS: kafka:9092
-      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:-ids-change-me}@timescaledb:5432/ids
+      POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
       FLOWS_TOPIC: flows
       SRC_IP: "10.255.255.100"
       TARGET_IP: "10.255.255.1"
@@ -1082,7 +1091,7 @@ services:
       ALLOWED_SRC_CIDRS: "192.0.2.0/24,198.51.100.0/24,203.0.113.0/24"
       MAX_TIMEOUT_SEC:   "120"
       DOCKER_HOST:       "unix:///var/run/docker.sock"
-      POSTGRES_DSN:      "postgres://ids:${POSTGRES_PASSWORD:-ids-change-me}@localhost:5432/ids"
+      POSTGRES_DSN:      "postgres://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@localhost:5432/ids"
     ports:
       - "${REDTEAM_API_PORT:-8002}:8002"
     volumes:

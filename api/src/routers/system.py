@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from database import get_pool
 from deps import require_admin
+from env_safe import valid_iface_name
 from models import ConfigResponse, ConfigUpdate, ThreatLevelResponse
 
 _SYS_NET  = Path("/host/sys/class/net")
@@ -155,6 +156,7 @@ def _sniffer_stats() -> dict:
 class InterfaceConfigRequest(BaseModel):
     role:  Literal["sniffer", "management"]
     iface: str
+
 
 router = APIRouter(prefix="/api", tags=["system"])
 
@@ -350,7 +352,11 @@ async def set_interface_config(
     _admin: dict = Depends(require_admin),
 ) -> dict:
     iface = body.iface.strip()
-    if not iface or "/" in iface or " " in iface:
+    # Strikte Whitelist: der Name landet via _env_set() in /opt/ids/.env — ein
+    # Newline oder Steuerzeichen im Namen würde sonst beliebige .env-Zeilen
+    # injizieren (z.B. POSTGRES_PASSWORD=…). Nur echte Linux-Interface-Namen
+    # zulassen: [a-zA-Z0-9_.:-], 1–32 Zeichen (deckt VLAN/Alias wie eth0.100:1).
+    if not valid_iface_name(iface):
         raise HTTPException(400, "Ungültiger Interface-Name")
 
     profile_file = Path("/etc/cyjan/profile")

@@ -133,7 +133,14 @@ export default function App() {
     if (!token) { setAuthChk(false); return; }
     fetchMe()
       .then(u => setUser(u))
-      .catch(() => clearToken())
+      .catch((e: unknown) => {
+        // Nur bei echtem Auth-Fehler (401/403) den Token verwerfen. Ein
+        // transienter Netzwerk-/5xx-Fehler darf einen gültigen Token nicht
+        // wegwerfen — sonst muss der User sich nach jedem Server-Hiccup neu
+        // einloggen. (401 räumt den Token bereits in api.req() selbst weg.)
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/^(401|403)\b/.test(msg)) clearToken();
+      })
       .finally(() => setAuthChk(false));
   }, []);
 
@@ -246,6 +253,10 @@ function Dashboard({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   const handleUpdate = (updated: Alert) => {
     setAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a));
+    // Im historischen Zeitfenster rendert das Dashboard historicAlerts, nicht
+    // den WS-State — Feedback/Severity-Patches müssen dort ebenfalls landen,
+    // sonst verpufft die Markierung optisch bis zum nächsten Fetch.
+    setHistoricAlerts(prev => prev.map(a => a.alert_id === updated.alert_id ? updated : a));
   };
 
   useEffect(() => {

@@ -126,6 +126,19 @@ def match_role(profile: HostProfile, role: RoleDef, oui_bonus: float) -> RoleMat
     )
 
 
+def _parse_iso(value) -> datetime | None:
+    """ISO-8601-Timestamp (mit +00:00 oder 'Z') → aware datetime, None bei Müll."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _is_manual(existing_role: dict, existing_manual: dict, role_id: str) -> bool:
     """Rolle gilt als manual-gelockt, wenn source=manual ODER ein
     manual[role_id].locked=true-Eintrag existiert (Contract §1)."""
@@ -201,6 +214,50 @@ def build_detected_roles(
 
     out: dict = {"roles": new_roles, "evaluated_at": now_iso}
     # manual-Block nur durchreichen, wenn er nicht leer ist — saubere Files.
+    if old_manual:
+        out["manual"] = old_manual
+    return out
+
+
+def prune_auto_roles(existing: dict | None, stale_cutoff: datetime) -> dict | None:
+    """Aging für Hosts, die im Beobachtungsfenster NICHT mehr als Responder
+    auftauchen (build_profiles liefert sie nicht → build_detected_roles läuft
+    für sie nie): auto-Rollen, deren `last_confirmed` älter als `stale_cutoff`
+    ist, werden entfernt. So erbt ein IP-Nachnutzer nicht die Rolle eines
+    dekommissionierten Servers.
+
+    manual-gelockte Rollen und der komplette manual-Block (Locks + Suppress)
+    bleiben unangetastet. Rückgabe: neues Payload wenn mindestens eine Rolle
+    entfernt wurde, sonst None (Signal an den Caller: kein Schreib-Roundtrip).
+    """
+    existing = existing if isinstance(existing, dict) else {}
+    old_roles = existing.get("roles") if isinstance(existing.get("roles"), dict) else {}
+    old_manual = existing.get("manual") if isinstance(existing.get("manual"), dict) else {}
+
+    kept: dict[str, dict] = {}
+    removed = 0
+    for rid, entry in old_roles.items():
+        # manual-gelockte Rollen nie altern.
+        if _is_manual(entry, old_manual, rid):
+            kept[rid] = entry
+            continue
+        ts = _parse_iso(entry.get("last_confirmed") if isinstance(entry, dict) else None)
+        # Ohne datierbaren Zeitstempel konservativ behalten — nichts wegwerfen,
+        # dessen Alter wir nicht kennen.
+        if ts is None or ts >= stale_cutoff:
+            kept[rid] = entry
+            continue
+        removed += 1
+
+    if removed == 0:
+        return None
+
+    out: dict = {"roles": kept}
+    # evaluated_at NICHT neu setzen — wir haben nicht re-evaluiert, nur gealtert;
+    # den letzten echten Detektor-Zeitstempel durchreichen falls vorhanden.
+    ev = existing.get("evaluated_at")
+    if isinstance(ev, str) and ev:
+        out["evaluated_at"] = ev
     if old_manual:
         out["manual"] = old_manual
     return out

@@ -7,9 +7,12 @@ ConditionPathExists=/usr/local/bin/cyjan-tap
 
 [Service]
 Type=oneshot
-# -y skippt die interaktive Bestätigung (wir wurden ja explizit vom
-# Master getriggert, der UI-Klick gilt als Confirmation).
-ExecStart=/usr/local/bin/cyjan-tap update --from-master -y
+# --auto: nicht-interaktiv (der Master-Trigger gilt als Confirmation), aber
+# OHNE Force — ist die angebotene Version identisch zur installierten, beendet
+# sich cyjan-tap sauber statt einen erneuten Stack-Recreate auszulösen. Ein
+# per PathChanged doppelt gefeuerter Trigger kann so keine Re-Update-Schleife
+# starten. (Früher -y → bedingungsloses Re-Apply auch bei gleicher Version.)
+ExecStart=/usr/local/bin/cyjan-tap update --from-master --auto
 # Nach erfolgreichem Update das Trigger-File wegräumen — sonst feuert
 # der path-Watcher beim nächsten ähnlichen Schreib-Event nochmal. Das
 # ExecStartPost läuft NUR bei rc=0.

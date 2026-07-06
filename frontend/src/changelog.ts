@@ -16,6 +16,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.6.0',
+    date: '2026-07-06',
+    title: 'Stabilität & Härtung (Code-Review-Nachzug)',
+    notes: [
+      'Zahlreiche Robustheits- und Sicherheits-Fixes aus dem Code-Review: Remote-Taps verlieren bei Verbindungsabbrüchen keine Alarme mehr (Alarme werden erst nach bestätigtem Empfang am Master gelöscht), die Alarm-Anreicherung ist bei Scan-Bursts deutlich schneller, und die Rollen-Erkennung übersteht defekte Katalog-Einträge ohne Aussetzer.',
+      'Update-Pfad gehärtet: die Versionsanzeige springt erst nach erfolgreichem Update auf „aktuell", automatische Tap-Updates laufen nicht mehr in Schleifen, und der Stack startet ohne gesetzte Datenbank-/Speicher-Passwörter gar nicht erst (statt still mit Standard-Zugangsdaten).',
+      'Frontend-Feinschliff: korrekte Hostnamen in gruppierten Alarmen bei Richtungswechsel, Feedback bleibt auch im historischen Zeitfenster erhalten, korrekte IPv6-Kurzschreibweise in der PCAP-Vorschau, und Einstellungs-Formulare überschreiben die Server-Konfiguration nicht mehr bei einem stummen Ladefehler.',
+    ],
+  },
+  {
     version: 'v2.5.59',
     date: '2026-06-29',
     title: 'PCAP-Pakete lesbar decodiert',

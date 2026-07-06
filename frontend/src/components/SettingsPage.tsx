@@ -1779,17 +1779,22 @@ function PcapRetentionSection() {
   const [msgType,  setMsgType]  = useState<'ok' | 'err'>('ok');
   const [confirmCleanup, setConfirmCleanup] = useState(false);
 
-  const reload = () => {
+  // syncDays nur beim ersten Load + nach dem Speichern true — der 60s-Poller
+  // (syncDays=false) darf das Tage-Feld nicht überschreiben, sonst wird ein
+  // gerade getippter Wert mitten im Editieren zurückgesetzt.
+  const reload = (syncDays = false) => {
     fetchPcapRetention()
       .then(s => {
         setState(s);
-        // Form-Default: persisted > active > default. Erst-Setup zeigt env-Default.
-        const v = s.persisted_days ?? s.active_days ?? s.default_days;
-        setDays(String(v));
+        if (syncDays) {
+          // Form-Default: persisted > active > default. Erst-Setup zeigt env-Default.
+          const v = s.persisted_days ?? s.active_days ?? s.default_days;
+          setDays(String(v));
+        }
       })
       .catch(e => { setMsgType('err'); setMsg(String((e as Error).message)); });
   };
-  useEffect(() => { reload(); const ti = setInterval(reload, 60_000); return () => clearInterval(ti); }, []);
+  useEffect(() => { reload(true); const ti = setInterval(() => reload(false), 60_000); return () => clearInterval(ti); }, []);
 
   const save = async () => {
     const n = parseInt(days, 10);
@@ -1801,7 +1806,7 @@ function PcapRetentionSection() {
     try {
       const r = await setPcapRetention(n);
       setMsgType('ok'); setMsg(r.message);
-      reload();
+      reload(true);
     } catch (e) {
       setMsgType('err'); setMsg(String((e as Error).message));
     } finally { setBusy(false); }
@@ -1946,7 +1951,6 @@ function BackupRestoreSection({ onDone, canReauth, reauthHint }: { onDone: () =>
   // die übertragene Größe live anzeigen, keinen Prozent-Balken.
   const [backupBusy,  setBackupBusy]  = useState(false);
   const [backupBytes, setBackupBytes] = useState(0);
-  const [backupStart, setBackupStart] = useState<number>(0);
 
   function fmtMB(b: number): string {
     return (b / 1024 / 1024).toFixed(1) + ' MB';
@@ -1958,7 +1962,11 @@ function BackupRestoreSection({ onDone, canReauth, reauthHint }: { onDone: () =>
     const url   = backupDbUrl();
     setBackupBusy(true);
     setBackupBytes(0);
-    setBackupStart(Date.now());
+    // Lokale Variable statt State: setBackupStart() wirkt erst im nächsten
+    // Render, die Closure hier läse sonst den alten Wert (0 → ~55 Jahre
+    // Backup-Dauer). Der Startzeitpunkt wird nur für die Dauer-Anzeige
+    // gebraucht, nicht im JSX — deshalb reicht ein const.
+    const started = Date.now();
     setMsg('');
     try {
       const r = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -1994,7 +2002,7 @@ function BackupRestoreSection({ onDone, canReauth, reauthHint }: { onDone: () =>
       link.download = fn;
       link.click();
       URL.revokeObjectURL(link.href);
-      const secs = ((Date.now() - backupStart) / 1000).toFixed(1);
+      const secs = ((Date.now() - started) / 1000).toFixed(1);
       setMsgType('ok');
       setMsg(t('settings.dbMaint.backupDownloaded', { filename: fn })
              + ` — ${fmtMB(received)} in ${secs}s`);
@@ -2868,11 +2876,22 @@ function RuleSources() {
   // Polling wenn Update angefordert
   useEffect(() => {
     if (!status?.requested) { if (pollRef.current) clearTimeout(pollRef.current); return; }
-    pollRef.current = setTimeout(async () => {
+    let cancelled = false;
+    const tick = async () => {
       const s = await fetchRuleUpdateStatus().catch(() => null);
-      if (s) setStatus(s);
-    }, 5000);
-    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
+      if (cancelled) return;
+      if (s) {
+        // Erfolg → setStatus re-triggert den Effekt, der den nächsten Poll
+        // plant (bzw. beim requested=false-Übergang stoppt).
+        setStatus(s);
+      } else {
+        // Transienter Fetch-Fehler: NICHT aufhören zu pollen, sonst hängt die
+        // UI dauerhaft auf "Update läuft". Nächsten Versuch selbst einplanen.
+        pollRef.current = setTimeout(tick, 5000);
+      }
+    };
+    pollRef.current = setTimeout(tick, 5000);
+    return () => { cancelled = true; if (pollRef.current) clearTimeout(pollRef.current); };
   }, [status]);
 
   async function handleToggleSource(src: RuleSource) {
@@ -3411,11 +3430,16 @@ function RulesList() {
   const LIMIT = 100;
 
   useEffect(() => {
+    // cancelled-Guard: beim Tippen im Suchfeld überlappen die Requests; ohne
+    // ihn könnte eine langsam zurückkommende ältere Antwort eine neuere
+    // überschreiben (stale result). fetchRules hat keinen AbortController.
+    let cancelled = false;
     setLoading(true);
     fetchRules({ search, limit: LIMIT, offset })
-      .then(r => { setRules(r.rules); setTotal(r.total); })
+      .then(r => { if (!cancelled) { setRules(r.rules); setTotal(r.total); } })
       .catch(() => {})
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [search, offset]);
 
   // Overrides werden nur einmal geladen – nicht pro Page-Wechsel
@@ -3934,6 +3958,19 @@ function SslSettings() {
   );
 }
 
+// Banner für fehlgeschlagenen Config-Fetch: macht sichtbar, dass das Formular
+// nur Defaults zeigt und Speichern blockiert ist (sonst überschreibt ein Save
+// die echte Server-Config mit Standardwerten).
+function ConfigLoadErrorBanner({ show }: { show: boolean }) {
+  const { t } = useTranslation();
+  if (!show) return null;
+  return (
+    <div className="text-xs text-red-300 bg-red-950/40 border border-red-800/50 rounded px-3 py-2">
+      {t('settings.configLoadFailed')}
+    </div>
+  );
+}
+
 // ── SyslogSettings ────────────────────────────────────────────────────────────
 
 const SYSLOG_DEFAULT: SyslogConfig = {
@@ -3945,10 +3982,11 @@ function SyslogSettings() {
   const [cfg,     setCfg]     = useState<SyslogConfig>(SYSLOG_DEFAULT);
   const [saving,  setSaving]  = useState(false);
   const [testing, setTesting] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);
   const [msg,     setMsg]     = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
-    fetchSyslogConfig().then(setCfg).catch(() => {});
+    fetchSyslogConfig().then(c => { setCfg(c); setLoadErr(false); }).catch(() => setLoadErr(true));
   }, []);
 
   function flash(type: 'ok' | 'err', text: string) {
@@ -3958,6 +3996,9 @@ function SyslogSettings() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    // Config nicht geladen → Formular zeigt nur Defaults; Speichern würde die
+    // echte Server-Config damit überschreiben. Blocken.
+    if (loadErr) { flash('err', t('settings.configLoadFailed')); return; }
     setSaving(true);
     try { await saveSyslogConfig(cfg); flash('ok', t('settings.saml.savedOk')); }
     catch (err: unknown) { flash('err', err instanceof Error ? err.message : t('common.errorGeneric')); }
@@ -3976,6 +4017,7 @@ function SyslogSettings() {
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
+      <ConfigLoadErrorBanner show={loadErr} />
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">{t('settings.syslog.title')}</h2>
         <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
@@ -4046,7 +4088,7 @@ function SyslogSettings() {
           <button type="button" className="btn-ghost text-xs" disabled={testing || !cfg.host} onClick={handleTest}>
             {testing ? t('settings.syslog.testing') : t('settings.syslog.testConnection')}
           </button>
-          <button type="submit" className="btn-primary text-xs" disabled={saving}>
+          <button type="submit" className="btn-primary text-xs" disabled={saving || loadErr}>
             {saving ? t('settings.users.savingShort') : t('common.save')}
           </button>
         </div>
@@ -4070,10 +4112,11 @@ function ItopSettings() {
   const [msg,     setMsg]     = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [sync,    setSync]    = useState<ItopSyncState | null>(null);
   const [showPw,  setShowPw]  = useState(false);
+  const [loadErr, setLoadErr] = useState(false);
   const pollRef               = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    fetchItopConfig().then(setCfg).catch(() => {});
+    fetchItopConfig().then(c => { setCfg(c); setLoadErr(false); }).catch(() => setLoadErr(true));
     getItopSyncStatus().then(setSync).catch(() => {});
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
@@ -4100,6 +4143,7 @@ function ItopSettings() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    if (loadErr) { flash('err', t('settings.configLoadFailed')); return; }
     setSaving(true);
     try { await saveItopConfig(cfg); flash('ok', t('settings.saml.savedOk')); }
     catch (err: unknown) { flash('err', err instanceof Error ? err.message : t('common.errorGeneric')); }
@@ -4137,6 +4181,7 @@ function ItopSettings() {
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
+      <ConfigLoadErrorBanner show={loadErr} />
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">{t('settings.itop.title')}</h2>
         <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
@@ -4228,7 +4273,7 @@ function ItopSettings() {
         <div className="flex items-center gap-3">
           {msg?.type === 'ok'  && <span className="text-xs text-green-400">{msg.text}</span>}
           {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
-          <button type="submit" className="btn-primary text-xs" disabled={saving}>
+          <button type="submit" className="btn-primary text-xs" disabled={saving || loadErr}>
             {saving ? t('settings.users.savingShort') : t('common.save')}
           </button>
         </div>
@@ -5481,12 +5526,14 @@ function MqttSettings() {
   const [testing, setTesting] = useState(false);
   const [testRes, setTestRes] = useState<{ ok: boolean; text: string } | null>(null);
   const [blocklistText, setBlocklistText] = useState('');
+  const [loadErr, setLoadErr] = useState(false);
 
   useEffect(() => {
     fetchMqttConfig().then(c => {
       setCfg(c);
       setBlocklistText((c.rule_id_blocklist ?? []).join('\n'));
-    }).catch(() => {});
+      setLoadErr(false);
+    }).catch(() => setLoadErr(true));
   }, []);
 
   function flash(type: 'ok' | 'err', text: string) {
@@ -5507,6 +5554,10 @@ function MqttSettings() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    if (loadErr) {
+      flash('err', 'Konfiguration konnte nicht geladen werden — Speichern blockiert, damit die Server-Config nicht mit Defaults überschrieben wird. Seite neu laden.');
+      return;
+    }
     setSaving(true);
     try {
       const final = { ...cfg, rule_id_blocklist: parseBlocklist(blocklistText) };
@@ -5539,6 +5590,7 @@ function MqttSettings() {
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
+      <ConfigLoadErrorBanner show={loadErr} />
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">MQTT-Bridge</h2>
         <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
@@ -5771,7 +5823,7 @@ function MqttSettings() {
             onClick={handleTest}>
             {testing ? 'Teste…' : 'Verbindung testen'}
           </button>
-          <button type="submit" className="btn-primary text-xs" disabled={saving}>
+          <button type="submit" className="btn-primary text-xs" disabled={saving || loadErr}>
             {saving ? 'Speichere…' : 'Speichern'}
           </button>
         </div>
@@ -5798,9 +5850,10 @@ function IrmaSettings() {
   const [saving, setSaving] = useState(false);
   const [msg,    setMsg]    = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [showPw, setShowPw] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);
 
   useEffect(() => {
-    fetchIrmaConfig().then(setCfg).catch(() => {});
+    fetchIrmaConfig().then(c => { setCfg(c); setLoadErr(false); }).catch(() => setLoadErr(true));
   }, []);
 
   function flash(type: 'ok' | 'err', text: string) {
@@ -5810,6 +5863,7 @@ function IrmaSettings() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    if (loadErr) { flash('err', t('settings.configLoadFailed')); return; }
     setSaving(true);
     try { await saveIrmaConfig(cfg); flash('ok', t('settings.irma.savedOk')); }
     catch (err: unknown) { flash('err', err instanceof Error ? err.message : t('common.errorGeneric')); }
@@ -5818,6 +5872,7 @@ function IrmaSettings() {
 
   return (
     <form onSubmit={handleSave} className="space-y-5">
+      <ConfigLoadErrorBanner show={loadErr} />
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-200">{t('settings.irma.title')}</h2>
         <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
@@ -5897,7 +5952,7 @@ function IrmaSettings() {
           {msg?.type === 'err' && <span className="text-xs text-red-400">{msg.text}</span>}
         </div>
         <div className="flex gap-2">
-          <button type="submit" className="btn-primary text-xs" disabled={saving}>
+          <button type="submit" className="btn-primary text-xs" disabled={saving || loadErr}>
             {saving ? t('settings.users.savingShort') : t('common.save')}
           </button>
         </div>
@@ -6854,21 +6909,25 @@ function MlTuningCard({ ruleIds }: { ruleIds: string[] }) {
   // Eingabe-Felder (in Stunden für UX, intern Sekunden)
   const [windowH, setWindowH] = useState<string>('10');
   const [blacklist, setBlacklist] = useState<string>('');
+  // Die Eingabefelder werden GENAU EINMAL aus der Config vorbefüllt. Der
+  // 15s-Poller aktualisiert danach nur noch den Status (State/Badges), nicht
+  // die Inputs — sonst wäre die Blacklist nicht leerbar (jeder Poll schreibt
+  // den Config-Wert zurück) und ein getippter Stunden-Wert würde überschrieben.
+  const hydrated = useRef(false);
 
   const reload = () => {
     fetchMlStatus()
       .then(s => {
         setStatus(s);
-        // Beim ersten Load die Felder aus der Config vorbefüllen.
-        // window_s sind Sekunden; in Stunden anzeigen mit max. 2 Nachkommastellen,
-        // damit Sub-Stunden-Werte (z.B. 60s aus einem Test) nicht zu '0' gerundet
-        // werden und der User nicht denkt, das Feld sei kaputt.
-        setWindowH(prev => {
-          if (prev !== '10') return prev;  // user hat schon getippt — nicht überschreiben
+        if (!hydrated.current) {
+          hydrated.current = true;
+          // window_s sind Sekunden; in Stunden anzeigen mit max. 2 Nachkomma-
+          // stellen, damit Sub-Stunden-Werte (z.B. 60s aus einem Test) nicht
+          // zu '0' gerundet werden und der User nicht denkt, das Feld sei kaputt.
           const hrs = (s.config.window_s ?? 36000) / 3600;
-          return hrs >= 1 ? String(Math.round(hrs)) : hrs.toFixed(2);
-        });
-        setBlacklist(prev => prev === '' ? (s.config.blacklist ?? []).join(',') : prev);
+          setWindowH(hrs >= 1 ? String(Math.round(hrs)) : hrs.toFixed(2));
+          setBlacklist((s.config.blacklist ?? []).join(','));
+        }
       })
       .catch(e => setError(e instanceof Error ? e.message : String(e)));
   };

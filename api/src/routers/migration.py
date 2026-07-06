@@ -51,6 +51,7 @@ from fastapi.responses import StreamingResponse
 
 from database import get_pool
 from deps import require_admin
+from env_safe import valid_iface_name, valid_ip_addr
 
 log = logging.getLogger("migration")
 
@@ -1011,6 +1012,16 @@ def _apply_env_mapping(mapping: dict[str, str], manifest: dict) -> dict:
 
     if not target_keys:
         return {"status": "skipped", "reason": "kein Mapping angegeben"}
+
+    # .env-Zeilen-Injektion abwehren: alle Werte gehen zeilenbasiert nach
+    # /opt/ids/.env; ein Newline/Steuerzeichen im (bundle-kontrollierten)
+    # Iface-Namen oder in MANAGEMENT_IP würde sonst beliebige .env-Zeilen
+    # injizieren. Gleiche Whitelist wie der Interface-Config-Pfad (env_safe).
+    for k, v in target_keys.items():
+        ok = valid_ip_addr(v) if k == "MANAGEMENT_IP" else valid_iface_name(v)
+        if not ok:
+            return {"status": "error",
+                    "reason": f"ungültiger Wert für {k} (unerlaubte Zeichen)"}
 
     old = HOST_ENV_FILE.read_text(encoding="utf-8", errors="replace")
     # Backup (nur einmal pro Tag, damit wiederholte Imports nicht überschreiben)

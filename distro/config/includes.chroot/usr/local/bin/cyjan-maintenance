@@ -42,7 +42,12 @@ while [ $# -gt 0 ]; do
     --aggressive)        AGGRESSIVE=1; shift ;;
     --dry-run)           DRY_RUN=1; shift ;;
     --pcap-cleanup)      PCAP_CLEANUP=1; shift ;;
-    --days)              PCAP_DAYS="${2:-}"; shift 2 ;;
+    --days)
+      # Wert-Argument absichern: ohne diesen Guard bräche 'shift 2' beim
+      # letzten Argument (nur 1 Positional übrig) unter set -e nackt ab,
+      # statt eine verständliche Meldung zu liefern.
+      if [ $# -lt 2 ]; then echo "FEHLER: --days braucht einen Wert (Tage)." >&2; exit 2; fi
+      PCAP_DAYS="$2"; shift 2 ;;
     --refresh-tap-update) REFRESH_TAP=1; shift ;;
     -h|--help)
       sed -n '2,33p' "$0"

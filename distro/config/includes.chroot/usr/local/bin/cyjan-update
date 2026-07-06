@@ -300,6 +300,17 @@ cmd_apply() {
     rsync -a --delete "$stage/tap-update/" "$IDS_DIR/tap-update/"
   fi
 
+  # ── VERSION-Pinning ───────────────────────────────────────────────────────
+  # Der Source-Sync oben hat VERSION bereits auf den neuen Stand gehoben. Wir
+  # merken uns den Zielwert und setzen VERSION vorerst auf den ALTEN Stand
+  # zurück — geschrieben wird die neue Version erst NACH erfolgreichem docker
+  # load + compose up. Sonst meldet ein abgebrochener docker load (set -e) den
+  # Host als bereits aktualisiert, obwohl die Images fehlen: 'cyjan-update'
+  # zeigte "aktuell" und der Boot-Recreate liefe gegen nicht vorhandene Images.
+  local new_ver_target
+  new_ver_target=$(read_version)
+  printf '%s\n' "$cur" > "$VERSION_FILE"
+
   # ── Images laden ─────────────────────────────────────────────────────────
   echo "$TAG Lade Images via docker load (kann je nach Bundle 1-3 min dauern) …"
   zstd -dc "$stage/images.tar.zst" | docker load
@@ -318,6 +329,9 @@ cmd_apply() {
     (cd "$IDS_DIR" && docker compose "${PROFILE_ARGS[@]}" up -d --force-recreate)
   fi
 
+  # Jetzt — nach erfolgreichem docker load (+ compose up, sofern nicht
+  # übersprungen) — die Ziel-Version festschreiben.
+  printf '%s\n' "$new_ver_target" > "$VERSION_FILE"
   local new_ver
   new_ver=$(read_version)
   echo "$TAG Fertig. Aktive Version: $new_ver"

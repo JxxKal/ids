@@ -23,6 +23,7 @@ Endpoints:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -32,7 +33,7 @@ from typing import Any, Literal
 
 import asyncpg
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from database import get_pool
@@ -124,6 +125,11 @@ class SigRuleOverride(BaseModel):
 
 class SigRulesOverrides(BaseModel):
     overrides: dict[str, SigRuleOverride] = Field(default_factory=dict)
+    # Version-Tag des _overrides.json-Standes für Optimistic-Concurrency. Wird
+    # von GET gesetzt; PUT ignoriert das Body-Feld und liest den If-Match-Header
+    # (siehe put_overrides). Optional — GUI-Clients ohne Concurrency-Check
+    # lassen es weg.
+    version: str | None = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -174,6 +180,20 @@ def _write_overrides_file(payload: dict[str, dict]) -> None:
         tmp.replace(OVERRIDES_FILE)
     except OSError as exc:
         raise HTTPException(500, f"Overrides-Datei nicht schreibbar: {exc}") from exc
+
+
+def _overrides_version() -> str:
+    """Version-Tag des aktuellen _overrides.json-Standes für Optimistic-
+    Concurrency. Hash der rohen Datei-Bytes; '0' wenn die Datei (noch) nicht
+    existiert. Ändert sich bei jedem Schreibvorgang (GUI oder rule-tuner),
+    sodass ein zwischenzeitlicher Fremd-Write vom If-Match-Check beim PUT
+    erkannt wird."""
+    if not OVERRIDES_FILE.exists():
+        return "0"
+    try:
+        return hashlib.sha256(OVERRIDES_FILE.read_bytes()).hexdigest()
+    except OSError:
+        return "0"
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────
@@ -395,7 +415,7 @@ async def get_overrides() -> SigRulesOverrides:
             ) else None,
             parameters=params,
         )
-    return SigRulesOverrides(overrides=cleaned)
+    return SigRulesOverrides(overrides=cleaned, version=_overrides_version())
 
 
 @router.put(
@@ -404,7 +424,19 @@ async def get_overrides() -> SigRulesOverrides:
     dependencies=[Depends(require_admin)],
     summary="Overrides setzen (komplett ersetzen)",
 )
-async def put_overrides(body: SigRulesOverrides) -> SigRulesOverrides:
+async def put_overrides(
+    body: SigRulesOverrides,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> SigRulesOverrides:
+    # Optimistic-Concurrency: schickt der Client ein If-Match (nur der
+    # rule-tuner tut das), lehnen wir mit 409 ab, falls die Datei seit seinem
+    # GET fremd-geschrieben wurde — sonst würde ein stale Merge z.B. einen frisch
+    # gesetzten source=manual-Lock aus der GUI überschreiben. Version-Check und
+    # Write laufen ohne await dazwischen im selben Event-Loop, sind also atomar.
+    # GUI-Clients ohne If-Match behalten das bisherige Last-Writer-Wins-Verhalten.
+    if if_match is not None and if_match != _overrides_version():
+        raise HTTPException(409, "Overrides-Datei wurde zwischenzeitlich geändert (Version-Mismatch)")
+
     # Schema pro Rule-ID einsammeln, damit wir Parameter-Werte clampen + auf
     # bekannte Param-Namen filtern können. Unbekannte Rule-IDs werden hier nicht
     # rausgefiltert (sonst sind Custom-Rules problematisch); Parameter-Cleanup

@@ -186,7 +186,14 @@ def load_catalog(catalog_dir: str) -> list[RoleDef]:
         for entry in docs:
             if not isinstance(entry, dict):
                 continue
-            role = _parse_role(entry)
+            # Ein defekter Eintrag (z.B. nicht-numerisches min_flows_per_port /
+            # base_confidence) darf nicht die restliche Datei mitreißen —
+            # überspringen + loggen, statt den ganzen Katalog zu killen.
+            try:
+                role = _parse_role(entry)
+            except Exception as exc:
+                log.warning("Defekter Katalog-Eintrag in %s übersprungen: %s", name, exc)
+                continue
             if role is None:
                 continue
             if role.id in seen_ids:

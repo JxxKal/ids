@@ -103,6 +103,23 @@ SEND_BATCH_SIZE = int(os.environ.get("SEND_BATCH_SIZE", "50"))
 HEARTBEAT_TO    = float(os.environ.get("HEARTBEAT_TIMEOUT_S", "75"))
 RECONNECT_MIN_S = 1.0
 RECONNECT_MAX_S = 60.0
+# App-Level-Ack: gesendete Frames bleiben in der DiskQueue, bis der Master
+# sie per `{"type":"ack",...}`-Frame quittiert (er tut das nach erfolgreichem
+# Kafka-Produce). ACK_TIMEOUT_S ist der Fallback: schickt der Master innerhalb
+# dieser Zeit KEINEN Ack (alter Master ohne ack-Support), schalten wir für die
+# Verbindung auf das alte Best-Effort-Delete-nach-Send zurück, statt ewig zu
+# blockieren. REDELIVER_AFTER_S: hängen bestätigungsfähige Frames zu lange
+# unbestätigt (z.B. Master-Kafka down bei stehender WSS), liefern wir sie ohne
+# Reconnect ab Queue-Anfang neu aus.
+ACK_TIMEOUT_S     = float(os.environ.get("ACK_TIMEOUT_S", "30"))
+REDELIVER_AFTER_S = float(os.environ.get("REDELIVER_AFTER_S", "60"))
+# Sende-Fenster: höchstens so viele Frames dürfen gleichzeitig unbestätigt
+# (in-flight) sein. Bei einem Master-Kafka-Ausfall mit stehender WSS würde der
+# Sender sonst unbegrenzt weiterschicken, ohne je einen Ack zu bekommen →
+# _inflight (RAM) wüchse unbegrenzt. Ist das Fenster voll, pausiert der Sender;
+# neue Frames bleiben durabel in der DiskQueue (der eigentliche Outage-Buffer,
+# 1 GB-Cap) statt im Speicher. Acks geben das Fenster wieder frei.
+MAX_INFLIGHT      = int(os.environ.get("MAX_INFLIGHT", "1000"))
 
 # Reverse-Channel: Config-Pull alle CONFIG_POLL_INTERVAL_S Sekunden vom Master.
 # Schreibt in $RULES_DIR/{builtin,custom}/. signature-engine reagiert mit
@@ -499,6 +516,16 @@ class Uplink:
         self._last_connect_at: float | None = None
         self._last_disconnect_at: float | None = None
         self._last_error: str | None = None
+        # App-Level-Ack-State (pro Verbindung in run() zurückgesetzt):
+        #   _inflight        row_id → monotonic Send-Zeit, noch nicht bestätigt
+        #   _ack_capable     None=unbekannt, True=Master schickt Acks,
+        #                    False=Alt-Master (Fallback: sofort löschen)
+        #   _ack_deadline    Frist für den ersten Ack (Fallback-Trigger)
+        #   _last_redeliver  Drossel für die Redelivery-ab-Anfang-Schleife
+        self._inflight: dict[int, float] = {}
+        self._ack_capable: bool | None = None
+        self._ack_deadline: float | None = None
+        self._last_redeliver: float = 0.0
 
     def _write_state(self, connection: str) -> None:
         st = self._diskq.stats()
@@ -541,6 +568,14 @@ class Uplink:
                     log.info("WSS verbunden mit %s", MASTER_URL)
                     self._write_state("connected")
 
+                    # Per-Connection Ack-State zurücksetzen: neue Verbindung
+                    # ⇒ der Sender startet mit cursor=0 und liefert alle noch
+                    # nicht bestätigten (= nicht gelöschten) Frames neu aus.
+                    self._inflight = {}
+                    self._ack_capable = None
+                    self._ack_deadline = None
+                    self._last_redeliver = 0.0
+
                     # Hello-Frame: Tap stellt sich beim Master vor, schickt
                     # die laufende Version + Schema-Version mit. master-
                     # uplink persistiert das in taps.version. Failsoft —
@@ -568,39 +603,153 @@ class Uplink:
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, RECONNECT_MAX_S)
 
+    @staticmethod
+    def _frame_with_seq(payload: bytes, seq: int) -> bytes:
+        """Schiebt "seq":<row_id> direkt hinter die öffnende Klammer eines
+        serialisierten JSON-Frames ({"type":...}). So kann der Master das Frame
+        per App-Level-Ack quittieren, ohne dass wir das Frame (gerade große
+        pcap_upload-Blobs) teuer reparsen/redumpen müssen. Frames beginnen bei
+        orjson immer mit '{' und haben stets ein "type"-Feld — der eingefügte
+        Key davor bleibt valides JSON."""
+        if payload[:1] != b"{":
+            return payload
+        return b'{"seq":' + str(seq).encode() + b"," + payload[1:]
+
+    def _check_ack_fallback(self) -> None:
+        """Fallback für alte Master ohne ack-Support: kommt innerhalb
+        ACK_TIMEOUT_S kein einziger Ack, schalten wir die Verbindung auf das
+        alte Verhalten (Best-Effort-Delete nach Send) und geben die bereits
+        gesendeten, unbestätigten Frames frei, statt ewig zu blockieren."""
+        if self._ack_capable is not None:
+            return
+        if self._ack_deadline is None or time.monotonic() < self._ack_deadline:
+            return
+        stale = list(self._inflight.keys())
+        self._inflight.clear()
+        self._ack_capable = False
+        if stale:
+            self._diskq.ack(stale)
+            self._sent_total += len(stale)
+        log.warning("Master ohne App-Level-Ack (>%.0fs) – Fallback auf "
+                    "Best-Effort-Delete (Alt-Master?)", ACK_TIMEOUT_S)
+
+    def _should_redeliver(self) -> bool:
+        """True wenn bestätigungsfähige Frames zu lange unbestätigt hängen
+        (z.B. Master-Kafka war down während die WSS stand). Der Sender setzt
+        dann seinen Cursor auf 0 und liefert alle noch nicht gelöschten
+        (= unbestätigten) Frames erneut aus – ohne Reconnect abzuwarten."""
+        if not self._ack_capable or not self._inflight:
+            return False
+        now = time.monotonic()
+        if now - min(self._inflight.values()) < REDELIVER_AFTER_S:
+            return False
+        if now - self._last_redeliver < REDELIVER_AFTER_S:
+            return False
+        self._last_redeliver = now
+        log.warning("%d Frames >%.0fs unbestätigt – Redelivery ab Queue-Anfang",
+                    len(self._inflight), REDELIVER_AFTER_S)
+        return True
+
+    def _handle_ack(self, msg: dict) -> None:
+        """Verarbeitet ein `{"type":"ack","seqs":[...]}`- (oder Einzel-`seq`-)
+        Frame vom Master: bestätigte row_ids aus _inflight entfernen und
+        endgültig aus der DiskQueue löschen."""
+        seqs = msg.get("seqs")
+        if seqs is None:
+            one = msg.get("seq")
+            seqs = [one] if one is not None else []
+        ids: list[int] = []
+        for s in seqs:
+            try:
+                ids.append(int(s))
+            except (TypeError, ValueError):
+                continue
+        if not ids:
+            return
+        self._ack_capable = True
+        for rid in ids:
+            self._inflight.pop(rid, None)
+        self._diskq.ack(ids)
+        self._sent_total += len(ids)
+        self._last_send_at = time.time()
+
     async def _send_loop(self, ws) -> None:
-        """Pumpt Disk-Queue → WSS, ältester zuerst. Wenn Queue leer ist:
-        kurz warten, nicht busy-loopen."""
+        """Pumpt Disk-Queue → WSS, ältester zuerst. Frames werden mit einer
+        `seq` (= DiskQueue-row_id) markiert und bleiben in der Queue, bis der
+        Master sie per ack-Frame quittiert (siehe _handle_ack). Ein Cursor
+        verhindert, dass innerhalb einer Verbindung dieselben unbestätigten
+        Frames erneut rausgehen; bei Reconnect startet er wieder bei 0."""
+        cursor = 0
         idle = 0
         while True:
-            batch = self._diskq.pop_batch(SEND_BATCH_SIZE)
-            if not batch:
-                idle += 1
-                # alle 5s State refresh, damit die UI nicht "festhängt"
-                if idle % 50 == 0:
-                    self._write_state("connected")
-                await asyncio.sleep(0.1)
-                continue
-            idle = 0
+            # Ack-Fallback + Redelivery laufen JEDES Mal (nicht nur im Leerlauf):
+            # bei Master-Kafka-Down mit stehender WSS produziert der Tap ständig
+            # neue Rows, der if-not-batch-Zweig würde sonst nie betreten und das
+            # Redelivery-Sicherheitsnetz nie greifen.
+            self._check_ack_fallback()
+            if self._should_redeliver():
+                cursor = 0
+
+            batch = self._diskq.pop_batch_after(cursor, SEND_BATCH_SIZE)
             ids_sent: list[int] = []
+            window_full = False
             try:
                 for row_id, payload in batch:
-                    await ws.send(payload)
+                    # Sende-Fenster nur für NEUE (noch nicht in-flight) Frames.
+                    # Redelivery bereits in-flight befindlicher Frames wächst
+                    # _inflight nicht und darf immer raus; neue Frames jenseits
+                    # von MAX_INFLIGHT bleiben in der DiskQueue (Backpressure).
+                    if (self._ack_capable is not False
+                            and row_id not in self._inflight
+                            and len(self._inflight) >= MAX_INFLIGHT):
+                        window_full = True
+                        break
+                    await ws.send(self._frame_with_seq(payload, row_id))
                     ids_sent.append(row_id)
-                self._diskq.ack(ids_sent)
-                self._sent_total += len(ids_sent)
+                    cursor = row_id
+            except Exception:
+                # Teil-Batch raus. Alt-Master-Fallback: best-effort löschen.
+                # Sonst inflight vormerken – Löschung erst per ack bzw.
+                # Redelivery beim nächsten Verbindungsaufbau (cursor=0).
+                if self._ack_capable is False and ids_sent:
+                    self._diskq.ack(ids_sent)
+                    self._sent_total += len(ids_sent)
+                else:
+                    now = time.monotonic()
+                    for rid in ids_sent:
+                        self._inflight[rid] = now
+                raise
+
+            if ids_sent:
+                if self._ack_capable is False:
+                    # Alt-Master: kein ack zu erwarten → sofort löschen (altes
+                    # Best-Effort-Verhalten).
+                    self._diskq.ack(ids_sent)
+                    self._sent_total += len(ids_sent)
+                else:
+                    now = time.monotonic()
+                    for rid in ids_sent:
+                        self._inflight[rid] = now
+                    if self._ack_deadline is None:
+                        self._ack_deadline = now + ACK_TIMEOUT_S
                 self._last_send_at = time.time()
                 if self._sent_total % 100 == 0:
                     self._write_state("connected")
-            except Exception:
-                # Was bereits raus war: ack. Was nicht: bleibt in der Queue
-                # für den nächsten Verbindungsaufbau.
-                self._diskq.ack(ids_sent)
-                raise
+
+            # Nichts Neues rausgegangen (leere Queue ODER Fenster voll) → kurz
+            # warten statt busy-loopen; der receive_loop gibt per Ack das Fenster
+            # frei. Ein voll durchgesendeter Batch schläft nicht (Durchsatz).
+            if not ids_sent or window_full or not batch:
+                idle += 1
+                if idle % 50 == 0:
+                    self._write_state("connected")
+                await asyncio.sleep(0.1)
+            else:
+                idle = 0
 
     async def _receive_loop(self, ws) -> None:
-        """Empfängt ping/pong vom Master. Aktuell nur Heartbeat – der
-        Reverse-Channel (Rule-Sync) läuft über REST-Pull, nicht hier."""
+        """Empfängt ping/pong + App-Level-Acks vom Master. Der Reverse-Channel
+        (Rule-Sync) läuft über REST-Pull, nicht hier."""
         while True:
             try:
                 raw = await asyncio.wait_for(ws.recv(), timeout=HEARTBEAT_TO)
@@ -614,6 +763,18 @@ class Uplink:
                 continue
             if msg.get("type") == "ping":
                 await ws.send(orjson.dumps({"type": "pong"}).decode())
+            elif msg.get("type") == "hello_ack":
+                # Master signalisiert deterministisch App-Level-Ack-Support —
+                # wir müssen es nicht per Timeout erraten. Verhindert die
+                # Fehlklassifikation als Alt-Master, wenn beim Connect noch kein
+                # Alert produziert wurde (z.B. Master-Kafka gerade unten).
+                if self._ack_capable is None:
+                    self._ack_capable = True
+                    self._ack_deadline = None
+            elif msg.get("type") == "ack":
+                # Master bestätigt erfolgreich verarbeitete Frames → aus der
+                # DiskQueue löschen.
+                self._handle_ack(msg)
             elif msg.get("type") == "update_now":
                 # Master triggert Update. Wir schreiben einen Trigger-File
                 # ins host-bind-mountete /run/cyjan-update/, ein systemd-

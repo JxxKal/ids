@@ -47,13 +47,22 @@ locate_src() {
 # nur überschrieben falls sie keine log-driver-Einstellung enthält oder
 # explizit Default ist. Sonst Backup + Hinweis, kein blindes Überschreiben.
 DAEMON_JSON="/etc/docker/daemon.json"
-DAEMON_SRC="${SRC_DIR}/daemon.json"
+# Quelle über locate_src auflösen: im Update-ZIP liegt daemon.json direkt in
+# scripts/, im frischen git-Checkout unter distro/.../etc/docker/. Ein
+# hartkodiertes "${SRC_DIR}/daemon.json" brach beim Clone-Bootstrap ab (cp auf
+# fehlende Quelle → set -e), wodurch alle folgenden Unit-/Maintenance-Installs
+# übersprungen wurden.
+DAEMON_SRC="$(locate_src daemon.json etc/docker)"
 mkdir -p /etc/docker
 NEEDS_DOCKER_RESTART=0
 if [ ! -f "$DAEMON_JSON" ]; then
-  cp "$DAEMON_SRC" "$DAEMON_JSON"
-  echo "[post-update] $DAEMON_JSON neu angelegt."
-  NEEDS_DOCKER_RESTART=1
+  if [ -n "$DAEMON_SRC" ]; then
+    cp "$DAEMON_SRC" "$DAEMON_JSON"
+    echo "[post-update] $DAEMON_JSON neu angelegt."
+    NEEDS_DOCKER_RESTART=1
+  else
+    echo "[post-update] WARNUNG: daemon.json-Quelle nicht gefunden — $DAEMON_JSON nicht angelegt."
+  fi
 else
   # Targeted-Migration: log-driver=journald → json-file + live-restore,
   # ohne andere User-Settings (z.B. eigene "hosts": [...]) anzufassen.

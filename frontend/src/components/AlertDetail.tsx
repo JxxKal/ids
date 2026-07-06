@@ -86,6 +86,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
   const { t } = useTranslation();
   const [note, setNote]         = useState('');
   const [loading, setLoading]   = useState(false);
+  const [fbError, setFbError]   = useState(false);
   const [showGraph, setShowGraph] = useState(false);
   const [showPcap, setShowPcap] = useState(false);
   // Edit-Modus: Operator hat ein bestehendes Feedback und will es korrigieren
@@ -105,12 +106,14 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
 
   const giveFeedback = async (fb: 'fp' | 'tp') => {
     setLoading(true);
+    setFbError(false);
     try {
       const updated = await setFeedback(alert.alert_id, fb, note || undefined);
       onUpdate(updated);
       setEditing(false);
     } catch (e) {
       console.error(e);
+      setFbError(true);
     } finally {
       setLoading(false);
     }
@@ -119,6 +122,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
   const removeFeedback = async () => {
     if (!confirm(t('alertDetail.fb.removeConfirm'))) return;
     setLoading(true);
+    setFbError(false);
     try {
       const updated = await clearFeedback(alert.alert_id);
       onUpdate(updated);
@@ -126,6 +130,7 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
       setNote('');
     } catch (e) {
       console.error(e);
+      setFbError(true);
     } finally {
       setLoading(false);
     }
@@ -278,6 +283,11 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
 
         {/* Actions */}
         <div className="flex items-center gap-2 px-3 md:px-5 py-4 border-t border-slate-800 flex-wrap">
+          {fbError && (
+            <div className="w-full text-xs text-red-300 bg-red-950/40 border border-red-800/50 rounded px-2.5 py-1.5">
+              {t('alertDetail.fb.error')}
+            </div>
+          )}
           {showGraph && (
             <AlertFlowPopup alert={alert} onClose={() => setShowGraph(false)} />
           )}

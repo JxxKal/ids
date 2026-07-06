@@ -211,9 +211,34 @@ class Db:
             })
         return out
 
+    async def hosts_with_roles(self) -> list[tuple[str, dict | None]]:
+        """(IP, detected_roles) für Hosts mit mindestens einer erkannten Rolle —
+        Kandidaten fürs Aging. Enthält auch Hosts, die im aktuellen
+        Beobachtungsfenster gar nicht mehr als Responder auftauchen (die
+        build_profiles nie zurückgibt).
+
+        Liefert den detected_roles-Snapshot gleich mit, damit der Aging-Pass
+        billig (ohne Transaktion) vorprüfen kann, ob überhaupt etwas veraltet
+        ist, und nur für echte Treffer den FOR-UPDATE-Schreibpfad betritt."""
+        assert self._pool is not None
+        rows = await self._pool.fetch(
+            """
+            SELECT host(ip) AS host, detected_roles
+              FROM host_info
+             WHERE detected_roles IS NOT NULL
+               AND jsonb_typeof(detected_roles->'roles') = 'object'
+               AND detected_roles->'roles' <> '{}'::jsonb
+            """,
+        )
+        out: list[tuple[str, dict | None]] = []
+        for r in rows:
+            val = r["detected_roles"]
+            out.append((str(r["host"]), val if isinstance(val, dict) else None))
+        return out
+
     # ── Schreiber: host_info.detected_roles ───────────────────────────────
 
-    async def update_detected_roles(self, host_ip: str, build_payload) -> dict:
+    async def update_detected_roles(self, host_ip: str, build_payload):
         """Alleiniger Schreiber von detected_roles — Read-Modify-Write in EINER
         Transaktion mit `SELECT ... FOR UPDATE`.
 
@@ -225,8 +250,10 @@ class Db:
         rutschen und würde vom Detektor mit dem Vor-Edit-Stand überschrieben.
         Durch die Zeilen-Sperre serialisiert der Detektor gegen die API.
 
-        `build_payload` ist ein Callable(existing: dict | None) -> dict, das
-        den Merge auf dem gesperrten `existing` durchführt. Rückgabe: das
+        `build_payload` ist ein Callable(existing: dict | None) -> dict | None,
+        das den Merge auf dem gesperrten `existing` durchführt. Gibt es None
+        zurück (nichts zu ändern, z.B. Aging ohne veraltete Rolle), wird kein
+        Schreib-Roundtrip gemacht und None zurückgegeben — sonst das
         geschriebene Payload (für den ≥1-Rolle-Zähler in main.py).
 
         Payloads gehen als dict rein (jsonb-Codec) — kein json.dumps,
@@ -245,6 +272,11 @@ class Db:
                     existing = val if isinstance(val, dict) else None
 
                 payload = build_payload(existing)
+
+                # Build-Funktion signalisiert "keine Änderung" → nicht schreiben
+                # (spart updated_at-Berührung + WAL für unveränderte Hosts).
+                if payload is None:
+                    return None
 
                 if locked is None:
                     await conn.execute(

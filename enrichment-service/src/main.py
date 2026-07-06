@@ -24,6 +24,7 @@ import logging
 import signal
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import orjson
@@ -75,6 +76,18 @@ PUSH_TOPIC    = "alerts-enriched-push"
 POLL_TIMEOUT  = 1.0
 GROUP_ID      = "enrichment-service"
 
+# ── Thread-Pool für die blockierenden Netz-Lookups ───────────────────────────
+# rDNS (bis dns_timeout_s) und Ping (bis ping_timeout_ms) sind reine Netz-I/O
+# und blockierten bisher seriell (src.rDNS → src.Ping → dst.rDNS → dst.Ping),
+# im Worst-Case ~6 s/Alert. Bei Scan-Bursts mit vielen nicht-pingbaren IPs
+# staut das den Consumer und die Enriched-Pushes hinken hinterher.
+# Wir stoßen die vier Calls (rDNS+Ping je für src und dst) gemeinsam an, sodass
+# der Worst-Case auf ~langsamster-Einzel-Call (~2 s) sinkt. 4 Worker genügen,
+# da wir pro Alert höchstens 4 Lookups parallel offen haben (danach blockiert
+# die Schleife bis zum Ergebnis). DB/Cache/GeoIP bleiben bewusst im Hauptthread
+# — kein Lock nötig, keine Race beim Cache-Write.
+_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="enrich")
+
 
 def _make_producer(brokers: str) -> Producer:
     return Producer({
@@ -99,10 +112,15 @@ def _enrich_ip(
     cfg: Config,
     cache: EnrichmentCache,
     db: EnrichmentDB,
+    netfut: tuple | None = None,
 ) -> dict | None:
     """
     Reichert eine einzelne IP an.
     Gibt Enrichment-Dict inkl. trusted/trust_source/display_name zurück.
+
+    ``netfut`` ist ein optionales (rDNS-Future, Ping-Future)-Tupel, das der
+    Aufrufer bereits parallel angestoßen hat (siehe _enrich_pair). Fehlt es,
+    laufen rDNS und Ping hier wie gehabt seriell.
     """
     if not ip:
         return None
@@ -117,8 +135,14 @@ def _enrich_ip(
     # Trust-Status VOR der DNS-Auflösung lesen (manuell/csv hat Vorrang)
     trust = db.get_host_trust(ip)
 
-    hostname = resolve_hostname(ip, cfg.dns_timeout_s)
-    ping_ms  = ping_host(ip, cfg.ping_timeout_ms)
+    # rDNS + Ping: entweder die vom Aufrufer parallel gestarteten Futures
+    # einsammeln oder – als Fallback – hier direkt (seriell) auflösen.
+    if netfut is not None:
+        hostname = netfut[0].result()
+        ping_ms  = netfut[1].result()
+    else:
+        hostname = resolve_hostname(ip, cfg.dns_timeout_s)
+        ping_ms  = ping_host(ip, cfg.ping_timeout_ms)
     geo      = None if private else geo_lookup(ip)
     asn      = None if private else asn_lookup(ip)
     network  = db.get_network_for_ip(ip)
@@ -140,6 +164,36 @@ def _enrich_ip(
     db.upsert_host_info(ip, info)
 
     return info
+
+
+def _enrich_pair(
+    src_ip: str | None,
+    dst_ip: str | None,
+    cfg: Config,
+    cache: EnrichmentCache,
+    db: EnrichmentDB,
+) -> tuple[dict | None, dict | None]:
+    """
+    Reichert src und dst gemeinsam an und lässt dabei die blockierenden
+    Netz-Lookups (rDNS + Ping) beider IPs parallel laufen.
+
+    Die Futures werden vom Hauptthread angestoßen, DB/Cache/GeoIP bleiben im
+    Hauptthread — dadurch keine Race beim Cache-Write und keine Anforderung an
+    die Thread-Sicherheit von DB-/Redis-Client. Nur nicht-gecachte IPs lösen
+    Lookups aus (gecachte bleiben billig); doppelte IPs (src == dst) werden
+    einmalig angestoßen.
+    """
+    futures: dict[str, tuple] = {}
+    for ip in (src_ip, dst_ip):
+        if ip and ip not in futures and cache.get(ip) is None:
+            futures[ip] = (
+                _POOL.submit(resolve_hostname, ip, cfg.dns_timeout_s),
+                _POOL.submit(ping_host, ip, cfg.ping_timeout_ms),
+            )
+
+    src_info = _enrich_ip(src_ip, cfg, cache, db, futures.get(src_ip or ""))
+    dst_info = _enrich_ip(dst_ip, cfg, cache, db, futures.get(dst_ip or ""))
+    return src_info, dst_info
 
 
 def _check_unknown_host(
@@ -223,8 +277,8 @@ def run(cfg: Config) -> None:
             dst_ip = alert.get("dst_ip")
 
             t0 = time.monotonic()
-            src_info = _enrich_ip(src_ip, cfg, cache, db)
-            dst_info = _enrich_ip(dst_ip, cfg, cache, db)
+            # src + dst parallel anreichern (rDNS/Ping nebenläufig statt seriell)
+            src_info, dst_info = _enrich_pair(src_ip, dst_ip, cfg, cache, db)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
 
             def _f(info: dict | None, key: str):
@@ -330,6 +384,7 @@ def run(cfg: Config) -> None:
 
     finally:
         log.info("Shutting down – enriched %d alerts", total)
+        _POOL.shutdown(wait=False)
         db.close()
         producer.flush(timeout=5)
         consumer.close()

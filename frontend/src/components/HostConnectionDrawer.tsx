@@ -68,6 +68,10 @@ export function HostConnectionDrawer() {
       const newIp = ce.detail?.ip;
       if (typeof newIp === 'string' && newIp) {
         setIp(newIp);
+        // Alte Peers/Sparkline verwerfen — sonst zeigt der Drawer beim
+        // schnellen Host-Wechsel die Daten des vorherigen Hosts unter der
+        // neuen IP, bis der Fetch für die neue IP durch ist.
+        setData(null);
         setRoles(ce.detail?.roles ?? null);
         setRoleCat(ce.detail?.catalog ?? []);
         setError(null);

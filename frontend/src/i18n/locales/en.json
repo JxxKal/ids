@@ -214,7 +214,8 @@
       "editTitle": "Correct label or note",
       "remove": "✕ Remove",
       "removeTitle": "Remove feedback + delete training sample from ML pool",
-      "removeConfirm": "Remove feedback completely?\n\nThe associated training sample is also deleted from the DB so it no longer influences the ML model on the next retrain."
+      "removeConfirm": "Remove feedback completely?\n\nThe associated training sample is also deleted from the DB so it no longer influences the ML model on the next retrain.",
+      "error": "Could not save feedback. Please try again."
     }
   },
   "flowPopup": {
@@ -601,6 +602,7 @@
     }
   },
   "settings": {
+    "configLoadFailed": "Could not load configuration. Saving is blocked so the server configuration is not overwritten with defaults. Reload the page and try again.",
     "groups": {
       "general": "General",
       "users": "Users & access",

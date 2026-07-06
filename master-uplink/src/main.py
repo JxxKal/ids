@@ -125,6 +125,47 @@ log = logging.getLogger(__name__)
 _minio_client: Minio | None = None
 _pcap_pool: asyncpg.Pool | None = None
 
+# Wie lange ein pcap_upload-Frame auf die (noch fehlende) Alert-Zeile wartet,
+# bevor wir aufgeben und ihn acken (statt ihn per Redelivery endlos als MB-
+# Poison-Pill kreisen zu lassen). Deckt den normalen ~60s-Versatz + Puffer ab.
+PCAP_MAX_WAIT_S = float(os.environ.get("PCAP_MAX_WAIT_S", "300"))
+
+# Per-Tap High-Water-Mark der zuletzt auf rule-metrics produzierten Frame-`seq`.
+# rule-metrics hat downstream KEINE Dedup (anders als Alerts, die alert-manager
+# über 300s dedupt). Bei einer Redelivery (cursor=0) schickt der Tap bereits
+# produzierte Metric-Frames erneut — ohne diese Marke würden sie doppelt ins
+# Reservoir des rule-tuners zählen und die gelernten Quantil-Schwellwerte
+# verzerren. Wir überspringen daher den Re-Produce für seq <= hw, acken aber
+# trotzdem (der Tap darf den Frame löschen). Trade-off: ein Metric-Frame, dessen
+# Kafka-Delivery später fehlschlägt, geht verloren — bei gesampelten,
+# statistischen Metriken vernachlässigbar, die Doppelzählung ist das reale
+# Problem. Modul-global, damit die Marke einen Reconnect überlebt.
+_metric_seq_hw: dict[str, int] = {}
+
+
+class _TapConn:
+    """Bündelt die Tap-WebSocket mit einem Send-Lock. aiohttp serialisiert
+    nebenläufige Writes aus verschiedenen Tasks NICHT — heartbeat_loop,
+    ack_flush_loop (4 Hz) und update_trigger_loop schreiben aber alle auf
+    dieselbe ws. Ohne Lock können sich zwei Coroutinen an ihrem internen
+    drain-await verschränken (RuntimeError oder verschränkte Frame-Bytes). Alle
+    Writer gehen daher über conn.send(); Reads (ws.receive) brauchen den Lock
+    nicht."""
+
+    __slots__ = ("ws", "_lock")
+
+    def __init__(self, ws: web.WebSocketResponse) -> None:
+        self.ws = ws
+        self._lock = asyncio.Lock()
+
+    async def send(self, data: str) -> None:
+        async with self._lock:
+            await self.ws.send_str(data)
+
+    @property
+    def closed(self) -> bool:
+        return self.ws.closed
+
 
 def _get_minio() -> Minio:
     global _minio_client
@@ -158,6 +199,36 @@ def _upload_pcap(alert_id: str, pcap_bytes: bytes) -> str | None:
     except Exception as exc:
         log.warning("PCAP-Upload Fehler für %s: %s", alert_id[:8], exc)
     return None
+
+
+async def _alert_ownership(alert_id: str, tap_id: str) -> str:
+    """Ownership-Vorprüfung VOR dem MinIO-Write, als Tri-State:
+
+      - "owned":   Zeile existiert und gehört diesem Tap → MinIO-Write erlaubt.
+      - "foreign": Zeile existiert, gehört aber einem anderen Tap / ist
+                   master-lokal (tap_id NULL) → hart ablehnen (Evidence-Tampering
+                   über die geteilte Key-Convention alerts/<alert_id>.pcap).
+      - "missing": keine Zeile (noch nicht).
+
+    Der "missing"-Fall ist bewusst NICHT dasselbe wie "foreign": der pcap_upload
+    kann die Alert-Zeile knapp überholen — v.a. bei Redelivery direkt nach einem
+    Outage laufen Alert- und pcap_upload-Frame back-to-back rein, die Zeile ist
+    dann evtl. noch nicht durch alert-manager persistiert. Der Aufrufer behandelt
+    "missing" transient (nicht acken, Tap liefert neu aus), damit ein legitimes
+    Evidence-PCAP nicht wegen eines Timing-Rennens unwiederbringlich verworfen
+    wird. "foreign" bleibt permanent abgelehnt."""
+    global _pcap_pool
+    if _pcap_pool is None:
+        _pcap_pool = await asyncpg.create_pool(POSTGRES_DSN, min_size=1, max_size=2)
+    row = await _pcap_pool.fetchrow(
+        "SELECT tap_id FROM alerts WHERE alert_id = $1", alert_id,
+    )
+    if row is None:
+        return "missing"
+    row_tap = row["tap_id"]
+    if row_tap is not None and str(row_tap) == str(tap_id):
+        return "owned"
+    return "foreign"
 
 
 async def _mark_pcap_available(alert_id: str, pcap_key: str, tap_id: str) -> str:
@@ -656,17 +727,38 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
     metrics_received = 0
 
     # In active_taps registrieren, damit der trigger_loop den Tap pingen
-    # kann. Eintrag wird im finally weiter unten wieder entfernt.
-    _active_taps[tap_id] = ws
+    # kann. Eintrag wird im finally weiter unten wieder entfernt. _TapConn
+    # kapselt ws + Send-Lock (alle Writer serialisieren darüber).
+    conn = _TapConn(ws)
+    _active_taps[tap_id] = conn
+
+    # App-Level-Ack: der Tap markiert jedes Frame mit einer `seq` (= seiner
+    # DiskQueue-row_id) und löscht es erst, wenn wir diese seq zurück-
+    # quittieren. Wir tun das NACH erfolgreichem Kafka-Produce (Delivery-
+    # Callback) bzw. nach terminaler Verarbeitung — nicht schon nach dem
+    # Empfang. Alte Taps senden keine `seq`; sie bekommen keinen Ack und
+    # löschen weiterhin sofort nach Send (abwärtskompatibel).
+    acked_seqs: list[int] = []
+    # Retry-Buch für pcap_upload-Frames, deren Alert-Zeile noch nicht da ist
+    # (alert_id → erster Sichtungs-monotonic-ts). Lokal pro Verbindung.
+    pcap_retry: dict[str, float] = {}
+
+    def _mk_cb(seq):
+        def _cb(err, _msg):
+            if err is not None:
+                log.error("Kafka delivery failure (seq=%s): %s", seq, err)
+            elif seq is not None:
+                acked_seqs.append(seq)
+        return _cb
 
     async def heartbeat_loop() -> None:
         try:
             while True:
                 await asyncio.sleep(HEARTBEAT_INTERVAL_S)
-                if ws.closed:
+                if conn.closed:
                     return
                 try:
-                    await ws.send_str(orjson.dumps({"type": "ping"}).decode())
+                    await conn.send(orjson.dumps({"type": "ping"}).decode())
                 except (ConnectionResetError, RuntimeError):
                     return
         except asyncio.CancelledError:
@@ -687,8 +779,31 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
         except asyncio.CancelledError:
             return
 
+    async def ack_flush_loop() -> None:
+        # Löst über producer.poll(0) die Kafka-Delivery-Callbacks aus (die
+        # acked_seqs füllen) und schickt die gesammelten Acks gebündelt an den
+        # Tap. Eigener Loop, damit Acks auch fließen wenn gerade keine neuen
+        # Frames reinkommen. Alle ws-Writes laufen über conn.send() (Send-Lock),
+        # damit sich dieser 4-Hz-Sender nicht mit heartbeat_loop/
+        # update_trigger_loop auf derselben ws verschränkt.
+        try:
+            while True:
+                producer.poll(0)
+                if acked_seqs:
+                    batch = acked_seqs[:]
+                    acked_seqs.clear()
+                    try:
+                        await conn.send(orjson.dumps(
+                            {"type": "ack", "seqs": batch}).decode())
+                    except (ConnectionResetError, RuntimeError):
+                        return
+                await asyncio.sleep(0.25)
+        except asyncio.CancelledError:
+            return
+
     hb = asyncio.create_task(heartbeat_loop())
     st = asyncio.create_task(stats_loop())
+    af = asyncio.create_task(ack_flush_loop())
 
     try:
         # Read-Timeout: wenn länger als HEARTBEAT_TIMEOUT_S kein Frame ankommt
@@ -718,6 +833,9 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                 continue
 
             mtype = msg.get("type", "alert")
+            # Vom Tap injizierte Sequenz-Kennung (= DiskQueue-row_id); fehlt bei
+            # alten Taps und bei direkt gesendeten Frames (pong/hello).
+            seq = msg.get("seq")
             if mtype == "pong":
                 continue
             if mtype == "hello":
@@ -728,10 +846,23 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                         log.info("Tap %s meldet Version %s", tap_name, version)
                     except Exception as exc:
                         log.warning("report_version fail %s: %s", tap_name, exc)
+                # Deterministische Ack-Capability-Signalisierung: der Tap muss
+                # nicht per Timeout erraten, ob wir App-Level-Acks schicken —
+                # sonst würde ein neuer Master, dessen Kafka beim Connect gerade
+                # down ist (kein Produce → kein Ack), fälschlich als Alt-Master
+                # eingestuft und der Tap auf Best-Effort-Delete zurückfallen.
+                try:
+                    await conn.send(orjson.dumps(
+                        {"type": "hello_ack", "ack": True}).decode())
+                except Exception as exc:
+                    log.debug("hello_ack send fail: %s", exc)
                 continue
             if mtype == "alert":
                 raw_alert = msg.get("payload") or {}
                 if not isinstance(raw_alert, dict):
+                    # Malformed → acken (drop), sonst Poison-Pill-Redelivery.
+                    if seq is not None:
+                        acked_seqs.append(seq)
                     continue
                 # Feld-Whitelist: nur erwartete Alert-Felder durchlassen,
                 # insbesondere KEIN tap-geliefertes feedback (Tuner-Poisoning).
@@ -742,15 +873,16 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                         ALERTS_TOPIC,
                         key=(alert.get("src_ip") or tap_id).encode(),
                         value=orjson.dumps(alert),
-                        callback=_delivery_cb,
+                        callback=_mk_cb(seq),
                     )
                     producer.poll(0)
                     alerts_received += 1
                 except Exception as exc:
                     log.error("Kafka produce (alert) fehlgeschlagen: %s", exc)
-                    # Bei Kafka-Down keinen Disconnect erzwingen: der Tap-Buffer
-                    # würde sonst unnötig anwachsen. Wir signalisieren backpressure
-                    # über den nicht gesendeten Ack (Tap-seitig optional).
+                    # Bei Kafka-Down keinen Disconnect erzwingen und NICHT acken:
+                    # der Tap behält das Frame in-flight und liefert es beim
+                    # nächsten Verbindungsaufbau (bzw. per Redelivery) neu aus,
+                    # statt es still zu verwerfen.
                 continue
 
             if mtype == "metric":
@@ -761,20 +893,33 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                 # eigenen Reservoir-Stream zu fahren).
                 raw_metric = msg.get("payload") or {}
                 if not isinstance(raw_metric, dict):
+                    if seq is not None:
+                        acked_seqs.append(seq)
                     continue
                 # Feld-Whitelist analog zum Alert-Frame.
                 metric = _sanitize_tap_metric(raw_metric, tap_id)
                 if metric is None:
+                    if seq is not None:
+                        acked_seqs.append(seq)
+                    continue
+                # Dedup gegen Redelivery: eine bereits produzierte seq nur acken,
+                # nicht erneut auf rule-metrics schreiben (sonst Reservoir-Bias
+                # im rule-tuner, der Topic hat keine Downstream-Dedup).
+                hw = _metric_seq_hw.get(tap_id)
+                if seq is not None and hw is not None and seq <= hw:
+                    acked_seqs.append(seq)
                     continue
                 try:
                     producer.produce(
                         METRICS_TOPIC,
                         key=f"{metric.get('rule_id', '')}|{metric.get('param_name', '')}".encode(),
                         value=orjson.dumps(metric),
-                        callback=_delivery_cb,
+                        callback=_mk_cb(seq),
                     )
                     producer.poll(0)
                     metrics_received += 1
+                    if seq is not None:
+                        _metric_seq_hw[tap_id] = max(hw or 0, seq)
                 except Exception as exc:
                     log.error("Kafka produce (metric) fehlgeschlagen: %s", exc)
                 continue
@@ -788,13 +933,20 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                 host_ip = prof.get("host_ip") if isinstance(prof, dict) else None
                 ports = prof.get("ports") if isinstance(prof, dict) else None
                 if not host_ip or not isinstance(ports, list) or not ports:
+                    # Unbrauchbares Profil → verwerfen + acken (kein Poison-
+                    # Redelivery).
+                    if seq is not None:
+                        acked_seqs.append(seq)
                     continue
                 try:
                     await auth.upsert_host_profile(
                         tap_id, host_ip, ports,
                         prof.get("mac"), prof.get("first_seen"),
                     )
+                    if seq is not None:
+                        acked_seqs.append(seq)
                 except Exception as exc:
+                    # DB-Fehler → nicht acken, Tap liefert neu aus.
                     log.warning("host_profile-Upsert (%s/%s) fehlgeschlagen: %s",
                                 tap_name, host_ip, exc)
                 continue
@@ -808,50 +960,102 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
                 # der DB.
                 payload = msg.get("payload") or {}
                 if not isinstance(payload, dict):
+                    if seq is not None:
+                        acked_seqs.append(seq)
                     continue
                 alert_id = payload.get("alert_id")
                 pcap_b64 = payload.get("pcap_b64")
                 if not alert_id or not pcap_b64:
                     log.warning("pcap_upload-Frame unvollständig von %s", tap_name)
+                    if seq is not None:
+                        acked_seqs.append(seq)
                     continue
+                # Ownership-Check VOR dem MinIO-Write: ein Tap darf nur PCAPs zu
+                # eigenen Alerts hochladen. Ohne diese Vorprüfung könnte ein Tap
+                # das MinIO-Objekt eines fremden Alerts (anderer Tap oder
+                # master-lokal) über die geteilte Key-Convention überschreiben —
+                # Evidence-Tampering. Der DB-Mark unten bleibt zusätzlich
+                # ownership-gescoped (Defense-in-Depth gegen die Race, dass die
+                # Zeile zwischen Check und Mark verschwindet).
+                try:
+                    ownership = await _alert_ownership(alert_id, tap_id)
+                except Exception as exc:
+                    log.warning("pcap_upload Ownership-Check fail %s: %s",
+                                alert_id[:8], exc)
+                    ownership = "missing"   # transient behandeln → Retry
+                if ownership == "foreign":
+                    # Fremder / master-lokaler Alert → hart ablehnen + acken
+                    # (Evidence-Tampering-Schutz, permanent).
+                    log.warning(
+                        "pcap_upload von %s für fremden alert_id=%s abgelehnt",
+                        tap_name, alert_id[:8],
+                    )
+                    pcap_retry.pop(alert_id, None)
+                    if seq is not None:
+                        acked_seqs.append(seq)
+                    continue
+                if ownership == "missing":
+                    # Alert-Zeile (noch) nicht da: der pcap_upload hat sie knapp
+                    # überholt (Race/Redelivery direkt nach Outage). NICHT acken →
+                    # der Tap liefert erneut, sobald die Zeile gelandet ist. Nur
+                    # bis PCAP_MAX_WAIT_S, danach aufgeben (kein MB-Poison-Loop).
+                    first = pcap_retry.get(alert_id)
+                    if first is None:
+                        pcap_retry[alert_id] = time.monotonic()
+                        continue
+                    if time.monotonic() - first < PCAP_MAX_WAIT_S:
+                        continue
+                    log.warning("pcap_upload für alert_id=%s nach %.0fs ohne "
+                                "Alert-Zeile aufgegeben",
+                                alert_id[:8], PCAP_MAX_WAIT_S)
+                    pcap_retry.pop(alert_id, None)
+                    if seq is not None:
+                        acked_seqs.append(seq)
+                    continue
+                pcap_retry.pop(alert_id, None)
                 try:
                     pcap_bytes = base64.b64decode(pcap_b64)
                 except Exception as exc:
                     log.warning("pcap_upload b64-decode fail %s: %s", alert_id[:8], exc)
+                    if seq is not None:
+                        acked_seqs.append(seq)
                     continue
                 if len(pcap_bytes) < 24:   # libpcap-global-header ist 24 Bytes
                     log.warning("pcap_upload zu klein (%d Bytes) von %s", len(pcap_bytes), tap_name)
+                    if seq is not None:
+                        acked_seqs.append(seq)
                     continue
                 key = await asyncio.to_thread(_upload_pcap, alert_id, pcap_bytes)
                 if key:
-                    # Ownership-scoped Mark: nur wenn der Alert diesem Tap
-                    # gehört, wird geflaggt + gebroadcastet. Fremde alert_ids
-                    # (Cross-Tap / master-lokal) treffen 0 Zeilen.
                     tag = await _mark_pcap_available(alert_id, key, tap_id)
-                    if tag == "UPDATE 0":
-                        log.warning(
-                            "pcap_upload von %s für nicht-eigenen/unbekannten "
-                            "alert_id=%s verworfen (kein tap_id-Match)",
-                            tap_name, alert_id[:8],
-                        )
-                        continue
-                    # Frontend live benachrichtigen — alerts-enriched-push ist
-                    # der Topic den die api-WebSocket-Streamer konsumiert.
-                    try:
-                        producer.produce(
-                            PUSH_TOPIC,
-                            value=orjson.dumps({"type": "pcap_available",
-                                                "data": {"alert_id": alert_id}}),
-                            callback=_delivery_cb,
-                        )
-                        producer.poll(0)
-                    except Exception as exc:
-                        log.debug("WS-broadcast pcap_available fail: %s", exc)
-                    log.info("PCAP von %s übernommen: %s (%d Bytes)",
-                             tap_name, key, len(pcap_bytes))
+                    if tag != "UPDATE 0":
+                        # Frontend live benachrichtigen — alerts-enriched-push
+                        # ist der Topic den die api-WebSocket-Streamer konsumiert.
+                        try:
+                            producer.produce(
+                                PUSH_TOPIC,
+                                value=orjson.dumps({"type": "pcap_available",
+                                                    "data": {"alert_id": alert_id}}),
+                                callback=_delivery_cb,
+                            )
+                            producer.poll(0)
+                        except Exception as exc:
+                            log.debug("WS-broadcast pcap_available fail: %s", exc)
+                        log.info("PCAP von %s übernommen: %s (%d Bytes)",
+                                 tap_name, key, len(pcap_bytes))
+                # pcap_upload-Frames sind groß und best-effort: nach terminaler
+                # Verarbeitung (Erfolg wie auch nicht behebbarer MinIO-Fehler)
+                # acken, sonst würde ein transienter MinIO-Ausfall die Tap-Queue
+                # mit MB-Frames per Redelivery fluten.
+                if seq is not None:
+                    acked_seqs.append(seq)
                 continue
 
             log.warning("Unbekannter Frame-Type von %s: %s", tap_name, mtype)
+            # Unbekannten queue-stämmigen Frame acken (drop), sonst würde der
+            # Tap ihn als Poison-Pill endlos neu ausliefern.
+            if seq is not None:
+                acked_seqs.append(seq)
 
     except (ConnectionResetError, asyncio.CancelledError) as exc:
         log.info("Tap %s disconnected: %s (alerts=%d metrics=%d)",
@@ -859,7 +1063,13 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
     finally:
         hb.cancel()
         st.cancel()
-        _active_taps.pop(tap_id, None)
+        af.cancel()
+        # Nur poppen wenn der Eintrag noch auf DIESE ws zeigt: bei einem
+        # schnellen Reconnect hat Handler B _active_taps[tap_id] evtl. schon mit
+        # seiner neuen ws überschrieben — ein bedingungsloses pop würde die
+        # frische Verbindung aus der Trigger-Registry werfen (Reconnect-Race).
+        if _active_taps.get(tap_id) is conn:
+            _active_taps.pop(tap_id, None)
         # Final-Stats persistieren. Metriken zählen aktuell nicht in die
         # taps.alerts_received-Spalte rein – das wäre irreführend für die UI.
         # Falls später ein metrics_received-Counter in der DB erwünscht ist,
@@ -874,7 +1084,7 @@ async def handle_tap(request: web.Request) -> web.WebSocketResponse:
 # Aktive Tap-WebSockets (in-memory). update_trigger_loop nutzt das, um
 # bei einem `update_requested_at > update_acked_at`-Eintrag in der taps-
 # Tabelle einen "update_now"-Frame an den passenden Tap zu schicken.
-_active_taps: dict[str, web.WebSocketResponse] = {}
+_active_taps: dict[str, "_TapConn"] = {}
 
 
 async def update_trigger_loop(auth: "TapAuth") -> None:
@@ -897,13 +1107,13 @@ async def update_trigger_loop(auth: "TapAuth") -> None:
             )
             for row in rows:
                 tap_id = row["id"]
-                ws = _active_taps.get(tap_id)
-                if ws is None or ws.closed:
+                conn = _active_taps.get(tap_id)
+                if conn is None or conn.closed:
                     # Tap aktuell nicht connected — wir warten. Sobald er
                     # sich verbindet, greift der nächste Loop-Pass.
                     continue
                 try:
-                    await ws.send_str(orjson.dumps({
+                    await conn.send(orjson.dumps({
                         "type": "update_now",
                         "ts":   row["update_requested_at"].isoformat() if row["update_requested_at"] else None,
                     }).decode())
@@ -926,7 +1136,11 @@ async def amain() -> None:
     producer = Producer({
         "bootstrap.servers": KAFKA_BROKERS,
         "linger.ms": 20,
-        "acks": "1",
+        # acks=all: erst nach Replikations-Bestätigung gilt ein Frame als
+        # produziert. Wir quittieren dem Tap den App-Level-Ack im Delivery-
+        # Callback (nicht schon nach produce()), damit ein Kafka-Ausfall bei
+        # stehender WSS nicht zu stillem Alert-Verlust führt.
+        "acks": "all",
         "compression.type": "lz4",
     })
 

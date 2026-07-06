@@ -28,7 +28,7 @@ import asyncpg
 import orjson
 from confluent_kafka import Consumer, KafkaError
 
-from api_client import ApiClient
+from api_client import ApiClient, OverridesConflict
 from config import Config
 from reservoir import Reservoir
 
@@ -43,6 +43,11 @@ SAFETY_MARGIN = 1.05  # Quantil × 1.05, damit knappe Treffer nicht alarmieren
 # - FPs setzen Untergrenze: threshold ≥ max(metric@FP) + 1
 # - Konflikt (FP-Untergrenze > TP-Obergrenze): Constraint verwerfen, alten Wert behalten.
 FP_TP_MIN_FEEDBACK = 3
+
+# Optimistic-Concurrency: setzt ein GUI-User zwischen unserem GET und PUT der
+# Overrides einen manuellen Wert/Disable, lehnt die api den PUT mit 409 ab. Wir
+# holen dann frisch, mergen neu und PUTten erneut — max. so oft.
+MAX_PUT_RETRIES = 3
 
 # Trust-Boundary: rule_id/param_name in eingehenden rule-metrics-Records sind
 # tap-kontrolliert. Absurd lange Strings werden verworfen (Speicher-Missbrauch),
@@ -410,7 +415,6 @@ class Tuner:
         blacklist = set(str(x) for x in cfg.get("blacklist", []) or [])
 
         rules = await api.list_rules()
-        existing_ovs = await api.get_overrides()
         # Phase 4.5: FP/TP-Markierungen pro (rule, param) als Constraint-Quelle.
         # Pre-Loaded für alle Rules in diesem Cycle, damit wir keine N+1-Query
         # pro Param machen.
@@ -422,6 +426,55 @@ class Tuner:
                 k: r._samples.copy() for k, r in self._reservoirs.items()
             }
 
+        # Optimistic-Concurrency-Retry: GET (mit Version) → Merge → PUT (If-Match).
+        # Bei 409 (GUI hat zwischenzeitlich geschrieben) frisch holen + neu mergen,
+        # damit ein User-gesetzter source=manual-Lock nicht vom stale Merge platt-
+        # gemacht wird.
+        for attempt in range(1, MAX_PUT_RETRIES + 1):
+            existing_ovs, version = await api.get_overrides()
+            new_overrides, ml_updates = self._build_overrides(
+                rules, existing_ovs, feedback_by_rule, res_snapshot,
+                quantile, scope_split, max_change_down, max_change_up,
+                blacklist, first_apply,
+            )
+            if not ml_updates:
+                log.info("Tuning-Cycle ohne Updates (nicht genug Samples oder alle manual)")
+                return
+            try:
+                await api.put_overrides(new_overrides, version)
+            except OverridesConflict:
+                log.warning(
+                    "Override-PUT abgelehnt (Version-Konflikt, Versuch %d/%d) — "
+                    "hole frisch und merge neu", attempt, MAX_PUT_RETRIES,
+                )
+                continue
+            log.info("Override-Write: %d Param-Einträge auf %d Rules aktualisiert",
+                     ml_updates, len([r for r in new_overrides.values() if r.get("parameters")]))
+            return
+
+        log.error("Override-Write nach %d Versuchen wegen anhaltender Version-Konflikte "
+                  "aufgegeben — nächster Cycle versucht es erneut", MAX_PUT_RETRIES)
+
+    def _build_overrides(
+        self,
+        rules: list[dict],
+        existing_ovs: dict[str, dict],
+        feedback_by_rule: dict[str, dict[str, dict[str, list[float]]]],
+        res_snapshot: dict[tuple[str, str, str], list[float]],
+        quantile: float,
+        scope_split: bool,
+        max_change_down: float,
+        max_change_up: float,
+        blacklist: set[str],
+        first_apply: bool,
+    ) -> tuple[dict[str, dict], int]:
+        """Baut den kompletten neuen Override-Stand aus Reservoir-Quantilen +
+        FP/TP-Constraints, ausgehend vom frisch gelesenen `existing_ovs`.
+
+        Pure (kein I/O), damit der Optimistic-Concurrency-Retry in
+        `_do_tuning_cycle` den Merge nach einem 409 einfach mit frischem
+        `existing_ovs` neu rechnen kann. Rückgabe: (new_overrides, ml_updates).
+        """
         new_overrides: dict[str, dict] = {}
 
         # Vorhandene Einträge beibehalten (enabled, severity, manuelle Params)
@@ -548,12 +601,7 @@ class Tuner:
                 rule_payload["parameters"][pname] = entry
                 ml_updates += 1
 
-        if ml_updates:
-            await api.put_overrides(new_overrides)
-            log.info("Override-Write: %d Param-Einträge auf %d Rules aktualisiert",
-                     ml_updates, len([r for r in new_overrides.values() if r.get("parameters")]))
-        else:
-            log.info("Tuning-Cycle ohne Updates (nicht genug Samples oder alle manual)")
+        return new_overrides, ml_updates
 
     async def _load_feedback_metrics(
         self, rules: list[dict]

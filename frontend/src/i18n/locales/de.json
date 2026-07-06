@@ -214,7 +214,8 @@
       "editTitle": "Label oder Notiz korrigieren",
       "remove": "✕ Entfernen",
       "removeTitle": "Feedback entfernen + Training-Sample aus ML-Pool löschen",
-      "removeConfirm": "Feedback komplett entfernen?\n\nDas zugehörige Training-Sample wird ebenfalls aus der DB gelöscht, damit es das ML-Modell beim nächsten Retrain nicht mehr beeinflusst."
+      "removeConfirm": "Feedback komplett entfernen?\n\nDas zugehörige Training-Sample wird ebenfalls aus der DB gelöscht, damit es das ML-Modell beim nächsten Retrain nicht mehr beeinflusst.",
+      "error": "Feedback konnte nicht gespeichert werden. Bitte erneut versuchen."
     }
   },
   "flowPopup": {
@@ -601,6 +602,7 @@
     }
   },
   "settings": {
+    "configLoadFailed": "Konfiguration konnte nicht geladen werden. Speichern ist blockiert, damit die Server-Konfiguration nicht mit Standardwerten überschrieben wird. Seite neu laden und erneut versuchen.",
     "groups": {
       "general": "Allgemein",
       "users": "Benutzer & Zugang",

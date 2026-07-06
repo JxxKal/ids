@@ -43,7 +43,11 @@ function ipv6Str(a: Uint8Array, o: number): string {
   if (bl >= 2) {
     const pre = g.slice(0, bs).join(':');
     const suf = g.slice(bs + bl).join(':');
-    return `${pre}::${suf}`.replace(/^:|:$/, '');
+    // pre/suf sind bei einem Zero-Run am Anfang bzw. Ende leer — das "::" aus
+    // dem Template liefert dann bereits die korrekte Kurzform (z.B. "::1",
+    // "1::", "::"). Kein Trimmen von führendem/abschließendem ":", sonst
+    // wird "::1" fälschlich zu ":1".
+    return `${pre}::${suf}`;
   }
   return g.join(':');
 }
@@ -205,36 +209,53 @@ function tokenize(s: string): Tok[] {
   toks.push({t:'EOF'}); return toks;
 }
 
+// Felder, die evalFilter tatsächlich auswertet. Ein Vergleich gegen ein
+// unbekanntes Feld liefert dort still `true` (→ alle Pakete). Deshalb hier
+// beim Parsen validieren, damit ein Tippfehler als Fehler sichtbar wird
+// statt lautlos ins Leere zu filtern.
+const FILTER_FIELDS = new Set([
+  'ip.addr','host','ip.src','ip.src_host','ip.dst','ip.dst_host',
+  'port','tcp.port','udp.port','tcp.srcport','udp.srcport','tcp.dstport','udp.dstport',
+  'frame.len','ip.len','icmp.type',
+  'tcp.flags','tcp.flags.syn','tcp.flags.fin','tcp.flags.rst','tcp.flags.ack',
+]);
+
+// Wirft bei syntaktisch/semantisch ungültigem Filter (unbekanntes Feld,
+// überschüssige Tokens, unbekanntes Wort). Der Aufrufer (applyFilter →
+// PcapPreview) fängt das und zeigt das Filter-Feld rot statt still alle
+// Pakete durchzulassen.
 function parseFilter(input: string): FNode {
   if (!input.trim()) return {op:'T'};
-  try {
-    const toks=tokenize(input); let p=0;
-    const peek=()=>toks[p], eat=()=>toks[p++];
-    const PROTOS=['tcp','udp','icmp','icmpv6','arp','ipv6','ip'];
+  const toks=tokenize(input); let p=0;
+  const peek=()=>toks[p], eat=()=>toks[p++];
+  const PROTOS=['tcp','udp','icmp','icmpv6','arp','ipv6','ip'];
 
-    function or():FNode { let l=and(); while(peek().t==='OR'){eat();l={op:'OR',l,r:and()};} return l; }
-    function and():FNode { let l=not(); while(peek().t==='AND'){eat();l={op:'AND',l,r:not()};} return l; }
-    function not():FNode { if(peek().t==='NOT'){eat();return{op:'NOT',e:not()};} return prim(); }
-    function prim():FNode {
-      if (peek().t==='LP') { eat(); const n=or(); if(peek().t==='RP')eat(); return n; }
-      if (peek().t==='W') {
-        const w=(eat() as {t:'W';v:string}).v.toLowerCase();
-        if (w==='host' && peek().t==='W') { const ip=(eat() as {t:'W';v:string}).v; return {op:'CMP',field:'ip.addr',cmp:'==',val:ip}; }
-        if (w==='port' && peek().t==='N') { const n=(eat() as {t:'N';v:number}).v; return {op:'CMP',field:'port',cmp:'==',val:n}; }
-        if (peek().t==='CMP') {
-          const cmp=(eat() as {t:'CMP';v:string}).v;
-          let val:string|number='';
-          if (peek().t==='W') val=(eat() as {t:'W';v:string}).v;
-          else if (peek().t==='N') val=(eat() as {t:'N';v:number}).v;
-          return {op:'CMP',field:w,cmp,val};
-        }
-        if (PROTOS.includes(w)) return {op:'PROTO',v:w.toUpperCase()};
-        return {op:'T'};
+  function or():FNode { let l=and(); while(peek().t==='OR'){eat();l={op:'OR',l,r:and()};} return l; }
+  function and():FNode { let l=not(); while(peek().t==='AND'){eat();l={op:'AND',l,r:not()};} return l; }
+  function not():FNode { if(peek().t==='NOT'){eat();return{op:'NOT',e:not()};} return prim(); }
+  function prim():FNode {
+    if (peek().t==='LP') { eat(); const n=or(); if(peek().t==='RP')eat(); else throw new Error('unclosed ('); return n; }
+    if (peek().t==='W') {
+      const w=(eat() as {t:'W';v:string}).v.toLowerCase();
+      if (w==='host' && peek().t==='W') { const ip=(eat() as {t:'W';v:string}).v; return {op:'CMP',field:'ip.addr',cmp:'==',val:ip}; }
+      if (w==='port' && peek().t==='N') { const n=(eat() as {t:'N';v:number}).v; return {op:'CMP',field:'port',cmp:'==',val:n}; }
+      if (peek().t==='CMP') {
+        const cmp=(eat() as {t:'CMP';v:string}).v;
+        if (!FILTER_FIELDS.has(w)) throw new Error(`unknown field: ${w}`);
+        let val:string|number='';
+        if (peek().t==='W') val=(eat() as {t:'W';v:string}).v;
+        else if (peek().t==='N') val=(eat() as {t:'N';v:number}).v;
+        else throw new Error('missing value');
+        return {op:'CMP',field:w,cmp,val};
       }
-      return {op:'T'};
+      if (PROTOS.includes(w)) return {op:'PROTO',v:w.toUpperCase()};
+      throw new Error(`unexpected term: ${w}`);
     }
-    return or();
-  } catch { return {op:'T'}; }
+    throw new Error('expected term');
+  }
+  const tree=or();
+  if (peek().t!=='EOF') throw new Error('trailing input');
+  return tree;
 }
 
 function evalFilter(n: FNode, p: PcapPacket): boolean {

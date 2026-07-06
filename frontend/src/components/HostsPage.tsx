@@ -46,13 +46,18 @@ export function HostsPage() {
   const [error, setError]       = useState('');
   const [loading, setLoading]   = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Monoton steigende Request-ID: verhindert, dass eine langsam
+  // zurückkommende ältere Suchantwort eine neuere überschreibt (Race beim
+  // Tippen im Suchfeld — es gibt keinen AbortController auf fetchHosts).
+  const loadSeq = useRef(0);
 
   const load = () => {
     const params: { trusted?: boolean; search?: string } = {};
     if (filter === 'trusted') params.trusted = true;
     if (filter === 'unknown') params.trusted = false;
     if (search) params.search = search;
-    fetchHosts(params).then(setHosts).catch(() => {});
+    const seq = ++loadSeq.current;
+    fetchHosts(params).then(rows => { if (seq === loadSeq.current) setHosts(rows); }).catch(() => {});
   };
 
   useEffect(() => { load(); }, [filter, search]);

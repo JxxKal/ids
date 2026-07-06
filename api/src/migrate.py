@@ -18,19 +18,6 @@ log = logging.getLogger("migrate")
 _DEFAULT_DIR = Path(os.environ.get("MIGRATIONS_DIR", "/migrations"))
 
 
-async def _is_already_applied(conn: asyncpg.Connection, name: str) -> bool:
-    """Prüft ob eine Migration bereits im DB-Schema widergespiegelt ist.
-
-    Wird beim Seeding genutzt: alte Installs haben migrations via initdb.d
-    eingespielt, aber nur bis zu einem bestimmten Stand. Neue Migrations
-    die gleichzeitig mit dem Migration-Runner eingeführt wurden, müssen ggf.
-    noch ausgeführt werden.
-    """
-    if name == "008_itop_cmdb.sql":
-        return await _cmdb_constraint_exists(conn)
-    return True
-
-
 async def _cmdb_constraint_exists(conn: asyncpg.Connection) -> bool:
     count = await conn.fetchval(
         "SELECT COUNT(*) FROM pg_constraint "
@@ -88,25 +75,33 @@ async def run(pool: asyncpg.Pool, migrations_dir: Path = _DEFAULT_DIR) -> None:
                 WHERE schemaname = 'public' AND tablename != 'schema_migrations'
             """)
             if has_tables:
-                log.info("Bestehende DB erkannt – prüfe Migrations-Status.")
-                for sql_file in sql_files:
+                # Bestehende DB ohne Migrations-Ledger. Die erste Migration ist die
+                # initdb-Baseline (nicht idempotent: bare CREATE TABLE +
+                # create_hypertable) – sie hat die erkannten Tabellen bereits angelegt
+                # und wird nur als angewendet markiert, niemals erneut gefahren.
+                # Alle weiteren Migrations sind idempotent geschrieben (IF NOT EXISTS /
+                # ON CONFLICT / DO-Block-Constraints) und werden regulär ausgeführt:
+                # bereits vorhandene no-op'en, fehlende (z.B. bei einem Sprung von altem
+                # Schema-Stand auf den Runner) werden nachgeholt statt still als
+                # angewendet markiert.
+                log.info("Bestehende DB ohne Migrations-Ledger erkannt – Baseline markieren, Rest ausführen.")
+                baseline = sql_files[0]
+                await conn.execute(
+                    "INSERT INTO schema_migrations (id) VALUES ($1) ON CONFLICT DO NOTHING",
+                    baseline.name,
+                )
+                log.debug("Baseline-Migration %s als angewendet markiert (via initdb angelegt).", baseline.name)
+                for sql_file in sql_files[1:]:
                     name = sql_file.name
-                    if await _is_already_applied(conn, name):
+                    log.info("Wende (idempotente) Migration an: %s", name)
+                    sql = sql_file.read_text()
+                    async with conn.transaction():
+                        await conn.execute(sql)
                         await conn.execute(
                             "INSERT INTO schema_migrations (id) VALUES ($1) ON CONFLICT DO NOTHING",
                             name,
                         )
-                        log.debug("Migration %s als angewendet markiert.", name)
-                    else:
-                        log.info("Migration %s noch nicht angewendet – führe aus.", name)
-                        sql = sql_file.read_text()
-                        async with conn.transaction():
-                            await conn.execute(sql)
-                            await conn.execute(
-                                "INSERT INTO schema_migrations (id) VALUES ($1) ON CONFLICT DO NOTHING",
-                                name,
-                            )
-                        log.info("Migration %s erfolgreich.", name)
+                    log.info("Migration %s erfolgreich.", name)
                 log.info("Seeding/Upgrade abgeschlossen.")
                 return
 

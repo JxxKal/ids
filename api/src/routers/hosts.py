@@ -393,6 +393,22 @@ async def update_host(
     return _row_to_host(row)
 
 
+async def _known_role_id(pool: asyncpg.Pool, role_id: str) -> bool:
+    """True, wenn role_id eine Built-in- oder aktivierte Custom-Rolle ist —
+    dieselbe Quelle wie /role-catalog. Verhindert, dass ein Tippfehler beim
+    manuellen Setzen eine dauerhaft gelockte Phantom-Rolle anlegt."""
+    for c in load_catalog():
+        if c.get("id") == role_id:
+            return True
+    try:
+        row = await pool.fetchrow(
+            "SELECT 1 FROM host_role_custom WHERE id = $1 AND enabled = true", role_id,
+        )
+        return row is not None
+    except asyncpg.UndefinedTableError:
+        return False   # Migration 029 noch nicht eingespielt — nur Built-ins.
+
+
 @router.put("/{ip}/roles", response_model=HostResponse)
 async def update_host_roles(
     ip:   str,
@@ -408,6 +424,14 @@ async def update_host_roles(
     """
     role_id = body.role_id
     now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    # action=set legt eine manuell gelockte Rolle an — role_id muss im Katalog
+    # existieren, sonst entstehen durch Tippfehler dauerhafte Phantom-Rollen.
+    # Vor der FOR-UPDATE-Transaktion validieren (load_catalog liest Dateien —
+    # nicht unter gehaltener Zeilensperre laufen lassen). reset/remove/suppress
+    # dürfen weiterhin beliebige role_ids adressieren (Cleanup entfernter Rollen).
+    if body.action == "set" and not await _known_role_id(pool, role_id):
+        raise HTTPException(status_code=400, detail=f"Unbekannte Rolle-ID: {role_id}")
 
     async with pool.acquire() as conn:
         async with conn.transaction():

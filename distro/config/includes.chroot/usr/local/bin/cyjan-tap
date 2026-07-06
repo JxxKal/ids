@@ -486,19 +486,28 @@ cmd_update() {
   # Buffer fängt Alarme während der ~30 s Downtime ab und schickt sie nach.
   local from_master=0
   local skip_compose=0
-  local yes=0
+  local yes=0     # nicht-interaktiv (überspringt die [y/N]-Rückfrage)
+  local force=0   # zusätzlich: Re-Apply erzwingen, auch wenn Version gleich
   shift_args=()
   for arg in "$@"; do
     case "$arg" in
       --from-master)   from_master=1 ;;
       --no-compose)    skip_compose=1 ;;  # nur load, kein up -d (für Tests)
-      -y|--yes)        yes=1 ;;
+      # -y/--yes: nicht-interaktiv UND Force-Reapply (bewusster Operator-Wille).
+      -y|--yes)        yes=1; force=1 ;;
+      # --auto: nicht-interaktiv, aber Versionsgleichheit respektieren (kein
+      # Force). Der Master-getriggerte cyjan-tap-update.service nutzt das —
+      # so löst ein Re-Trigger bei bereits aktueller Version keinen erneuten
+      # Stack-Recreate (und damit keine Update-Schleife) aus.
+      --auto)          yes=1 ;;
       *)               echo "Unbekanntes Argument: $arg" >&2; exit 2 ;;
     esac
   done
   if [ "$from_master" -ne 1 ]; then
     echo "Aktuell nur '--from-master' unterstützt." >&2
-    echo "  cyjan-tap update --from-master [-y] [--no-compose]" >&2
+    echo "  cyjan-tap update --from-master [-y|--auto] [--no-compose]" >&2
+    echo "    -y/--yes  nicht-interaktiv + Re-Apply erzwingen" >&2
+    echo "    --auto    nicht-interaktiv, aber Versionsgleichheit respektieren" >&2
     exit 2
   fi
 
@@ -562,8 +571,12 @@ cmd_update() {
     exit 2
   fi
   # wss://master:8443/uplink → https://master:8443
+  # Scheme auf https drehen, dann NUR den Pfad-Anteil (alles ab dem ersten /
+  # nach dem Host) abschneiden — Host:Port bleibt erhalten. Das frühere
+  # 's|/[^/]*$||' fraß bei einer pfadlosen URL (wss://master:8443) den Port
+  # mit weg (→ 'https:/'), wodurch jeder /tap-update/-Abruf ins Leere lief.
   local master_base
-  master_base=$(echo "$master_url" | sed -E 's|^wss://|https://|; s|^ws://|https://|; s|/[^/]*$||')
+  master_base=$(echo "$master_url" | sed -E 's|^wss://|https://|; s|^ws://|https://|; s|^(https?://[^/]+).*|\1|')
   echo "Master:        $master_base"
 
   # Server-Authentifizierung via Public-Key-Pinning.
@@ -608,11 +621,15 @@ cmd_update() {
   local manifest_tmp=""
   : "${BUNDLE_TMP:=}"
   : "${COMPOSE_TMP:=}"
+  # tar_tmp (~1 GB entpacktes Bundle) muss ebenfalls in den EXIT-Trap — ein
+  # abgebrochener docker load (set -e) sprang sonst am expliziten rm-Aufruf
+  # vorbei und ließ die Datei auf einem plattenknappen Tap liegen.
+  : "${tar_tmp:=}"
   manifest_tmp=$(mktemp)
   # Trap überschreibt den vorherigen cert-Trap — wir müssen daher BEIDE
   # Verzeichnisse hier aufräumen. Alle Vars mit :- für den Fall dass die
   # Funktion vor der Initialisierung crasht (set -u-Schutz).
-  trap 'rm -rf "${cert_tmp_dir:-}" ; rm -f "${manifest_tmp:-}" "${BUNDLE_TMP:-}" "${COMPOSE_TMP:-}"' EXIT
+  trap 'rm -rf "${cert_tmp_dir:-}" ; rm -f "${manifest_tmp:-}" "${BUNDLE_TMP:-}" "${COMPOSE_TMP:-}" "${tar_tmp:-}"' EXIT
   echo "Hole Manifest …"
   if ! "${curl_mtls[@]}" -o "$manifest_tmp" "$master_base/tap-update/manifest"; then
     echo "FEHLER: Manifest-Download fehlgeschlagen. Hat der Master ein Update-ZIP eingespielt?" >&2
@@ -638,7 +655,9 @@ cmd_update() {
 
   if [ "$current_version" = "$remote_version" ]; then
     echo "Bereits aktuell. Mit -y / --yes erzwingen falls Re-Apply gewünscht."
-    [ "$yes" -eq 1 ] || exit 0
+    # Nur -y/--yes (force) erzwingt ein Re-Apply; --auto respektiert die
+    # Versionsgleichheit und beendet sich hier sauber.
+    [ "$force" -eq 1 ] || exit 0
   fi
 
   if [ "$yes" -ne 1 ]; then
@@ -661,7 +680,7 @@ cmd_update() {
   echo "Hash OK: $actual_sha"
 
   # ── 3. docker load ────────────────────────────────────────────────────
-  local tar_tmp
+  # Bewusst NICHT local — tar_tmp wird oben im EXIT-Trap referenziert.
   tar_tmp=$(mktemp --suffix=.tar)
   # Ab hier laufen wir garantiert als root (siehe re-exec oben), die
   # ganzen `if EUID -ne 0; then sudo …` sind weggefallen.
@@ -678,9 +697,9 @@ cmd_update() {
   cp "$COMPOSE_TMP" "$COMPOSE_FILE"
   echo "  → $COMPOSE_FILE aktualisiert"
 
-  # VERSION-Marker setzen, damit nachfolgende Update-Checks korrekt
-  # vergleichen können.
-  echo "$remote_version" > "$COMPOSE_DIR/VERSION"
+  # VERSION-Marker wird bewusst ERST nach erfolgreichem compose up gesetzt
+  # (siehe unten) — sonst meldet ein abgebrochener docker load / compose up
+  # den Tap als bereits aktuell, obwohl Images fehlen.
 
   # ── 5. Host-Side-Skripte aus tap-update/scripts/ holen ────────────────
   # Skripte/systemd-Units werden im Update-ZIP unter scripts/ ausgeliefert
@@ -715,6 +734,12 @@ cmd_update() {
   fi
   echo "Starte Stack neu (--force-recreate, Outage-Buffer fängt ~30 s Downtime ab) …"
   docker compose -f "$COMPOSE_FILE" up -d --force-recreate
+
+  # VERSION-Marker erst JETZT setzen — nach erfolgreichem docker load +
+  # compose up. Ein vorher geschriebener Marker hätte den Tap bei einem
+  # abgebrochenen Update fälschlich als aktuell gemeldet, während der Boot-
+  # Recreate gegen fehlende Images liefe.
+  echo "$remote_version" > "$COMPOSE_DIR/VERSION"
 
   # ── 7. Host-Wartung: post-update.sh ausführen falls vorhanden ─────────
   # daemon.json + Maintenance-Timer + Mirror-Tune sind dadurch idempotent

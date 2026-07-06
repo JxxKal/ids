@@ -160,6 +160,9 @@ interface AlertGroup {
   last_ts:       string;
   latest:        Alert;
   enrichment?:   Enrichment;
+  // src_ip, für den die gespeicherte enrichment eingesammelt wurde — nötig um
+  // sie bei Richtungswechsel korrekt auf die Anzeige-Richtung zu orientieren.
+  enrichmentSrc?: string;
   bidirectional: boolean;
 }
 
@@ -412,6 +415,39 @@ function maxSeverity(a: Alert['severity'], b: Alert['severity']): Alert['severit
   return (SEV_RANK[b] ?? 0) > (SEV_RANK[a] ?? 0) ? b : a;
 }
 
+// Enrichment ist richtungsgebunden: src_* beschreibt den src_ip des Alerts,
+// dst_* den dst_ip. Eine Gruppe zeigt aber die NEUESTE Richtung (g.src_ip aus
+// dem jüngsten Alert). Stammt die gespeicherte Enrichment aus einem Alert der
+// Gegenrichtung, müssen src_/dst_-Felder getauscht werden, sonst hängt am
+// angezeigten src_ip der Hostname des dst_ip (Bug bei Richtungswechsel).
+function orientEnrichment(
+  enr: Enrichment | undefined,
+  capturedSrcIp: string | undefined,
+  displaySrcIp: string | undefined,
+): Enrichment | undefined {
+  if (!enr) return undefined;
+  if (!capturedSrcIp || !displaySrcIp || capturedSrcIp === displaySrcIp) return enr;
+  return {
+    ...enr,
+    src_hostname:     enr.dst_hostname,     dst_hostname:     enr.src_hostname,
+    src_network:      enr.dst_network,      dst_network:      enr.src_network,
+    src_ping_ms:      enr.dst_ping_ms,      dst_ping_ms:      enr.src_ping_ms,
+    src_asn:          enr.dst_asn,          dst_asn:          enr.src_asn,
+    src_geo:          enr.dst_geo,          dst_geo:          enr.src_geo,
+    src_trusted:      enr.dst_trusted,      dst_trusted:      enr.src_trusted,
+    src_trust_source: enr.dst_trust_source, dst_trust_source: enr.src_trust_source,
+    src_display_name: enr.dst_display_name, dst_display_name: enr.src_display_name,
+  };
+}
+
+// Enrichment für die aktuell angezeigte Gruppen-Richtung. Bevorzugt die
+// zuerst eingesammelte Enrichment (kann async schon da sein, während der
+// jüngste Alert noch unenriched ist), reorientiert sie aber auf g.src_ip.
+function displayEnrichment(g: AlertGroup): Enrichment | undefined {
+  if (g.enrichment) return orientEnrichment(g.enrichment, g.enrichmentSrc, g.src_ip);
+  return orientEnrichment(g.latest.enrichment ?? undefined, g.latest.src_ip, g.src_ip);
+}
+
 function groupAlerts(alerts: Alert[]): AlertGroup[] {
   const map = new Map<string, AlertGroup>();
 
@@ -440,7 +476,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
         g.dst_port = a.dst_port;
       }
       if (tsMs(a.ts) < tsMs(g.first_ts)) g.first_ts = a.ts;
-      if (!g.enrichment && a.enrichment) g.enrichment = a.enrichment;
+      if (!g.enrichment && a.enrichment) { g.enrichment = a.enrichment; g.enrichmentSrc = a.src_ip; }
       if (a.tags?.length) g.tags = [...new Set([...g.tags, ...a.tags])];
     } else {
       map.set(k, {
@@ -450,6 +486,7 @@ function groupAlerts(alerts: Alert[]): AlertGroup[] {
         tags: [...(a.tags ?? [])],
         count: 1, first_ts: a.ts, last_ts: a.ts, latest: a,
         enrichment: a.enrichment ?? undefined,
+        enrichmentSrc: a.enrichment ? a.src_ip : undefined,
         bidirectional: false,
       });
     }
@@ -670,7 +707,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, 
         const pa = PRIORITY_ORDER[a.boundary_priority ?? ''] ?? 99;
         const pb = PRIORITY_ORDER[b.boundary_priority ?? ''] ?? 99;
         if (pa !== pb) return pa - pb;
-        return new Date(b.ts).getTime() - new Date(a.ts).getTime();
+        return tsMs(b.ts) - tsMs(a.ts);
       });
     }
     return filteredArr;
@@ -1127,7 +1164,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, 
                   {showCol('source') && (
                     <td className="px-3 py-2 overflow-hidden" style={tdStyle('source')}>
                       <div className="flex items-center gap-1.5">
-                        <IpCell ip={g.src_ip} enrichment={g.enrichment ?? g.latest.enrichment} dir="src" roles={g.src_ip ? rolesByIp[g.src_ip] : undefined} catalog={roleCatalog} />
+                        <IpCell ip={g.src_ip} enrichment={displayEnrichment(g)} dir="src" roles={g.src_ip ? rolesByIp[g.src_ip] : undefined} catalog={roleCatalog} />
                         {g.bidirectional && (
                           <span title={t('alertFeed.bidirectional')} className="text-cyan-500 text-sm shrink-0">↔</span>
                         )}
@@ -1136,7 +1173,7 @@ export function AlertFeed({ alerts, onUpdate, showTest, showSuppressed, mlOnly, 
                   )}
                   {showCol('destination') && (
                     <td className="px-3 py-2 overflow-hidden" style={tdStyle('destination')}>
-                      <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={g.enrichment ?? g.latest.enrichment} dir="dst" roles={g.dst_ip ? rolesByIp[g.dst_ip] : undefined} catalog={roleCatalog} />
+                      <IpCell ip={g.dst_ip} port={g.latest.dst_port} enrichment={displayEnrichment(g)} dir="dst" roles={g.dst_ip ? rolesByIp[g.dst_ip] : undefined} catalog={roleCatalog} />
                     </td>
                   )}
                   {showCol('hits') && (

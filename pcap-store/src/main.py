@@ -280,7 +280,7 @@ def run(cfg: Config) -> None:
             # Alle als sofort bereit markieren
             for pa in pending:
                 pa.ready_at = 0
-            _flush_pending(pending, buf, storage)
+            _flush_pending(pending, buf, storage, producer)
 
         log.info(
             "Shutting down – packets buffered: %d, PCAPs written: %d",

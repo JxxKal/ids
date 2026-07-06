@@ -84,7 +84,10 @@ fi
 # hardgecodetes apache/kafka:latest im Bundle ließ den Tap offline am Pull
 # scheitern ("failed to resolve apache/kafka:4.2.0"), weil compose den
 # gepinnten Tag verlangt, das Bundle aber nur :latest mitbrachte.
-KAFKA_IMG=$(grep -oE 'apache/kafka:[A-Za-z0-9._-]+' docker-compose.tap.yml | head -1)
+# '|| true' hält den Fallback erreichbar: unter set -o pipefail failt sonst
+# schon die Zuweisung (grep-Exit 1 bei keinem Treffer), bevor die [ -z ]-
+# Bedingung greift → Skript bräche ab statt auf :latest zurückzufallen.
+KAFKA_IMG=$(grep -oE 'apache/kafka:[A-Za-z0-9._-]+' docker-compose.tap.yml | head -1 || true)
 [ -z "$KAFKA_IMG" ] && KAFKA_IMG="apache/kafka:latest"
 # Falls am Master nur apache/kafka:latest vorliegt (älterer Stand), unter dem
 # gepinnten Tag aliasen — so trägt das Bundle garantiert den Tag, den der
@@ -96,18 +99,30 @@ if ! docker image inspect "$KAFKA_IMG" >/dev/null 2>&1 \
 fi
 echo "  Kafka-Image fürs Bundle: $KAFKA_IMG"
 
-# --force: überschreibt eine bestehende images-tap.tar.zst stillschweigend.
+# Atomar schreiben: erst in temp-Dateien, dann per mv umbenennen. Ein
+# mittendrin abgebrochenes 'docker save | zstd' (pipefail) hinterließ sonst
+# ein korruptes images-tap.tar.zst am finalen Pfad, während manifest.json noch
+# den alten sha256 referenziert — ein pullender Tap bekäme dann dauerhaft
+# SHA256-Mismatch. Mit temp+mv bleibt bei Abbruch der alte, konsistente Stand
+# erhalten (Bundle + Manifest passen zusammen), und der Re-Run repariert.
+BUNDLE_FINAL="tap-update/images-tap.tar.zst"
+MANIFEST_FINAL="tap-update/manifest.json"
+BUNDLE_TMP="${BUNDLE_FINAL}.tmp.$$"
+MANIFEST_TMP="${MANIFEST_FINAL}.tmp.$$"
+trap 'rm -f "$BUNDLE_TMP" "$MANIFEST_TMP"' EXIT
+
+# --force: überschreibt eine bestehende temp-Datei stillschweigend.
 docker save \
   ids-sniffer:latest ids-flow-aggregator:latest ids-signature-engine:latest \
   ids-tap-uplink:latest ids-tap-api:latest "$KAFKA_IMG" \
-  | zstd -3 -T0 --force -o tap-update/images-tap.tar.zst
+  | zstd -3 -T0 --force -o "$BUNDLE_TMP"
 
-SHA=$(sha256sum tap-update/images-tap.tar.zst | cut -d' ' -f1)
-SIZE=$(stat -c%s tap-update/images-tap.tar.zst)
+SHA=$(sha256sum "$BUNDLE_TMP" | cut -d' ' -f1)
+SIZE=$(stat -c%s "$BUNDLE_TMP")
 CSHA=$(sha256sum tap-update/docker-compose.tap.yml | cut -d' ' -f1)
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-cat > tap-update/manifest.json <<MANIFEST
+cat > "$MANIFEST_TMP" <<MANIFEST
 {
   "version": "${VERSION}",
   "created_at": "${TS}",
@@ -115,6 +130,11 @@ cat > tap-update/manifest.json <<MANIFEST
   "compose": { "file": "docker-compose.tap.yml", "sha256": "${CSHA}" }
 }
 MANIFEST
+
+# Fertiges Bundle einschwenken, danach das Manifest — so referenziert das
+# Manifest nie ein noch nicht vorhandenes/halbes Bundle.
+mv -f "$BUNDLE_TMP" "$BUNDLE_FINAL"
+mv -f "$MANIFEST_TMP" "$MANIFEST_FINAL"
 
 echo
 echo "Fertig. tap-update/ ist auf $VERSION."

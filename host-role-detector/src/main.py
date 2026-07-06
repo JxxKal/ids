@@ -15,13 +15,14 @@ import asyncio
 import logging
 import signal
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aggregator import build_profiles
 from catalog import load_catalog, parse_role
 from config import Config
 from db import Db
-from matcher import build_detected_roles
+from matcher import build_detected_roles, prune_auto_roles
 
 logging.basicConfig(
     level=logging.INFO,
@@ -63,7 +64,16 @@ async def _run_cycle(cfg: Config, db: Db) -> None:
         builtin_ids = {r.id for r in catalog}
         added = 0
         for raw in custom:
-            rd = parse_role(raw)
+            # Eine defekte host_role_custom-Zeile (nicht-numerisches
+            # min_flows_per_port/base_confidence/min_any) würde in parse_role
+            # eine uncaught ValueError werfen und den kompletten Cycle abbrechen
+            # — pro Eintrag abfangen, überspringen, Cycle läuft weiter.
+            try:
+                rd = parse_role(raw)
+            except Exception as exc:
+                log.warning("Defekte Custom-Rolle %s übersprungen: %s",
+                            raw.get("id", "?"), exc)
+                continue
             if rd is None:
                 continue
             if rd.id in builtin_ids:
@@ -98,12 +108,46 @@ async def _run_cycle(cfg: Config, db: Db) -> None:
                     cfg.min_confidence, cfg.oui_confidence_bonus,
                 )
             payload = await db.update_detected_roles(ip, _build)
-            if payload.get("roles"):
+            if payload and payload.get("roles"):
                 written += 1
         except Exception as exc:
             log.warning("Host %s: Detektion fehlgeschlagen: %s", ip, exc)
 
-    log.info("Cycle fertig: %d Hosts evaluiert, %d mit ≥1 Rolle", len(profiles), written)
+    # ── Aging ────────────────────────────────────────────────────────────────
+    # Hosts, die im Fenster nicht mehr als Responder auftauchen (nicht in
+    # `profiles`), werden von der Detektions-Schleife nie angefasst und behielten
+    # ihre auto-Rollen sonst ewig — ein IP-Nachnutzer erbte sie. auto-Rollen mit
+    # last_confirmed älter als ROLE_STALE_DAYS entfernen; manual/suppress bleibt.
+    pruned = 0
+    if cfg.role_stale_days > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=cfg.role_stale_days)
+        try:
+            candidates = await db.hosts_with_roles()
+        except Exception as exc:
+            log.warning("Aging-Kandidaten laden fehlgeschlagen: %s", exc)
+            candidates = []
+        for ip, snapshot in candidates:
+            if ip in profiles:
+                continue   # frisch evaluiert — die reguläre Auswertung altert selbst
+            # Billige Vorprüfung auf dem Snapshot: nur wenn hier tatsächlich eine
+            # auto-Rolle veraltet ist, den FOR-UPDATE-Schreibpfad betreten. Sonst
+            # zahlte jeder Cycle N Transaktionen + Row-Locks nur um "nichts zu
+            # tun" festzustellen. Der Schreibpfad prüft unter Lock erneut (TOCTOU).
+            if prune_auto_roles(snapshot, cutoff) is None:
+                continue
+            try:
+                result = await db.update_detected_roles(
+                    ip, lambda existing, _cut=cutoff: prune_auto_roles(existing, _cut),
+                )
+                if result is not None:
+                    pruned += 1
+            except Exception as exc:
+                log.warning("Host %s: Aging fehlgeschlagen: %s", ip, exc)
+
+    log.info(
+        "Cycle fertig: %d Hosts evaluiert, %d mit ≥1 Rolle, %d veraltete Rollen-Sets bereinigt",
+        len(profiles), written, pruned,
+    )
 
 
 async def amain() -> None:
