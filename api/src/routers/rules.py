@@ -577,12 +577,21 @@ def _validate_with_suricata(file_path: Path) -> tuple[bool, str]:
     """Lädt das gesamte Rules-Verzeichnis im Snort-Container probeweise.
     `-S file` macht zwar einen "rules-only"-Pass, aber Inter-Datei-Variablen
     (flowbits etc.) brauchen den vollständigen Config-Lauf. Dafür gibt's
-    `suricata -T -c <yaml>` ohne -S, das den ganzen Stack durchparst."""
+    `suricata -T -c <yaml>` ohne -S, das den ganzen Stack durchparst.
+
+    WICHTIG: Die Config MUSS die sein, mit der die Engine tatsächlich läuft —
+    der entrypoint generiert `/tmp/suricata.yaml` (address-groups, app-layer,
+    default-rule-path=/etc/suricata/rules) und startet damit. Die Stock-Config
+    `/etc/suricata/suricata.yaml` aus dem Paket zeigt dagegen auf
+    /var/lib/suricata/rules/suricata.rules (existiert nicht) → sie lädt 0 Regeln
+    und `suricata -T` gibt non-zero zurück. Das validierte damit NIE die
+    Custom/AI-Rules und verwarf JEDE Änderung als vermeintlichen Syntaxfehler."""
+    config = os.getenv("SNORT_SURICATA_CONFIG", "/tmp/suricata.yaml")
     try:
         r = subprocess.run(
             ["docker", "exec", "ids-snort",
-             "suricata", "-T", "-c", "/etc/suricata/suricata.yaml"],
-            capture_output=True, text=True, timeout=20,
+             "suricata", "-T", "-c", config],
+            capture_output=True, text=True, timeout=60,
         )
         # Suricata druckt seine Diagnose primär nach stderr.
         out = (r.stdout + r.stderr).strip()
@@ -590,7 +599,7 @@ def _validate_with_suricata(file_path: Path) -> tuple[bool, str]:
     except FileNotFoundError:
         return False, "docker-CLI im API-Container nicht verfügbar"
     except subprocess.TimeoutExpired:
-        return False, "suricata -T Timeout (>20s) – Container vermutlich überlastet"
+        return False, "suricata -T Timeout (>60s) – Container vermutlich überlastet"
     except Exception as exc:                       # noqa: BLE001
         return False, f"{type(exc).__name__}: {exc}"
 
