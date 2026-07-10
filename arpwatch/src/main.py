@@ -197,10 +197,13 @@ def _spawn_arpwatch() -> subprocess.Popen:
         log.warning("chmod auf %s fehlgeschlagen: %s", data_dir, exc)
     cmd = ["arpwatch", "-d", "-N", "-i", IFACE, "-f", ARP_DATA]
     log.info("Starte: %s", " ".join(cmd))
+    # arpwatch -d schreibt seine Reports auf stdout (nicht stderr, entgegen der
+    # Manpage). Wir mergen stderr in stdout und lesen einen Strom — so ist der
+    # Parser unabhängig davon, auf welchem Stream welche Version ausgibt.
     return subprocess.Popen(
         cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
@@ -222,7 +225,7 @@ def main() -> None:
              ALERTS_TOPIC, KAFKA_BROKERS, IFACE, WARMUP_S)
 
     proc = _spawn_arpwatch()
-    assert proc.stderr is not None
+    assert proc.stdout is not None
 
     def _beat() -> None:
         try:
@@ -242,7 +245,7 @@ def main() -> None:
     threading.Thread(target=_heartbeat_loop, daemon=True).start()
 
     try:
-        for line in proc.stderr:
+        for line in proc.stdout:
             line = line.rstrip("\n")
             log.debug("arpwatch: %s", line)
             for ev in parser.feed(line):
