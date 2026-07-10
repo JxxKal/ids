@@ -49,6 +49,7 @@ volumes:
   tap-cert:                         # /etc/cyjan/tap.{key,pem} + master-ca.pem
   tap-queue:                        # SQLite-Outage-Buffer
   tap-runtime:                      # geteilter Mount für state.json (uplink → api)
+  arpwatch-data:                    # arpwatch arp.dat (MAC/IP-Zustand)
 
 services:
 
@@ -148,6 +149,31 @@ services:
       RUST_LOG: info
     volumes:
       - /sys:/host/sys:ro
+
+  # ───────────────────────────────────────────────────────────────────────
+  # ARPWATCH (Tap): passive L2-Überwachung des lokalen Segments auf
+  # Duplicate-IP / ARP-Spoof. Alerts (source=arpwatch) laufen via lokales
+  # alerts-raw → tap-uplink → Master.
+  # ───────────────────────────────────────────────────────────────────────
+  arpwatch:
+    build: ./arpwatch
+    container_name: cyjan-tap-arpwatch
+    mem_limit: 128m
+    healthcheck: *heartbeat-check
+    restart: unless-stopped
+    logging: *default-logging
+    network_mode: host
+    cap_add: [NET_RAW, NET_ADMIN]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - arpwatch-data:/var/lib/arpwatch
+    environment:
+      KAFKA_BROKERS: localhost:9094
+      MIRROR_IFACE: ${MIRROR_INTERFACE:?MIRROR_INTERFACE muss in /etc/cyjan/profile gesetzt sein}
+      NEW_STATION_WARMUP_S: ${ARPWATCH_WARMUP_S:-120}
+      TEST_MODE: "false"
 
   # ───────────────────────────────────────────────────────────────────────
   # Detection-Pipeline (lokal): flow-aggregator → signature-engine

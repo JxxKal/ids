@@ -145,7 +145,7 @@ jobs:
           CUSTOM_MASTER=(api frontend flow-aggregator signature-engine ml-engine \
                          alert-manager enrichment-service pcap-store training-loop \
                          sniffer irma-bridge snort snort-bridge master-uplink \
-                         rule-tuner host-role-detector mqtt-bridge \
+                         rule-tuner host-role-detector mqtt-bridge arpwatch \
                          notification-dispatcher traffic-generator)
 
           # Ausnahmen (bewusst NICHT im Update-Bundle):
@@ -178,7 +178,7 @@ jobs:
           # damit das Tap-ISO unter ~600 MB bleibt. tap-uplink + tap-api +
           # die Detection-Pipeline-Services + das einzige nötige externe Image
           # (Kafka).
-          CUSTOM_TAP=(sniffer flow-aggregator signature-engine tap-uplink tap-api)
+          CUSTOM_TAP=(sniffer flow-aggregator signature-engine tap-uplink tap-api arpwatch)
 
           # Drift-Guard auch fürs Tap-Bundle (keine Ausnahmen — am Tap muss
           # jeder build-Service offline verfügbar sein).

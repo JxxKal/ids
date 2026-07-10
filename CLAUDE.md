@@ -197,6 +197,7 @@ Stack-Layout pro Rolle:
 | alert-manager | Python | Dedup (300s window), score normalization, DB write |
 | enrichment-service | Python | rDNS, ICMP ping, GeoIP/ASN, Redis cache (TTL 3600s) |
 | pcap-store | Python | ±60s packet buffer, libpcap format (128-byte snaplen), MinIO upload |
+| arpwatch | Python + arpwatch | Passive L2-Überwachung des Mirror-Ports (`arpwatch -d`), Duplicate-IP/ARP-Spoof → CRITICAL, new station → LOW, source=arpwatch nach alerts-raw. Master + Tap (`network_mode: host`) |
 | api | Python/FastAPI | REST + WebSocket, JWT auth (HS256: 8h user / 365d service), Pairing-Token-API, Tap-Verwaltung |
 | frontend | React + Vite + TS | Real-time alert feed, connection graph, ML config, user mgmt, Remote-Taps + Rule-Adjustments UI |
 | training-loop | Python | Semi-supervised IsolationForest retrain (24h interval, joblib) |

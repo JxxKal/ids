@@ -16,6 +16,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.6.2',
+    date: '2026-07-10',
+    title: 'Duplicate-IP-/ARP-Spoof-Erkennung (arpwatch)',
+    notes: [
+      'Neuer passiver Layer-2-Wächter auf dem Mirror-Port: erkennt, wenn dieselbe IP von zwei verschiedenen MAC-Adressen beansprucht wird (IP-Konflikt oder ARP-Spoofing) und meldet das als CRITICAL-Alarm. Neu auftauchende Geräte (neue MAC) erscheinen als LOW-Hinweis.',
+      'Läuft auf Master und Remote-Taps. Die Alarme durchlaufen die normale Pipeline (Dedup, Anreicherung, Live-Feed, Benachrichtigungen) und tragen die Quelle „arpwatch".',
+    ],
+  },
+  {
+    version: 'v2.6.1',
+    date: '2026-07-10',
+    title: 'Fix: Suricata-Regel-Editor verwarf jede Änderung',
+    notes: [
+      'Der Editor unter Einstellungen → Regelwerk → Eigene Signaturen validierte gespeicherte Suricata-Regeln gegen die falsche (leere) Konfiguration und lehnte deshalb jede Änderung mit „Syntaxfehler" ab — auch syntaktisch korrekte Regeln. Die Validierung nutzt jetzt die tatsächlich laufende Engine-Konfiguration.',
+    ],
+  },
+  {
     version: 'v2.6.0',
     date: '2026-07-06',
     title: 'Stabilität & Härtung (Code-Review-Nachzug)',

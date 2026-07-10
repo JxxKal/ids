@@ -57,6 +57,7 @@ volumes:
   signature-rules:
   snort-rules:    # Persistenter Regel-Cache (Community + ET Open)
   snort-alerts:   # Shared Volume: Snort → snort-bridge
+  arpwatch-data:  # arpwatch arp.dat (MAC/IP-Zustand, überlebt Neustart)
   irma-data:      # Persistiert letzte bekannte IRMA-Alarm-ID
   ids-certs:      # TLS-Zertifikate (API schreibt, nginx liest)
   master-ca:      # Master-CA für mTLS-Auth der Remote-Taps (api schreibt, master-uplink liest)
@@ -1002,6 +1003,36 @@ services:
       SNORT_ALERT_FILE: /var/log/suricata/eve.json
       TEST_MODE: ${TEST_MODE:-false}
       SURICATA_OVERRIDES_FILE: /sig-rules/custom/_suricata_overrides.json
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # ARPWATCH  (docker compose --profile prod up)
+  #
+  # Passive Layer-2-Überwachung des Mirror-Ports auf Duplicate-IP / ARP-Spoof.
+  # network_mode: host sieht MIRROR_IFACE direkt und erreicht Kafka über den
+  # External-Listener auf localhost:9094 (wie der Sniffer). Emittiert
+  # source=arpwatch nach alerts-raw → normale Pipeline (alert-manager → DB → WS).
+  # ────────────────────────────────────────────────────────────────────────────
+
+  arpwatch:
+    build: ./arpwatch
+    container_name: ids-arpwatch
+    mem_limit: 128m
+    healthcheck: *heartbeat-check
+    restart: unless-stopped
+    logging: *default-logging
+    network_mode: host
+    profiles: [prod]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    cap_add: [NET_RAW, NET_ADMIN]
+    volumes:
+      - arpwatch-data:/var/lib/arpwatch
+    environment:
+      MIRROR_IFACE: ${MIRROR_IFACE:?MIRROR_IFACE muss in .env gesetzt sein}
+      KAFKA_BROKERS: localhost:9094                  # External Listener (network_mode: host)
+      NEW_STATION_WARMUP_S: ${ARPWATCH_WARMUP_S:-120}
+      TEST_MODE: "false"
 
   # ────────────────────────────────────────────────────────────────────────────
   # KALI-SHELL (Lab-only — Compose-Profile `redteam`)

@@ -697,7 +697,7 @@ const MQTT_DEFAULT: import('./types').MqttConfig = {
   threat_publish_interval_s: 30,
   tap_publish_interval_s: 30,
   severity_min:           'low',
-  sources_allowed:        ['signature', 'ml', 'suricata', 'external'],
+  sources_allowed:        ['signature', 'ml', 'suricata', 'external', 'arpwatch'],
   rule_id_blocklist:      [],
 };
 
@@ -2240,7 +2240,7 @@ export async function generateMcpToken(
 // ── Notification-Channels ──────────────────────────────────────────────────
 
 export async function fetchNotificationTypes(): Promise<import("./types").NotificationTypesInfo> {
-  if (isDemoMode()) return { types: ['webhook','ntfy','email'], severity_levels: ['low','medium','high','critical'], source_options: ['signature','ml','suricata','external'] };
+  if (isDemoMode()) return { types: ['webhook','ntfy','email'], severity_levels: ['low','medium','high','critical'], source_options: ['signature','ml','suricata','external','arpwatch'] };
   return await req<import("./types").NotificationTypesInfo>('/api/notifications/types');
 }
 

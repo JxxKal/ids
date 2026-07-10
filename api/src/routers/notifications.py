@@ -138,7 +138,7 @@ async def list_supported_types() -> dict[str, list[str]]:
     return {
         "types":            sorted(SUPPORTED_TYPES),
         "severity_levels":  ["low", "medium", "high", "critical"],
-        "source_options":   ["signature", "ml", "suricata", "external"],
+        "source_options":   ["signature", "ml", "suricata", "external", "arpwatch"],
     }
 
 
