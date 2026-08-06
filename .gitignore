@@ -72,3 +72,6 @@ data/
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
+
+# graphify Knowledge-Graph (regenerierbar via /graphify . --update)
+graphify-out/

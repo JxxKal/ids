@@ -2,6 +2,43 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Codebase-Navigation: immer zuerst graphify
+
+Dieses Repo hat einen gebauten **graphify-Knowledge-Graph** unter `graphify-out/` (gitignored, lokal pro Clone zu erzeugen). Er verknüpft den Code mit der Architektur-Doku — `CLAUDE.md`, `README.md`, `TODO.md` und die Lab-Befunde aus `CyjanKali.md` liegen als Konzept- und Rationale-Nodes direkt an dem Code, den sie beschreiben.
+
+**Regel: Fragen zu Codebase, Architektur oder Datei-Zusammenhängen gehen zuerst über den Graphen, nicht über Grep.** Grep findet die Doku↔Code-Verbindung prinzipiell nicht. Erst wenn der Graph nichts hergibt, auf Grep/Read ausweichen.
+
+```bash
+graphify query "Wie fließen Alerts vom Tap zum Master?" --budget 3000
+graphify query "..." --dfs          # konkreter Pfad statt breitem Kontext
+graphify path "tap-uplink" "AlertWriter"
+graphify explain "Reservoir"
+graphify god-nodes --top 20
+graphify affected "get_pool" --depth 3   # VOR jeder Änderung: was bricht mit?
+```
+
+`graphify affected` ist bei den God-Nodes Pflicht, nicht Kür — `get_pool()`, `require_admin()`, `req()`, `RuleLoader`, `Tuner` hängen an 24–117 Kanten.
+
+**Graph frisch halten:**
+
+| Was geändert | Kommando |
+|---|---|
+| Code (Python/TS/Rust/SQL) | `graphify update .` — rein AST, kein LLM, keine Subagenten |
+| Docs (CLAUDE.md, README, …) | `/graphify . --update` — braucht die semantische Extraktion mit Subagenten |
+
+**Setup auf einem frischen Clone** (Debian/PEP-668: kein `pip install --user`):
+
+```bash
+python3 -m venv ~/.local/share/graphify-venv
+~/.local/share/graphify-venv/bin/pip install "graphifyy[sql]"
+ln -sf ~/.local/share/graphify-venv/bin/graphify ~/.local/bin/graphify
+graphify install --platform claude   # Skill nach ~/.claude/skills/graphify/
+```
+
+Das `[sql]`-Extra ist **Pflicht** — ohne `tree_sitter_sql` fallen alle Migrations unter `infra/timescaledb/migrations/` stumm aus dem Graphen (die Warnung ist leicht zu überlesen). Danach den Graph einmal voll bauen: `/graphify .`
+
+Die ~1000 „dangling edges" im Health-Check sind externe Libraries (`logging`, `fastapi`, `react`) ohne Repo-Node — kein Defekt.
+
 ## Development Workflow
 
 Dieses Repository (VS Code, macOS) ist die **Source of Truth** und wird auf GitHub (`JxxKal/ids`) gespiegelt.
