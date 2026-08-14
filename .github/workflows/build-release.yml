@@ -146,7 +146,7 @@ jobs:
                          alert-manager enrichment-service pcap-store training-loop \
                          sniffer irma-bridge snort snort-bridge master-uplink \
                          rule-tuner host-role-detector mqtt-bridge arpwatch \
-                         notification-dispatcher traffic-generator)
+                         notification-dispatcher traffic-generator app-connect)
 
           # Ausnahmen (bewusst NICHT im Update-Bundle):
           #   sniffer-test/snort-test — Test-Profil-Varianten, nutzen dieselben

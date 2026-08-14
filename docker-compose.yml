@@ -836,6 +836,72 @@ services:
       MQTT_RULE_ID_BLOCKLIST:     ${MQTT_RULE_ID_BLOCKLIST:-}
 
   # ────────────────────────────────────────────────────────────────────────────
+  # APP-CONNECT — ausgehender WSS-Tunnel zur CYJAN-App (proxy.cyjan.dev)
+  #
+  # Hält eine persistente Verbindung nach draußen (Port 443, ausgehend), pusht
+  # gefilterte Alerts + Threat-Level und führt eingehende RPCs gegen die lokale
+  # ids-api aus — gegen eine fail-closed Allowlist und mit einem Service-JWT mit
+  # role=viewer. Master-only; der Tap braucht das nicht, seine Alarme laufen
+  # ohnehin über master-uplink hier zusammen.
+  #
+  # Vertrag: cyjan-mobile/docs/architecture/protocol.md (v1).
+  #
+  # BEWUSST OHNE FAIL-CLOSED-VARIABLEN: ohne APP_CONNECT_PROXY_URL bzw. Device-
+  # Token loggt der Dienst das einmal und schläft. Ein nicht genutztes App-
+  # Connect darf den Stack-Start nicht blockieren. Der Heartbeat läuft dabei
+  # weiter — ein unerreichbarer Cloud-Proxy macht den Container NICHT unhealthy
+  # (sonst würde cyjan-stack-health beim Boot auf fremde Infrastruktur warten).
+  # ────────────────────────────────────────────────────────────────────────────
+
+  app-connect:
+    build: ./app-connect
+    container_name: ids-app-connect
+    mem_limit: 256m
+    healthcheck: *heartbeat-check
+    restart: unless-stopped
+    logging: *default-logging
+    profiles: [prod]
+    networks: [ids-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      APP_CONNECT_ENABLED:            ${APP_CONNECT_ENABLED:-true}
+      # Leer = dormant. Erst diese beiden Werte schalten den Tunnel scharf.
+      APP_CONNECT_PROXY_URL:          ${APP_CONNECT_PROXY_URL:-}
+      APP_CONNECT_DEVICE_TOKEN:       ${APP_CONNECT_DEVICE_TOKEN:-}
+      APP_CONNECT_DEVICE_TOKEN_FILE:  ${APP_CONNECT_DEVICE_TOKEN_FILE:-}
+      APP_CONNECT_SENTRY_NAME:        ${APP_CONNECT_SENTRY_NAME:-}
+      # Triage (Feedback setzen/löschen aus der App) ist per Default AUS.
+      # true ⇒ hello.read_only=false + capability "triage".
+      APP_CONNECT_ALLOW_TRIAGE:       ${APP_CONNECT_ALLOW_TRIAGE:-false}
+      APP_CONNECT_SEVERITY_MIN:       ${APP_CONNECT_SEVERITY_MIN:-medium}
+      APP_CONNECT_THREAT_INTERVAL_S:  ${APP_CONNECT_THREAT_INTERVAL_S:-60}
+      APP_CONNECT_STATUS_INTERVAL_S:  ${APP_CONNECT_STATUS_INTERVAL_S:-300}
+      APP_CONNECT_RPC_TIMEOUT_S:      ${APP_CONNECT_RPC_TIMEOUT_S:-20}
+      APP_CONNECT_CA_FILE:            ${APP_CONNECT_CA_FILE:-}
+      APP_CONNECT_TLS_INSECURE:       ${APP_CONNECT_TLS_INSECURE:-false}
+      APP_CONNECT_ALERTS_TOPIC:       alerts-enriched
+      APP_CONNECT_API_BASE_URL:       http://api:8000
+      KAFKA_BROKERS:                  kafka:9092
+      KAFKA_GROUP_ID:                 app-connect
+      # Identisch zum SECRET_KEY der api — app-connect mintet sich daraus
+      # ein JWT mit role=viewer (kein User-DB-Eintrag nötig, weil
+      # get_current_user nur die Signatur prüft).
+      API_SECRET_KEY:                 ${API_SECRET_KEY:-change-me-in-production}
+      # Egress über den Firmen-Proxy. app-connect baut den Tunnel per
+      # HTTP-CONNECT auf und wertet no_proxy inkl. CIDR-Einträgen aus
+      # (die der ids-setup-Wizard schreibt und curl nicht versteht).
+      HTTPS_PROXY:                    ${HTTPS_PROXY:-}
+      NO_PROXY:                       ${NO_PROXY:-}
+      LOG_LEVEL:                      ${APP_CONNECT_LOG_LEVEL:-INFO}
+    volumes:
+      # Versionsanzeige im hello-Frame und in `cyjan-app status`.
+      - ./VERSION:/etc/cyjan/version:ro
+
+  # ────────────────────────────────────────────────────────────────────────────
   # SNIFFER – PRODUKTION  (docker compose --profile prod up)
   #
   # Benötigt: MIRROR_IFACE gesetzt in .env

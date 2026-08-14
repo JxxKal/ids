@@ -223,6 +223,40 @@ Stack-Layout pro Rolle:
 | Master | `docker-compose.yml` (`--profile prod`) | Volle Pipeline + `master-uplink` |
 | Tap | `docker-compose.tap.yml` | `sniffer`, `flow-aggregator`, `signature-engine`, lokales `kafka`, `tap-uplink`, `tap-api` |
 
+### CYJAN-App (iOS) — app-connect
+
+Ein Master kann seine Alarme an eine native iOS-App melden, ohne dass ein Port
+im OT-Netz geöffnet wird. Der neue Service `app-connect` baut dafür einen
+**ausgehenden** WSS-Tunnel zu einem Cloud-Relay auf (`proxy.cyjan.dev`); die
+App spricht mit dem Relay, nie mit dem Master.
+
+```
+[Master 81] alerts-enriched (Kafka) ─► app-connect ──ausgehend :443──►  proxy.cyjan.dev  ◄── iOS-App
+                     ids-api:8000  ◄── RPC (Allowlist) ──┘                  + APNs
+```
+
+- **App und Proxy leben im Schwester-Repo** `../cyjan-mobile`. Der verbindliche
+  Vertrag zwischen allen drei Komponenten steht in
+  `cyjan-mobile/docs/architecture/protocol.md` — Frame-Typen, Allowlist,
+  Enrollment, Push. Wer dort etwas ändert, ändert es in allen drei Komponenten.
+- **Zwei unabhängige Schranken zum Master**: eine Fail-Closed-Pfad-Allowlist in
+  `app-connect/src/` **und** ein selbst gemintetes Service-JWT der Rolle
+  `viewer` (Muster von `rule-tuner`). Admin-Router sind damit auch bei einem
+  Allowlist-Fehler serverseitig unerreichbar.
+- **Read-only per Default.** Triage (TP/FP) ist implementiert und hinter
+  `APP_CONNECT_ALLOW_TRIAGE=false` abgeschaltet. Der Zustand wird der App im
+  `hello`-Frame gemeldet; sie blendet die Bedienelemente entsprechend ein.
+- **Schläft ohne Konfiguration.** Ohne `APP_CONNECT_PROXY_URL` + Device-Token
+  loggt der Container das einmal und bleibt healthy. Der Heartbeat ist bewusst
+  vom Tunnelzustand entkoppelt (Muster von `mqtt-bridge`) — ein Internetausfall
+  darf `cyjan-stack-health` nicht rot färben und den Boot blockieren.
+- **Kopplung**: `docker compose exec app-connect cyjan-app pair --label "iPhone X"`
+  zeigt Code + QR. `cyjan-app devices|revoke|status` für den Rest.
+- **Proxy-Egress**: app-connect ist der erste Service im Stack, der
+  `HTTPS_PROXY`/`NO_PROXY` tatsächlich auswertet (HTTP-CONNECT-Tunnel, `NO_PROXY`
+  mit Hostname-Suffixen *und* CIDRs). Alle anderen Container ignorieren die
+  Proxy-Variablen bis heute — siehe `cyjan-mobile/docs/decisions/0003-proxy-egress.md`.
+
 ### Services Summary
 
 | Service | Language | Key Role |
@@ -241,6 +275,7 @@ Stack-Layout pro Rolle:
 | master-uplink | Python | mTLS-WSS-Server (Port 8443), nimmt Tap-Alarme ins Master-Kafka auf, serviert Reverse-Channel `/config` mit Rules + Overrides |
 | tap-uplink | Python | (Tap-only) mTLS-Client zum Master, Outage-Buffer (SQLite), Reverse-Pull der Rules alle 5 min |
 | tap-api | Python/FastAPI | (Tap-only) minimaler Status-View + Maschinen-Endpoints für die `cyjan-tap`-CLI, kein eigener Auth-Stack |
+| app-connect | Python | (Master-only, optional) ausgehender WSS-Tunnel zu `proxy.cyjan.dev` für die iOS-App. Pusht Alerts aus `alerts-enriched`, beantwortet RPC-Anfragen gegen die lokale api hinter einer Fail-Closed-Allowlist. Schläft ohne Konfiguration. |
 
 ### Infrastructure
 
