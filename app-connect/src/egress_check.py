@@ -231,6 +231,25 @@ async def check_egress(
 
     result.steps.append(Step("connect", True, connect_detail))
 
+    # Klartext-Ziel (ws:// bzw. http://) — Lab- und Bring-up-Betrieb. Dahinter
+    # liegt kein TLS, also gibt es auch nichts zu prüfen. Täten wir es doch,
+    # meldete der Test einen funktionierenden Tunnel als rot, und zwar mit
+    # einem Hinweis, der zum Nachbessern an der falschen Stelle einlädt.
+    if url.lower().startswith(("ws://", "http://")):
+        for name in ("tls", "cert"):
+            result.steps.append(
+                Step(name, True, "übersprungen — Klartext-Verbindung (ws://)")
+            )
+        if sock is not None:
+            sock.close()
+        result.ok = True
+        result.stage = "ok"
+        result.detail = (
+            "Egress-Pfad ist frei. Achtung: unverschlüsselte Verbindung — "
+            "für den Produktivbetrieb wss:// verwenden."
+        )
+        return result
+
     # ── 3./4. TLS + Zertifikat ───────────────────────────────────────────
     try:
         proto, issuer = await asyncio.wait_for(

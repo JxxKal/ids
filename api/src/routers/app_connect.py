@@ -464,7 +464,7 @@ async def devices() -> list[dict[str, Any]]:
     return [d for d in body if isinstance(d, dict)]
 
 
-@router.delete("/devices/{device_id}", status_code=204,
+@router.delete("/devices/{device_id}", status_code=204, response_model=None,
                dependencies=[Depends(require_admin)])
 async def revoke_device(device_id: str) -> None:
     if not device_id.strip():

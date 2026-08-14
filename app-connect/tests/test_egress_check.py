@@ -172,3 +172,33 @@ def test_socket_wird_nicht_offen_gelassen():
     gc.collect()
     after = len([o for o in gc.get_objects() if isinstance(o, socket.socket)])
     assert after - before <= 1
+
+
+@pytest.mark.asyncio
+async def test_klartext_ziel_ueberspringt_die_tls_stufen():
+    """`ws://` hat kein TLS — der Test darf einen laufenden Lab-Tunnel nicht
+    als Fehlschlag melden.
+
+    Aufgefallen beim Bring-up auf dem Dev-Host: der Tunnel stand und lief,
+    der Egress-Test meldete trotzdem rot mit „kein TLS dahinter" und schickte
+    damit auf die falsche Fährte.
+    """
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+    try:
+        result = await check_egress(f"ws://127.0.0.1:{port}/tunnel", timeout=5.0)
+    finally:
+        server.close()
+
+    assert result.ok is True
+    assert result.stage == "ok"
+    assert "unverschlüsselt" in result.detail.lower()
+
+    stages = {s.name: s for s in result.steps}
+    assert stages["dns"].ok and stages["connect"].ok
+    # Die Stufen tauchen weiterhin auf — die UI rendert eine feste Leiter und
+    # soll keine Lücke zeigen —, aber als übersprungen markiert.
+    assert stages["tls"].ok and "übersprungen" in stages["tls"].detail
+    assert stages["cert"].ok and "übersprungen" in stages["cert"].detail
