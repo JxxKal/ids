@@ -155,7 +155,21 @@ Der Weg zur lokalen `ids-api` läuft **nie** über den Proxy
 
 ### Aktivieren
 
-In der `.env` am Master:
+**Der normale Weg ist die Web-GUI** (Einstellungen → Integrationen → CYJAN App). Sie
+schreibt nach `system_config['app_connect']`; app-connect pollt diesen Eintrag
+alle 30 s und überlagert damit die `.env` **feldweise**. Ändert sich dabei eines
+der Verbindungsfelder (`proxy_url`, `device_token`, `https_proxy`, `no_proxy`,
+`ca_file`, `tls_insecure`), baut der Dienst den Tunnel sauber neu auf — ohne
+Container-Neustart. Alles andere (Severity-Schwelle, Triage) wird im laufenden
+Betrieb übernommen.
+
+Ein **leerer** Wert in der DB gilt als „nicht gesetzt" und fällt auf die `.env`
+zurück; abgeschaltet wird über `enabled: false`, nicht durch Leeren eines
+Feldes. Die Schnittstelle, über die die `api` das macht, steht in
+[`docs/internal-api.md`](docs/internal-api.md).
+
+Für Erstinstallation, Air-Gap und ISO bleibt der ENV-Weg — in der `.env` am
+Master:
 
 ```bash
 APP_CONNECT_PROXY_URL=wss://proxy.cyjan.dev/tunnel
@@ -176,9 +190,14 @@ docker compose logs -f app-connect
 
 Solange `APP_CONNECT_PROXY_URL` **oder** das Device-Token leer ist, schläft der
 Dienst (eine Log-Zeile, danach Ruhe) und bleibt dabei absichtlich *healthy*. Er
-prüft die Konfiguration alle 60 s neu — ein per Bind-Mount nachgereichtes
-Token-File (`APP_CONNECT_DEVICE_TOKEN_FILE`) wird also ohne Container-Neustart
-aufgegriffen.
+prüft die Konfiguration alle 30 s neu — eine in der GUI vorgenommene
+Einrichtung wird also ohne Container-Neustart aufgegriffen. (Ein per Bind-Mount
+nachgereichtes Token-File `APP_CONNECT_DEVICE_TOKEN_FILE` dagegen erst beim
+Neustart: die ENV-Ebene wird nur beim Prozessstart gelesen.)
+
+Die interne HTTP-API auf `:8090` läuft dabei **immer** — auch im Ruhezustand.
+Genau darüber richtet die GUI den Dienst ja erst ein; sie ist nur im `ids-net`
+erreichbar (kein Host-Port) und verlangt `Authorization: Bearer <API_SECRET_KEY>`.
 
 ### Gerät koppeln
 
@@ -203,19 +222,26 @@ respektieren dabei `HTTPS_PROXY`/`no_proxy` inklusive CIDR-Einträgen.
 
 ### Konfiguration
 
-Alle Variablen sind in `.env.example` dokumentiert. Die wichtigsten:
+ENV ist **Bootstrap**, die GUI gewinnt (siehe „Aktivieren"). Alle Variablen sind
+in `.env.example` dokumentiert. Die wichtigsten — mit ✎ markiert, was auch über
+die GUI (`system_config['app_connect']`) gesetzt werden kann:
 
 | Variable | Default | Wirkung |
 |---|---|---|
-| `APP_CONNECT_ENABLED` | `true` | harter Aus-Schalter |
-| `APP_CONNECT_PROXY_URL` | – | Tunnel-Endpunkt; leer = dormant |
-| `APP_CONNECT_DEVICE_TOKEN` / `…_FILE` | – | Bearer-Token des Sentry; leer = dormant |
-| `APP_CONNECT_ALLOW_TRIAGE` | `false` | Feedback-Endpoints freischalten |
-| `APP_CONNECT_SEVERITY_MIN` | `medium` | Untergrenze für gepushte Alarme |
+| `APP_CONNECT_ENABLED` ✎ | `true` | harter Aus-Schalter |
+| `APP_CONNECT_PROXY_URL` ✎ | – | Tunnel-Endpunkt; leer = dormant · Reconnect |
+| `APP_CONNECT_DEVICE_TOKEN` ✎ / `…_FILE` | – | Bearer-Token des Sentry; leer = dormant · Reconnect |
+| `APP_CONNECT_SENTRY_NAME` ✎ | `$HOSTNAME` | Anzeigename in der App |
+| `APP_CONNECT_ALLOW_TRIAGE` ✎ | `false` | Feedback-Endpoints freischalten |
+| `APP_CONNECT_SEVERITY_MIN` ✎ | `medium` | Untergrenze für gepushte Alarme |
 | `APP_CONNECT_THREAT_INTERVAL_S` | `60` | Poll-Takt für `threat_level` |
 | `APP_CONNECT_RPC_TIMEOUT_S` | `20` | Timeout gegen die lokale api |
-| `APP_CONNECT_CA_FILE` | – | eigene CA für TLS-inspizierende Proxies |
-| `APP_CONNECT_TLS_INSECURE` | `false` | **nur Lab** — Zertifikatsprüfung aus |
+| `APP_CONNECT_CA_FILE` ✎ | – | eigene CA für TLS-inspizierende Proxies · Reconnect |
+| `APP_CONNECT_TLS_INSECURE` ✎ | `false` | **nur Lab** — Zertifikatsprüfung aus · Reconnect |
+| `HTTPS_PROXY` / `APP_CONNECT_HTTPS_PROXY` ✎ | – | Egress-Proxy · Reconnect |
+| `NO_PROXY` / `APP_CONNECT_NO_PROXY` ✎ | – | Ausnahmen inkl. CIDR · Reconnect |
+| `POSTGRES_DSN` | (Compose) | Quelle des GUI-Overlays; leer ⇒ nur ENV |
+| `APP_CONNECT_INTERNAL_PORT` | `8090` | interne API für die `api` |
 
 Der Proxy kann `event_severity_min` und `push_detail` per `config`-Frame live
 nachschärfen; das wirkt ohne Reconnect und überschreibt die env-Vorgabe für die

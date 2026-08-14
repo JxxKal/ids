@@ -35,6 +35,7 @@ def _cfg(**over) -> Config:
         device_token="tok", sentry_name="master-hq", version="v9.9.9",
         ca_file="", tls_insecure=False, https_proxy="", no_proxy="",
         api_base_url="http://api:8000", api_secret_key="s3cret",
+        postgres_dsn="", internal_host="127.0.0.1", internal_port=8090,
         kafka_brokers="kafka:9092", alerts_topic="alerts-enriched",
         kafka_group_id="app-connect", allow_triage=False,
         severity_min="medium", threat_interval_s=60.0, status_interval_s=300.0,

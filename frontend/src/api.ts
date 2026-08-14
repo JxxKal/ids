@@ -2416,3 +2416,208 @@ export async function migrationApply(
   }
   return res.json();
 }
+
+// ── App-Connect (CYJAN App) ───────────────────────────────────────────────────
+//
+// Backend: /api/app-connect (api/src/routers/app_connect.py). Der Router hält
+// die Konfiguration in system_config['app_connect'] und reicht Status,
+// Kopplung, Geräteliste und Egress-Test an den app-connect-Container weiter.
+//
+// Wichtig: das device_token kommt NIE zurück — nur `device_token_set`.
+
+export type AppConnectSeverity   = 'low' | 'medium' | 'high' | 'critical';
+export type AppConnectConnection = 'connected' | 'reconnecting' | 'down' | 'starting' | 'dormant';
+export type AppConnectSource     = 'db' | 'env';
+
+export interface AppConnectConfig {
+  enabled:      boolean;
+  proxy_url:    string;
+  sentry_name:  string;
+  https_proxy:  string;
+  no_proxy:     string;
+  ca_file:      string;
+  allow_triage: boolean;
+  severity_min: AppConnectSeverity;
+}
+
+export interface AppConnectConfigResponse {
+  config:            AppConnectConfig;
+  device_token_set:  boolean;
+  /** Felder, die aus der ENV vorbelegt sind (DB leer, Dienst meldet Wert). */
+  env_fields:        string[];
+  /** Effektiver ENV-Wert je Feld — Platzhalter im Eingabefeld. */
+  env_values:        Record<string, string>;
+  service_reachable: boolean;
+  config_source:     AppConnectSource | null;
+}
+
+/** PUT-Body: Config + Token-Sonderfelder. Leeres device_token lässt das
+ *  gespeicherte unangetastet; clear_device_token entfernt es explizit. */
+export interface AppConnectConfigUpdate extends AppConnectConfig {
+  device_token:       string;
+  clear_device_token: boolean;
+}
+
+export interface AppConnectStatus {
+  configured:         boolean;
+  enabled:            boolean;
+  connection:         AppConnectConnection;
+  connected_since:    number | null;
+  proxy_url:          string;
+  sentry_name:        string;
+  proxy_version:      string;
+  push_enabled:       boolean;
+  read_only:          boolean;
+  allow_triage:       boolean;
+  event_severity_min: AppConnectSeverity;
+  egress:             string | null;
+  egress_source:      'db' | 'env' | 'none';
+  ca_file:            string;
+  events_sent:        number;
+  events_dropped:     number;
+  rpc_ok:             number;
+  rpc_rejected:       number;
+  rpc_failed:         number;
+  last_error:         string | null;
+  config_source:      AppConnectSource;
+}
+
+export interface AppConnectPairResult {
+  code:       string;
+  expires_at: string;
+  deep_link:  string;
+  /** Rohes SVG. Wird als data:-URI in ein <img> gehängt, NICHT per
+   *  dangerouslySetInnerHTML — siehe app-connect/docs/internal-api.md. */
+  qr_svg:     string;
+}
+
+export interface AppConnectDevice {
+  id:                string;
+  label:             string;
+  platform:          string;
+  created_at:        string;
+  last_seen:         string | null;
+  push_registered:   boolean;
+  push_severity_min: AppConnectSeverity | null;
+  include_test:      boolean;
+}
+
+export interface AppConnectEgressStep {
+  name:   string;
+  ok:     boolean;
+  detail: string;
+}
+
+export interface AppConnectEgressResult {
+  ok:     boolean;
+  stage:  string;
+  detail: string;
+  hint?:  string;
+  steps:  AppConnectEgressStep[];
+}
+
+export interface AppConnectEgressTestRequest {
+  proxy_url?:   string;
+  https_proxy?: string;
+  no_proxy?:    string;
+  ca_file?:     string;
+}
+
+const APP_CONNECT_DEMO_CONFIG: AppConnectConfig = {
+  enabled:      false,
+  proxy_url:    '',
+  sentry_name:  '',
+  https_proxy:  '',
+  no_proxy:     '',
+  ca_file:      '',
+  allow_triage: false,
+  severity_min: 'medium',
+};
+
+/** true, wenn der Fehler daher kommt, dass der app-connect-Container nicht
+ *  läuft (503 aus dem Proxy-Router). Das ist der Normalfall im Ruhezustand
+ *  und soll in der GUI als Hinweis erscheinen, nicht als roter Fehler. */
+export function isAppConnectUnavailable(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith('503');
+}
+
+export async function fetchAppConnectConfig(): Promise<AppConnectConfigResponse> {
+  if (isDemoMode()) {
+    return {
+      config: APP_CONNECT_DEMO_CONFIG, device_token_set: false,
+      env_fields: [], env_values: {}, service_reachable: false, config_source: null,
+    };
+  }
+  return req<AppConnectConfigResponse>('/api/app-connect/config');
+}
+
+export async function saveAppConnectConfig(
+  value: AppConnectConfigUpdate,
+): Promise<AppConnectConfigResponse> {
+  if (isDemoMode()) {
+    const cfg: AppConnectConfig = {
+      enabled:      value.enabled,
+      proxy_url:    value.proxy_url,
+      sentry_name:  value.sentry_name,
+      https_proxy:  value.https_proxy,
+      no_proxy:     value.no_proxy,
+      ca_file:      value.ca_file,
+      allow_triage: value.allow_triage,
+      severity_min: value.severity_min,
+    };
+    return {
+      config: cfg, device_token_set: false,
+      env_fields: [], env_values: {}, service_reachable: false, config_source: null,
+    };
+  }
+  return req<AppConnectConfigResponse>('/api/app-connect/config', {
+    method: 'PUT',
+    body: JSON.stringify(value),
+  });
+}
+
+export async function fetchAppConnectStatus(): Promise<AppConnectStatus> {
+  if (isDemoMode()) {
+    return {
+      configured: false, enabled: false, connection: 'dormant', connected_since: null,
+      proxy_url: '', sentry_name: 'cyjan-demo', proxy_version: '–', push_enabled: false,
+      read_only: true, allow_triage: false, event_severity_min: 'medium',
+      egress: null, egress_source: 'none', ca_file: '',
+      events_sent: 0, events_dropped: 0, rpc_ok: 0, rpc_rejected: 0, rpc_failed: 0,
+      last_error: null, config_source: 'db',
+    };
+  }
+  return req<AppConnectStatus>('/api/app-connect/status');
+}
+
+export async function pairAppConnectDevice(
+  label: string, ttlS = 600,
+): Promise<AppConnectPairResult> {
+  if (isDemoMode()) throw new Error('503 Service Unavailable: Demo-Modus');
+  return req<AppConnectPairResult>('/api/app-connect/pair', {
+    method: 'POST',
+    body: JSON.stringify({ label, ttl_s: ttlS }),
+  });
+}
+
+export async function fetchAppConnectDevices(): Promise<AppConnectDevice[]> {
+  if (isDemoMode()) return [];
+  return req<AppConnectDevice[]>('/api/app-connect/devices');
+}
+
+export async function revokeAppConnectDevice(deviceId: string): Promise<void> {
+  if (isDemoMode()) return;
+  await req<void>(`/api/app-connect/devices/${encodeURIComponent(deviceId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function testAppConnectEgress(
+  value: AppConnectEgressTestRequest,
+): Promise<AppConnectEgressResult> {
+  if (isDemoMode()) throw new Error('503 Service Unavailable: Demo-Modus');
+  return req<AppConnectEgressResult>('/api/app-connect/test-egress', {
+    method: 'POST',
+    body: JSON.stringify(value),
+  });
+}

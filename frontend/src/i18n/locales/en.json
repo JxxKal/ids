@@ -638,6 +638,7 @@
       "irma": "IRMA",
       "itop": "iTop CMDB",
       "mqtt": "MQTT bridge",
+      "app-connect": "CYJAN app",
       "notifications": "Notifications",
       "pattern-import": "Import pattern bundle",
       "pattern-export": "Export pattern bundle",

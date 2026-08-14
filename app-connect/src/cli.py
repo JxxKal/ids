@@ -12,46 +12,61 @@ Web-UI, Pairing über ein Einmal-Token mit TTL.
 also gerade dann, wenn der Tunnel unten ist. Die anderen Kommandos reden
 mit dem Proxy und respektieren dabei HTTPS_PROXY/no_proxy inklusive
 CIDR-Einträgen (httpx alleine könnte das nicht).
+
+Die Konfiguration wird genauso aufgelöst wie im Dienst selbst: ENV als
+Bootstrap, `system_config['app_connect']` überlagert feldweise. Sonst würde
+die CLI „nicht konfiguriert" melden, sobald jemand die Einrichtung über die
+GUI gemacht hat. Ist die DB nicht erreichbar, bleibt es bei der ENV.
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import sys
-from urllib.parse import urlparse, urlunparse
 
 import httpx
 
-from config import Config
+from config import Config, env_dict, merge_db_overlay
+from proxy_api import (
+    DEVICES_PATH,
+    ENROLL_PATH,
+    build_deep_link,
+    client_kwargs,
+    rest_base_url,
+)
 from proxy_egress import proxy_for_url
 from state import read_state
 
-# Der Proxy-seitige Enrollment-Pfad steht in protocol.md §6. Die
-# Verwaltungs-Endpoints (Liste/Revoke) sind dort nur als CLI-Verhalten
-# beschrieben, nicht als HTTP-Pfad — wir spiegeln sie unter /internal/,
-# analog zu /internal/enroll-codes.
-ENROLL_PATH = "/internal/enroll-codes"
-DEVICES_PATH = "/internal/devices"
 
+def load_config() -> Config:
+    """Effektive Konfiguration (ENV + DB-Overlay), fehlertolerant."""
+    env = env_dict()
+    fallback = Config.from_dict(merge_db_overlay(env, None))
+    if not env.get("postgres_dsn"):
+        return fallback
+    try:
+        import asyncio
 
-def _api_base(cfg: Config) -> str:
-    """wss://proxy.cyjan.dev/tunnel → https://proxy.cyjan.dev"""
-    p = urlparse(cfg.proxy_url)
-    scheme = "https" if p.scheme in ("wss", "https") else "http"
-    return urlunparse((scheme, p.netloc, "", "", "", ""))
+        from db_config import ConfigStore
+
+        async def _read() -> Config:
+            store = ConfigStore(env["postgres_dsn"], env)
+            try:
+                return await store.effective()
+            finally:
+                await store.close()
+
+        return asyncio.run(_read())
+    except Exception as exc:
+        print(f"Hinweis: GUI-Konfiguration nicht lesbar ({type(exc).__name__}) — "
+              f"es gilt die ENV.", file=sys.stderr)
+        return fallback
 
 
 def _client(cfg: Config) -> httpx.Client:
-    base = _api_base(cfg)
-    proxy = proxy_for_url(base, cfg.https_proxy, cfg.no_proxy)
-    return httpx.Client(
-        base_url=base,
-        timeout=httpx.Timeout(30.0, connect=10.0),
-        headers={"Authorization": f"Bearer {cfg.device_token}"},
-        verify=(cfg.ca_file or not cfg.tls_insecure),
-        proxy=(proxy.as_url() if proxy else None),
-        trust_env=False,   # no_proxy-CIDRs kann httpx nicht — wir schon
-    )
+    """Sync-Variante desselben Clients, den die interne API async nutzt —
+    Basis-URL, Proxy-Entscheidung und CA-Handling kommen aus proxy_api."""
+    return httpx.Client(**client_kwargs(cfg))
 
 
 def _require_config(cfg: Config) -> None:
@@ -59,8 +74,10 @@ def _require_config(cfg: Config) -> None:
         missing = ", ".join(cfg.missing())
         print(f"Fehler: app-connect ist nicht konfiguriert ({missing} fehlt).",
               file=sys.stderr)
-        print("        In der .env am Master setzen und den Container neu "
-              "starten.", file=sys.stderr)
+        print("        Einrichtung normalerweise über die Web-GUI "
+              "(Einstellungen → Integrationen → CYJAN App);", file=sys.stderr)
+        print("        die .env am Master ist nur noch der Bootstrap-Weg.",
+              file=sys.stderr)
         raise SystemExit(2)
 
 
@@ -107,16 +124,20 @@ def cmd_pair(cfg: Config, args) -> int:
         print(f"Proxy lieferte keinen Code: {body}", file=sys.stderr)
         return 1
 
-    # Wenn der Proxy eine fertige Scan-Payload liefert, gewinnt die —
-    # sonst der nackte Code (die App akzeptiert beides, §6).
-    qr_payload = body.get("qr") or body.get("enroll_url") or code
+    # Kodiert wird der Deep-Link, damit die App Proxy-Adresse UND Code aus
+    # einem Scan bekommt. Der `proxy`-Parameter ist die REST-Basis, nicht
+    # die Tunnel-URL (siehe proxy_api.rest_base_url).
+    deep_link = str(body.get("deep_link") or "").strip() or build_deep_link(
+        rest_base_url(cfg.proxy_url), code
+    )
 
     print()
     print(f"  Enrollment-Code:  {code}")
     print(f"  Label:            {args.label}")
     print(f"  Gültig bis:       {_fmt_ts(body.get('expires_at'))}")
+    print(f"  Deep-Link:        {deep_link}")
     print()
-    _print_qr(qr_payload)
+    _print_qr(deep_link)
     print()
     print("  In der CYJAN-App: QR scannen oder Code eintippen.")
     print("  Der Code ist einmalig und verfällt nach Ablauf der TTL.")
@@ -197,6 +218,92 @@ def cmd_status(cfg: Config, args) -> int:
     return 0
 
 
+def cmd_test_proxy(cfg: Config, args) -> int:
+    """Egress-Pfad Stufe für Stufe prüfen.
+
+    Im OT-Netz kann man nicht eben curl durchprobieren, und der Tunnel meldet
+    im Fehlerfall nur „geht nicht". Dieser Befehl sagt, an welcher Stufe es
+    hängt — das ist der Unterschied zwischen „Proxy-Passwort falsch" und
+    „Firewall lässt CONNECT nicht durch", die sonst beide gleich aussehen.
+
+    Die Stufenlogik selbst liegt in `egress_check`; dieselbe Prüfung liefert
+    `POST /test-egress` an die GUI. Hier wird sie nur hübsch gedruckt.
+    """
+    import asyncio
+
+    from egress_check import STAGES, check_egress
+    from proxy_egress import target_from_url
+
+    url = args.url or cfg.proxy_url
+    if not url:
+        print("Keine Ziel-URL. APP_CONNECT_PROXY_URL setzen oder --url angeben.")
+        return 2
+
+    proxy = proxy_for_url(url, cfg.https_proxy, cfg.no_proxy)
+    host, port = target_from_url(url)
+
+    print()
+    print("  CYJAN app-connect — Egress-Test")
+    print(f"    Ziel             {host}:{port}")
+    if proxy is None:
+        if cfg.https_proxy:
+            print(f"    Egress           direkt (no_proxy greift für {host})")
+        else:
+            print("    Egress           direkt (kein Proxy konfiguriert)")
+    else:
+        print(f"    Proxy            {proxy}")          # __str__ redigiert Credentials
+        print(f"    Proxy-Auth       {'ja' if proxy.auth_header() else 'nein'}")
+    print(f"    Eigene CA        {cfg.ca_file or '(System-Trust-Store)'}")
+    if cfg.tls_insecure:
+        print("    TLS-Prüfung      AUS (APP_CONNECT_TLS_INSECURE=true)")
+    print()
+
+    timeout = float(args.timeout)
+
+    labels = {"dns": "DNS", "connect": "CONNECT" if proxy else "TCP",
+              "tls": "TLS", "cert": "Zertifikat"}
+
+    async def run() -> int:
+        result = await check_egress(
+            url=url,
+            https_proxy=cfg.https_proxy,
+            no_proxy=cfg.no_proxy,
+            ca_file=cfg.ca_file,
+            tls_insecure=cfg.tls_insecure,
+            timeout=timeout,
+        )
+        done = {step.name for step in result.steps}
+        for step in result.steps:
+            idx = STAGES.index(step.name) + 1
+            label = labels.get(step.name, step.name)
+            marker = "ok" if step.ok else "FEHLER"
+            print(f"    [{idx}/{len(STAGES)}] {label:<10} {marker} — {step.detail}")
+        # Nicht erreichte Stufen sichtbar machen, damit klar ist, wo Schluss war.
+        for name in STAGES:
+            if name not in done:
+                idx = STAGES.index(name) + 1
+                print(f"    [{idx}/{len(STAGES)}] {labels.get(name, name):<10} –")
+
+        print()
+        if result.ok:
+            print(f"    {result.detail}")
+            if result.hint:
+                print(f"    Hinweis: {result.hint}")
+            print("    Fehlt danach noch die Verbindung, liegt es am")
+            print("    Device-Token, nicht am Netz.")
+            return 0
+
+        print(f"    {result.detail}")
+        if result.hint:
+            print(f"    {result.hint}")
+        return 1
+
+    try:
+        return asyncio.run(run())
+    except KeyboardInterrupt:
+        return 130
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="cyjan-app",
@@ -219,12 +326,22 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="Tunnel-Zustand anzeigen")
     status.set_defaults(func=cmd_status)
 
+    test = sub.add_parser(
+        "test-proxy",
+        help="Egress prüfen: DNS → CONNECT/TCP → TLS → Zertifikat",
+    )
+    test.add_argument("--url", default="",
+                      help="Abweichendes Ziel statt APP_CONNECT_PROXY_URL")
+    test.add_argument("--timeout", default=15.0, type=float,
+                      help="Sekunden pro Stufe (Default 15)")
+    test.set_defaults(func=cmd_test_proxy)
+
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    cfg = Config.from_env()
+    cfg = load_config()
     try:
         return args.func(cfg, args)
     except SystemExit:

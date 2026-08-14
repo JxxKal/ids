@@ -55,6 +55,7 @@ from routers import reports as reports_router
 from routers import taps as taps_router
 from routers import tap_update as tap_update_router
 from routers import mqtt as mqtt_router
+from routers import app_connect as app_connect_router
 from routers import pattern as pattern_router
 from routers import ssl as ssl_router
 from routers import system as system_router
@@ -196,6 +197,10 @@ app.include_router(maintenance_router.router, dependencies=_auth)
 app.include_router(migration_router.router,   dependencies=_auth)
 app.include_router(tap_update_router.router,   dependencies=_auth)
 app.include_router(mqtt_router.router,          dependencies=_auth)
+# App-Connect: Konfig-CRUD + Proxy zum app-connect-Container. Jeder Endpunkt
+# trägt zusätzlich Depends(require_admin) — Kopplung und Geräte-Widerruf sind
+# Rechtevergabe, kein Viewer-Thema.
+app.include_router(app_connect_router.router,   dependencies=_auth)
 app.include_router(pattern_router.router,       dependencies=_auth)
 
 # Pattern-Export ist Lab-only — wird nur registriert wenn Lab-Modus per

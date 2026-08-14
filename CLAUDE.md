@@ -250,8 +250,25 @@ App spricht mit dem Relay, nie mit dem Master.
   loggt der Container das einmal und bleibt healthy. Der Heartbeat ist bewusst
   vom Tunnelzustand entkoppelt (Muster von `mqtt-bridge`) — ein Internetausfall
   darf `cyjan-stack-health` nicht rot färben und den Boot blockieren.
-- **Kopplung**: `docker compose exec app-connect cyjan-app pair --label "iPhone X"`
-  zeigt Code + QR. `cyjan-app devices|revoke|status` für den Rest.
+- **Einrichtung und Kopplung laufen über die GUI**: Einstellungen → Integrationen
+  → CYJAN App. Dort sitzen Proxy-Adresse, Device-Token, Egress-Proxy, Firmen-CA,
+  Mindest-Severity und der Triage-Schalter, dazu ein Testknopf, der den Egress
+  stufenweise prüft (DNS → CONNECT → TLS → Zertifikat), sowie der
+  Kopplungsdialog mit QR-Code und die Geräteliste.
+- **ENV ist nur noch Bootstrap.** `system_config['app_connect']` überlagert die
+  `.env` feldweise (Muster von `mqtt-bridge`); ein leerer DB-Wert fällt auf ENV
+  zurück, `enabled: false` schaltet ab. Der Config-Watcher pollt alle 30 s;
+  nur `proxy_url`, `device_token`, `https_proxy`, `no_proxy`, `ca_file` und
+  `tls_insecure` erzwingen einen Tunnel-Neuaufbau, der Rest wird live übernommen.
+- **Interne API**: `app-connect:8090` (nur `ids-net`, kein Host-Port), Bearer
+  gegen `API_SECRET_KEY`. Die api reicht unter `/api/app-connect/*` durch —
+  Muster von `redteam_proxy.py`. Vertrag: `app-connect/docs/internal-api.md`.
+- **Firmen-CA** für TLS-inspizierende Proxies nach `/etc/cyjan/certs/` auf dem
+  Host legen (read-only gemountet) und den Pfad *im Container* in der GUI
+  eintragen. Bewusst kein Repo-Verzeichnis — eine Kunden-CA gehört weder ins
+  Git noch ins Update-ZIP.
+- **Konsole** weiterhin verfügbar: `cyjan-app pair|devices|revoke|status|test-proxy`.
+  Die CLI löst die Konfiguration genauso auf wie der Dienst (ENV + DB-Overlay).
 - **Proxy-Egress**: app-connect ist der erste Service im Stack, der
   `HTTPS_PROXY`/`NO_PROXY` tatsächlich auswertet (HTTP-CONNECT-Tunnel, `NO_PROXY`
   mit Hostname-Suffixen *und* CIDRs). Alle anderen Container ignorieren die

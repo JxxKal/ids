@@ -16,6 +16,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.7.0',
+    date: '2026-08-14',
+    title: 'CYJAN App — Anbindung an die iOS-App',
+    notes: [
+      'Der Master kann seine Alarme jetzt an die CYJAN-App auf dem iPhone melden. Dafür baut er eine ausgehende Verbindung nach draußen auf — im OT-Netz wird kein Port geöffnet und die Firewall bleibt unverändert. Die App bekommt ausschließlich Lesezugriff.',
+      'Neue Sektion unter Einstellungen → Integrationen → „CYJAN App": Verbindungszustand, Sentry-Name, Push-Status und Ereigniszähler auf einen Blick, alle 15 Sekunden aktualisiert.',
+      'Geräte koppeln per QR-Code: Bezeichnung eingeben, Code erzeugen, in der App scannen. Der Code lässt sich antippen zum Kopieren und zeigt, wie lange er noch gültig ist. Gekoppelte Geräte lassen sich einzeln widerrufen — die Verbindung des Geräts endet damit sofort.',
+      'Der Weg nach draußen (Firmen-Proxy, Firmen-CA, no_proxy) ist konfigurierbar und mit „Verbindung testen" prüfbar, bevor gespeichert wird: die Prüfung zeigt Schritt für Schritt, ob DNS, CONNECT, TLS und Zertifikat durchgehen.',
+      'Der Schreibzugriff der App auf die Alarm-Bewertung (Triage) ist standardmäßig aus und weist beim Einschalten darauf hin, dass diese Markierungen ins Nachtraining der Erkennung einfließen.',
+    ],
+  },
+  {
     version: 'v2.6.2',
     date: '2026-07-10',
     title: 'Duplicate-IP-/ARP-Spoof-Erkennung (arpwatch)',

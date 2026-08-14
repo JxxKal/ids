@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import {
-  Activity, ChevronDown, Database, FileText, Globe, HardDrive, Info, KeyRound, ListTree, Lock, Menu, Network, Plug, RotateCcw, Server, Sliders, Sparkles, Upload, Users,
+  Activity, ChevronDown, Database, FileText, Globe, HardDrive, Info, KeyRound, ListTree, Lock, Menu, Network, Plug, RotateCcw, Server, Sliders, Smartphone, Sparkles, Upload, Users,
 } from 'lucide-react';
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '../i18n';
 import {
@@ -55,6 +55,7 @@ import type {
   PatternTrustKey, RemoteTap, RemoteTapPairingToken, Rule, RuleSource, SamlConfig, SignatureStatus,
   StagedBundle, SystemUpdateStatus, UpdateStatus, User,
 } from '../types';
+import { AppConnectSettings } from './AppConnectSettings';
 import { CollapsibleHelp } from './CollapsibleHelp';
 import { ConfirmDialog } from './ConfirmDialog';
 import { FuerThorsten } from './FuerThorsten';
@@ -8545,7 +8546,7 @@ function VersionInfoSection() {
 
 // ── Settings Navigation ───────────────────────────────────────────────────────
 
-export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'notifications' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'migration' | 'egress-priorities' | 'remote-taps' | 'version-info' | 'thorsten';
+export type SectionId = 'general' | 'users' | 'saml' | 'ml-overview' | 'ml-status' | 'ml-config' | 'ml-learned' | 'rules-sources' | 'rules-list' | 'rules-editor' | 'rules-overrides' | 'interfaces' | 'dns-resolvers' | 'ssl' | 'syslog' | 'irma' | 'itop' | 'mqtt' | 'app-connect' | 'notifications' | 'pattern-import' | 'pattern-export' | 'redteam' | 'features' | 'update' | 'geoip' | 'system-health' | 'db-maintenance' | 'migration' | 'egress-priorities' | 'remote-taps' | 'version-info' | 'thorsten';
 
 // Labels werden zur Render-Zeit über i18n aufgelöst:
 //   group:  t('settings.groups.<key>')
@@ -8609,7 +8610,8 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'irma',           icon: <Plug     {...ICON_PROPS} /> },
       { id: 'itop',           icon: <Database {...ICON_PROPS} /> },
-      { id: 'mqtt',           icon: <Network  {...ICON_PROPS} /> },
+      { id: 'mqtt',           icon: <Network    {...ICON_PROPS} /> },
+      { id: 'app-connect',    icon: <Smartphone {...ICON_PROPS} /> },
       { id: 'notifications',  icon: <Plug     {...ICON_PROPS} /> },
       { id: 'pattern-import', icon: <Upload   {...ICON_PROPS} /> },
       { id: 'pattern-export', icon: <Upload   {...ICON_PROPS} /> },
@@ -8794,6 +8796,7 @@ export function SettingsPage({ initialSection }: SettingsPageProps = {}) {
             {active === 'irma'          && <IrmaSettings />}
             {active === 'itop'          && <ItopSettings />}
             {active === 'mqtt'          && <MqttSettings />}
+            {active === 'app-connect'   && <AppConnectSettings />}
             {active === 'notifications' && <NotificationSettings />}
             {active === 'pattern-import' && <PatternImportSettings />}
             {active === 'pattern-export' && <PatternExportSettings />}

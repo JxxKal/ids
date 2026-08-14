@@ -20,13 +20,26 @@ log = logging.getLogger(__name__)
 
 
 class StateWriter:
+    """Schreibt den Zustand als Datei UND hält ihn im Speicher.
+
+    Die In-Memory-Kopie (`last`) bedient die interne HTTP-API — `GET /status`
+    soll nicht bei jeder Anfrage eine Datei lesen, und sie muss auch dann
+    antworten können, wenn das State-File nicht schreibbar ist.
+    """
+
     def __init__(self, path: str) -> None:
         self._path = Path(path)
         self._warned = False
+        self.last: dict = {}
+        # Merker für die Unterscheidung starting ⇄ reconnecting in der API.
+        self.ever_connected = False
 
     def write(self, **fields) -> None:
         payload = dict(fields)
         payload["updated_at"] = time.time()
+        self.last = payload
+        if fields.get("connection") == "connected":
+            self.ever_connected = True
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(self._path.suffix + ".tmp")

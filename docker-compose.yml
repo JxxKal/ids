@@ -867,7 +867,16 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    # Port 8090 (interne API) wird BEWUSST nicht veröffentlicht — sie ist nur
+    # im ids-net erreichbar, und die api ist ihr einziger Aufrufer.
     environment:
+      # ── ENV ist nur noch Bootstrap ────────────────────────────────────────
+      # Die GUI schreibt nach system_config['app_connect']; app-connect pollt
+      # das alle 30s und überlagert die Werte hier feldweise. Ein LEERER
+      # DB-Wert fällt auf ENV zurück; zum Abschalten dient enabled=false in
+      # der DB. Details: app-connect/docs/internal-api.md.
       APP_CONNECT_ENABLED:            ${APP_CONNECT_ENABLED:-true}
       # Leer = dormant. Erst diese beiden Werte schalten den Tunnel scharf.
       APP_CONNECT_PROXY_URL:          ${APP_CONNECT_PROXY_URL:-}
@@ -887,6 +896,14 @@ services:
       APP_CONNECT_API_BASE_URL:       http://api:8000
       KAFKA_BROKERS:                  kafka:9092
       KAFKA_GROUP_ID:                 app-connect
+      # Config-Overlay aus system_config['app_connect'] — dieselbe DSN-Form
+      # wie mqtt-bridge. Keine NEUE Fail-Closed-Variable: POSTGRES_PASSWORD
+      # ist stackweit bereits Pflicht.
+      POSTGRES_DSN:                   postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
+      # Interne HTTP-API für die ids-api (docs/internal-api.md). Bindet an
+      # 0.0.0.0 im Container-Netz, ohne Host-Publish.
+      APP_CONNECT_INTERNAL_HOST:      0.0.0.0
+      APP_CONNECT_INTERNAL_PORT:      8090
       # Identisch zum SECRET_KEY der api — app-connect mintet sich daraus
       # ein JWT mit role=viewer (kein User-DB-Eintrag nötig, weil
       # get_current_user nur die Signatur prüft).
@@ -896,10 +913,21 @@ services:
       # (die der ids-setup-Wizard schreibt und curl nicht versteht).
       HTTPS_PROXY:                    ${HTTPS_PROXY:-}
       NO_PROXY:                       ${NO_PROXY:-}
+      # Dedizierte Überschreibung, falls app-connect einen anderen Proxy nutzen
+      # soll als der Rest des Hosts (oder als einziger überhaupt einen). Hat
+      # Vorrang vor HTTPS_PROXY/NO_PROXY.
+      APP_CONNECT_HTTPS_PROXY:        ${APP_CONNECT_HTTPS_PROXY:-}
+      APP_CONNECT_NO_PROXY:           ${APP_CONNECT_NO_PROXY:-}
       LOG_LEVEL:                      ${APP_CONNECT_LOG_LEVEL:-INFO}
     volumes:
       # Versionsanzeige im hello-Frame und in `cyjan-app status`.
       - ./VERSION:/etc/cyjan/version:ro
+      # Firmen-CA für TLS-inspizierende Proxies. Der Ordner wird beim ersten
+      # Start angelegt; PEM hineinlegen und APP_CONNECT_CA_FILE auf den Pfad
+      # IM CONTAINER zeigen lassen, z.B. /etc/cyjan/certs/corp-ca.pem.
+      # Bewusst ein Host-Pfad und kein Repo-Verzeichnis: eine Kunden-CA hat im
+      # Git und im Update-ZIP nichts verloren.
+      - /etc/cyjan/certs:/etc/cyjan/certs:ro
 
   # ────────────────────────────────────────────────────────────────────────────
   # SNIFFER – PRODUKTION  (docker compose --profile prod up)
