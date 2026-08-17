@@ -392,17 +392,23 @@ async def put_config(
     # Auf dem bestehenden Block aufsetzen, damit Felder, die diese GUI nicht
     # kennt (z.B. tls_insecure), beim Speichern nicht verloren gehen.
     block: dict[str, Any] = dict(current)
-    block.update({
-        "enabled":      body.enabled,
-        "proxy_url":    body.proxy_url.strip(),
-        "device_token": token,
-        "sentry_name":  body.sentry_name.strip(),
-        "https_proxy":  body.https_proxy.strip(),
-        "no_proxy":     body.no_proxy.strip(),
-        "ca_file":      body.ca_file.strip(),
-        "allow_triage": body.allow_triage,
-        "severity_min": body.severity_min,
-    })
+
+    # NUR übermittelte Felder überschreiben. Würden wir stur alle Modellwerte
+    # schreiben, machte ein PUT mit einem einzigen Feld aus jedem ausgelassenen
+    # Wert dessen Default — `enabled` fiele auf false und der Dienst ginge
+    # schlafen, ohne dass irgendwo etwas davon steht. Die GUI schickt zwar
+    # immer das ganze Formular, aber ein Teil-Update ist eine völlig normale
+    # Erwartung an ein PUT auf eine Konfiguration, und die Token-Regel
+    # („leer = unverändert") verspricht sie ohnehin.
+    supplied = body.model_dump(exclude_unset=True)
+    for name in ("enabled", "proxy_url", "sentry_name", "https_proxy",
+                 "no_proxy", "ca_file", "allow_triage", "severity_min"):
+        if name not in supplied:
+            continue
+        value = supplied[name]
+        block[name] = value.strip() if isinstance(value, str) else value
+
+    block["device_token"] = token
     stored = await _store_block(pool, block)
     log.info(
         "app-connect-Konfig gespeichert (enabled=%s, triage=%s, severity_min=%s, token=%s)",
