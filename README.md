@@ -103,6 +103,7 @@ PCAP Store ──(pcap-headers + alerts-enriched)──► MinIO (ids-pcaps)
 | `master-uplink` | Python (aiohttp) | ✅ | mTLS-Endpoint (Port 8443) für Remote-Taps. WebSocket `/uplink` für Alert-/Metric-/PCAP-Frames, `/config` für Rule-Sync, **`/tap-update/<file>` mit Streaming via `sendfile`** für Update-Bundle-Auslieferung. Pollt `taps.update_requested_at` und sendet Update-Push-Frames an die WS-Connection. |
 | `tap-uplink` | Python | ✅ | *(nur Tap)* mTLS-Client zum Master. Konsumiert lokales `alerts-raw` + `rule-metrics` und forwarded mit Outage-Buffer (SQLite, 1 GB Cap) zum Master. **Zusätzlich Mini-PCAP-Store**: konsumiert `pcap-headers`, hält ±60 s in-memory Ringbuffer, baut bei Tap-Alarmen ein libpcap-File und sendet es als `pcap_upload`-Frame. Empfängt `update_now`-Trigger vom Master und schreibt `/run/cyjan-update/trigger` (host bind-mount) — systemd-path-watcher startet `cyjan-tap update --from-master -y`. Reverse-Pull der Heuristik-Rules + Overrides + `known_networks` alle 5 min. |
 | `tap-api` | Python | ✅ | *(nur Tap)* Minimaler Status-View + Maschinen-Endpoints für die `cyjan-tap`-CLI |
+| `app-connect` | Python | ✅ | *(nur Master, Profil `prod`)* Tunnel-Agent für die iOS-App. Baut eine **ausgehende** WSS-Verbindung zum Cloud-Proxy auf und reicht RPCs an die lokale `api` weiter — fail-closed Allowlist, Rolle `viewer`. Ohne Kopplung dormant und trotzdem `healthy` (siehe [CYJAN App](#cyjan-app-ios--app-connect)) |
 | `redteam-orchestrator` | Python FastAPI + FastMCP | ✅ | *(Lab-Profile)* MCP-Server unter `:8002/mcp/` mit 11 Tools für KI-Auto-Pen-Test. Ruft `kali-shell` via `docker exec`, verwaltet Payload-Scenarios (Builtin-Templates, KI-generated, Pattern-Federation-imported), schreibt AI-Suricata-Rules (SID 9000000-9999999), persistiert Run-Ergebnisse in `redteam_results` für MITRE-Coverage. Service-JWT aus `API_SECRET_KEY`. |
 | `redteam-listener` | Alpine + ncat | ✅ | *(Lab-Profile)* TCP-Sinks auf `192.0.2.254` für 20 ICS-/Windows-Standard-Ports (Modbus, S7, OPC-UA, IEC-104, BACnet, MQTT, LDAP, SMB, RDP, …). Erlaubt vollständigen TCP-Handshake für Payload-Scenarios → Sniffer sieht L7-Bytes statt nur SYN. `network_mode: host`, bindet IP-qualifiziert. |
 | `kali-shell` | Kali Linux | ✅ | *(Lab-Profile)* Sandboxed-Container für Pen-Test-Tools (nmap, hping3, hydra, ncat). `network_mode: none` — Netzwerk-Zugriff nur via veth-Pair vom Orchestrator. Whitelisted-CIDRs (RFC 5737 TEST-NETs) erzwungen. |
@@ -116,6 +117,7 @@ Bewusste Architektur-Entscheidungen, die man kennen muss, bevor man am Stack sch
 - **Docker-Socket-Mounts** (`/var/run/docker.sock`): `api` (read-write) und `redteam-orchestrator` (read-only) mounten den Host-Docker-Socket. Das ist **root-äquivalent auf dem Host** — eine Kompromittierung dieser Container = Host-Übernahme. Bewusst so, weil das Self-Update (`api` startet `docker compose up` für die Update-Pipeline) und das RedTeam-Tooling es brauchen. **Konsequenz:** Diese beiden Container sind die kritischste Angriffsfläche; Update-Endpoints sind `require_admin`-geschützt, RedTeam ist standardmäßig aus (`REDTEAM_ENABLED`). Nicht „mal eben" weitere Container mit Socket-Mount versehen.
 - **Service-zu-Service-Auth**: Interne Dienste (z.B. `rule-tuner`) authentisieren sich mit kurzlebigen JWTs (5 min), die sie selbst aus `API_SECRET_KEY` signieren — kein DB-User. Wer `API_SECRET_KEY` hat, kann beliebige Admin-Tokens minten ⇒ der Key ist das kronjuwel (ISO-Wizard generiert ihn zufällig; Startup failt bei Default-Wert).
 - **mTLS Master↔Tap**: `tap-uplink` verifiziert das Master-Cert gegen die gepinnte CA (`check_hostname=False`, weil das Server-Cert die CA selbst ist — ein MITM bräuchte den CA-Privatekey). Die CA liegt im `master-ca`-Volume; dessen Schutz = Vertraulichkeit des gesamten Tap-Verbunds.
+- **app-connect (iOS-App)**: Der einzige Dienst, der von sich aus **aus dem OT-Netz heraus** eine dauerhafte Verbindung ins Internet aufbaut. Kein Ingress, kein offener Port, keine Master-Zugangsdaten auf dem Telefon. Abgesichert durch zwei unabhängige Schranken — fail-closed Allowlist (`app-connect/src/allowlist.py`) und die Rolle `viewer` des Service-Tokens. **Konsequenz:** Wer die Allowlist erweitert, verschiebt eine Trust-Boundary; sie muss mit `protocol.md` §2.3 des App-Repos übereinstimmen. Ohne Kopplung ist der Dienst dormant und baut gar keine Verbindung auf.
 - **Web-Auth**: JWT im `localStorage` (XSS-exponiert, daher strikte CSP), Login-Brute-Force per IP-Rate-Limit gebremst, lokale Passwörter bcrypt.
 - **CSP**: strikt same-origin (`script-src 'self'`, keine externen CDNs). Neue externe Ressourcen werden vom Browser geblockt — bewusst, die Appliance läuft offline. Bei Bedarf lokal bündeln statt freigeben.
 
@@ -1334,6 +1336,68 @@ Update auf einem laufenden Tap (drei Pfade, je nach Setup):
 3. **Klassisch via Git** — `cd /opt/ids && git pull && docker compose -f docker-compose.tap.yml build && up -d`. Fall-back wenn das Bundle am Master nicht gestaged ist.
 
 Heuristik-Rule-Änderungen kommen ohnehin separat über den Reverse-Channel (`/config`) und brauchen keinen Container-Rebuild.
+
+---
+
+## CYJAN App (iOS) — app-connect
+
+Die native iOS-App liegt in einem eigenen Repo ([`cyjan-mobile`](https://github.com/JxxKal/cyjan-mobile)). Hier im Stack steckt nur ihr Gegenstück: **`app-connect`**, der Tunnel-Agent.
+
+```
+OT-Netz (kein Ingress)                    Internet                  Gerät
+──────────────────────                    ────────────────          ──────────
+
+  ids-api ◄── app-connect ──ausgehend :443──► proxy.cyjan.dev ◄──── CYJAN Sentry
+             (dieses Repo)   persistente WSS   (cyjan-mobile)         (iPhone)
+                                                + APNs
+```
+
+**Kein eingehender Verkehr in die Anlage.** Die Verbindung geht ausschließlich von innen nach außen. Der Cloud-Proxy ist der Treffpunkt zwischen Telefon und Anlage — er gehört **nicht** auf die OT-Box und wird auch nicht mit ausgeliefert. Auf dem Telefon liegen keine Master-Zugangsdaten; app-connect authentisiert sich selbst gegen die lokale `api`.
+
+### Wann läuft app-connect?
+
+Der Container startet **mit dem Stack** — beim Boot und nach jedem `cyjan-update`, sofern das Profil `prod` aktiv ist (Default aus `/etc/cyjan/profile`). Er wartet nicht auf einen Klick in der GUI.
+
+Ohne Kopplung bleibt er allerdings **untätig**: fehlen `APP_CONNECT_PROXY_URL` oder `APP_CONNECT_DEVICE_TOKEN`, schreibt er `connection="dormant"` und loggt „Dienst bleibt im Leerlauf". Dabei ist er **absichtlich `healthy`** — ohne App-Anbindung ist Leerlauf kein Fehlerzustand, und ein unerreichbarer Cloud-Proxy darf `cyjan-stack-health` beim Boot nicht auf fremde Infrastruktur warten lassen.
+
+### Aktivierung
+
+**Web-GUI: Einstellungen → Integrationen → CYJAN App.** Dort wird die Proxy-Adresse eingetragen, optional der Egress über einen Firmen-Proxy samt Firmen-CA, und ein Gerät gekoppelt. Ein Testknopf prüft den ganzen Weg durch, *bevor* gespeichert wird.
+
+Die GUI schreibt nach `system_config['app_connect']`. app-connect pollt das alle **30 s** (`CONFIG_RELOAD_INTERVAL_S`) und überlagert die ENV-Werte feldweise — **ein Neustart ist nicht nötig**. Nach dem Speichern steht der Tunnel also spätestens eine halbe Minute später.
+
+Ein leerer DB-Wert fällt auf die ENV-Vorgabe zurück. Zum Abschalten dient `enabled=false` in der DB, **nicht** das Stoppen des Containers.
+
+Für den SSH-Weg gibt es dasselbe als CLI:
+
+```bash
+docker compose exec app-connect cyjan-app test-proxy          # DNS → CONNECT/TCP → TLS → Zertifikat
+docker compose exec app-connect cyjan-app pair --label "iPhone Jan"
+docker compose exec app-connect cyjan-app status              # Tunnel-Zustand
+docker compose exec app-connect cyjan-app devices             # gekoppelte Geräte
+docker compose exec app-connect cyjan-app revoke <device_id>  # Gerät sperren
+```
+
+Der Kopplungscode gilt **10 Minuten** und nur **einmal**.
+
+### Was die App darf
+
+Zwei unabhängige Schranken, beide müssten fehlerhaft sein, damit ein Telefon an einen Admin-Endpunkt kommt:
+
+1. **Fail-closed Allowlist** in `app-connect/src/allowlist.py` — was nicht ausdrücklich freigegeben ist, wird abgewiesen. Sie ist der verbindliche Vertrag und steht identisch in `docs/architecture/protocol.md` §2.3 des App-Repos. **Ein neuer Endpunkt in der App braucht hier einen Eintrag**, sonst kommt er nicht durch.
+2. **Rolle `viewer`** des Service-Tokens, mit dem app-connect gegen die lokale `api` arbeitet.
+
+Schreibzugriff (TP/FP-Triage aus der App) ist per Default **aus**. `APP_CONNECT_ALLOW_TRIAGE=true` meldet `read_only=false` plus die Capability `triage`; die App blendet die Bedienelemente dann von selbst ein — ohne App-Update.
+
+### Auslieferung
+
+`app-connect` geht den normalen Release-Weg mit: Der Workflow baut es mit `--profile prod`, legt es per `docker save` ins Update-Bundle, und `cyjan-update` spielt es mit `docker load` ein. **Auf der Offline-Box wird nichts gebaut.**
+
+| Wo | Was |
+|---|---|
+| Interne API | Port 8090, bewusst **nicht** veröffentlicht — nur im `ids-net`, einziger Aufrufer ist die `api`. Details: [`app-connect/docs/internal-api.md`](app-connect/docs/internal-api.md) |
+| Protokoll | `docs/architecture/protocol.md` im [`cyjan-mobile`](https://github.com/JxxKal/cyjan-mobile)-Repo — Frames, Allowlist, Push, Enrollment |
+| Proxy-Betrieb | `docs/ops/deploy.md` ebendort |
 
 ---
 
