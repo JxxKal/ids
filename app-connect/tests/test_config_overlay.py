@@ -143,7 +143,6 @@ def test_reconnect_feld_erkannt(field, value):
 
 @pytest.mark.parametrize("field,value", [
     ("severity_min", "critical"),
-    ("allow_triage", True),
     ("sentry_name", "anderer-name"),
 ])
 def test_live_feld_erzwingt_keinen_reconnect(field, value):
@@ -153,6 +152,22 @@ def test_live_feld_erzwingt_keinen_reconnect(field, value):
     assert changed != base                      # Änderung wird bemerkt …
     assert changed.differs_in_connection(base) is False   # … aber live
     assert changed.needs_restart(base) is False
+
+
+def test_triage_wechsel_ist_ein_neustart():
+    """Triage wirkt in der Allowlist sofort, aber `read_only` und
+    `capabilities` stehen für Proxy und App nur im `hello`. Ohne Neuaufbau
+    erführe eine laufende App nie, dass der Betreiber den Schalter in der GUI
+    umgelegt hat — die TP/FP-Bedienelemente blieben aus."""
+    base = cfg({"proxy_url": "wss://a/t", "device_token": "t"})
+    on = cfg({"proxy_url": "wss://a/t", "device_token": "t"},
+             {"allow_triage": True})
+    assert on.differs_in_connection(base) is False   # kein Verbindungsfeld …
+    assert on.needs_restart(base) is True            # … trotzdem Neuaufbau
+
+    # Und wieder zurück: Abschalten muss genauso durchschlagen, sonst behielte
+    # die App eine Schreibberechtigung, die es nicht mehr gibt.
+    assert base.needs_restart(on) is True
 
 
 def test_enabled_wechsel_ist_ein_neustart():

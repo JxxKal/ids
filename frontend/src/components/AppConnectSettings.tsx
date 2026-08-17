@@ -660,6 +660,10 @@ export function AppConnectSettings() {
                 Diese Markierungen fließen ins ML-Retraining ein und verschieben die Schwellwerte der
                 Heuristiken — eine Fehlmarkierung vom Handy wirkt also dauerhaft auf die Erkennung.
                 Ohne diesen Schalter ist die Verbindung strikt lesend.
+                <br />
+                Nach dem Speichern baut der Tunnel sich einmal neu auf; die Bedienelemente
+                erscheinen danach binnen einer halben Minute von selbst in der App — ohne
+                Neustart und ohne App-Update.
               </span>
             </div>
           )}

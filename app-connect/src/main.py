@@ -87,7 +87,6 @@ async def _config_watch(
     store: ConfigStore,
     runtime: ServiceRuntime,
     rt: RuntimeConfig,
-    allowlist: Allowlist,
 ) -> None:
     """Pollt die effektive Konfiguration. Kehrt zurück, sobald der Tunnel
     neu aufgebaut werden muss; alles andere wird live übernommen."""
@@ -110,14 +109,13 @@ async def _config_watch(
             return
 
         # Live-Übernahme ohne Reconnect.
+        #
+        # `allow_triage` steht hier bewusst NICHT mehr: es erzwingt seit
+        # needs_restart() einen Tunnel-Neuaufbau. Anders erführen Proxy und App
+        # die geänderten `read_only`/`capabilities` nie — beide lesen sie
+        # ausschließlich aus dem `hello`.
         if fresh.severity_min != applied.severity_min:
             rt.event_severity_min = fresh.severity_min
-        if fresh.allow_triage != applied.allow_triage:
-            allowlist.allow_triage = fresh.allow_triage
-            log.info("Triage jetzt %s — read_only=%s, capabilities=%s "
-                     "(wirkt sofort, der Proxy erfährt es mit dem nächsten hello)",
-                     "aktiv" if fresh.allow_triage else "aus",
-                     allowlist.read_only, allowlist.capabilities())
         log.info("Konfiguration live übernommen: %s", ", ".join(changed))
         applied = fresh
 
@@ -153,7 +151,7 @@ async def _run_session(
             asyncio.create_task(source.run(), name="events"),
             asyncio.create_task(tunnel.run(), name="tunnel"),
             asyncio.create_task(
-                _config_watch(cfg, store, runtime, rt, allowlist),
+                _config_watch(cfg, store, runtime, rt),
                 name="config-watch",
             ),
         ]

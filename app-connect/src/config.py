@@ -203,10 +203,23 @@ class Config:
         return False
 
     def needs_restart(self, other: "Config") -> bool:
-        """Wie `differs_in_connection`, plus der An/Aus-Schalter: von
-        `enabled=false` auf `true` (und zurück) ist ein Lebenszyklus-
-        Wechsel, kein Live-Update."""
-        return self.enabled != other.enabled or self.differs_in_connection(other)
+        """Wie `differs_in_connection`, plus zwei Schalter:
+
+        `enabled` ist ein Lebenszyklus-Wechsel, kein Live-Update.
+
+        `allow_triage` wirkt in der Allowlist zwar sofort, steht für den
+        Proxy und die App aber ausschließlich im `hello` (read_only,
+        capabilities). Ohne Neuaufbau erführe eine laufende App nie, dass
+        der Betreiber Triage in der GUI eingeschaltet hat — die TP/FP-
+        Bedienelemente blieben aus, womöglich tagelang. Ein Reconnect
+        kostet gut eine Sekunde; das ist der Preis dafür, dass ein Klick
+        in der GUI am Telefon ankommt.
+        """
+        return (
+            self.enabled != other.enabled
+            or self.allow_triage != other.allow_triage
+            or self.differs_in_connection(other)
+        )
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Config":
