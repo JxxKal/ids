@@ -92,8 +92,13 @@ async def connection_graph(
         rows = await conn.fetch(
             """
             SELECT
-                src_ip::text,
-                dst_ip::text,
+                -- host() statt ::text: inet trägt die Netzmaske, und ::text
+                -- gibt sie mit aus ("192.168.1.85/32"). Alle anderen
+                -- Endpunkte liefern die nackte Adresse; wer hier vergleicht —
+                -- etwa der Verbindungsgraph für die Pfeilrichtung — bekam
+                -- sonst nie einen Treffer. Gleiche Falle wie in alerts.py.
+                host(src_ip) AS src_ip,
+                host(dst_ip) AS dst_ip,
                 dst_port,
                 proto,
                 COUNT(*)        AS flow_count,
