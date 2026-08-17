@@ -20,8 +20,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # ausgehende Verbindungen, hört intern auf 8090 (>1024) und schreibt nur
 # /tmp/heartbeat sowie die Zustandsdatei unter /run/cyjan — beides tmpfs.
 # Feste UID, damit `user:` im Compose-File dazu passt.
-RUN groupadd -g 10002 connect \
- && useradd -u 10002 -g 10002 -M -s /usr/sbin/nologin connect \
+RUN groupadd -g 10002 cyjan \
+ && useradd -u 10002 -g 10002 -M -s /usr/sbin/nologin cyjan \
  && chown -R 10002:10002 /app
 
 CMD ["python", "-u", "src/main.py"]
