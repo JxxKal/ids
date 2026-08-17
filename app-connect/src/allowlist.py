@@ -63,6 +63,38 @@ _STREAM_RULE = re.compile(rf"^/api/alerts/{_UUID}/pcap$")
 _FORBIDDEN = re.compile(r"[\x00-\x20\x7f\\]")
 
 
+# Obergrenze für `limit`. Die ids-API deckelt selbst (`le=10_000` bei Alerts),
+# das ist für einen Lese-Client vom Telefon aber viel zu großzügig: die App
+# zeigt nie mehr als eine Seite auf einmal. Ohne eigene Grenze könnte ein
+# entwendetes Gerät die Datenbank des Masters mit Maximalabfragen belasten.
+MAX_QUERY_LIMIT = 500
+
+
+def clamp_query(query: dict[str, str]) -> dict[str, str]:
+    """Begrenzt `limit` auf `MAX_QUERY_LIMIT`.
+
+    Bewusst kappen statt ablehnen: ein zu großes `limit` ist kein Angriff,
+    sondern meist ein Client, der zu viel auf einmal will. Ein Fehler dafür
+    wäre unfreundlich, ein stilles Kappen ist die richtige Antwort — die
+    Antwort ist dann eben kürzer.
+    """
+    raw = query.get("limit")
+    if raw is None:
+        return query
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        # Nicht-numerisch: unverändert weiterreichen, die API validiert selbst
+        # und antwortet mit einer sauberen 422.
+        return query
+    if value <= MAX_QUERY_LIMIT:
+        return query
+    log.info("limit=%s auf %d gekappt", raw, MAX_QUERY_LIMIT)
+    out = dict(query)
+    out["limit"] = str(MAX_QUERY_LIMIT)
+    return out
+
+
 class RejectedPath(Exception):
     """Pfad nicht in der Allowlist bzw. syntaktisch unzulässig."""
 

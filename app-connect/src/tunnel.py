@@ -30,7 +30,7 @@ from urllib.parse import urlparse
 import orjson
 import websockets
 
-from allowlist import Allowlist, RejectedPath
+from allowlist import Allowlist, RejectedPath, clamp_query
 from api_client import ApiClient
 from backoff import next_backoff, with_jitter
 from config import (
@@ -390,6 +390,7 @@ class Tunnel:
         # sie aber nicht.
         for k, v in extra_query.items():
             query.setdefault(k, v)
+        query = clamp_query(query)
 
         body: bytes | None = None
         b64 = payload.get("body_b64")

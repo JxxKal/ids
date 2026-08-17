@@ -3,7 +3,7 @@ Modul. Wenn hier etwas durchrutscht, ist der Tunnel eine offene Tür in die
 ids-api."""
 import pytest
 
-from allowlist import Allowlist, RejectedPath
+from allowlist import MAX_QUERY_LIMIT, Allowlist, RejectedPath, clamp_query
 
 ALERT_ID = "3f1c9a2e-4b6d-4e7a-9c1f-0a2b3c4d5e6f"
 
@@ -158,3 +158,31 @@ def test_only_pcap_is_streamable(acl):
     assert not Allowlist.is_streamable("/api/alerts")
     assert not Allowlist.is_streamable(f"/api/alerts/{ALERT_ID}")
     assert not Allowlist.is_streamable("/api/flows")
+
+
+# ── Query-Begrenzung ──────────────────────────────────────────
+
+
+@pytest.mark.parametrize("roh,erwartet", [
+    ("50", "50"),
+    ("500", "500"),
+    ("501", "500"),
+    ("10000", "500"),
+    ("-1", "-1"),          # negativ: die API validiert das selbst (422)
+    ("keine-zahl", "keine-zahl"),
+])
+def test_limit_wird_gekappt(roh, erwartet):
+    assert clamp_query({"limit": roh})["limit"] == erwartet
+
+
+def test_clamp_laesst_andere_parameter_unberuehrt():
+    query = {"limit": "9999", "severity": "critical", "src_ip": "10.0.0.1"}
+    out = clamp_query(query)
+    assert out["limit"] == str(MAX_QUERY_LIMIT)
+    assert out["severity"] == "critical"
+    assert out["src_ip"] == "10.0.0.1"
+
+
+def test_clamp_ohne_limit_ist_identitaet():
+    query = {"severity": "high"}
+    assert clamp_query(query) is query

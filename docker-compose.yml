@@ -867,6 +867,19 @@ services:
     logging: *default-logging
     profiles: [prod]
     networks: [ids-net]
+    # ── Härtung ──────────────────────────────────────────────
+    # Der einzige Dienst, der von sich aus aus dem OT-Netz heraus verbindet,
+    # und er hält das device_token und den API_SECRET_KEY. Entsprechend eng:
+    # keine Wurzelrechte, keine Capabilities, kein beschreibbares Dateisystem.
+    user: "10002:10002"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      # /tmp/heartbeat für den Healthcheck, /run/cyjan für die Zustandsdatei.
+      - /tmp:size=16m,mode=1777
+      - /run/cyjan:size=8m,mode=1777
     depends_on:
       kafka:
         condition: service_healthy

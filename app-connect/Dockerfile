@@ -16,4 +16,12 @@ RUN printf '#!/bin/sh\nexec python -u /app/src/cli.py "$@"\n' > /usr/local/bin/c
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
+# Unprivilegiert laufen. Der Dienst braucht keine Wurzelrechte: er öffnet
+# ausgehende Verbindungen, hört intern auf 8090 (>1024) und schreibt nur
+# /tmp/heartbeat sowie die Zustandsdatei unter /run/cyjan — beides tmpfs.
+# Feste UID, damit `user:` im Compose-File dazu passt.
+RUN groupadd -g 10002 connect \
+ && useradd -u 10002 -g 10002 -M -s /usr/sbin/nologin connect \
+ && chown -R 10002:10002 /app
+
 CMD ["python", "-u", "src/main.py"]
