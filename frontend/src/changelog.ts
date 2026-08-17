@@ -17,14 +17,16 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: 'v2.7.0',
-    date: '2026-08-14',
+    date: '2026-08-17',
     title: 'CYJAN App — Anbindung an die iOS-App',
     notes: [
       'Der Master kann seine Alarme jetzt an die CYJAN-App auf dem iPhone melden. Dafür baut er eine ausgehende Verbindung nach draußen auf — im OT-Netz wird kein Port geöffnet und die Firewall bleibt unverändert. Die App bekommt ausschließlich Lesezugriff.',
       'Neue Sektion unter Einstellungen → Integrationen → „CYJAN App": Verbindungszustand, Sentry-Name, Push-Status und Ereigniszähler auf einen Blick, alle 15 Sekunden aktualisiert.',
       'Geräte koppeln per QR-Code: Bezeichnung eingeben, Code erzeugen, in der App scannen. Der Code lässt sich antippen zum Kopieren und zeigt, wie lange er noch gültig ist. Gekoppelte Geräte lassen sich einzeln widerrufen — die Verbindung des Geräts endet damit sofort.',
       'Der Weg nach draußen (Firmen-Proxy, Firmen-CA, no_proxy) ist konfigurierbar und mit „Verbindung testen" prüfbar, bevor gespeichert wird: die Prüfung zeigt Schritt für Schritt, ob DNS, CONNECT, TLS und Zertifikat durchgehen.',
-      'Der Schreibzugriff der App auf die Alarm-Bewertung (Triage) ist standardmäßig aus und weist beim Einschalten darauf hin, dass diese Markierungen ins Nachtraining der Erkennung einfließen.',
+      'Der Schreibzugriff der App auf die Alarm-Bewertung (Triage) ist standardmäßig aus und weist beim Einschalten darauf hin, dass diese Markierungen ins Nachtraining der Erkennung einfließen. Wird er eingeschaltet, greift er jetzt binnen einer halben Minute — vorher wirkte er erst, wenn die Verbindung zur App zufällig neu aufgebaut wurde.',
+      'Behoben: Im Verbindungsgraph zeigten die Pfeile zwischen zwei Adressen immer in dieselbe Richtung, unabhängig davon, wer tatsächlich mit wem gesprochen hat. Ursache war eine Adress-Schreibweise, die nur an dieser einen Stelle von der übrigen Schnittstelle abwich.',
+      'Behoben: PCAP-Downloads schlugen bei älteren Alarmen fehl. Mitschnitte werden nach sieben Tagen automatisch gelöscht, die Alarme boten sie danach aber weiter zum Herunterladen an. Der Mitschnitt wird jetzt als nicht mehr vorhanden geführt, sobald die Aufbewahrungsfrist abgelaufen ist.',
     ],
   },
   {
