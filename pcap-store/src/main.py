@@ -225,6 +225,17 @@ def run(cfg: Config) -> None:
     total_pcaps  = 0
     last_stats_log = time.monotonic()
 
+    # Einmal beim Start: nach einem längeren Stillstand ist die Tabelle voller
+    # Zusagen für Objekte, die MinIO inzwischen geräumt hat.
+    cleared = storage.expire_stale_pcaps(cfg.pcap_retention_days)
+    if cleared:
+        log.info(
+            "Retention-Sweep beim Start: %d Alarme ohne Mitschnitt bereinigt "
+            "(älter als %d Tage)",
+            cleared, cfg.pcap_retention_days,
+        )
+    last_sweep = time.monotonic()
+
     def _stop(sig, _frame):
         nonlocal running
         log.info("Shutdown signal received")
@@ -236,6 +247,18 @@ def run(cfg: Config) -> None:
     try:
         while running:
             _beat()
+
+            # Retention-Sweep. Läuft unabhängig vom Kafka-Verkehr — gerade auf
+            # einem stillen Sensor altern die Mitschnitte weiter.
+            if time.monotonic() - last_sweep >= cfg.retention_sweep_s:
+                last_sweep = time.monotonic()
+                cleared = storage.expire_stale_pcaps(cfg.pcap_retention_days)
+                if cleared:
+                    log.info(
+                        "Retention-Sweep: %d Alarme ohne Mitschnitt bereinigt",
+                        cleared,
+                    )
+
             msg = consumer.poll(timeout=POLL_TIMEOUT)
 
             # Pending-Alerts auswerten (auch ohne neue Kafka-Nachricht)

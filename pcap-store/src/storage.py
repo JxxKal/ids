@@ -90,6 +90,57 @@ class PcapStorage:
                 if attempt < 2:
                     time.sleep(2 ** attempt)
 
+    def expire_stale_pcaps(self, retention_days: int) -> int:
+        """Nimmt die Verfügbarkeits-Zusage zurück, sobald MinIO geräumt hat.
+
+        MinIO löscht die Objekte per Lifecycle-Regel nach PCAP_RETENTION_DAYS
+        (infra/minio/init-buckets.sh). An der alerts-Tabelle ging das bisher
+        spurlos vorbei: `pcap_available` blieb true, `pcap_key` zeigte auf ein
+        Objekt, das es nicht mehr gab. Die API lief in `minio.get_object` auf
+        einen Fehler und lieferte 404 — ununterscheidbar von „dieser Alarm
+        hatte nie einen Mitschnitt". Clients boten den Download trotzdem an.
+
+        Bewusst über das **Alter** statt über eine Objektabfrage: die
+        Lifecycle-Regel arbeitet nach genau demselben Maß, und ein
+        `stat_object` je Alarm wäre bei sechsstelligen Zeilenzahlen nicht
+        tragbar. Der Alert-Zeitstempel liegt minimal vor der Objekt-Erzeugung
+        (Upload passiert erst nach dem ±window_s-Fenster), wir räumen also
+        eher ein paar Minuten zu früh als zu spät auf — das ist die richtige
+        Richtung: lieber nichts versprechen als ein leeres Versprechen.
+
+        Gibt die Anzahl bereinigter Zeilen zurück, 0 auch im Fehlerfall.
+        """
+        if retention_days <= 0:
+            return 0
+
+        for attempt in range(3):
+            try:
+                self._connect()
+                with self._conn.cursor() as cur:      # type: ignore[union-attr]
+                    cur.execute(
+                        """
+                        UPDATE alerts
+                        SET pcap_available = false, pcap_key = NULL
+                        WHERE pcap_available
+                          AND ts < now() - make_interval(days => %s)
+                        """,
+                        (retention_days,),
+                    )
+                    cleared = cur.rowcount
+                self._conn.commit()                   # type: ignore[union-attr]
+                return cleared if cleared > 0 else 0
+            except Exception as exc:
+                log.error("PCAP-Retention-Sweep, Versuch %d: %s", attempt + 1, exc)
+                if self._conn:
+                    try:
+                        self._conn.rollback()
+                    except Exception:
+                        pass
+                    self._conn = None
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+        return 0
+
     def _connect(self) -> None:
         if self._conn is None or self._conn.closed:
             self._conn = psycopg2.connect(self._dsn)

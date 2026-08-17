@@ -482,6 +482,11 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}
       PCAP_BUCKET: ids-pcaps
       PCAP_WINDOW_S: ${PCAP_WINDOW_S:-60}          # ±Sekunden um Alert-Timestamp
+      # MUSS mit dem Wert bei minio-init übereinstimmen: dort räumt die
+      # Lifecycle-Regel die Objekte, hier wird die Zusage in der alerts-Tabelle
+      # zurückgenommen. Läuft das auseinander, verspricht die API wieder
+      # Mitschnitte, die es nicht mehr gibt.
+      PCAP_RETENTION_DAYS: ${PCAP_RETENTION_DAYS:-7}
       POSTGRES_DSN: postgresql://ids:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD nicht gesetzt - Secret in .env erforderlich (ids-setup/Wizard generiert es)}@timescaledb:5432/ids
 
   api:

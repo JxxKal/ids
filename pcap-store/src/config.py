@@ -12,6 +12,13 @@ class Config:
     pcap_bucket: str
     # ±Sekunden um den Alert-Timestamp für das PCAP-Fenster
     pcap_window_s: float
+    # Muss mit der MinIO-Lifecycle-Regel übereinstimmen (siehe
+    # infra/minio/init-buckets.sh) — sonst behauptet die alerts-Tabelle
+    # entweder zu lange oder zu kurz, ein Mitschnitt sei da.
+    pcap_retention_days: int
+    # Abstand zwischen zwei Retention-Sweeps. Stunde reicht: die
+    # Lifecycle-Regel arbeitet in Tagen, exakter muss es nicht sein.
+    retention_sweep_s: float
     test_mode: bool
 
     @classmethod
@@ -27,5 +34,7 @@ class Config:
             minio_secret_key=os.environ.get("MINIO_SECRET_KEY", "ids-secret-change-me"),
             pcap_bucket=os.environ.get("PCAP_BUCKET", "ids-pcaps"),
             pcap_window_s=float(os.environ.get("PCAP_WINDOW_S", "60")),
+            pcap_retention_days=int(os.environ.get("PCAP_RETENTION_DAYS", "7")),
+            retention_sweep_s=float(os.environ.get("RETENTION_SWEEP_S", "3600")),
             test_mode=os.environ.get("TEST_MODE", "false").lower() == "true",
         )
