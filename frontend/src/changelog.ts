@@ -16,6 +16,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.7.1',
+    date: '2026-08-17',
+    title: 'Härtung der App-Anbindung',
+    notes: [
+      'Der Tunnel-Dienst zur CYJAN-App läuft nicht mehr mit Wurzelrechten und mit einem schreibgeschützten Dateisystem. Er ist der einzige Dienst, der von sich aus eine Verbindung aus dem Anlagennetz heraus aufbaut, und hält dabei die Zugangsdaten zum Master — entsprechend eng ist er jetzt eingeschnürt.',
+      'Abfragen der App sind begrenzt: eine einzelne Anfrage kann höchstens 500 Datensätze anfordern. Die App zeigt ohnehin nie mehr als eine Seite auf einmal; ein entwendetes Telefon kann damit die Datenbank des Masters nicht mehr mit Maximalabfragen belasten.',
+      'Am Cloud-Proxy sind dieselben Maßnahmen umgesetzt worden, dazu Anfragegrenzen pro Gerät und eine kürzere Gültigkeit der Geräte-Anmeldung (44 statt 120 Tage). Der Proxy wird getrennt aktualisiert und ist nicht Teil dieses Updates.',
+      'Keine Änderung an der Bedienung. Wer die App-Anbindung nicht nutzt, merkt von diesem Update nichts.',
+    ],
+  },
+  {
     version: 'v2.7.0',
     date: '2026-08-17',
     title: 'CYJAN App — Anbindung an die iOS-App',
