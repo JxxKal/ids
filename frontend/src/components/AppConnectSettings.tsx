@@ -343,8 +343,9 @@ export function AppConnectSettings() {
         <p className="text-xs text-slate-500 leading-relaxed">
           Verbindet diesen Master über eine ausgehende Verbindung (Port 443) mit dem CYJAN-Cloud-Proxy,
           damit gekoppelte Smartphones Alarme und Threat-Level sehen. Es wird <strong>kein Port geöffnet</strong> —
-          die Verbindung baut immer der Master nach draußen auf. Ohne Proxy-URL und Device-Token bleibt der
-          Dienst im Ruhezustand.
+          die Verbindung baut immer der Master nach draußen auf. Ohne Proxy-URL und Sentry-Token bleibt der
+          Dienst im Ruhezustand — beides stammt vom Cloud-Proxy und wird einmalig eingetragen.
+          Telefone werden davon getrennt gekoppelt, weiter unten unter „Gekoppelte Geräte".
         </p>
       </CollapsibleHelp>
 
@@ -433,7 +434,7 @@ export function AppConnectSettings() {
             )}
             {!status.configured && (
               <p className="text-[11px] text-slate-500">
-                Noch nicht eingerichtet — Proxy-URL und Device-Token fehlen. Beides steht unten im Formular.
+                Noch nicht eingerichtet — Proxy-URL und Sentry-Token fehlen. Beides steht unten im Formular.
               </p>
             )}
           </>
@@ -482,7 +483,8 @@ export function AppConnectSettings() {
 
             <div className="flex flex-col gap-1 md:col-span-2">
               <label className="text-slate-400 flex items-center gap-2">
-                Device-Token
+                Sentry-Token
+                <span className="text-[10px] font-mono text-slate-600">APP_CONNECT_DEVICE_TOKEN</span>
                 {tokenSet && (
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-emerald-700/40 bg-emerald-900/20 text-emerald-300">
                     gesetzt
@@ -502,29 +504,51 @@ export function AppConnectSettings() {
                   disabled={clearToken}
                   placeholder={
                     clearToken ? '(wird beim Speichern entfernt)'
-                      : tokenSet ? '•••••••• gesetzt — leer lassen behält es'
-                      : 'Token aus dem CYJAN-Portal einfügen'
+                      : tokenSet ? 'gespeichert — zum Ersetzen neues Token einfügen'
+                      : 'Token vom Cloud-Proxy einfügen'
                   }
                   value={tokenInput}
-                  onChange={e => setTokenInput(e.target.value)}
+                  onChange={e => {
+                    setTokenInput(e.target.value);
+                    // Leert man das Feld, verschwindet der Umschalter — sein
+                    // Zustand darf nicht überdauern, sonst steht das nächste
+                    // eingefügte Token unerwartet im Klartext da.
+                    if (e.target.value === '') setShowToken(false);
+                  }}
                 />
                 <div className="flex gap-2">
-                  <button type="button" className="btn-ghost text-xs"
-                    onClick={() => setShowToken(v => !v)} disabled={clearToken}>
-                    {showToken ? 'Verbergen' : 'Zeigen'}
-                  </button>
+                  {/* Nur solange es etwas zu zeigen gibt. Das Feld ist
+                      schreibend-only: der Server liefert das Token nie zurück,
+                      also steht hier außerhalb einer Eingabe nichts, das ein
+                      Umschalter sichtbar machen könnte. Ein Knopf, der bei
+                      leerem Feld nichts tut, sieht aus wie ein Defekt. */}
+                  {tokenInput.length > 0 && !clearToken && (
+                    <button type="button" className="btn-ghost text-xs"
+                      onClick={() => setShowToken(v => !v)}>
+                      {showToken ? 'Verbergen' : 'Zeigen'}
+                    </button>
+                  )}
                   {(tokenSet || clearToken) && (
                     <button type="button"
                       className={clearToken ? 'btn-ghost text-xs text-amber-300' : 'btn-danger text-xs'}
-                      onClick={() => { setClearToken(v => !v); setTokenInput(''); }}>
+                      onClick={() => { setClearToken(v => !v); setTokenInput(''); setShowToken(false); }}>
                       {clearToken ? 'Doch behalten' : 'Token entfernen'}
                     </button>
                   )}
                 </div>
               </div>
-              <span className="text-[10px] text-slate-600">
-                Wird nie zurückgeliefert — die Oberfläche zeigt nur, ob eines hinterlegt ist.
-                Ein leeres Feld lässt das gespeicherte Token unangetastet.
+              <span className="text-[10px] text-slate-600 leading-relaxed">
+                Weist <em>diesen Master</em> gegenüber dem Cloud-Proxy aus. Es wird dort einmalig
+                ausgegeben, wenn der Sentry angelegt wird
+                (<span className="font-mono">POST /internal/sentries</span>), und ist danach nicht
+                mehr abrufbar — der Proxy speichert nur seinen Hash. Verloren heißt neu ausstellen.
+                <br />
+                Nicht zu verwechseln mit dem <strong>Kopplungscode</strong>, mit dem sich Telefone
+                anmelden: den erzeugt weiter unten „Gerät koppeln", er gilt zehn Minuten und wird
+                hier nicht eingetragen.
+                <br />
+                Auch hier wird nichts zurückgeliefert — die Oberfläche zeigt nur, ob eines
+                hinterlegt ist. Ein leeres Feld lässt das gespeicherte Token unangetastet.
               </span>
             </div>
           </div>
