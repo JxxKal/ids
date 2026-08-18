@@ -191,7 +191,14 @@ cmd_apply() {
   cur=$(read_version)
   echo "$TAG Ist-Version: $cur"
 
-  local zip_path=""
+  # BEWUSST NICHT `local` — genau wie $stage weiter unten: der EXIT-Trap
+  # läuft im Skript-Scope und sieht Funktions-Locals nicht mehr. Mit `local`
+  # räumt er stillschweigend nichts weg.
+  zip_path=""
+  # Nur ein von UNS heruntergeladenes ZIP darf am Ende weg. Ein per
+  # --from-zip übergebenes Archiv gehört dem Betreiber (Air-Gap: oft der
+  # einzige Datenträger mit dem Release) und wird nie angefasst.
+  zip_is_temp=0
   if [ -n "$from_zip" ]; then
     [ -r "$from_zip" ] || { echo "$TAG ZIP nicht lesbar: $from_zip"; exit 1; }
     zip_path="$from_zip"
@@ -211,6 +218,7 @@ cmd_apply() {
       case "$a" in y|Y|yes) ;; *) echo "Abgebrochen."; exit 0 ;; esac
     fi
     zip_path="/tmp/cyjan-update-${target}.zip"
+    zip_is_temp=1
     local asset_name="cyjan-ids-update-${target}.zip"
     local url="https://github.com/$REPO/releases/download/$target/${asset_name}"
     echo "$TAG Lade $url …"
@@ -246,7 +254,10 @@ cmd_apply() {
   # → "stage ist nicht gesetzt"). ${stage:-} im Trap ist die zweite Bremse,
   # falls jemand das später doch auf local umstellt.
   stage=$(mktemp -d --suffix=.cyjan-update)
-  trap 'rm -rf "${stage:-}"' EXIT
+  # Das Update-ZIP ist ~1,5 GB. Bisher blieb es nach jedem Lauf in /tmp
+  # liegen — auf einem Offline-Host, der über Jahre per ZIP aktualisiert
+  # wird, summiert sich das zu einem der größten Posten auf der Platte.
+  trap 'rm -rf "${stage:-}"; if [ "${zip_is_temp:-0}" = "1" ]; then rm -f "${zip_path:-}"; fi' EXIT
   echo "$TAG Entpacke nach $stage …"
   unzip -q "$zip_path" -d "$stage"
   # CI-Build legt einen Wrapper-Subdir cyjan-ids-update-<tag>/ an. Wenn
