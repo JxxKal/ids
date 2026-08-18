@@ -16,6 +16,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.7.2',
+    date: '2026-08-18',
+    title: 'Fix: Festplatte lief durch Suricata-Protokolldaten voll',
+    notes: [
+      'Auf einem produktiven System hatte die Suricata-Protokolldatei 104 GB erreicht — ein Vielfaches der Datenbank und die eigentliche Ursache wiederkehrender Speicherplatz-Warnungen. Suricata schrieb zu jedem Alarm auch die komplette Protokoll-Telemetrie mit: jede DNS-Abfrage, jede Modbus-Transaktion, jede TLS-Verbindung. Ausgewertet wurden davon nur die Alarme, alles andere wurde ungelesen verworfen.',
+      'Produktiv werden jetzt ausschließlich Alarme protokolliert. Die ausführliche Telemetrie ist an den Labor-Modus gekoppelt, wo sie für die Angriffssimulation gebraucht wird, und lässt sich bei Bedarf gezielt einschalten.',
+      'Zusätzlich hat die Protokolldatei jetzt eine Größenbremse (Standard 2 GB): Suricata bringt keine eigene Rotation mit, wodurch die Datei bisher unbegrenzt wachsen konnte.',
+      'Aufbewahrungsfristen für die Datenbank werden bei einer Neuinstallation nun mit sinnvollen Vorgaben angelegt (Flows 90 Tage, Alarme 1 Jahr). Bisher gab es gar keine, solange sie niemand von Hand gesetzt hat. Bestehende Systeme sind nicht betroffen: eine Vorgabe wird nur gesetzt, wenn sie keine vorhandenen Daten löschen würde — sonst bleibt die Entscheidung unter Einstellungen → Wartung.',
+      'Behoben: Das Update-Archiv (rund 1,5 GB) blieb nach jedem Update auf der Platte liegen. Auf Systemen, die über Jahre per Update-Paket gepflegt werden, summierte sich das erheblich.',
+    ],
+  },
+  {
     version: 'v2.7.1',
     date: '2026-08-17',
     title: 'Härtung der App-Anbindung',
