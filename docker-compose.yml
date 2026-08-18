@@ -1043,6 +1043,14 @@ services:
       SNORT_IFACE: ${SNORT_IFACE:-${MIRROR_IFACE:-eth1} cy-inj-peer}
       SNORT_RULESET: ${SNORT_RULESET:-emerging-threats}
       SNORT_UPDATE_RULES: ${SNORT_UPDATE_RULES:-false}
+      # eve.json schreibt sonst die komplette Protokoll-Telemetrie (jede
+      # DNS-Abfrage, jede Modbus-Transaktion). snort-bridge liest davon nur
+      # alert/drop — produktiv sind das GB pro Tag, die niemand liest.
+      # Default folgt dem Lab-Schalter; explizit setzbar.
+      REDTEAM_ENABLED: ${REDTEAM_ENABLED:-false}
+      SNORT_EVE_PROTOCOL_LOGS: ${SNORT_EVE_PROTOCOL_LOGS:-}
+      # Suricata rotiert nicht selbst — Notbremse in MB (0 = aus).
+      SNORT_EVE_MAX_MB: ${SNORT_EVE_MAX_MB:-2048}
 
   # ────────────────────────────────────────────────────────────────────────────
   # SURICATA – TEST  (docker compose --profile test --profile snort-test up)
@@ -1066,6 +1074,14 @@ services:
       SNORT_IFACE: ${TEST_IFACE:-eth0}
       SNORT_RULESET: ${SNORT_RULESET:-emerging-threats}
       SNORT_UPDATE_RULES: ${SNORT_UPDATE_RULES:-false}
+      # eve.json schreibt sonst die komplette Protokoll-Telemetrie (jede
+      # DNS-Abfrage, jede Modbus-Transaktion). snort-bridge liest davon nur
+      # alert/drop — produktiv sind das GB pro Tag, die niemand liest.
+      # Default folgt dem Lab-Schalter; explizit setzbar.
+      REDTEAM_ENABLED: ${REDTEAM_ENABLED:-false}
+      SNORT_EVE_PROTOCOL_LOGS: ${SNORT_EVE_PROTOCOL_LOGS:-}
+      # Suricata rotiert nicht selbst — Notbremse in MB (0 = aus).
+      SNORT_EVE_MAX_MB: ${SNORT_EVE_MAX_MB:-2048}
 
   # ────────────────────────────────────────────────────────────────────────────
   # SURICATA-BRIDGE  (startet mit snort ODER snort-test Profil)
