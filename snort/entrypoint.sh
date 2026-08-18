@@ -25,6 +25,22 @@ UPDATE="${SNORT_UPDATE_RULES:-false}"
 RULES_DIR="/etc/suricata/rules"
 LOG_DIR="/var/log/suricata"
 
+# ─── eve.json: Umfang und Größenbremse ────────────────────────────────────────
+# Suricata schreibt in eve.json auf Wunsch die komplette Protokoll-Telemetrie
+# (jede DNS-Abfrage, jede Modbus-Transaktion …). Für das RedTeam-Tooling ist
+# das der Sinn der Sache; snort-bridge dagegen liest ausschließlich
+# event_type alert/drop und verwirft den Rest sofort.
+#
+# Auf einem produktiven OT-Master wurde damit ein eve.json von 104 GB
+# erzeugt, das nie jemand gelesen hat. Deshalb: Telemetrie folgt per Default
+# dem Lab-Schalter und ist produktiv aus.
+REDTEAM_ENABLED="${REDTEAM_ENABLED:-false}"
+EVE_PROTO_LOGS="${SNORT_EVE_PROTOCOL_LOGS:-$REDTEAM_ENABLED}"
+# Notbremse: Suricata rotiert nicht selbst. 0 schaltet sie ab.
+# Auf der Platte liegen im schlimmsten Fall ~2× dieser Wert (aktuelle Datei
+# plus eine aufgehobene Generation .1).
+EVE_MAX_MB="${SNORT_EVE_MAX_MB:-2048}"
+
 mkdir -p "$LOG_DIR" "$RULES_DIR"
 
 # ─── Suricata-Version ermitteln (für ET-Regel-URL) ────────────────────────────
@@ -131,6 +147,60 @@ for one_iface in $AVAILABLE_IFACES; do
 done
 
 # ─── suricata.yaml generieren ─────────────────────────────────────────────────
+# ─── eve.json-Typen zusammenstellen ───────────────────────────────────────────
+# snort-bridge braucht nur alert/drop. Alles andere ist Telemetrie fürs Lab.
+if [ "$EVE_PROTO_LOGS" = "true" ]; then
+  echo "[suricata] eve.json: Alarme + volle Protokoll-Telemetrie (Lab-Modus)"
+  EVE_TYPES_BLOCK=$(cat <<'EVETYPES'
+      types:
+        - alert
+        - drop
+        - http:
+            extended: yes
+        - dns:
+            query: yes
+            answer: yes
+        - tls:
+            extended: yes
+        - smb
+        - krb5
+        - dcerpc
+        - dnp3
+        - modbus
+        - rdp
+        - mqtt
+        - quic
+        - smtp
+        - ssh
+        - ftp
+        - tftp
+        - ike
+        - sip
+        - flow
+        - anomaly:
+            enabled: yes
+            types:
+              decode: yes
+              stream: yes
+              applayer: yes
+EVETYPES
+)
+else
+  echo "[suricata] eve.json: nur Alarme (SNORT_EVE_PROTOCOL_LOGS=true fuer Telemetrie)"
+  EVE_TYPES_BLOCK=$(cat <<'EVETYPES'
+      types:
+        - alert
+        - drop
+        - anomaly:
+            enabled: yes
+            types:
+              decode: yes
+              stream: yes
+              applayer: yes
+EVETYPES
+)
+fi
+
 cat > /tmp/suricata.yaml << YAML
 %YAML 1.1
 ---
@@ -178,37 +248,7 @@ outputs:
       # Suricata-7-Parser-Outputs: jeder Eintrag emittiert Protokoll-Telemetrie
       # auch ohne Alarm — wichtig damit das RedTeam-Tooling sehen kann was
       # erkannt wurde (z.B. KRB5-cname, OPC-UA-EndpointUrl, SMB-Dialect).
-      types:
-        - alert
-        - drop
-        - http:
-            extended: yes
-        - dns:
-            query: yes
-            answer: yes
-        - tls:
-            extended: yes
-        - smb
-        - krb5
-        - dcerpc
-        - dnp3
-        - modbus
-        - rdp
-        - mqtt
-        - quic
-        - smtp
-        - ssh
-        - ftp
-        - tftp
-        - ike
-        - sip
-        - flow
-        - anomaly:
-            enabled: yes
-            types:
-              decode: yes
-              stream: yes
-              applayer: yes
+${EVE_TYPES_BLOCK}
 
 af-packet:${AF_PACKET_BLOCK}
 
@@ -301,6 +341,37 @@ echo "[suricata] PID ${SURICATA_PID}"
 # ─── Trigger-Polling-Schleife (alle 30 s) ─────────────────────────────────────
 while kill -0 "$SURICATA_PID" 2>/dev/null; do
     sleep 30
+
+    # ── eve.json-Notbremse ────────────────────────────────────────────────
+    # Suricata bringt keine eigene Rotation für filetype: regular mit. Ohne
+    # diese Bremse läuft die Datei auf einem Langläufer bis zur vollen
+    # Platte — auf einem OT-Master real mit 104 GB beobachtet.
+    #
+    # Wir rotieren per Umbenennen und lassen Suricata die Datei über den
+    # Command-Socket neu öffnen; das ist der saubere Weg und hinterlässt
+    # keine sparse-Datei, wie es ein blindes Truncate täte, falls Suricata
+    # den Log nicht im Append-Modus hält. Klappt der Socket nicht, kürzen
+    # wir als Rückfallebene.
+    #
+    # snort-bridge übersteht beides: es vergleicht Inode UND Dateigröße
+    # gegen den eigenen Offset (siehe _tail() dort).
+    EVE="${LOG_DIR}/eve.json"
+    if [ "${EVE_MAX_MB:-0}" -gt 0 ] 2>/dev/null && [ -f "$EVE" ]; then
+        EVE_MB=$(( $(stat -c %s "$EVE" 2>/dev/null || echo 0) / 1048576 ))
+        if [ "$EVE_MB" -ge "$EVE_MAX_MB" ]; then
+            echo "[suricata] eve.json ${EVE_MB} MB >= ${EVE_MAX_MB} MB - rotiere."
+            if mv -f "$EVE" "${EVE}.1" 2>/dev/null \
+               && suricatasc -c reopen-log-files >/dev/null 2>&1; then
+                echo "[suricata] rotiert nach eve.json.1"
+            else
+                # Rückfall: Datei zurück und kürzen. Lieber ein Truncate als
+                # ein Suricata, das in eine umbenannte Datei weiterschreibt.
+                [ -f "${EVE}.1" ] && mv -f "${EVE}.1" "$EVE" 2>/dev/null
+                : > "$EVE"
+                echo "[suricata] WARNUNG: reopen-log-files ging nicht - gekuerzt."
+            fi
+        fi
+    fi
 
     TRIGGER="${RULES_DIR}/update.trigger"
     SOURCES="${RULES_DIR}/update-sources.txt"
