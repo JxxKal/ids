@@ -310,7 +310,11 @@ async def startup() -> None:
     # Retention-/Disk-Monitor — alle 6h Disk-%, DB-Größe und TimescaleDB-
     # Policy-Job-Health prüfen; bei Problemen Alert in die DB (DISK_SPACE_001
     # critical / RETENTION_001 high). Verhindert stilles Volllaufen der Disk.
-    from retention_monitor import retention_monitor_loop
+    # Der Producer muss VOR dem Start gesetzt sein, sonst landet ein Alarm aus
+    # dem ersten Cycle nur in der Tabelle und erreicht die Topic-Konsumenten
+    # nicht (App-Push, notification-dispatcher, mqtt-bridge).
+    from retention_monitor import retention_monitor_loop, set_retention_producer
+    set_retention_producer(kafka_producer)
     asyncio.create_task(retention_monitor_loop(get_pool))
 
     # PCAP-Lifecycle-Sync: wenn UI einen abweichenden Retention-Wert in

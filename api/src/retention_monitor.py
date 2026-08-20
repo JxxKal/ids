@@ -16,25 +16,51 @@ RETENTION_CHECK_INTERVAL_S (Default 6h) drei Signale:
   3. TimescaleDB-Job-Health (policy_retention/policy_compression): failed oder
      seit > 2× schedule_interval kein Erfolg → RETENTION_001 (high).
 
-Alarmierung: Insert direkt in die alerts-Tabelle (gleiches Muster wie
-BOOT_HEALTH_001/UNKNOWN_HOST_001 — erscheint im Web-UI-Feed; live-Push via WS
-kommt erst beim nächsten Refresh, für eine 6h-Kadenz unkritisch). Dedup: pro
-rule_id max. 1 Alert je 24h, damit es nicht bei jedem Cycle neu feuert.
+Alarmierung: Insert in die alerts-Tabelle **und** Publikation auf
+'alerts-enriched' — dieselbe Doppelung wie im alert-manager. Der reine Insert
+reichte nicht: alles, was auf dem Topic hört, sah diese Alarme sonst nie.
+Betroffen waren die App-Push-Benachrichtigung (app-connect), der
+notification-dispatcher (E-Mail/Webhook/Syslog) und die mqtt-bridge.
+
+Ausgerechnet „die Platte läuft voll" — ein Zustand, der das IDS blind macht —
+erreichte damit kein Telefon. Aufgefallen am 2026-08-20, als ein
+DISK_SPACE_001 um 00:47 im Web-UI stand, aber nirgends sonst ankam.
+
+Der Insert bleibt trotzdem zuerst: er ist die Dedup-Instanz, und wenn Kafka
+klemmt, soll der Alarm wenigstens im Feed stehen. Umgekehrt wäre er bei einem
+Kafka-Ausfall ganz verloren.
+
+Dedup: pro rule_id max. 1 Alert je 24h, damit es nicht bei jedem Cycle neu
+feuert — das begrenzt zugleich, wie oft die Kanäle davon hören.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import shutil
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 import asyncpg
+import orjson
+from confluent_kafka import Producer
 
 from config import Config
 
 log = logging.getLogger("retention-monitor")
 cfg = Config.from_env()
+
+ALERTS_TOPIC = "alerts-enriched"
+
+# Wird von main.py nach dem Start gesetzt — gleiches Muster wie
+# set_feedback_producer/set_notifications_producer in den Routern.
+_producer: Producer | None = None
+
+
+def set_retention_producer(producer: Producer) -> None:
+    global _producer
+    _producer = producer
 
 _RETENTION_PROCS = ["policy_retention", "policy_compression"]
 _DEDUP_WINDOW = "24 hours"
@@ -165,21 +191,65 @@ def _disk_pct() -> float:
 
 async def _emit_alert(conn: asyncpg.Connection, rule_id: str, severity: str,
                       score: float, message: str, dedup_window: str = _DEDUP_WINDOW) -> bool:
-    """Dedup'd Alert-Insert. Gibt True zurück, wenn neu eingefügt."""
+    """Dedup'd Alert-Insert plus Publikation auf `alerts-enriched`.
+
+    Gibt True zurück, wenn neu eingefügt.
+
+    `alert_id` und `ts` entstehen hier in Python statt in der Datenbank, damit
+    der Datensatz in der Tabelle und die Nachricht auf dem Topic **dieselbe**
+    Kennung und denselben Zeitstempel tragen. Sonst zeigte die App eine andere
+    ID als das Web-UI, und ein Tipp auf die Push-Nachricht liefe ins Leere.
+    """
     recent = await conn.fetchval(
         f"SELECT 1 FROM alerts WHERE rule_id = $1 AND ts > now() - interval '{dedup_window}' LIMIT 1",
         rule_id,
     )
     if recent:
         return False
+
+    alert_id = str(uuid.uuid4())
+    ts = datetime.now(timezone.utc)
     await conn.execute(
         """
-        INSERT INTO alerts (ts, source, rule_id, severity, score, description, is_test)
-        VALUES (now(), 'correlation', $1, $2, $3, $4, false)
+        INSERT INTO alerts (alert_id, ts, source, rule_id, severity, score, description, is_test)
+        VALUES ($1, $2, 'correlation', $3, $4, $5, $6, false)
         """,
-        rule_id, severity, score, message,
+        alert_id, ts, rule_id, severity, score, message,
     )
+
+    _publish(alert_id, ts, rule_id, severity, score, message)
     return True
+
+
+def _publish(alert_id: str, ts: datetime, rule_id: str, severity: str,
+             score: float, message: str) -> None:
+    """Best effort: der Alarm steht bereits in der Tabelle.
+
+    Schlägt die Publikation fehl, fehlt er nur den Topic-Konsumenten und nicht
+    dem Web-UI. Deshalb wird hier geloggt statt geworfen — ein klemmender
+    Broker darf den Monitor-Cycle nicht abbrechen.
+    """
+    if _producer is None:
+        log.debug("Kein Kafka-Producer gesetzt — %s nur in der Tabelle.", rule_id)
+        return
+    try:
+        _producer.produce(
+            ALERTS_TOPIC,
+            value=orjson.dumps({
+                "alert_id":    alert_id,
+                "ts":          ts.isoformat(),
+                "source":      "correlation",
+                "rule_id":     rule_id,
+                "severity":    severity,
+                "score":       score,
+                "description": message,
+                "is_test":     False,
+            }),
+        )
+        _producer.poll(0)
+    except Exception as exc:
+        log.warning("Publikation von %s auf %s fehlgeschlagen: %s",
+                    rule_id, ALERTS_TOPIC, exc)
 
 
 async def emergency_cleanup(pool: asyncpg.Pool) -> dict[str, Any]:
