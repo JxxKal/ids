@@ -23,7 +23,7 @@ import orjson
 from confluent_kafka import Consumer, KafkaError
 
 from config import Config, RuntimeConfig
-from fields import severity_at_least
+from fields import is_stale, severity_at_least
 
 log = logging.getLogger(__name__)
 
@@ -33,12 +33,26 @@ def make_consumer(cfg: Config) -> Consumer:
         "bootstrap.servers": cfg.kafka_brokers,
         "group.id": cfg.kafka_group_id,
         # §1.5 — ab "jetzt", nie Backlog nachreichen.
+        #
+        # Dafür müssen BEIDE Einstellungen zusammenspielen, und die zweite
+        # stand bis v2.7.2 falsch:
+        #
+        #   auto.offset.reset=latest greift nur, wenn die Gruppe KEINEN
+        #   gespeicherten Offset hat — also beim allerersten Start. Mit
+        #   enable.auto.commit=true speicherte Kafka den Offset alle 5 s,
+        #   und jeder Neustart von app-connect setzte dort fort: der
+        #   komplette Rückstand der Ausfallzeit floss als „live" durch den
+        #   Tunnel, mit alten Zeitstempeln und einem Push pro Alarm. Am
+        #   25.08. standen so Suricata-Alarme von 11:05 um 12:11 als
+        #   Live-Events in der App.
+        #
+        # Kein Commit heißt: kein gespeicherter Offset, jeder Start beginnt
+        # bei latest — genau die Zusage aus §1.5. Der frühere Verweis „Muster
+        # von mqtt-bridge" war falsch übertragen: mqtt-bridge committet
+        # ABSICHTLICH (ihr Rückstand ist ein Feature, „Outage-Buffer for
+        # free") — für den Benachrichtigungskanal ist er ein Fehler.
         "auto.offset.reset": "latest",
-        # Auto-Commit reicht: wir haben keine At-Least-Once-Zusage zu
-        # halten, ein verlorener Offset kostet höchstens ein paar
-        # Sekunden Events (die wir bei einem Neustart ohnehin verwerfen).
-        "enable.auto.commit": True,
-        "auto.commit.interval.ms": 5000,
+        "enable.auto.commit": False,
     })
 
 
@@ -50,6 +64,7 @@ class EventSource:
         self._rt = runtime
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=cfg.event_queue_max)
         self.dropped = 0
+        self.dropped_stale = 0
         self.consumed = 0
 
     def _offer(self, alert: dict) -> None:
@@ -109,6 +124,23 @@ class EventSource:
                 if not severity_at_least(
                     alert.get("severity") or "low", self._rt.event_severity_min
                 ):
+                    continue
+                # Frische-Wächter, zweite Verteidigungslinie neben dem
+                # Commit-Verzicht: auch wenn irgendwo davor Rückstand
+                # entsteht (hängender alert-manager, Bridge-Replay nach
+                # Truncation), gehört er nicht auf den Live-Kanal — §1.5:
+                # nachgereichte Benachrichtigungen sind wertlos, die
+                # kanonische Kopie liegt in der Datenbank und kommt beim
+                # nächsten App-Refresh. Ohne Zeitstempel gilt der Alarm als
+                # frisch (NaN-artige Fälle: is_stale liefert False).
+                if is_stale(alert.get("ts"), self._cfg.event_max_age_s):
+                    self.dropped_stale += 1
+                    if self.dropped_stale in (1, 10, 100) or self.dropped_stale % 1000 == 0:
+                        log.warning(
+                            "Veraltetes Event verworfen (ts=%r, Limit %ds) — insgesamt %d. "
+                            "Rückstand gehört nicht auf den Live-Kanal (§1.5).",
+                            alert.get("ts"), self._cfg.event_max_age_s, self.dropped_stale,
+                        )
                     continue
                 self._offer(alert)
         finally:

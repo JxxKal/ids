@@ -158,6 +158,14 @@ class Config:
     event_queue_max: int
     state_path: str
 
+    # Frische-Wächter (§1.5): Events, deren Zeitstempel älter ist, gehen nicht
+    # auf den Live-Kanal. 300 s tragen normale Pipeline-Latenz plus einen
+    # trägen Poll; alles darüber ist Rückstand. Mit Default am Feldende, weil
+    # Config in Tests und im Overlay auch direkt gebaut wird — ein neues
+    # Pflichtfeld bräche jeden dieser Aufrufer, und Dataclass-Regeln
+    # verlangen Defaults hinter den Pflichtfeldern.
+    event_max_age_s: int = 300
+
     # Welche Felder aus der DB kamen. Reine Herkunfts-Information für
     # `GET /status` (`config_source`/`egress_source`) — bewusst
     # `compare=False`, damit ein Umzug desselben Wertes von ENV in die DB
@@ -290,6 +298,7 @@ def env_dict() -> dict[str, Any]:
         ),
         "chunk_bytes": _env_int("APP_CONNECT_CHUNK_BYTES", 192 * 1024, 4096, 4 * 1024 * 1024),
         "event_queue_max": _env_int("APP_CONNECT_EVENT_QUEUE_MAX", 1000, 10),
+        "event_max_age_s": _env_int("APP_CONNECT_EVENT_MAX_AGE_S", 300, 10),
         "state_path": _env("APP_CONNECT_STATE_PATH", "/run/cyjan/app-connect.state.json"),
     }
 
