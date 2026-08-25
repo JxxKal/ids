@@ -2,6 +2,13 @@
 # ============================================================
 # Baut das Update-ZIP für „Einstellungen → System-Update".
 #
+# ⚠ DER NORMALWEG IST DIE CI: .github/workflows/build-release.yml baut das
+# Paket bei jedem Tag-Push und hängt es ans GitHub-Release — mit sauberer
+# Layer-Teilung zwischen den Images (~1,5 GB). Dieses Skript ist der
+# Rückfallweg für Air-Gap-Situationen ohne CI-Zugriff. Wichtig dabei: ohne
+# gemeinsamen Build-Cache teilen die Images keine Schichten, das Bundle wird
+# ~35 % größer — am 25.08. genug, um GitHubs 2-GiB-Asset-Grenze zu reißen.
+#
 # Läuft auf einem Dockerhost mit gebautem Stack (z. B. dem Dev-Master) —
 # NICHT auf dem Mac, dort gibt es kein Docker. Das Layout entspricht exakt
 # dem v2.7.2-Paket; was der Import damit tut, steht in UPDATE.md im ZIP.
