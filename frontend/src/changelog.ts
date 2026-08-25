@@ -16,6 +16,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.7.3',
+    date: '2026-08-25',
+    title: 'Fix: Alarm-Pipeline verlor bei Störungen die Fassung',
+    notes: [
+      'Auf einem produktiven System wiederholte sich derselbe kritische Alarm im Viertelstundentakt als Push-Benachrichtigung, während er in der Oberfläche längst Stunden alt war — und die Datenbank füllte sich mit über 200 Kopien desselben Ereignisses. Ursache war eine einzige fehlerhafte Nachricht: sie brachte die Alarmverarbeitung zum Absturz, der Dienst startete neu und verarbeitete dasselbe Zeitfenster erneut — Kopie um Kopie, Push um Push.',
+      'Die Alarmverarbeitung übersteht fehlerhafte Nachrichten jetzt: eine Giftnachricht kostet einen Protokolleintrag (der den Auslöser benennt), nie mehr den Dienst.',
+      'Die App-Anbindung reicht nach einem Neustart keinen Rückstand mehr nach. Benachrichtigungen, die während einer Ausfallzeit aufliefen, sind bei Zustellung Stunden später wertlos — die vollständige Historie steht ohnehin in der Alarmliste. Zusätzlich verwirft die Anbindung Ereignisse, die älter als fünf Minuten sind, egal wo in der Pipeline sie aufgehalten wurden.',
+      'Warnungen der Selbstüberwachung (Festplatte läuft voll, Aufbewahrung gestört) erreichen jetzt auch die App, E-Mail und MQTT. Bisher erschienen sie nur im Alarm-Feed der Weboberfläche — ausgerechnet der Zustand, der das System blind machen kann, blieb auf dem Telefon stumm.',
+      'Für Systeme, die vom Kopien-Problem betroffen waren, liegt ein Aufräumskript bei (scripts/cleanup-duplicate-alerts.sql) — es entfernt Duplikate gleicher Regel, Quelle und Sekunde und behält je das älteste Original. Es läuft bewusst nicht automatisch: Alarme löscht dieses System nur auf ausdrückliche Anweisung.',
+    ],
+  },
+  {
     version: 'v2.7.2',
     date: '2026-08-18',
     title: 'Fix: Festplatte lief durch Suricata-Protokolldaten voll',
