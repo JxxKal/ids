@@ -644,6 +644,11 @@ jobs:
           # User wird nach erfolgreichem GUI-Update einmal manuell zur sudo-
           # Ausführung aufgefordert. Idempotent — re-runs sind unschädlich.
           mkdir -p "$PKG/scripts"
+          # Betreiber-Skripte aus dem Repo-scripts/: die CI kuratiert diesen
+          # Ordner bewusst (Host-Werkzeuge unten kommen aus distro/), aber
+          # Wartungs-SQL gehört ins Paket — der v2.7.3-Changelog verwies auf
+          # cleanup-duplicate-alerts.sql, das ZIP enthielt es nicht.
+          cp scripts/cleanup-duplicate-alerts.sql "$PKG/scripts/"
           cp distro/config/includes.chroot/etc/docker/daemon.json                    "$PKG/scripts/daemon.json"
           cp distro/config/includes.chroot/usr/local/bin/cyjan-maintenance           "$PKG/scripts/cyjan-maintenance"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-maintenance.service "$PKG/scripts/cyjan-maintenance.service"
