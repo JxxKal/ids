@@ -257,7 +257,12 @@ cmd_apply() {
   # Das Update-ZIP ist ~1,5 GB. Bisher blieb es nach jedem Lauf in /tmp
   # liegen — auf einem Offline-Host, der über Jahre per ZIP aktualisiert
   # wird, summiert sich das zu einem der größten Posten auf der Platte.
-  trap 'rm -rf "${stage:-}"; if [ "${zip_is_temp:-0}" = "1" ]; then rm -f "${zip_path:-}"; fi' EXIT
+  # Stack-Watchdog (cyjan-stack-watch.timer) pausieren: zwischen docker load
+  # und compose up darf er nicht selbst ein `up -d` anstoßen, sonst laufen
+  # zwei Recreates gegeneinander. Marker liegt in /run, verschwindet also
+  # auch nach einem Crash spätestens beim Reboot.
+  touch /run/cyjan-stack-watch.pause 2>/dev/null || true
+  trap 'rm -f /run/cyjan-stack-watch.pause; rm -rf "${stage:-}"; if [ "${zip_is_temp:-0}" = "1" ]; then rm -f "${zip_path:-}"; fi' EXIT
   echo "$TAG Entpacke nach $stage …"
   unzip -q "$zip_path" -d "$stage"
   # CI-Build legt einen Wrapper-Subdir cyjan-ids-update-<tag>/ an. Wenn

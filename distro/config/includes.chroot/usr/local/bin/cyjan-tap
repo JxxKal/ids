@@ -629,7 +629,10 @@ cmd_update() {
   # Trap überschreibt den vorherigen cert-Trap — wir müssen daher BEIDE
   # Verzeichnisse hier aufräumen. Alle Vars mit :- für den Fall dass die
   # Funktion vor der Initialisierung crasht (set -u-Schutz).
-  trap 'rm -rf "${cert_tmp_dir:-}" ; rm -f "${manifest_tmp:-}" "${BUNDLE_TMP:-}" "${COMPOSE_TMP:-}" "${tar_tmp:-}"' EXIT
+  # Stack-Watchdog pausieren (siehe cyjan-update): kein konkurrierendes
+  # `up -d` zwischen docker load und compose up.
+  touch /run/cyjan-stack-watch.pause 2>/dev/null || true
+  trap 'rm -f /run/cyjan-stack-watch.pause; rm -rf "${cert_tmp_dir:-}" ; rm -f "${manifest_tmp:-}" "${BUNDLE_TMP:-}" "${COMPOSE_TMP:-}" "${tar_tmp:-}"' EXIT
   echo "Hole Manifest …"
   if ! "${curl_mtls[@]}" -o "$manifest_tmp" "$master_base/tap-update/manifest"; then
     echo "FEHLER: Manifest-Download fehlgeschlagen. Hat der Master ein Update-ZIP eingespielt?" >&2
