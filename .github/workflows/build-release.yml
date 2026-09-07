@@ -660,6 +660,10 @@ jobs:
           cp distro/config/includes.chroot/usr/local/bin/cyjan-tap-disk-watch              "$PKG/scripts/cyjan-tap-disk-watch"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-disk-watch.service "$PKG/scripts/cyjan-tap-disk-watch.service"
           cp distro/config/includes.chroot/etc/systemd/system/cyjan-tap-disk-watch.timer   "$PKG/scripts/cyjan-tap-disk-watch.timer"
+          # Stack-Watchdog (v2.7.4+ — bringt fehlende/gestoppte Services zurück)
+          cp distro/config/includes.chroot/usr/local/bin/cyjan-stack-watch                 "$PKG/scripts/cyjan-stack-watch"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-stack-watch.service    "$PKG/scripts/cyjan-stack-watch.service"
+          cp distro/config/includes.chroot/etc/systemd/system/cyjan-stack-watch.timer      "$PKG/scripts/cyjan-stack-watch.timer"
           cp distro/config/includes.chroot/etc/tmpfiles.d/cyjan-update.conf              "$PKG/scripts/cyjan-update.tmpfiles"
           # Host-Interface-Snapshot für Settings-Migration (v2.5.9+)
           cp distro/config/includes.chroot/usr/local/bin/cyjan-host-interfaces             "$PKG/scripts/cyjan-host-interfaces"

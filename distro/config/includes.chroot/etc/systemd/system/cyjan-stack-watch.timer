@@ -1,0 +1,13 @@
+[Unit]
+Description=5-Min-Watchdog für den Cyjan-Compose-Stack
+Documentation=https://github.com/JxxKal/ids
+
+[Timer]
+# Erst 10 min nach Boot, damit cyjan-stack.service + Health-Check durch sind.
+OnBootSec=10min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Unit=cyjan-stack-watch.service
+
+[Install]
+WantedBy=timers.target

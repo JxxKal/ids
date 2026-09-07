@@ -97,6 +97,17 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_LOG_RETENTION_HOURS: "168"
+      # SAFETY-NET gegen Bursts: Byte-Cap pro Partition als Broker-Default,
+      # zusätzlich zu den Topic-Caps aus infra/kafka/init-topics.sh. Ohne das
+      # hielt alerts-raw am 2026-09-04 zeitbasiert 24 h einer 10k/s-Flut
+      # (88 GB) — Platte voll, Kafka tot, Pipeline drei Tage blind.
+      KAFKA_LOG_RETENTION_BYTES: "2147483648"
+      # Cleanup alle 30 s statt 5 min: bei einer Flut entscheidet der
+      # Cleanup-Lag, ob das Cap rechtzeitig greift.
+      KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "30000"
+      # Kafka löscht nur ganze Segmente — kleine Segmente machen das Cap
+      # feingranular (Default 1 GB → Cap wirkt erst bei Cap + 1 GB).
+      KAFKA_LOG_SEGMENT_BYTES: "134217728"
       KAFKA_MESSAGE_MAX_BYTES: "10485760"            # 10 MB (für PCAP-Header-Batches)
       KAFKA_REPLICA_FETCH_MAX_BYTES: "10485760"
       # MUSS auf den Volume-Mountpunkt zeigen — apache/kafka-Default ist
@@ -1136,6 +1147,12 @@ services:
       SNORT_ALERT_FILE: /var/log/suricata/eve.json
       TEST_MODE: ${TEST_MODE:-false}
       SURICATA_OVERRIDES_FILE: /sig-rules/custom/_suricata_overrides.json
+      # Drossel VOR Kafka (Vorfall 2026-09-04: eine Stream-Engine-SID mit
+      # 10k Alerts/s füllte alerts-raw mit 88 GB und riss Kafka mit). Details
+      # und Defaults in snort-bridge/src/throttle.py.
+      SNORT_DROP_ENGINE_EVENTS: ${SNORT_DROP_ENGINE_EVENTS:-true}
+      SNORT_BRIDGE_COOLDOWN_S:  ${SNORT_BRIDGE_COOLDOWN_S:-60}
+      SNORT_BRIDGE_MAX_RATE:    ${SNORT_BRIDGE_MAX_RATE:-50}
 
   # ────────────────────────────────────────────────────────────────────────────
   # ARPWATCH  (docker compose --profile prod up)

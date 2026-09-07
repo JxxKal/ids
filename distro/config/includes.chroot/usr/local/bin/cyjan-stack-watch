@@ -1,0 +1,103 @@
+#!/bin/sh
+# Cyjan IDS – Stack-Watchdog: fehlende oder gestoppte Compose-Services im
+# laufenden Betrieb wieder hochbringen.
+#
+# Hintergrund (OT-Vorfall 2026-09-04): eine Suricata-Flut füllte die Platte,
+# Kafka starb — und der Container war danach nicht nur gestoppt, sondern weg.
+# `restart: unless-stopped` greift nur, solange der Container existiert;
+# cyjan-stack-up läuft nur beim Boot; cyjan-stack-health prüft nur nach dem
+# Boot. Ergebnis: drei Tage ohne Pipeline, im Frontend nur "Threat Level 0".
+#
+# Dieser Watchdog läuft alle 5 min per Timer. Er baut die Compose-Argumente
+# wie cyjan-stack-up auf, prüft jeden Long-Running-Service (One-Shots *-init
+# ausgenommen) und ruft bei Abweichung `docker compose up -d` — idempotent,
+# fehlende Container werden erzeugt, gestoppte gestartet, laufende bleiben
+# unangetastet. Wer den Stack absichtlich anhält, legt vorher
+#   touch /run/cyjan-stack-watch.pause
+# an (verschwindet beim Reboot) — dann meldet der Watchdog nur, statt zu
+# starten. Ein ehrlich gemeinter `docker compose down` für Wartung ohne
+# Pause-Marker würde sonst nach spätestens 5 min rückgängig gemacht.
+#
+# Manuell: `cyjan-stack-watch` (Exit 0 = ok oder repariert, 1 = Reparatur
+# fehlgeschlagen, 2 = pausiert/übersprungen).
+set -u
+
+IDS_DIR="/opt/ids"
+MODE_FILE="/etc/cyjan/mode"
+PROFILE_FILE="/etc/cyjan/profile"
+PAUSE="/run/cyjan-stack-watch.pause"
+STAMP="/run/cyjan-stack-watch.last-repair"
+
+if [ ! -d "$IDS_DIR" ]; then
+  exit 0
+fi
+cd "$IDS_DIR"
+
+# Boot noch im Gange? Dann cyjan-stack.service den Vortritt lassen.
+if systemctl is-active --quiet cyjan-stack.service 2>/dev/null; then
+  :
+elif systemctl -q is-activating cyjan-stack.service 2>/dev/null; then
+  echo "cyjan-stack-watch: cyjan-stack.service startet gerade — übersprungen."
+  exit 2
+fi
+
+MODE="$(cat "$MODE_FILE" 2>/dev/null | tr -d '[:space:]')"
+[ -z "$MODE" ] && MODE="master"
+
+case "$MODE" in
+  tap)
+    CONTAINER_PREFIX="cyjan-tap-"
+    set -- -f docker-compose.tap.yml
+    ;;
+  master|*)
+    CONTAINER_PREFIX="ids-"
+    PROFILE_RAW="$(cat "$PROFILE_FILE" 2>/dev/null || echo prod)"
+    set --
+    old_ifs="${IFS-}"
+    IFS=','
+    for p in $PROFILE_RAW; do
+      [ -n "$p" ] && set -- "$@" --profile "$p"
+    done
+    IFS="$old_ifs"
+    ;;
+esac
+
+SERVICES="$(docker compose "$@" config --services 2>/dev/null)"
+if [ -z "$SERVICES" ]; then
+  echo "cyjan-stack-watch: keine Compose-Services ermittelbar — übersprungen." >&2
+  exit 2
+fi
+
+MISSING=""
+for svc in $SERVICES; do
+  case "$svc" in
+    *-init) continue ;;
+  esac
+  cname="${CONTAINER_PREFIX}${svc}"
+  status="$(docker container inspect "$cname" --format '{{.State.Status}}' 2>/dev/null)"
+  case "$status" in
+    running|restarting) ;;                 # restarting: Docker kümmert sich
+    "")                 MISSING="$MISSING $svc(fehlt)" ;;
+    *)                  MISSING="$MISSING $svc($status)" ;;
+  esac
+done
+MISSING="${MISSING# }"
+
+if [ -z "$MISSING" ]; then
+  exit 0
+fi
+
+if [ -f "$PAUSE" ]; then
+  echo "cyjan-stack-watch: pausiert ($PAUSE) — nicht ok: $MISSING"
+  exit 2
+fi
+
+echo "cyjan-stack-watch: nicht ok: $MISSING → docker compose $* up -d"
+if docker compose "$@" up -d >/tmp/cyjan-stack-watch.log 2>&1; then
+  date -u +%FT%TZ > "$STAMP" 2>/dev/null || true
+  echo "cyjan-stack-watch: Reparatur angestoßen (mode=$MODE)."
+  exit 0
+fi
+echo "cyjan-stack-watch: FEHLER — compose up fehlgeschlagen:" >&2
+tail -n 20 /tmp/cyjan-stack-watch.log >&2
+exit 1

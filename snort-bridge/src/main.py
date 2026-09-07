@@ -26,6 +26,15 @@ Umgebungsvariablen:
   SNORT_ALERT_FILE   Pfad zu eve.json   (Standard: /var/log/suricata/eve.json)
   TEST_MODE          true → is_test=true (Standard: false)
   LOG_LEVEL          DEBUG/INFO/WARNING  (Standard: INFO)
+
+  Drossel (siehe throttle.py — Vorsorge gegen Alert-Bursts, die Kafka füllen):
+  SNORT_DROP_ENGINE_EVENTS  Suricata-eigene Decoder-/Stream-Events (SID
+                            2200000–2299999) verwerfen   (Standard: true)
+  SNORT_BRIDGE_COOLDOWN_S   Wiederholungen derselben SID auf derselben
+                            src→dst-Verbindung unterdrücken, Sekunden
+                            (Standard: 60, 0 = aus)
+  SNORT_BRIDGE_MAX_RATE     Obergrenze Alerts/s nach Kafka, Token-Bucket
+                            (Standard: 50, 0 = aus)
 """
 
 from __future__ import annotations
@@ -42,6 +51,7 @@ from confluent_kafka import Producer
 
 from direction import normalize as normalize_direction
 from sid_overrides import SuricataOverrides
+from throttle import AlertThrottle
 
 # ── Konfiguration ─────────────────────────────────────────────────────────────
 
@@ -49,6 +59,10 @@ KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "kafka:9092")
 ALERTS_TOPIC  = "alerts-raw"
 ALERT_FILE    = os.getenv("SNORT_ALERT_FILE", "/var/log/suricata/eve.json")
 TEST_MODE     = os.getenv("TEST_MODE", "false").lower() == "true"
+
+DROP_ENGINE_EVENTS = os.getenv("SNORT_DROP_ENGINE_EVENTS", "true").lower() == "true"
+COOLDOWN_S         = float(os.getenv("SNORT_BRIDGE_COOLDOWN_S", "60"))
+MAX_RATE           = float(os.getenv("SNORT_BRIDGE_MAX_RATE", "50"))
 
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -207,7 +221,16 @@ def main() -> None:
     })
     overrides = SuricataOverrides()
     overrides.reload_if_changed()
+    throttle = AlertThrottle(
+        cooldown_s=COOLDOWN_S,
+        max_rate=MAX_RATE,
+        drop_engine_events=DROP_ENGINE_EVENTS,
+    )
     log.info("Suricata-Bridge gestartet  →  %s @ %s", ALERTS_TOPIC, KAFKA_BROKERS)
+    log.info(
+        "Drossel: engine-events=%s cooldown=%.0fs max_rate=%.0f/s",
+        "drop" if DROP_ENGINE_EVENTS else "pass", COOLDOWN_S, MAX_RATE,
+    )
 
     for line in _tail(ALERT_FILE):
         if not line:
@@ -221,9 +244,17 @@ def main() -> None:
             # Per-SID-Override: Drop oder Severity umroutet. Reload-Check
             # ist intern auf 30s gerated → billig pro Alert.
             overrides.reload_if_changed()
-            sid = int(rec.get("alert", {}).get("signature_id", 0))
+            alert_obj = rec.get("alert", {})
+            sid = int(alert_obj.get("signature_id", 0))
+            gid = int(alert_obj.get("gid", 1))
             alert = overrides.apply(alert, sid)
             if alert is None:
+                continue
+
+            # Drossel VOR Kafka: Engine-Events, Wiederholungen pro Verbindung,
+            # globale Rate. Verworfenes wird minütlich als Summe geloggt.
+            throttle.maybe_report()
+            if not throttle.allow(gid, sid, alert["src_ip"], alert["dst_ip"]):
                 continue
 
             producer.produce(

@@ -205,6 +205,27 @@ else
   echo "[post-update] WARNUNG: cyjan-stack-health/alert-Quellen nicht gefunden — Boot-Health-Check übersprungen."
 fi
 
+# ── 5d) Stack-Watchdog (v2.7.4+) ─────────────────────────────────────────
+# OT-Vorfall 2026-09-04: Kafka starb an voller Platte und der Container war
+# danach WEG — restart: unless-stopped greift nur für existierende Container,
+# cyjan-stack-up läuft nur beim Boot, cyjan-stack-health prüft nur nach dem
+# Boot. Drei Tage keine Pipeline. Der Watchdog prüft alle 5 min den Soll-
+# Zustand und ruft bei Abweichung `docker compose up -d`. Pausierbar über
+# /run/cyjan-stack-watch.pause. Master UND Tap.
+WATCHDOG_BIN_SRC="$(locate_src cyjan-stack-watch         usr/local/bin)"
+WATCHDOG_SVC_SRC="$(locate_src cyjan-stack-watch.service etc/systemd/system)"
+WATCHDOG_TMR_SRC="$(locate_src cyjan-stack-watch.timer   etc/systemd/system)"
+if [ -n "$WATCHDOG_BIN_SRC" ] && [ -n "$WATCHDOG_SVC_SRC" ] && [ -n "$WATCHDOG_TMR_SRC" ]; then
+  install -m 0755 "$WATCHDOG_BIN_SRC" /usr/local/bin/cyjan-stack-watch
+  install -m 0644 "$WATCHDOG_SVC_SRC" /etc/systemd/system/cyjan-stack-watch.service
+  install -m 0644 "$WATCHDOG_TMR_SRC" /etc/systemd/system/cyjan-stack-watch.timer
+  systemctl daemon-reload
+  systemctl enable --now cyjan-stack-watch.timer
+  echo "[post-update] cyjan-stack-watch.timer aktiviert (5-Min-Watchdog, compose up -d bei fehlenden Services)."
+else
+  echo "[post-update] WARNUNG: cyjan-stack-watch-Quellen nicht gefunden — Stack-Watchdog übersprungen."
+fi
+
 # ── 5c) cyjan-update Self-Update (v2.5.33+) ──────────────────────────────
 # post-update.sh läuft typischerweise AUS cyjan-update heraus — ein direktes
 # install/cp auf /usr/local/bin/cyjan-update würde in das gerade laufende

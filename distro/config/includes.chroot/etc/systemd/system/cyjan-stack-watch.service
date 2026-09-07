@@ -1,0 +1,17 @@
+[Unit]
+Description=Cyjan IDS Stack-Watchdog (fehlende/gestoppte Services wieder hochbringen)
+Documentation=https://github.com/JxxKal/ids
+After=docker.service cyjan-stack.service
+Wants=docker.service
+ConditionPathExists=/opt/ids
+
+[Service]
+Type=oneshot
+# Logik in /usr/local/bin/cyjan-stack-watch: prüft alle Long-Running-Services
+# des Soll-Profils, ruft bei Abweichung `docker compose up -d`. Pausierbar
+# über /run/cyjan-stack-watch.pause. Exit 2 = übersprungen, kein Fehler.
+ExecStart=/usr/local/bin/cyjan-stack-watch
+SuccessExitStatus=2
+TimeoutStartSec=600
+StandardOutput=journal
+StandardError=journal

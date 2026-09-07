@@ -143,6 +143,20 @@ PCAP_MAX_WAIT_S = float(os.environ.get("PCAP_MAX_WAIT_S", "300"))
 _metric_seq_hw: dict[str, int] = {}
 
 
+def _parse_iso_utc(value: str | datetime | None) -> datetime | None:
+    """ISO-8601 (auch mit 'Z') → aware datetime, sonst None. datetime wird
+    durchgereicht, naive Werte gelten als UTC."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 class _TapConn:
     """Bündelt die Tap-WebSocket mit einem Send-Lock. aiohttp serialisiert
     nebenläufige Writes aus verschiedenen Tasks NICHT — heartbeat_loop,
@@ -368,6 +382,14 @@ class TapAuth:
         steuert die Recency, die der Detektor zum Windowing nutzt. ports als
         orjson.dumps + ::jsonb (TapAuth-Pool hat keinen json-Codec registriert)."""
         assert self._pool
+        # Der Tap liefert first_seen als ISO-8601-String ("…Z"). asyncpg
+        # verlangt für timestamptz ein datetime-Objekt — der ::timestamptz-
+        # Cast in der Query ändert daran nichts (Bindung passiert vor dem
+        # Cast). Ohne Parsen scheiterte JEDER Upsert mit "expected a
+        # datetime.date or datetime.datetime instance, got 'str'" und die
+        # Tap-Host-Rollenerkennung blieb leer. Unparsbar → NULL (LEAST()
+        # ignoriert NULL, ein alter Wert bleibt erhalten).
+        first_seen_dt = _parse_iso_utc(first_seen)
         await self._pool.execute(
             """
             INSERT INTO tap_host_profiles (tap_id, host_ip, ports, mac, first_seen, updated_at)
@@ -378,7 +400,7 @@ class TapAuth:
                   first_seen = LEAST(tap_host_profiles.first_seen, EXCLUDED.first_seen),
                   updated_at = now()
             """,
-            tap_id, host_ip, orjson.dumps(ports).decode(), mac, first_seen,
+            tap_id, host_ip, orjson.dumps(ports).decode(), mac, first_seen_dt,
         )
 
     async def get_dns_resolvers(self) -> list[str]:

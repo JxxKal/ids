@@ -28,17 +28,26 @@ echo "[kafka-init] Kafka bereit."
 #   $1 = Topic-Name
 #   $2 = Partitionen (nur bei Neuanlage)
 #   $3 = Retention in Millisekunden
-#   $4 = (optional) zusätzliche --config Argumente
+#   $4 = Retention in Bytes PRO PARTITION (Safety-Net gegen Bursts, -1 = aus)
+#   $5 = (optional) zusätzliche --config Argumente
+#
+#   Byte-Cap: Vorfall 2026-09-04 — alerts-raw hielt zeitbasiert 24 h einer
+#   10k/s-Suricata-Flut (88 GB), Platte voll, Kafka tot. Zeit-Retention
+#   begrenzt nichts, wenn die Rate explodiert; das Byte-Cap schon. Kafka
+#   löscht nur ganze Segmente, deshalb segment.bytes=128 MB statt 1 GB.
 # ──────────────────────────────────────────────────────────────────────────────
+SEGMENT_BYTES=134217728
+
 create_topic() {
   local TOPIC=$1
   local PARTITIONS=$2
   local RETENTION_MS=$3
-  local EXTRA_CONFIG=${4:-""}
+  local RETENTION_BYTES=$4
+  local EXTRA_CONFIG=${5:-""}
 
   if $KAFKA_BIN/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" \
       --describe --topic "$TOPIC" &>/dev/null; then
-    local ALTER_ARGS="retention.ms=${RETENTION_MS}"
+    local ALTER_ARGS="retention.ms=${RETENTION_MS},retention.bytes=${RETENTION_BYTES},segment.bytes=${SEGMENT_BYTES}"
     if [ -n "$EXTRA_CONFIG" ]; then
       local EXTRAS
       EXTRAS=$(echo "$EXTRA_CONFIG" | sed 's/--config //g' | tr ' ' ',' | sed 's/^,//;s/,$//')
@@ -47,7 +56,7 @@ create_topic() {
     $KAFKA_BIN/kafka-configs.sh --bootstrap-server "$BOOTSTRAP" --alter \
       --entity-type topics --entity-name "$TOPIC" \
       --add-config "$ALTER_ARGS" >/dev/null
-    echo "[kafka-init] Topic '$TOPIC' aktualisiert: retention=${RETENTION_MS}ms"
+    echo "[kafka-init] Topic '$TOPIC' aktualisiert: retention=${RETENTION_MS}ms bytes/partition=${RETENTION_BYTES}"
   else
     $KAFKA_BIN/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" \
       --create \
@@ -55,8 +64,10 @@ create_topic() {
       --partitions "$PARTITIONS" \
       --replication-factor 1 \
       --config retention.ms="$RETENTION_MS" \
+      --config retention.bytes="$RETENTION_BYTES" \
+      --config segment.bytes="$SEGMENT_BYTES" \
       $EXTRA_CONFIG
-    echo "[kafka-init] Topic erstellt: $TOPIC (${PARTITIONS}P, ${RETENTION_MS}ms)"
+    echo "[kafka-init] Topic erstellt: $TOPIC (${PARTITIONS}P, ${RETENTION_MS}ms, ${RETENTION_BYTES} B/partition)"
   fi
 }
 
@@ -99,15 +110,22 @@ create_topic() {
 #                   Topic ist nur für Debug-/Backfill-Sonderfälle.
 # ──────────────────────────────────────────────────────────────────────────────
 
-create_topic "raw-packets"          4   600000    "--config max.message.bytes=1048576"
-create_topic "flows"                4   3600000
-create_topic "pcap-headers"         4   1800000   "--config max.message.bytes=10485760"
-create_topic "alerts-raw"           2   86400000
-create_topic "alerts-enriched"      2   604800000
-create_topic "alerts-enriched-push" 1   3600000
-create_topic "feedback"             1   2592000000
-create_topic "test-commands"        1   3600000
-create_topic "rule-metrics"         1   604800000
+# Byte-Caps pro Partition. Worst-Case-Summe über alle Topics ≈ 17 GB.
+GB1=1073741824
+MB512=536870912
+MB256=268435456
+MB64=67108864
+
+#            Topic                  P   retention.ms  retention.bytes  extra
+create_topic "raw-packets"          4   600000        $GB1    "--config max.message.bytes=1048576"
+create_topic "flows"                4   3600000       $GB1
+create_topic "pcap-headers"         4   1800000       $GB1    "--config max.message.bytes=10485760"
+create_topic "alerts-raw"           2   86400000      $GB1
+create_topic "alerts-enriched"      2   604800000     $GB1
+create_topic "alerts-enriched-push" 1   3600000       $MB256
+create_topic "feedback"             1   2592000000    $MB256
+create_topic "test-commands"        1   3600000       $MB64
+create_topic "rule-metrics"         1   604800000     $MB512
 
 echo ""
 echo "[kafka-init] Alle Topics angelegt:"

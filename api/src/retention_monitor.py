@@ -6,6 +6,11 @@ Disk voll ist — und falls doch eine Policy gesetzt ist, kann der TimescaleDB-
 Background-Worker still scheitern (last_run_status='Failed'), ohne dass es
 jemand merkt. Beides endet im selben Totalausfall.
 
+Seit 2026-09 zusätzlich: die Docker-Volume-Größen (`docker system df -v`)
+landen in Health + Alert-Text. Beim OT-Vorfall lagen 190 GB in Kafka- und
+MinIO-Volumes, während die DB 3 GB hatte — DB-Retention und Notfall-Cleanup
+konnten daran nichts ändern, und die Meldung wies in die falsche Richtung.
+
 Dieser Monitor läuft als asyncio-Task im api-Container und prüft alle
 RETENTION_CHECK_INTERVAL_S (Default 6h) drei Signale:
 
@@ -36,7 +41,9 @@ feuert — das begrenzt zugleich, wie oft die Kanäle davon hören.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -74,6 +81,62 @@ _DEDUP_WINDOW = "24 hours"
 _EVICTABLE = [("flows", 2), ("test_runs", 1), ("alerts", 30)]
 _MAX_DROP_ITERATIONS = 300  # harte Obergrenze gegen Runaway
 
+# Docker-Volumes in der Diagnose: Vorfall 2026-09-04 — DISK_SPACE_001 nannte
+# "DB 3 GB" und eine Hypertable-Liste, während 102 GB in ids_kafka-data und
+# 89 GB in ids_minio-data lagen. Die Meldung muss sagen, WO der Platz liegt,
+# sonst sucht der Betreiber an der falschen Stelle. api hat den Docker-Socket
+# + CLI (für Log-/Update-Funktionen), also `docker system df -v`.
+_VOLUMES_TOP_N = 4
+_SIZE_RE = re.compile(r"^\s*([0-9.]+)\s*([kKMGTP]?i?B)?\s*$")
+_SIZE_UNITS = {"B": 1, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12, "PB": 1e15,
+               "KIB": 2**10, "MIB": 2**20, "GIB": 2**30, "TIB": 2**40, "PIB": 2**50}
+
+
+def _parse_size(text: str) -> int:
+    """'102.1GB' / '4.034GB' / '54.77MB' / '0B' → Bytes (docker-Human-Format)."""
+    m = _SIZE_RE.match(text or "")
+    if not m:
+        return 0
+    num, unit = m.group(1), (m.group(2) or "B").upper()
+    return int(float(num) * _SIZE_UNITS.get(unit, 1))
+
+
+async def docker_volumes() -> list[dict[str, Any]]:
+    """Alle Docker-Volumes mit Größe + Link-Zahl, größte zuerst. Leer, wenn
+    der Socket fehlt oder docker nicht antwortet — nie fatal."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "system", "df", "-v", "--format", "{{json .}}",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=30)
+        if proc.returncode != 0:
+            log.debug("docker system df fehlgeschlagen: %s", err.decode(errors="replace")[:200])
+            return []
+        data = json.loads(out.decode() or "{}")
+    except Exception as exc:
+        log.debug("Docker-Volumes nicht abfragbar: %s", exc)
+        return []
+    vols = []
+    for v in data.get("Volumes") or []:
+        vols.append({
+            "name":       v.get("Name", "?"),
+            "size_bytes": _parse_size(str(v.get("Size", "0B"))),
+            "links":      int(v.get("Links") or 0),
+        })
+    vols.sort(key=lambda x: x["size_bytes"], reverse=True)
+    return vols
+
+
+def _fmt_volumes(vols: list[dict[str, Any]]) -> str:
+    parts = []
+    for v in vols[:_VOLUMES_TOP_N]:
+        if v["size_bytes"] < 10**8:      # < 100 MB ist nie der Grund
+            continue
+        orphan = " (an keinem Container — verwaist?)" if v["links"] == 0 else ""
+        parts.append(f"{v['name']} {v['size_bytes'] / 1e9:.1f} GB{orphan}")
+    return ", ".join(parts) or "–"
+
 
 async def gather_health(pool: asyncpg.Pool) -> dict[str, Any]:
     """Liest Disk-, DB- und Job-Status. Reine Lesefunktion (Loop + Endpoint).
@@ -86,6 +149,7 @@ async def gather_health(pool: asyncpg.Pool) -> dict[str, Any]:
     db_size = 0
     jobs: list[dict[str, Any]] = []
     hypertables_without_retention: list[str] = []
+    volumes = await docker_volumes()
 
     async with pool.acquire() as conn:
         db_size = int(await conn.fetchval("SELECT pg_database_size(current_database())"))
@@ -147,6 +211,7 @@ async def gather_health(pool: asyncpg.Pool) -> dict[str, Any]:
             "score":    0.9,
             "message":  f"Disk zu {disk_pct}% voll (Schwelle {cfg.retention_disk_warn_pct}%). "
                         f"DB-Größe {db_size // 1024**3} GB. "
+                        f"Größte Docker-Volumes: {_fmt_volumes(volumes)}. "
                         f"Hypertables ohne Retention: {', '.join(hypertables_without_retention) or '–'}.",
         })
 
@@ -178,6 +243,7 @@ async def gather_health(pool: asyncpg.Pool) -> dict[str, Any]:
         "db_size_bytes": db_size,
         "db_size_gb":    round(db_gb, 1),
         "jobs":          jobs,
+        "volumes":       volumes[:12],
         "hypertables_without_retention": hypertables_without_retention,
         "problems":      problems,
         "checked_at":    datetime.now(timezone.utc).isoformat(),
@@ -303,8 +369,10 @@ async def emergency_cleanup(pool: asyncpg.Pool) -> dict[str, Any]:
                f"{end_pct}% (≥ {cfg.retention_emergency_pct}%). Platz liegt evtl. außerhalb der "
                f"DB (PCAP/MinIO) oder in den Schutz-Floors — MANUELLER EINGRIFF NÖTIG.")
     else:
+        vols = await docker_volumes()
         msg = (f"Notfall-Cleanup konnte NICHTS löschen (alle Chunks innerhalb der Schutz-Floors "
-               f"oder keine Chunks). Disk {end_pct}% — MANUELLER EINGRIFF NÖTIG.")
+               f"oder keine Chunks). Disk {end_pct}%. Der Platz liegt außerhalb der DB — "
+               f"größte Docker-Volumes: {_fmt_volumes(vols)}. MANUELLER EINGRIFF NÖTIG.")
     log.error(msg)
     async with pool.acquire() as conn:
         # Kurzes Dedup-Fenster: bei anhaltender Krise soll der adaptive 30-min-
