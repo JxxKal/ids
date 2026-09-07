@@ -16,6 +16,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.7.4',
+    date: '2026-09-07',
+    title: 'Fix: Ein Alarm-Sturm konnte die Nachrichtenschicht mitreißen',
+    notes: [
+      'Auf einem produktiven System löste eine einzige Suricata-Regel auf jedes Paket einer einseitig gespiegelten Verbindung aus — rund 10.000 Alarme pro Sekunde. Die Nachrichtenschicht bewahrte davon 24 Stunden auf (88 GB), die Festplatte lief voll, die Nachrichtenschicht stürzte ab und die gesamte Alarmverarbeitung stand drei Tage still. In der Oberfläche war davon nichts zu sehen: die Bedrohungslage zeigte „Normal", weil die Duplikat-Erkennung die Flut verschluckte.',
+      'Die Suricata-Anbindung bremst jetzt vor der Nachrichtenschicht: Suricatas eigene Protokoll-Zustandsmeldungen werden verworfen, Wiederholungen derselben Regel auf derselben Verbindung eine Minute lang zusammengefasst, und mehr als 50 Alarme pro Sekunde kommen nicht mehr durch. Verworfene Alarme erscheinen minütlich als Summe im Dienstprotokoll.',
+      'Die Nachrichtenschicht hat jetzt Größenobergrenzen pro Warteschlange (insgesamt höchstens rund 17 GB), unabhängig von der zeitlichen Aufbewahrung. Eine Flut kann die Festplatte damit nicht mehr füllen.',
+      'Die Speicherplatz-Warnung nennt jetzt die größten Docker-Datenträger und markiert verwaiste. Bisher zeigte sie nur die Datenbankgröße — die im Vorfall mit 3 GB gar nicht das Problem war.',
+      'Neu: ein Wächter prüft alle fünf Minuten, ob alle Dienste laufen, und startet fehlende oder gestoppte Dienste wieder. Bisher blieb ein abgestürzter und entfernter Dienst bis zum nächsten Neustart des Systems verschwunden. Für Wartungsarbeiten lässt sich der Wächter mit einer Marker-Datei pausieren; die Update-Werkzeuge tun das selbst.',
+      'Behoben: Host-Profile von Remote-Taps wurden wegen eines Datumsformat-Fehlers verworfen — die Rollenerkennung für Tap-Hosts blieb dadurch leer.',
+    ],
+  },
+  {
     version: 'v2.7.3',
     date: '2026-08-25',
     title: 'Fix: Alarm-Pipeline verlor bei Störungen die Fassung',
