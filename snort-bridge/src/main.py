@@ -206,6 +206,10 @@ def _tail(path: str):
                 # nächste Runde sieht die neue Datei.
                 pass
 
+            # Leerer Tick für den Aufrufer (Drossel-Report läuft auch, wenn
+            # nach einer Flut Ruhe ist — sonst käme die Summe erst mit dem
+            # nächsten Event).
+            yield ""
             time.sleep(0.05)
     finally:
         fh.close()
@@ -233,6 +237,7 @@ def main() -> None:
     )
 
     for line in _tail(ALERT_FILE):
+        throttle.maybe_report()
         if not line:
             continue
         try:
@@ -253,7 +258,6 @@ def main() -> None:
 
             # Drossel VOR Kafka: Engine-Events, Wiederholungen pro Verbindung,
             # globale Rate. Verworfenes wird minütlich als Summe geloggt.
-            throttle.maybe_report()
             if not throttle.allow(gid, sid, alert["src_ip"], alert["dst_ip"]):
                 continue
 
