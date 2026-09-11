@@ -205,7 +205,7 @@
       "tpBanner": "⚠ True positive – attack confirmed",
       "note": "Note: {{note}}",
       "trainingMl": "This feedback feeds into AI training on the next model retrain.",
-      "trainingNonMl": "This feedback feeds into AI training on the next model retrain (only ML alerts are used as training samples).",
+      "trainingNonMl": "Counts towards the hit statistics. Only ML alerts feed into AI training – this one comes from a signature.",
       "notePlaceholder": "Note (optional)",
       "tp": "⚠ True positive",
       "fp": "✓ False positive",
@@ -215,7 +215,13 @@
       "remove": "✕ Remove",
       "removeTitle": "Remove feedback + delete training sample from ML pool",
       "removeConfirm": "Remove feedback completely?\n\nThe associated training sample is also deleted from the DB so it no longer influences the ML model on the next retrain.",
-      "error": "Could not save feedback. Please try again."
+      "error": "Could not save feedback. Please try again.",
+      "fpAutoBanner": "✓ False positive – detected automatically (known pattern)",
+      "autoManual": "No analyst marked this alert: an earlier alert with the same rule and the same source→destination pair was manually classified as a false alarm, so the pattern counts as known.",
+      "autoLearned": "No analyst marked this alert: the frequency of this pattern lies within the baseline learned over 14 days, so it counts as known.",
+      "autoTuner": "Serves the rule tuner as a lower bound on its next threshold run. If this is a real hit: use “Edit” to set it to true positive.",
+      "setNonMl": "Feedback set.",
+      "setAuto": "Set automatically – override with “Edit”."
     }
   },
   "flowPopup": {

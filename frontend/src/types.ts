@@ -163,6 +163,24 @@ export function isSuppressed(a: Pick<Alert, 'tags'>): boolean {
   return !!a.tags?.some(t => t === 'ml-suppressed' || t === 'auto-suppressed');
 }
 
+// Automatisches FP-Feedback: der alert-manager setzt es für tunbare Regeln
+// selbst (statt Severity-Downgrade), wenn die Suppression das Muster kennt —
+// Notiz "auto-suppression:manual" (ein Analyst hat dieses Muster früher als
+// FP markiert) oder "auto-suppression:learned" (statistische Baseline), dazu
+// Tag "auto-fp-pattern". Kein Mensch hat geklickt — der Drawer muss das
+// kenntlich machen, sonst liest es sich wie eine Bestätigung.
+export const AUTO_FP_TAG = 'auto-fp-pattern';
+export type AutoFeedbackKind = 'manual' | 'learned';
+
+export function autoFeedbackKind(
+  a: Pick<Alert, 'feedback' | 'feedback_note' | 'tags'>,
+): AutoFeedbackKind | null {
+  if (a.feedback !== 'fp') return null;
+  const m = /^auto-suppression:(manual|learned)$/.exec(a.feedback_note ?? '');
+  if (m) return m[1] as AutoFeedbackKind;
+  return a.tags?.includes(AUTO_FP_TAG) ? 'manual' : null;
+}
+
 export interface RemoteTap {
   id: string;
   name: string;

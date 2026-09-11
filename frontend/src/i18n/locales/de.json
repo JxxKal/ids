@@ -205,7 +205,7 @@
       "tpBanner": "⚠ True Positive – Angriff bestätigt",
       "note": "Notiz: {{note}}",
       "trainingMl": "Dieses Feedback fließt beim nächsten Modell-Retrain in das KI-Training ein.",
-      "trainingNonMl": "Dieses Feedback fließt beim nächsten Modell-Retrain in das KI-Training ein (nur ML-Alerts werden als Trainings-Sample verwendet).",
+      "trainingNonMl": "Zählt für die Trefferstatistik. Ins KI-Training fließen nur ML-Alerts – dieser stammt aus einer Signatur.",
       "notePlaceholder": "Notiz (optional)",
       "tp": "⚠ True Positive",
       "fp": "✓ False Positive",
@@ -215,7 +215,13 @@
       "remove": "✕ Entfernen",
       "removeTitle": "Feedback entfernen + Training-Sample aus ML-Pool löschen",
       "removeConfirm": "Feedback komplett entfernen?\n\nDas zugehörige Training-Sample wird ebenfalls aus der DB gelöscht, damit es das ML-Modell beim nächsten Retrain nicht mehr beeinflusst.",
-      "error": "Feedback konnte nicht gespeichert werden. Bitte erneut versuchen."
+      "error": "Feedback konnte nicht gespeichert werden. Bitte erneut versuchen.",
+      "fpAutoBanner": "✓ False Positive – automatisch erkannt (bekanntes Muster)",
+      "autoManual": "Kein Analyst hat diesen Alarm markiert: Ein früherer Alarm mit derselben Regel und demselben Quelle→Ziel-Paar wurde manuell als Falschalarm eingestuft, deshalb gilt das Muster als bekannt.",
+      "autoLearned": "Kein Analyst hat diesen Alarm markiert: Die Häufigkeit dieses Musters liegt in der über 14 Tage gelernten Baseline, deshalb gilt es als bekannt.",
+      "autoTuner": "Dient dem Regel-Tuner als Untergrenze beim nächsten Schwellwert-Lauf. Falls das ein echter Treffer ist: mit „Ändern“ auf True Positive setzen.",
+      "setNonMl": "Feedback gesetzt.",
+      "setAuto": "Automatisch gesetzt – mit „Ändern“ übersteuern."
     }
   },
   "flowPopup": {

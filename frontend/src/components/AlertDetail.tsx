@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Network } from 'lucide-react';
 import { clearFeedback, setFeedback } from '../api';
 import { countryFlag, geoTooltip } from '../lib/country';
-import type { Alert } from '../types';
+import { autoFeedbackKind, type Alert } from '../types';
 import { AlertFlowPopup } from './AlertFlowPopup';
 import { showHostConnections } from './HostConnectionDrawer';
 import { PcapPreview } from './PcapPreview';
@@ -85,6 +85,7 @@ const SEV_BORDER: Record<string, string> = {
 export function AlertDetail({ alert, onClose, onUpdate }: Props) {
   const { t } = useTranslation();
   const [note, setNote]         = useState('');
+  const autoKind = autoFeedbackKind(alert);
   const [loading, setLoading]   = useState(false);
   const [fbError, setFbError]   = useState(false);
   const [showGraph, setShowGraph] = useState(false);
@@ -265,18 +266,26 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           }`}>
             <div className="flex items-center gap-2 mb-1">
               <span className={`font-semibold ${alert.feedback === 'fp' ? 'text-green-300' : 'text-red-300'}`}>
-                {alert.feedback === 'fp' ? t('alertDetail.fb.fpBanner') : t('alertDetail.fb.tpBanner')}
+                {alert.feedback === 'fp'
+                  ? (autoKind ? t('alertDetail.fb.fpAutoBanner') : t('alertDetail.fb.fpBanner'))
+                  : t('alertDetail.fb.tpBanner')}
               </span>
               {alert.feedback_ts && (
                 <span className="text-slate-600 ml-auto">{new Date(alert.feedback_ts).toLocaleString()}</span>
               )}
             </div>
-            {alert.feedback_note && (
+            {autoKind ? (
+              <p className="text-slate-400 mb-1.5">
+                {autoKind === 'manual' ? t('alertDetail.fb.autoManual') : t('alertDetail.fb.autoLearned')}
+              </p>
+            ) : alert.feedback_note && (
               <p className="text-slate-400 mb-1.5">{t('alertDetail.fb.note', { note: alert.feedback_note })}</p>
             )}
             <p className="text-slate-600 flex items-center gap-1">
               <span className="text-cyan-700">⬡</span>
-              {alert.source === 'ml' ? t('alertDetail.fb.trainingMl') : t('alertDetail.fb.trainingNonMl')}
+              {alert.source === 'ml'
+                ? t('alertDetail.fb.trainingMl')
+                : autoKind ? t('alertDetail.fb.autoTuner') : t('alertDetail.fb.trainingNonMl')}
             </p>
           </div>
         )}
@@ -364,7 +373,9 @@ export function AlertDetail({ alert, onClose, onUpdate }: Props) {
           ) : (
             <>
               <span className="text-xs text-slate-500 italic font-mono mr-auto">
-                {t('alertDetail.fb.set')}
+                {autoKind
+                  ? t('alertDetail.fb.setAuto')
+                  : alert.source === 'ml' ? t('alertDetail.fb.set') : t('alertDetail.fb.setNonMl')}
               </span>
               <button
                 onClick={startEdit}
