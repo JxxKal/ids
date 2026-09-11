@@ -16,6 +16,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: 'v2.7.5',
+    date: '2026-09-11',
+    title: 'Fix: Automatisch gesetztes Feedback las sich wie eine Bestätigung',
+    notes: [
+      'Für Regeln, deren Schwellwerte der Regel-Tuner pflegt, setzt die Alarmverarbeitung selbst ein False-Positive-Feedback, sobald sie ein bekanntes Muster erkennt — etwa weil ein Analyst früher einen Alarm mit derselben Regel und demselben Quelle→Ziel-Paar als Falschalarm eingestuft hat. Die Alarmdetails zeigten das bisher als „Falschalarm bestätigt" mit der internen Notiz auto-suppression, als hätte jemand geklickt.',
+      'Die Alarmdetails weisen automatisches Feedback jetzt als solches aus: „automatisch erkannt (bekanntes Muster)" mit einer Erklärung, woher die Einstufung stammt, und dem Hinweis, dass sie dem Regel-Tuner als Untergrenze dient. Wer den Alarm für echt hält, übersteuert ihn über „Ändern".',
+      'Der Hinweis „fließt in das KI-Training ein" erscheint nur noch bei Alarmen der KI-Erkennung. Bei Signatur-Alarmen stand er bisher ebenfalls, obwohl nur ML-Alarme als Trainingsdaten dienen.',
+      'Die CYJAN-App zeigt dieselbe Unterscheidung (separates App-Update).',
+    ],
+  },
+  {
     version: 'v2.7.4',
     date: '2026-09-07',
     title: 'Fix: Ein Alarm-Sturm konnte die Nachrichtenschicht mitreißen',
